@@ -1,0 +1,2188 @@
+import { useState, useEffect, useMemo } from 'react';
+import CompanyLayout from '@/components/CompanyLayout';
+import { supabase } from '@/lib/supabase';
+import { getCached, setCache } from '@/lib/dataCache';
+import { authHeaders } from '@/lib/apiHelpers';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Plus, Trash2, User, Mail, Phone, GraduationCap, CheckCircle, XCircle, Sparkles, Package, Loader2, FileText, Search, Euro, Clock } from 'lucide-react';
+import { sendEmail } from '@/lib/email';
+import Toast from '@/components/Toast';
+import { useTranslation } from '@/lib/i18n';
+import { formatLithuanianPhone, validateLithuanianPhone } from '@/lib/utils';
+import { SessionList } from '@/components/SessionList';
+import {
+  getStudentRecentPastSessions,
+  type Session,
+} from '@/lib/session-stats';
+import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import {
+  getEffectivePaymentActions,
+  mergeOrgTutorLessonPaymentDefaults,
+  type TutorPaymentFlags,
+  type LessonPaymentTiming,
+} from '@/lib/studentPaymentModel';
+import StudentPaymentModelSection from '@/components/StudentPaymentModelSection';
+import SendInvoiceModal from '@/components/SendInvoiceModal';
+import { shouldShowPayerContactSection } from '@/lib/orgContactVisibility';
+
+interface Student {
+  id: string;
+  tutor_id: string | null;
+  full_name: string;
+  email: string;
+  phone: string;
+  payer_email?: string | null;
+  payer_phone?: string | null;
+  trial_offer_disabled?: boolean;
+  invite_code: string;
+  payment_model?: string | null;
+  linked_user_id?: string | null;
+  created_at: string;
+  tutor?: {
+    full_name: string;
+  };
+}
+
+interface Tutor {
+  id: string;
+  full_name: string;
+}
+
+interface SubjectOption {
+  id: string;
+  name: string;
+  color: string;
+}
+
+function adminShowEmail(v: string | null | undefined) {
+  const s = (v || '').trim();
+  return s || '—';
+}
+
+function adminShowPhone(v: string | null | undefined) {
+  const s = (v || '').trim();
+  if (!s) return '—';
+  return formatLithuanianPhone(s);
+}
+
+export default function CompanyStudents() {
+  const { t } = useTranslation();
+  const { hasFeature, loading: orgFeaturesLoading } = useOrgFeatures();
+  const manualPaymentsEnabled = !orgFeaturesLoading && hasFeature('manual_payments');
+  const stc = getCached<any>('company_students');
+  const [students, setStudents] = useState<Student[]>(stc?.students ?? []);
+  const [tutors, setTutors] = useState<Tutor[]>(stc?.tutors ?? []);
+  const [loading, setLoading] = useState(!stc);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [orgId, setOrgId] = useState<string | null>(null);
+  const [baseUrl, setBaseUrl] = useState('');
+  const [newStudent, setNewStudent] = useState({
+    full_name: '',
+    email: '',
+    phone: '',
+    tutor_ids: [] as string[],
+  });
+  const [tutorSubjects, setTutorSubjects] = useState<SubjectOption[]>([]);
+  const [selectedSubjectForInvite, setSelectedSubjectForInvite] = useState('');
+  const [customPrice, setCustomPrice] = useState<number | ''>('');
+  const [customDuration, setCustomDuration] = useState<number | ''>('');
+  const [customCancellationHours, setCustomCancellationHours] = useState(24);
+  const [customCancellationFee, setCustomCancellationFee] = useState(0);
+  const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  // Past sessions for student modal (fetched by student_id when modal opens — reliable vs org-wide cache/timing)
+  const [modalRecentSessions, setModalRecentSessions] = useState<Session[]>([]);
+  const [loadingModalSessions, setLoadingModalSessions] = useState(false);
+
+  // Student Detail Modal State
+  const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+  const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
+
+  // Package state (student modal)
+  const [studentPackages, setStudentPackages] = useState<any[]>([]);
+  const [packageSubjects, setPackageSubjects] = useState<any[]>([]);
+  const [loadingPackages, setLoadingPackages] = useState(false);
+  const [sendPackageOpen, setSendPackageOpen] = useState(false);
+  const [pkgSubjectId, setPkgSubjectId] = useState('');
+  const [pkgLessons, setPkgLessons] = useState(5);
+  const [pkgPrice, setPkgPrice] = useState(0);
+  const [pkgSending, setPkgSending] = useState(false);
+  const [confirmingPackageId, setConfirmingPackageId] = useState<string | null>(null);
+  const [deactivatingPackageId, setDeactivatingPackageId] = useState<string | null>(null);
+  const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
+  const [studentSearch, setStudentSearch] = useState('');
+
+  const [trialSending, setTrialSending] = useState(false);
+  const [trialTutorId, setTrialTutorId] = useState<string | null>(null);
+  const [selectedStudentGroup, setSelectedStudentGroup] = useState<Student[]>([]);
+  const [selectedStudentSessionCount, setSelectedStudentSessionCount] = useState<number | null>(null);
+  const [editTutorsOpen, setEditTutorsOpen] = useState(false);
+  const [addingTutorId, setAddingTutorId] = useState('');
+  const [addingTutorSearch, setAddingTutorSearch] = useState('');
+  const [tutorsSaving, setTutorsSaving] = useState(false);
+  const [multiTutorPickerOpen, setMultiTutorPickerOpen] = useState(false);
+  const [multiTutorSearch, setMultiTutorSearch] = useState('');
+  const [subjectSearch, setSubjectSearch] = useState('');
+  const [trialDefaultsLoading, setTrialDefaultsLoading] = useState(false);
+  const [trialDefaults, setTrialDefaults] = useState({ topic: t('compStu.trialTopic'), durationMinutes: 60, priceEur: 0 });
+  const [trialModalOpen, setTrialModalOpen] = useState(false);
+  const [trialForm, setTrialForm] = useState({ topic: t('compStu.trialTopic'), durationMinutes: 60, priceEur: 0 });
+
+  // Individual pricing editor (student modal)
+  const [loadingStudentIndividualPricing, setLoadingStudentIndividualPricing] = useState(false);
+  const [studentIndividualPricing, setStudentIndividualPricing] = useState<any[]>([]);
+  const [tutorPricingSubjects, setTutorPricingSubjects] = useState<any[]>([]);
+  const [addingIndividualPrice, setAddingIndividualPrice] = useState(false);
+  const [newPriceSubjectId, setNewPriceSubjectId] = useState('');
+  const [newPriceAmount, setNewPriceAmount] = useState<number | ''>('');
+  const [newPriceDurationMinutes, setNewPriceDurationMinutes] = useState<number | ''>('');
+  const [newPriceCancellationHours, setNewPriceCancellationHours] = useState(24);
+  const [newPriceCancellationFeePercent, setNewPriceCancellationFeePercent] = useState(0);
+  const [savingStudentIndividualPricing, setSavingStudentIndividualPricing] = useState(false);
+
+  const [tutorPaymentFlags, setTutorPaymentFlags] = useState<TutorPaymentFlags>({
+    enable_per_lesson: true,
+    enable_monthly_billing: false,
+    enable_prepaid_packages: false,
+  });
+
+  // Org admin: source of truth is organizations.enable_* (sync to profiles may be delayed after login).
+  useEffect(() => {
+    if (!selectedStudent || !isStudentModalOpen) return;
+    let cancelled = false;
+    (async () => {
+      if (orgId) {
+        const { data } = await supabase
+          .from('organizations')
+          .select('enable_per_lesson, enable_monthly_billing, enable_prepaid_packages')
+          .eq('id', orgId)
+          .maybeSingle();
+        if (cancelled || !data) return;
+        setTutorPaymentFlags({
+          enable_per_lesson: data.enable_per_lesson ?? true,
+          enable_monthly_billing: !!data.enable_monthly_billing,
+          enable_prepaid_packages: !!data.enable_prepaid_packages,
+        });
+        return;
+      }
+      if (!selectedStudent.tutor_id) return;
+      const { data } = await supabase
+        .from('profiles')
+        .select('enable_per_lesson, enable_monthly_billing, enable_prepaid_packages')
+        .eq('id', selectedStudent.tutor_id)
+        .maybeSingle();
+      if (cancelled || !data) return;
+      setTutorPaymentFlags({
+        enable_per_lesson: data.enable_per_lesson ?? true,
+        enable_monthly_billing: !!data.enable_monthly_billing,
+        enable_prepaid_packages: !!data.enable_prepaid_packages,
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedStudent?.id, selectedStudent?.tutor_id, isStudentModalOpen, orgId]);
+
+  // Load individual pricing editor data when a student modal opens
+  useEffect(() => {
+    if (!selectedStudent || !isStudentModalOpen) return;
+    if (!selectedStudent.tutor_id) {
+      setTutorPricingSubjects([]);
+      setStudentIndividualPricing([]);
+      setLoadingStudentIndividualPricing(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      setLoadingStudentIndividualPricing(true);
+      try {
+        const { data: subjectsRes } = await supabase
+          .from('subjects')
+          .select('id, name, price, duration_minutes, color, meeting_link')
+          .eq('tutor_id', selectedStudent.tutor_id)
+          .order('name');
+
+        if (cancelled) return;
+        setTutorPricingSubjects(subjectsRes || []);
+
+        const { data: pricingRes } = await supabase
+          .from('student_individual_pricing')
+          .select('id, price, duration_minutes, cancellation_hours, cancellation_fee_percent, subject:subjects(id, name, color, duration_minutes)')
+          .eq('student_id', selectedStudent.id)
+          .eq('tutor_id', selectedStudent.tutor_id)
+          .order('created_at', { ascending: false });
+
+        if (cancelled) return;
+        setStudentIndividualPricing(pricingRes || []);
+      } finally {
+        if (!cancelled) setLoadingStudentIndividualPricing(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedStudent?.id, selectedStudent?.tutor_id, isStudentModalOpen]);
+
+  const showPaymentModelUi = !orgFeaturesLoading && hasFeature('per_student_payment_override');
+
+  const normalizedSearch = studentSearch.trim().toLowerCase();
+  const groupedStudents = useMemo(() => {
+    // Group by linked_user_id (multi-tutor). If student isn't linked yet, treat each row as a separate group.
+    const groups = new Map<string, Student[]>();
+    const order: string[] = [];
+    for (const s of students) {
+      const key = s.linked_user_id ? `u:${s.linked_user_id}` : `s:${s.id}`;
+      if (!groups.has(key)) {
+        groups.set(key, []);
+        order.push(key);
+      }
+      groups.get(key)!.push(s);
+    }
+    return order.map((key) => {
+      const rows = groups.get(key)!;
+      // students already ordered by created_at desc; keep first row as "primary"
+      return { key, primary: rows[0], rows };
+    });
+  }, [students]);
+
+  const filteredGroups = useMemo(() => {
+    if (!normalizedSearch) return groupedStudents;
+    return groupedStudents.filter((g) => g.primary.full_name.toLowerCase().includes(normalizedSearch));
+  }, [groupedStudents, normalizedSearch]);
+
+  const paymentActions = useMemo(() => {
+    if (!selectedStudent) return { canSendInvoice: false, canSendPackage: false };
+    return getEffectivePaymentActions(tutorPaymentFlags, selectedStudent.payment_model, showPaymentModelUi);
+  }, [selectedStudent, tutorPaymentFlags, showPaymentModelUi]);
+
+  useEffect(() => {
+    void fetchData();
+    setBaseUrl(window.location.origin);
+  }, []);
+
+  useEffect(() => {
+    if (!orgId) return;
+    let cancelled = false;
+    (async () => {
+      setTrialDefaultsLoading(true);
+      const { data } = await supabase
+        .from('organizations')
+        .select('features')
+        .eq('id', orgId)
+        .maybeSingle();
+      if (cancelled) return;
+      const feat = (data as any)?.features;
+      const featObj = feat && typeof feat === 'object' && !Array.isArray(feat) ? (feat as Record<string, unknown>) : {};
+      const topic = typeof featObj.trial_lesson_topic === 'string' && featObj.trial_lesson_topic.trim()
+        ? featObj.trial_lesson_topic.trim()
+        : t('compStu.trialTopic');
+      const durationMinutes =
+        typeof featObj.trial_lesson_duration_minutes === 'number' && Number.isFinite(featObj.trial_lesson_duration_minutes)
+          ? Math.max(15, Math.round(featObj.trial_lesson_duration_minutes))
+          : 60;
+      const priceEur =
+        typeof featObj.trial_lesson_price_eur === 'number' && Number.isFinite(featObj.trial_lesson_price_eur)
+          ? Math.max(0, featObj.trial_lesson_price_eur)
+          : 0;
+      setTrialDefaults({ topic, durationMinutes, priceEur });
+      setTrialDefaultsLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId]);
+
+  useEffect(() => {
+    if (!selectedStudent || !isStudentModalOpen) return;
+    let cancelled = false;
+    (async () => {
+      setLoadingPackages(true);
+      const [pkgRes, subjRes] = await Promise.all([
+        supabase
+          .from('lesson_packages')
+          .select('*, subject:subjects(name, color)')
+          .eq('student_id', selectedStudent.id)
+          // Show both "active" and "pending" packages (org admin wants to see what is sent vs paid)
+          .or('active.eq.true,payment_status.eq.pending')
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('subjects')
+          .select('id, name, color, price')
+          .eq('tutor_id', selectedStudent.tutor_id)
+          .order('name'),
+      ]);
+      if (!cancelled) {
+        setStudentPackages(pkgRes.data || []);
+        setPackageSubjects(subjRes.data || []);
+        const first = subjRes.data?.[0];
+        if (first) { setPkgSubjectId(first.id); setPkgPrice(first.price); }
+        setLoadingPackages(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedStudent, isStudentModalOpen]);
+
+  useEffect(() => {
+    if (!selectedStudent || !isStudentModalOpen) {
+      setSelectedStudentSessionCount(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { count } = await supabase
+        .from('sessions')
+        .select('id', { count: 'exact', head: true })
+        .eq('student_id', selectedStudent.id);
+      if (cancelled) return;
+      setSelectedStudentSessionCount(typeof count === 'number' ? count : 0);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedStudent?.id, isStudentModalOpen]);
+
+  useEffect(() => {
+    if (!selectedStudent || !isStudentModalOpen) {
+      setModalRecentSessions([]);
+      setLoadingModalSessions(false);
+      return;
+    }
+    const studentId = selectedStudent.id;
+    let cancelled = false;
+    (async () => {
+      setLoadingModalSessions(true);
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+      const { data, error } = await supabase
+        .from('sessions')
+        .select('*, student:students(full_name), tutor:profiles!sessions_tutor_id_fkey(full_name), subject:subjects(name)')
+        .eq('student_id', studentId)
+        .gte('start_time', sixMonthsAgo.toISOString())
+        .order('start_time', { ascending: false })
+        .limit(200);
+      if (cancelled) return;
+      if (error) {
+        console.error('Error fetching student sessions (org modal):', error);
+        setModalRecentSessions([]);
+      } else {
+        setModalRecentSessions(
+          getStudentRecentPastSessions((data || []) as Session[], studentId, 3)
+        );
+      }
+      if (!cancelled) setLoadingModalSessions(false);
+    })();
+    return () => {
+      cancelled = true;
+      setLoadingModalSessions(false);
+    };
+  }, [selectedStudent?.id, isStudentModalOpen]);
+
+  const fetchData = async () => {
+    if (!getCached('company_students')) setLoading(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setLoading(false); return; }
+
+    // Get organization ID from organization_admins
+    const { data: adminRow } = await supabase
+      .from('organization_admins')
+      .select('organization_id')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (!adminRow) {
+      console.log('🔴 User is NOT an org admin!');
+      setLoading(false);
+      return;
+    }
+    setOrgId(adminRow.organization_id);
+
+    const { data: adminUsers } = await supabase
+      .from('organization_admins')
+      .select('user_id')
+      .eq('organization_id', adminRow.organization_id);
+    const adminIds = new Set((adminUsers || []).map((a: { user_id: string }) => a.user_id));
+
+    const { data: profilesList } = await supabase
+      .from('profiles')
+      .select('id, full_name')
+      .eq('organization_id', adminRow.organization_id)
+      .order('full_name');
+
+    const tutorsList = (profilesList || []).filter((t) => !adminIds.has(t.id));
+
+    setTutors(tutorsList);
+
+    // Fetch students directly (RLS now allows org admin access)
+    const tutorIds = (tutorsList || []).map((t) => t.id);
+    let fetchedStudents: Student[] = [];
+
+    const fetchPromises: Promise<any>[] = [];
+
+    if (tutorIds.length > 0) {
+      fetchPromises.push(
+        supabase
+          .from('students')
+          .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
+          .in('tutor_id', tutorIds)
+          .order('created_at', { ascending: false })
+      );
+    }
+
+    if (adminRow.organization_id) {
+      fetchPromises.push(
+        supabase
+          .from('students')
+          .select('*, linked_user_id')
+          .is('tutor_id', null)
+          .eq('organization_id', adminRow.organization_id)
+          .order('created_at', { ascending: false })
+      );
+    }
+
+    const results = await Promise.all(fetchPromises);
+    for (const res of results) {
+      if (res.error) {
+        console.error('Error fetching students:', res.error);
+      } else if (res.data) {
+        fetchedStudents = fetchedStudents.concat(res.data);
+      }
+    }
+    fetchedStudents.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    setStudents(fetchedStudents);
+
+    setCache('company_students', { students: fetchedStudents, tutors: tutorsList });
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    const tid = newStudent.tutor_ids[0] || '';
+    if (!tid) {
+      setTutorSubjects([]);
+      setSelectedSubjectForInvite('');
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('subjects')
+        .select('id, name, color')
+        .eq('tutor_id', tid)
+        .order('name');
+      if (!cancelled) {
+        setTutorSubjects(data || []);
+        setSelectedSubjectForInvite('');
+        setCustomPrice('');
+        setCustomDuration('');
+        setCustomCancellationHours(24);
+        setCustomCancellationFee(0);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [newStudent.tutor_ids]);
+
+  const handleSendPackage = async () => {
+    if (!selectedStudent || !pkgSubjectId || pkgLessons <= 0) return;
+    setPkgSending(true);
+    try {
+      if (manualPaymentsEnabled) {
+        const { data: { session } } = await supabase.auth.getSession();
+        const response = await fetch('/api/create-manual-package', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+          },
+          body: JSON.stringify({
+            tutorId: selectedStudent.tutor_id,
+            studentId: selectedStudent.id,
+            subjectId: pkgSubjectId,
+            totalLessons: pkgLessons,
+            pricePerLesson: pkgPrice,
+          }),
+        });
+        const errBody = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error((errBody as any).error || (errBody as any).details || t('compStu.errorManualPackage'));
+        }
+        setToastMessage({
+          message: t('compStu.manualPackageCreated'),
+          type: 'success',
+        });
+      } else {
+        const response = await fetch('/api/create-package-checkout', {
+          method: 'POST',
+          headers: await authHeaders(),
+          body: JSON.stringify({
+            tutorId: selectedStudent.tutor_id,
+            studentId: selectedStudent.id,
+            subjectId: pkgSubjectId,
+            totalLessons: pkgLessons,
+            pricePerLesson: pkgPrice,
+          }),
+        });
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}));
+          throw new Error((err as any).error || t('compStu.errorSendingPackage'));
+        }
+        setToastMessage({ message: t('compStu.packageSent', { name: selectedStudent.full_name }), type: 'success' });
+      }
+      setSendPackageOpen(false);
+      const { data } = await supabase
+        .from('lesson_packages')
+        .select('*, subject:subjects(name, color)')
+        .eq('student_id', selectedStudent.id)
+        .or('active.eq.true,payment_status.eq.pending')
+        .order('created_at', { ascending: false });
+      setStudentPackages(data || []);
+    } catch (err: any) {
+      setToastMessage({ message: err.message, type: 'error' });
+    }
+    setPkgSending(false);
+  };
+
+  const handleConfirmManualPayment = async (packageId: string) => {
+    setConfirmingPackageId(packageId);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch('/api/confirm-manual-payment', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
+        body: JSON.stringify({ packageId }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error((json as any).error || t('compStu.confirmFailed'));
+      }
+      setToastMessage({ message: t('compStu.paymentConfirmed'), type: 'success' });
+      if (selectedStudent) {
+        const { data } = await supabase
+          .from('lesson_packages')
+          .select('*, subject:subjects(name, color)')
+          .eq('student_id', selectedStudent.id)
+          .or('active.eq.true,payment_status.eq.pending')
+          .order('created_at', { ascending: false });
+        setStudentPackages(data || []);
+      }
+    } catch (e: any) {
+      setToastMessage({ message: e?.message || t('compStu.errorGeneric'), type: 'error' });
+    }
+    setConfirmingPackageId(null);
+  };
+
+  const handleDeactivatePackage = async (packageId: string) => {
+    if (!selectedStudent) return;
+    setDeactivatingPackageId(packageId);
+    try {
+      const { error } = await supabase
+        .from('lesson_packages')
+        .update({ active: false })
+        .eq('id', packageId);
+      if (error) throw error;
+      const { data } = await supabase
+        .from('lesson_packages')
+        .select('*, subject:subjects(name, color)')
+        .eq('student_id', selectedStudent.id)
+        .or('active.eq.true,payment_status.eq.pending')
+        .order('created_at', { ascending: false });
+      setStudentPackages(data || []);
+      setToastMessage({ message: t('compStu.packageHidden'), type: 'success' });
+    } catch (e: any) {
+      setToastMessage({ message: e?.message || t('compStu.hidePackageFailed'), type: 'error' });
+    }
+    setDeactivatingPackageId(null);
+  };
+
+  const generateInviteCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
+
+  const reloadStudentIndividualPricing = async () => {
+    if (!selectedStudent) return;
+
+    setLoadingStudentIndividualPricing(true);
+    try {
+      const { data: subjectsRes } = await supabase
+        .from('subjects')
+        .select('id, name, price, duration_minutes, color, meeting_link')
+        .eq('tutor_id', selectedStudent.tutor_id)
+        .order('name');
+
+      setTutorPricingSubjects(subjectsRes || []);
+
+      const { data: pricingRes } = await supabase
+        .from('student_individual_pricing')
+        .select(
+          'id, price, duration_minutes, cancellation_hours, cancellation_fee_percent, subject:subjects(id, name, color, duration_minutes)',
+        )
+        .eq('student_id', selectedStudent.id)
+        .eq('tutor_id', selectedStudent.tutor_id)
+        .order('created_at', { ascending: false });
+
+      setStudentIndividualPricing(pricingRes || []);
+    } catch (e) {
+      console.error('[CompanyStudents] reloadStudentIndividualPricing failed:', e);
+    } finally {
+      setLoadingStudentIndividualPricing(false);
+    }
+  };
+
+  const handleAddIndividualPrice = async () => {
+    if (!selectedStudent) return;
+    if (!newPriceSubjectId) return;
+    if (newPriceAmount === '') return;
+
+    const subject = tutorPricingSubjects.find((s) => s.id === newPriceSubjectId);
+    const durationMinutesNum =
+      typeof newPriceDurationMinutes === 'number'
+        ? newPriceDurationMinutes
+        : subject?.duration_minutes ?? 60;
+
+    if (!durationMinutesNum || durationMinutesNum <= 0) {
+      setToastMessage({ message: t('compStu.invalidDuration'), type: 'error' });
+      return;
+    }
+
+    setSavingStudentIndividualPricing(true);
+    try {
+      const { error } = await supabase
+        .from('student_individual_pricing')
+        .upsert(
+          {
+            student_id: selectedStudent.id,
+            tutor_id: selectedStudent.tutor_id,
+            subject_id: newPriceSubjectId,
+            price: Number(newPriceAmount),
+            duration_minutes: Number(durationMinutesNum),
+            cancellation_hours: Number(newPriceCancellationHours),
+            cancellation_fee_percent: Number(newPriceCancellationFeePercent),
+          },
+          { onConflict: 'tutor_id,student_id,subject_id' },
+        );
+
+      if (error) throw error;
+
+      setToastMessage({ message: t('compStu.individualPriceSaved'), type: 'success' });
+      setAddingIndividualPrice(false);
+      setNewPriceSubjectId('');
+      setNewPriceAmount('');
+      setNewPriceDurationMinutes('');
+      setNewPriceCancellationHours(24);
+      setNewPriceCancellationFeePercent(0);
+      await reloadStudentIndividualPricing();
+    } catch (e: any) {
+      setToastMessage({ message: e?.message || t('compStu.individualPriceSaveFailed'), type: 'error' });
+    } finally {
+      setSavingStudentIndividualPricing(false);
+    }
+  };
+
+  const handleDeleteIndividualPrice = async (priceId: string) => {
+    if (!priceId) return;
+    if (!confirm(t('compStu.confirmDeletePrice'))) return;
+
+    setSavingStudentIndividualPricing(true);
+    try {
+      const { error } = await supabase.from('student_individual_pricing').delete().eq('id', priceId);
+      if (error) throw error;
+      setToastMessage({ message: t('compStu.individualPriceDeleted'), type: 'success' });
+      await reloadStudentIndividualPricing();
+    } catch (e: any) {
+      setToastMessage({ message: e?.message || t('compStu.individualPriceDeleteFailed'), type: 'error' });
+    } finally {
+      setSavingStudentIndividualPricing(false);
+    }
+  };
+
+  const handleAddStudent = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (newStudent.phone?.trim() && !validateLithuanianPhone(newStudent.phone)) {
+      setToastMessage({ message: t('compStu.phoneFormat'), type: 'error' });
+      return;
+    }
+
+    setSaving(true);
+    const inserted: { id: string; tutor_id: string | null; invite_code: string }[] = [];
+    const tutorIdsToInsert = newStudent.tutor_ids.length > 0 ? newStudent.tutor_ids : [null];
+    for (const tutorId of tutorIdsToInsert) {
+      const inviteCode = generateInviteCode();
+      const { data: row, error } = await supabase
+        .from('students')
+        .insert({
+          ...(tutorId ? { tutor_id: tutorId } : {}),
+          full_name: newStudent.full_name,
+          email: newStudent.email,
+          phone: newStudent.phone?.trim() || null,
+          invite_code: inviteCode,
+          ...(tutorId ? {} : { organization_id: orgId }),
+        })
+        .select('id, tutor_id, invite_code')
+        .single();
+      if (error || !row) {
+        console.error('Error adding student:', error);
+        setToastMessage({ message: t('compStu.errorPrefix', { msg: error?.message || t('compStu.unknownError') }), type: 'error' });
+        setSaving(false);
+        return;
+      }
+      inserted.push(row as any);
+    }
+
+    // Optional: apply individual pricing to the first selected tutor only (as a helper)
+    if (selectedSubjectForInvite && customPrice !== '' && customDuration !== '' && inserted[0]?.tutor_id) {
+      const first = inserted[0];
+      const firstTutorId = first.tutor_id;
+      const { error: pricingError } = await supabase.from('student_individual_pricing').insert({
+        student_id: first.id,
+        tutor_id: firstTutorId,
+        subject_id: selectedSubjectForInvite,
+        price: Number(customPrice),
+        duration_minutes: Number(customDuration),
+        cancellation_hours: customCancellationHours,
+        cancellation_fee_percent: customCancellationFee,
+      });
+      if (pricingError) {
+        console.error('Individual pricing error:', pricingError);
+        setToastMessage({
+          message: t('compStu.pricingSaveFailed', { msg: pricingError.message }),
+          type: 'error',
+        });
+      }
+    }
+
+    let emailOk = true;
+    if (newStudent.email?.trim()) {
+      for (const row of inserted) {
+        const tutor = tutors.find((t) => t.id === row.tutor_id);
+        const bookingUrl = `${baseUrl}/book/${row.invite_code}`;
+        const ok = await sendEmail({
+          type: 'invite_email',
+          to: newStudent.email.trim(),
+          data: {
+            studentName: newStudent.full_name,
+            tutorName: tutor?.full_name || t('compStu.tutorFallback'),
+            inviteCode: row.invite_code,
+            bookingUrl,
+          },
+        });
+        if (!ok) emailOk = false;
+      }
+    }
+
+    setToastMessage({
+      message: newStudent.email?.trim() && !emailOk
+        ? t('compStu.emailSendFailed')
+        : t('compStu.studentAdded'),
+      type: newStudent.email?.trim() && !emailOk ? 'error' : 'success',
+    });
+    setIsDialogOpen(false);
+    setNewStudent({ full_name: '', email: '', phone: '', tutor_ids: [] });
+    setSelectedSubjectForInvite('');
+    setCustomPrice('');
+    setCustomDuration('');
+    setCustomCancellationHours(24);
+    setCustomCancellationFee(0);
+    fetchData();
+    setSaving(false);
+  };
+
+  const handleDeleteStudent = async (id: string) => {
+    if (!confirm(t('compStu.confirmDeleteStudent'))) return;
+
+    const { error } = await supabase.from('students').delete().eq('id', id);
+    if (!error) {
+      setToastMessage({ message: t('compStu.studentDeleted'), type: 'success' });
+      fetchData();
+    } else {
+      setToastMessage({ message: t('compStu.errorPrefix', { msg: error.message }), type: 'error' });
+    }
+  };
+
+  if (loading) {
+    return (
+      <CompanyLayout>
+        <div className="max-w-6xl mx-auto">
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8">
+            <p className="text-center text-gray-500">{t('compStu.loadingText')}</p>
+          </div>
+        </div>
+      </CompanyLayout>
+    );
+  }
+
+  return (
+    <CompanyLayout>
+      {toastMessage && (
+        <Toast
+          message={toastMessage.message}
+          type={toastMessage.type}
+          onClose={() => setToastMessage(null)}
+        />
+      )}
+      <div className="max-w-6xl mx-auto">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+            <GraduationCap className="w-6 h-6 text-indigo-600" />
+            {t('compStu.title')}
+          </h1>
+
+          <div className="flex flex-wrap gap-2 justify-end items-center w-full lg:w-auto">
+            <div className="relative w-full sm:w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+              <Input
+                type="search"
+                placeholder={t('compStu.searchPlaceholder')}
+                value={studentSearch}
+                onChange={(e) => setStudentSearch(e.target.value)}
+                className="pl-9 rounded-xl border-gray-200"
+                aria-label={t('compStu.searchAriaLabel')}
+              />
+            </div>
+              <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button className="gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700">
+                    <Plus className="w-4 h-4" />
+                    {t('compStu.addStudent')}
+                  </Button>
+                </DialogTrigger>
+            <DialogContent className="w-[95vw] sm:max-w-[480px] max-h-[min(90vh,720px)] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>{t('compStu.addStudentTitle')}</DialogTitle>
+                <DialogDescription>
+                  {t('compStu.addStudentDesc')}
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={handleAddStudent}>
+                <div className="grid gap-4 py-4">
+                  <div className="space-y-2">
+                    <Label>{t('compStu.tutorsRequired')}</Label>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setMultiTutorPickerOpen((v) => !v)}
+                        className="w-full flex items-center justify-between rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm hover:border-indigo-300 transition-colors"
+                      >
+                        <span className="truncate text-left">
+                          {newStudent.tutor_ids.length === 0 && t('compStu.selectTutor')}
+                          {newStudent.tutor_ids.length === 1 && (() => {
+                            const found = tutors.find((tt) => tt.id === newStudent.tutor_ids[0]);
+                            return found?.full_name || t('compStu.oneTutorSelected');
+                          })()}
+                          {newStudent.tutor_ids.length > 1 && t('compStu.tutorsSelected', { count: String(newStudent.tutor_ids.length) })}
+                        </span>
+                        <span className="text-xs text-gray-400">▼</span>
+                      </button>
+                      {multiTutorPickerOpen && (
+                        <div className="absolute z-30 mt-1 w-full rounded-xl border border-gray-200 bg-white shadow-lg p-3 space-y-2 max-h-72 overflow-hidden">
+                          <Input
+                            placeholder={t('compStu.searchTutor')}
+                            value={multiTutorSearch}
+                            onChange={(e) => setMultiTutorSearch(e.target.value)}
+                            className="h-8 text-xs rounded-lg"
+                          />
+                          <div className="mt-2 max-h-52 overflow-y-auto space-y-1">
+                            {tutors
+                              .filter((t) =>
+                                t.full_name.toLowerCase().includes(multiTutorSearch.trim().toLowerCase())
+                              )
+                              .map((t) => {
+                                const active = newStudent.tutor_ids.includes(t.id);
+                                return (
+                                  <label
+                                    key={t.id}
+                                    className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-gray-50 cursor-pointer text-xs"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={active}
+                                      onChange={(e) => {
+                                        const next = e.target.checked
+                                          ? [...newStudent.tutor_ids, t.id]
+                                          : newStudent.tutor_ids.filter((id) => id !== t.id);
+                                        setNewStudent({ ...newStudent, tutor_ids: next });
+                                      }}
+                                      className="w-3.5 h-3.5"
+                                    />
+                                    <span className="truncate">{t.full_name}</span>
+                                  </label>
+                                );
+                              })}
+                            {tutors.filter((t) =>
+                              t.full_name.toLowerCase().includes(multiTutorSearch.trim().toLowerCase())
+                            ).length === 0 && (
+                              <p className="text-[11px] text-gray-400 px-2 py-1">{t('compStu.noTutorsFound')}</p>
+                            )}
+                          </div>
+                          <div className="flex justify-end pt-1">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-3 rounded-lg text-xs"
+                              onClick={() => setMultiTutorPickerOpen(false)}
+                            >
+                              {t('compStu.closePicker')}
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-gray-500">
+                      {t('compStu.tutorPickerHint')}
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>{t('compStu.fullNameRequired')}</Label>
+                    <Input
+                      value={newStudent.full_name}
+                      onChange={(e) => setNewStudent({ ...newStudent, full_name: e.target.value })}
+                      placeholder={t('compStu.namePlaceholder')}
+                      className="rounded-xl"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>{t('compStu.emailLabel')}</Label>
+                    <Input
+                      type="email"
+                      value={newStudent.email}
+                      onChange={(e) => setNewStudent({ ...newStudent, email: e.target.value })}
+                      placeholder="jonas@example.com"
+                      className="rounded-xl"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>{t('compStu.phoneLabel')}</Label>
+                    <Input
+                      value={newStudent.phone}
+                      onChange={(e) => setNewStudent({ ...newStudent, phone: formatLithuanianPhone(e.target.value) })}
+                      placeholder="+370 600 00000"
+                      className="rounded-xl"
+                    />
+                  </div>
+
+                  <div className="border-t border-gray-200 pt-4 space-y-3">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Sparkles className="w-4 h-4 text-amber-500" />
+                      <Label className="text-sm font-semibold">{t('compStu.individualPriceOptional')}</Label>
+                    </div>
+                    {!newStudent.tutor_ids[0] ? (
+                      <p className="text-xs text-gray-600 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2">
+                        {t('compStu.selectTutorFirst')}
+                      </p>
+                    ) : tutorSubjects.length === 0 ? (
+                      <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                        {t('compStu.noSubjectsYet')}
+                      </p>
+                    ) : (
+                      <>
+                        <div className="space-y-2">
+                          <Label className="text-xs text-gray-600">{t('compStu.subjectLabel')}</Label>
+                          <Select
+                            value={selectedSubjectForInvite}
+                            onValueChange={setSelectedSubjectForInvite}
+                          >
+                            <SelectTrigger className="rounded-xl">
+                              <SelectValue placeholder={t('compStu.selectSubject')} />
+                            </SelectTrigger>
+                          <SelectContent className="max-h-72 overflow-y-auto">
+                            <div className="sticky top-0 z-10 bg-white p-2 border-b border-gray-100">
+                              <Input
+                                value={subjectSearch}
+                                onChange={(e) => setSubjectSearch(e.target.value)}
+                                placeholder={t('common.search')}
+                                className="h-9 rounded-xl"
+                              />
+                              {!subjectSearch && tutorSubjects.length > 5 && (
+                                <p className="mt-1 text-[11px] text-gray-500">{t('common.searchToSeeMore')}</p>
+                              )}
+                            </div>
+                            {(subjectSearch
+                              ? tutorSubjects.filter((s) => (s.name || '').toLowerCase().includes(subjectSearch.trim().toLowerCase()))
+                              : tutorSubjects.slice(0, 5)
+                            ).map((subj) => (
+                                <SelectItem key={subj.id} value={subj.id}>
+                                  <div className="flex items-center gap-2">
+                                    <span
+                                      className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                                      style={{ backgroundColor: subj.color }}
+                                    />
+                                    {subj.name}
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {selectedSubjectForInvite && (
+                          <>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-2">
+                                <Label className="text-xs text-gray-600">{t('compStu.priceEur')}</Label>
+                                <Input
+                                  type="number"
+                                  value={customPrice}
+                                  onChange={(e) =>
+                                    setCustomPrice(e.target.value ? parseFloat(e.target.value) : '')
+                                  }
+                                  placeholder="25"
+                                  className="rounded-xl"
+                                  min="0"
+                                  step="0.01"
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label className="text-xs text-gray-600">{t('compStu.durationMin')}</Label>
+                                <Input
+                                  type="number"
+                                  value={customDuration}
+                                  onChange={(e) =>
+                                    setCustomDuration(e.target.value ? parseInt(e.target.value, 10) : '')
+                                  }
+                                  placeholder="60"
+                                  className="rounded-xl"
+                                  min="1"
+                                />
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-2">
+                                <Label className="text-xs text-gray-600">{t('compStu.cancellationH')}</Label>
+                                <Select
+                                  value={customCancellationHours.toString()}
+                                  onValueChange={(v) => setCustomCancellationHours(parseInt(v, 10))}
+                                >
+                                  <SelectTrigger className="rounded-xl">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {[2, 6, 12, 24, 48].map((h) => (
+                                      <SelectItem key={h} value={h.toString()}>
+                                        {h} {t('compStu.hoursAbbrev')}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-2">
+                                <Label className="text-xs text-gray-600">{t('compStu.feePercent')}</Label>
+                                <Select
+                                  value={customCancellationFee.toString()}
+                                  onValueChange={(v) => setCustomCancellationFee(parseInt(v, 10))}
+                                >
+                                  <SelectTrigger className="rounded-xl">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {[0, 25, 50, 75, 100].map((p) => (
+                                      <SelectItem key={p} value={p.toString()}>
+                                        {p}%
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3">
+                    <p className="text-xs text-indigo-700">
+                      {t('compStu.inviteCodeHint')}
+                    </p>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button
+                    variant="outline"
+                    type="button"
+                    onClick={() => setIsDialogOpen(false)}
+                    className="rounded-xl"
+                  >
+                    {t('compStu.cancelBtn')}
+                  </Button>
+                  <Button type="submit" disabled={saving} className="rounded-xl gap-2">
+                    <Plus className="w-4 h-4" />
+                    {saving ? t('compStu.savingBtn') : t('compStu.addBtn')}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+          </div>
+        </div>
+
+        {students.length === 0 && !loading ? (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm">
+            <div className="text-center py-16 px-6">
+              <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4">
+                <User className="w-8 h-8 text-gray-300" />
+              </div>
+              <p className="text-gray-500 font-medium">{t('compStu.noStudents')}</p>
+              <p className="text-gray-400 text-sm mt-1">{t('compStu.addFirstStudent')}</p>
+            </div>
+          </div>
+        ) : filteredGroups.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm">
+            <div className="text-center py-12 px-6">
+              <p className="text-gray-500 font-medium">{t('compStu.noSearchResults')}</p>
+              <p className="text-gray-400 text-sm mt-1">{t('compStu.changeSearchQuery')}</p>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+            {/* Mobile cards */}
+            <div className="md:hidden divide-y divide-gray-100">
+              {filteredGroups.map((g) => {
+                const student = g.primary;
+                const initials = student.full_name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
+                const hasTutor = g.rows.some((r) => r.tutor_id);
+                const tutorNames = hasTutor
+                  ? Array.from(new Set(g.rows.filter((r) => r.tutor?.full_name).map((r) => r.tutor!.full_name)))
+                  : [];
+                return (
+                  <div
+                    key={g.key}
+                    role="button"
+                    tabIndex={0}
+                    className="w-full text-left p-4 hover:bg-gray-50 transition-colors cursor-pointer"
+                    onClick={() => {
+                      setSelectedStudent(student);
+                      setSelectedStudentGroup(g.rows);
+                      setTrialTutorId(student.tutor_id);
+                      setIsStudentModalOpen(true);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setSelectedStudent(student);
+                        setSelectedStudentGroup(g.rows);
+                        setTrialTutorId(student.tutor_id);
+                        setIsStudentModalOpen(true);
+                      }
+                    }}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="w-11 h-11 rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                        {initials || '?'}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="font-semibold text-gray-900 truncate">{student.full_name}</p>
+                          {student.linked_user_id ? (
+                            <span className="text-[11px] text-green-700 bg-green-50 border border-green-200 rounded-md px-1.5 py-0.5 flex-shrink-0">
+                              {t('compStu.connected')}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-0.5 flex-shrink-0">
+                              {t('compStu.notConnected')}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1 truncate">
+                          {t('compStu.tutorInline')}{' '}
+                          {tutorNames.length > 0 ? (
+                            <span className="text-gray-700 font-medium">
+                              {tutorNames.length <= 1 ? tutorNames[0] : `${tutorNames[0]} +${tutorNames.length - 1}`}
+                            </span>
+                          ) : (
+                            <span className="text-amber-600 font-medium">{t('compStu.tutorNotAssigned')}</span>
+                          )}
+                        </p>
+                        <div className="mt-2 space-y-1 text-xs text-gray-700">
+                          <div className="flex items-center gap-1.5">
+                            <Mail className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                            <span className="truncate">{adminShowEmail(student.email)}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <Phone className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                            <span className="truncate">{adminShowPhone(student.phone)}</span>
+                          </div>
+                          {shouldShowPayerContactSection(student) && (
+                            <div className="pt-2 mt-2 border-t border-gray-100 space-y-1">
+                              <p className="text-[11px] text-gray-400 font-semibold uppercase tracking-wide">{t('compStu.payerLabel')}</p>
+                              <div className="flex items-center gap-1.5">
+                                <Mail className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                                <span className="truncate">{adminShowEmail(student.payer_email)}</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        <div className="mt-3 flex items-center justify-between gap-3">
+                          <code className="font-mono font-bold text-indigo-700 text-xs tracking-widest bg-indigo-50 px-2 py-1 rounded">
+                            {student.invite_code}
+                          </code>
+                          <button
+                            type="button"
+                            className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void handleDeleteStudent(student.id);
+                            }}
+                            aria-label={t('compStu.deleteStudentLabel')}
+                            title={t('compStu.deleteBtn')}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Desktop table */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b border-gray-100">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('compStu.thStudent')}</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('compStu.thTutor')}</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('compStu.thContacts')}</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('compStu.thCode')}</th>
+                    <th className="px-6 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('compStu.thActions')}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredGroups.map((g) => {
+                    const student = g.primary;
+                    const initials = student.full_name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
+                    const hasTutorDt = g.rows.some((r) => r.tutor_id);
+                    const tutorNames = hasTutorDt
+                      ? Array.from(new Set(g.rows.filter((r) => r.tutor?.full_name).map((r) => r.tutor!.full_name)))
+                      : [];
+                    return (
+                      <tr
+                        key={g.key}
+                        className="hover:bg-gray-50 transition-colors cursor-pointer"
+                        onClick={(e) => {
+                          if ((e.target as HTMLElement).closest('button')) return;
+                          setSelectedStudent(student);
+                          setSelectedStudentGroup(g.rows);
+                          setTrialTutorId(student.tutor_id);
+                          setIsStudentModalOpen(true);
+                        }}
+                      >
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                              {initials || '?'}
+                            </div>
+                            <div>
+                              <p className="font-semibold text-gray-900">{student.full_name}</p>
+                              <p className="text-xs mt-0.5">
+                                {student.linked_user_id ? (
+                                  <span className="text-green-700 bg-green-50 border border-green-200 rounded-md px-1.5 py-0.5">{t('compStu.connected')}</span>
+                                ) : (
+                                  <span className="text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-0.5">{t('compStu.notConnected')}</span>
+                                )}
+                              </p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          {tutorNames.length > 0 ? (
+                            <>
+                              <p className="text-sm text-gray-700">
+                                {tutorNames.length <= 1 ? tutorNames[0] : `${tutorNames[0]} +${tutorNames.length - 1}`}
+                              </p>
+                              {tutorNames.length > 1 && (
+                                <p className="text-[11px] text-gray-400 mt-0.5">{t('compStu.moreThanOneTutor')}</p>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-0.5">{t('compStu.tutorNotAssigned')}</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="space-y-2 text-xs text-gray-700">
+                            <div>
+                              <span className="text-gray-400 font-semibold uppercase tracking-wide">{t('compStu.studentLabel')}</span>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <Mail className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                                <span>{adminShowEmail(student.email)}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <Phone className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                                <span>{adminShowPhone(student.phone)}</span>
+                              </div>
+                            </div>
+                            {shouldShowPayerContactSection(student) && (
+                              <div className="pt-1 border-t border-gray-100">
+                                <span className="text-gray-400 font-semibold uppercase tracking-wide">{t('compStu.payerLabel')}</span>
+                                <div className="flex items-center gap-1.5 mt-0.5">
+                                  <Mail className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                                  <span>{adminShowEmail(student.payer_email)}</span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <Phone className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                                  <span>{adminShowPhone(student.payer_phone)}</span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <code className="font-mono font-bold text-indigo-700 text-sm tracking-widest bg-indigo-50 px-2 py-1 rounded">
+                            {student.invite_code}
+                          </code>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <button
+                            onClick={() => handleDeleteStudent(student.id)}
+                            className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                            title={t('compStu.deleteBtn')}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Student Detail Modal */}
+        <Dialog open={isStudentModalOpen} onOpenChange={(open) => { setIsStudentModalOpen(open); if (!open) { setSendPackageOpen(false); } }}>
+          <DialogContent className="w-[95vw] sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl max-h-[90vh] overflow-y-auto p-5 sm:p-6">
+            <DialogHeader>
+              <DialogTitle>{t('compStu.studentInfo')}</DialogTitle>
+            </DialogHeader>
+            {selectedStudent && (
+              <div className="space-y-5">
+                {selectedStudentGroup.length > 1 && (
+                  <div className="p-3 rounded-xl border border-gray-100 bg-gray-50">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">{t('compStu.thTutor')}</p>
+                    <Select
+                      value={selectedStudent.tutor_id || selectedStudent.id}
+                      onValueChange={(val) => {
+                        const row = selectedStudentGroup.find((r) => (r.tutor_id || r.id) === val);
+                        if (!row) return;
+                        setSelectedStudent(row);
+                        setTrialTutorId(row.tutor_id);
+                      }}
+                    >
+                      <SelectTrigger className="rounded-xl bg-white">
+                        <SelectValue placeholder={t('compStu.selectActiveTutor')} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {selectedStudentGroup.map((r) => (
+                          <SelectItem key={r.id} value={r.tutor_id || r.id}>
+                            {r.tutor_id ? (r.tutor?.full_name || '—') : t('compStu.tutorNotAssigned')}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[11px] text-gray-500 mt-2">
+                      {t('compStu.multiTutorHint')}
+                    </p>
+                  </div>
+                )}
+                {/* Info */}
+                <div className="flex justify-between items-start pb-4 border-b border-gray-100 gap-4">
+                  <div className="space-y-1 flex-1">
+                    <h3 className="text-xl font-bold text-gray-900">{selectedStudent.full_name}</h3>
+                    <div className="text-gray-600 text-sm space-y-3">
+                      <div>
+                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">{t('compStu.studentLabel')}</p>
+                        <p>
+                          {t('compStu.emailInline')} <span className="text-gray-900">{adminShowEmail(selectedStudent.email)}</span>
+                        </p>
+                        <p>
+                          {t('compStu.phoneInline')} <span className="text-gray-900">{adminShowPhone(selectedStudent.phone)}</span>
+                        </p>
+                      </div>
+                      {shouldShowPayerContactSection(selectedStudent) && (
+                        <div className="pt-2 border-t border-gray-100">
+                          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">{t('compStu.payerLabel')}</p>
+                          <p>
+                            {t('compStu.emailInline')} <span className="text-gray-900">{adminShowEmail(selectedStudent.payer_email)}</span>
+                          </p>
+                          <p>
+                            {t('compStu.phoneInline')} <span className="text-gray-900">{adminShowPhone(selectedStudent.payer_phone)}</span>
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-sm font-semibold">
+                      {t('compStu.tutorInline')}{' '}
+                      {selectedStudent.tutor_id ? (
+                        <span className="text-indigo-600">{selectedStudent.tutor?.full_name || '—'}</span>
+                      ) : (
+                        <span className="text-amber-600">{t('compStu.tutorNotAssigned')}</span>
+                      )}
+                    </p>
+                    <p className="text-gray-600 text-sm">
+                      {t('compStu.codeInline')} <code className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">{selectedStudent.invite_code}</code>
+                    </p>
+                    <div className="pt-1 flex items-center gap-2 flex-wrap">
+                      {selectedStudent.linked_user_id ? (
+                        <span className="inline-flex items-center gap-1 text-green-700 bg-green-50 border border-green-200 rounded-md px-2 py-1 text-xs">
+                          <CheckCircle className="w-3.5 h-3.5" /> {t('compStu.connected')}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 text-xs">
+                          <XCircle className="w-3.5 h-3.5" /> {t('compStu.notConnected')}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setEditTutorsOpen((v) => !v)}
+                        className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors border-gray-200 text-gray-700 bg-white hover:bg-gray-50"
+                      >
+                        {t('compStu.editTutors')}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {editTutorsOpen && (
+                  <div className="p-4 rounded-2xl border border-gray-100 bg-white space-y-3">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('compStu.tutorsSection')}</p>
+                    <div className="space-y-2">
+                      {selectedStudentGroup.map((row) => (
+                        <div key={row.id} className="flex items-center justify-between gap-2 p-2 rounded-xl bg-gray-50 border border-gray-100">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-gray-900 truncate">{row.tutor_id ? (row.tutor?.full_name || '—') : t('compStu.tutorNotAssigned')}</p>
+                            <p className="text-[11px] text-gray-500 truncate">{t('compStu.codePrefix', { code: row.invite_code })}</p>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <button
+                              type="button"
+                              className="text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white hover:bg-gray-100"
+                              onClick={() => {
+                                setSelectedStudent(row);
+                                setTrialTutorId(row.tutor_id);
+                              }}
+                            >
+                              {t('compStu.selectBtn')}
+                            </button>
+                            <button
+                              type="button"
+                              className="text-xs px-2 py-1 rounded-lg border border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+                              disabled={tutorsSaving}
+                              onClick={async () => {
+                                if (!confirm(t('compStu.confirmRemoveTutor'))) return;
+                                setTutorsSaving(true);
+                                const { error } = await supabase.from('students').delete().eq('id', row.id);
+                                if (error) {
+                                  setToastMessage({ message: t('compStu.tutorRemoveFailed'), type: 'error' });
+                                } else {
+                                  setToastMessage({ message: t('compStu.tutorRemoved'), type: 'success' });
+                                  const nextGroup = selectedStudentGroup.filter((r) => r.id !== row.id);
+                                  setSelectedStudentGroup(nextGroup);
+                                  if (nextGroup.length === 0) {
+                                    setSelectedStudent(null);
+                                    setIsStudentModalOpen(false);
+                                  } else if (selectedStudent?.id === row.id) {
+                                    const fallback = nextGroup[0];
+                                    setSelectedStudent(fallback);
+                                    setTrialTutorId(fallback.tutor_id);
+                                  }
+                                  fetchData();
+                                }
+                                setTutorsSaving(false);
+                              }}
+                            >
+                              {t('compStu.removeBtn')}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="pt-2 border-t border-gray-100">
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">{t('compStu.addNewTutor')}</p>
+                      <div className="flex gap-2 items-center">
+                        <Select value={addingTutorId} onValueChange={setAddingTutorId}>
+                          <SelectTrigger className="rounded-xl h-9">
+                            <SelectValue placeholder={t('compStu.selectPlaceholder')} />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-72 overflow-y-auto">
+                            <div className="sticky top-0 z-10 bg-white p-2 border-b border-gray-100">
+                              <Input
+                                value={addingTutorSearch}
+                                onChange={(e) => setAddingTutorSearch(e.target.value)}
+                                placeholder={t('common.search')}
+                                className="h-9 rounded-xl"
+                              />
+                              {!addingTutorSearch && tutors.length > 5 && (
+                                <p className="mt-1 text-[11px] text-gray-500">{t('common.searchToSeeMore')}</p>
+                              )}
+                            </div>
+                            {(addingTutorSearch
+                              ? tutors.filter((tu) => (tu.full_name || '').toLowerCase().includes(addingTutorSearch.trim().toLowerCase()))
+                              : tutors.slice(0, 5)
+                            )
+                              .filter((t) => !selectedStudentGroup.some((r) => r.tutor_id === t.id))
+                              .map((t) => (
+                                <SelectItem key={t.id} value={t.id}>
+                                  {t.full_name}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          type="button"
+                          className="rounded-xl h-9"
+                          disabled={!addingTutorId || tutorsSaving}
+                          onClick={async () => {
+                            if (!selectedStudent) return;
+                            setTutorsSaving(true);
+
+                            const nullTutorRow = selectedStudentGroup.find((r) => !r.tutor_id);
+                            let error: any = null;
+                            let data: any = null;
+
+                            if (nullTutorRow) {
+                              const res = await supabase
+                                .from('students')
+                                .update({ tutor_id: addingTutorId })
+                                .eq('id', nullTutorRow.id)
+                                .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
+                                .single();
+                              error = res.error;
+                              data = res.data;
+                            } else {
+                              const inviteCode = generateInviteCode();
+                              const res = await supabase
+                                .from('students')
+                                .insert({
+                                  tutor_id: addingTutorId,
+                                  full_name: selectedStudent.full_name,
+                                  email: selectedStudent.email,
+                                  phone: (selectedStudent.phone || '').trim() || null,
+                                  payer_email: selectedStudent.payer_email || null,
+                                  payer_phone: selectedStudent.payer_phone || null,
+                                  linked_user_id: selectedStudent.linked_user_id || null,
+                                  invite_code: inviteCode,
+                                })
+                                .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
+                                .single();
+                              error = res.error;
+                              data = res.data;
+                            }
+
+                            if (error || !data) {
+                              setToastMessage({ message: t('compStu.tutorAddFailed'), type: 'error' });
+                            } else {
+                              setToastMessage({ message: t('compStu.tutorAdded'), type: 'success' });
+                              const normalized = { ...(data as any), tutor: Array.isArray((data as any).tutor) ? (data as any).tutor[0] : (data as any).tutor };
+                              if (nullTutorRow) {
+                                setSelectedStudentGroup((prev) => prev.map((r) => r.id === nullTutorRow.id ? normalized : r));
+                                setSelectedStudent(normalized);
+                              } else {
+                                setSelectedStudentGroup((prev) => [...prev, normalized]);
+                              }
+                              setAddingTutorId('');
+                              fetchData();
+                            }
+                            setTutorsSaving(false);
+                          }}
+                        >
+                          {t('compStu.addBtn')}
+                        </Button>
+                      </div>
+                      <p className="text-[11px] text-gray-500 mt-2">
+                        {t('compStu.addTutorHint')}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Individual pricing editor */}
+                {selectedStudent && (
+                  <div className="mt-4 pt-4 border-t border-gray-100">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-semibold text-gray-900 flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-amber-500" />
+                        {t('compStu.individualPrices')}
+                      </h4>
+                      {!addingIndividualPrice && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="text-xs rounded-lg"
+                          onClick={() => {
+                            setAddingIndividualPrice(true);
+                            setNewPriceSubjectId('');
+                            setNewPriceAmount('');
+                            setNewPriceDurationMinutes('');
+                            setNewPriceCancellationHours(24);
+                            setNewPriceCancellationFeePercent(0);
+                          }}
+                        >
+                          <Plus className="w-3 h-3 mr-1" />
+                          {t('compStu.addBtn')}
+                        </Button>
+                      )}
+                    </div>
+
+                    {loadingStudentIndividualPricing ? (
+                      <p className="text-sm text-gray-500 text-center py-2">{t('compStu.loadingText')}</p>
+                    ) : (
+                      <>
+                        {studentIndividualPricing.length === 0 && !addingIndividualPrice ? (
+                          <p className="text-sm text-gray-500 bg-gray-50 p-4 rounded-xl text-center">
+                            {t('compStu.noIndividualPrices')}
+                          </p>
+                        ) : (
+                          <>
+                            {studentIndividualPricing.length > 0 && !addingIndividualPrice && (
+                              <div className="space-y-2">
+                                {studentIndividualPricing.map((pricing) => (
+                                  <div
+                                    key={pricing.id}
+                                    className="bg-amber-50 border border-amber-100 rounded-xl p-3 flex items-center justify-between gap-3"
+                                  >
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <div
+                                          className="w-3 h-3 rounded-full flex-shrink-0"
+                                          style={{ backgroundColor: pricing.subject?.color || '#6366f1' }}
+                                        />
+                                        <span className="font-semibold text-gray-900 text-sm truncate">
+                                          {pricing.subject?.name || t('compStu.subjectFallback')}
+                                        </span>
+                                      </div>
+                                      <div className="text-xs text-gray-600 space-y-0.5">
+                                        <p>
+                                          <Euro className="w-3 h-3 inline mr-1" />
+                                          <strong>€{pricing.price}</strong> / {pricing.duration_minutes} min
+                                        </p>
+                                        <p>
+                                          <Clock className="w-3 h-3 inline mr-1" />
+                                          {t('compStu.cancellationInfo', { hours: String(pricing.cancellation_hours), percent: String(pricing.cancellation_fee_percent) })}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="text-red-600 hover:text-red-700 hover:bg-red-50 shrink-0"
+                                      disabled={savingStudentIndividualPricing}
+                                      onClick={() => void handleDeleteIndividualPrice(pricing.id)}
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </Button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {addingIndividualPrice && (
+                              <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3 mt-2">
+                                <div className="space-y-1.5">
+                                  <Label className="text-xs font-semibold text-gray-700">{t('compStu.subjectRequired')}</Label>
+                                  <Select
+                                    value={newPriceSubjectId}
+                                    onValueChange={(v) => {
+                                      setNewPriceSubjectId(v);
+                                      const subj = tutorPricingSubjects.find(s => s.id === v);
+                                      if (subj) {
+                                        setNewPriceAmount(typeof subj.price === 'number' ? subj.price : '');
+                                        setNewPriceDurationMinutes(subj.duration_minutes ?? '');
+                                      } else {
+                                        setNewPriceAmount('');
+                                        setNewPriceDurationMinutes('');
+                                      }
+                                    }}
+                                  >
+                                    <SelectTrigger className="rounded-xl">
+                                      <SelectValue placeholder={t('compStu.selectSubjectPlaceholder')} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {tutorPricingSubjects.map((s) => (
+                                        <SelectItem key={s.id} value={s.id}>
+                                          {s.name}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div className="space-y-1.5">
+                                    <Label className="text-xs text-gray-600">{t('compStu.priceEurRequired')}</Label>
+                                    <Input
+                                      type="number"
+                                      min={0}
+                                      step={0.01}
+                                      value={newPriceAmount}
+                                      onChange={(e) => setNewPriceAmount(e.target.value ? parseFloat(e.target.value) : '')}
+                                      className="rounded-xl"
+                                    />
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    <Label className="text-xs text-gray-600">{t('compStu.durationMinRequired')}</Label>
+                                    <Input
+                                      type="number"
+                                      min={1}
+                                      value={newPriceDurationMinutes}
+                                      onChange={(e) => setNewPriceDurationMinutes(e.target.value ? parseInt(e.target.value, 10) : '')}
+                                      className="rounded-xl"
+                                    />
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div className="space-y-1.5">
+                                    <Label className="text-xs text-gray-600">{t('compStu.cancellationHRequired')}</Label>
+                                    <Select
+                                      value={String(newPriceCancellationHours)}
+                                      onValueChange={(v) => setNewPriceCancellationHours(parseInt(v, 10))}
+                                    >
+                                      <SelectTrigger className="rounded-xl">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {[2, 6, 12, 24, 48].map((h) => (
+                                          <SelectItem key={h} value={String(h)}>
+                                            {h} {t('compStu.hoursAbbrev')}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    <Label className="text-xs text-gray-600">{t('compStu.feePercentRequired')}</Label>
+                                    <Select
+                                      value={String(newPriceCancellationFeePercent)}
+                                      onValueChange={(v) => setNewPriceCancellationFeePercent(parseInt(v, 10))}
+                                    >
+                                      <SelectTrigger className="rounded-xl">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {[0, 25, 50, 75, 100].map((p) => (
+                                          <SelectItem key={p} value={String(p)}>
+                                            {p}%
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                </div>
+
+                                <div className="flex gap-2">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="flex-1 rounded-lg"
+                                    onClick={() => {
+                                      setAddingIndividualPrice(false);
+                                      setNewPriceSubjectId('');
+                                      setNewPriceAmount('');
+                                      setNewPriceDurationMinutes('');
+                                      setNewPriceCancellationHours(24);
+                                      setNewPriceCancellationFeePercent(0);
+                                    }}
+                                    disabled={savingStudentIndividualPricing}
+                                  >
+                                    {t('compStu.cancelBtn')}
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    className="flex-1 rounded-lg"
+                                    disabled={
+                                      savingStudentIndividualPricing ||
+                                      !newPriceSubjectId ||
+                                      newPriceAmount === '' ||
+                                      typeof newPriceDurationMinutes !== 'number'
+                                    }
+                                    onClick={() => void handleAddIndividualPrice()}
+                                  >
+                                    {savingStudentIndividualPricing ? t('compStu.savingInProgress') : t('compStu.saveBtn')}
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {showPaymentModelUi && (
+                  <StudentPaymentModelSection
+                    studentId={selectedStudent.id}
+                    value={selectedStudent.payment_model ?? null}
+                    perLessonTiming={(selectedStudent as any).per_lesson_payment_timing ?? null}
+                    perLessonDeadlineHours={(selectedStudent as any).per_lesson_payment_deadline_hours ?? null}
+                    inheritedLessonPayment={{ payment_timing: 'before_lesson', payment_deadline_hours: 24 }}
+                    allowPerLesson={!manualPaymentsEnabled}
+                    onSaved={(patch) => {
+                      setSelectedStudent((s) => (s ? { ...s, ...patch } : null));
+                      fetchData();
+                    }}
+                  />
+                )}
+
+                {paymentActions.canSendInvoice && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full gap-2 rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                    onClick={() => setIsInvoiceModalOpen(true)}
+                  >
+                    <FileText className="w-4 h-4" />
+                    {t('compStu.sendInvoice')}
+                  </Button>
+                )}
+
+                {/* Trial lesson offer (only for brand new students with 0 sessions) */}
+                {selectedStudent && (selectedStudentSessionCount ?? 0) === 0 && !selectedStudent.trial_offer_disabled && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <Button
+                        type="button"
+                        className="flex-1 gap-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white"
+                        disabled={trialSending || trialDefaultsLoading}
+                        onClick={() => {
+                          setTrialForm(trialDefaults);
+                          setTrialModalOpen(true);
+                        }}
+                      >
+                        <Sparkles className="w-4 h-4" />
+                        {t('compStu.offerTrial')}
+                      </Button>
+                      <button
+                        type="button"
+                        className="text-[11px] text-gray-500 hover:text-red-600 underline-offset-2 hover:underline"
+                        onClick={async () => {
+                          if (!selectedStudent) return;
+                          setSelectedStudent((s) => (s ? { ...s, trial_offer_disabled: true } : null));
+                          const { error } = await supabase
+                            .from('students')
+                            .update({ trial_offer_disabled: true })
+                            .eq('id', selectedStudent.id);
+                          if (error) {
+                            setToastMessage({ message: t('compStu.trialHideFailed'), type: 'error' });
+                            setSelectedStudent((s) => (s ? { ...s, trial_offer_disabled: false } : null));
+                          } else {
+                            setToastMessage({ message: t('compStu.trialHidden'), type: 'success' });
+                            fetchData();
+                          }
+                        }}
+                      >
+                        {t('compStu.hideTrialOffer')}
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-gray-500">
+                      {t('compStu.trialHint')}
+                    </p>
+                  </div>
+                )}
+
+                {/* Packages */}
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="font-semibold text-gray-900 flex items-center gap-2">
+                      <Package className="w-4 h-4 text-violet-600" /> {t('compStu.lessonPackages')}
+                    </h4>
+                    {paymentActions.canSendPackage && (
+                    <Button size="sm" variant="outline" className="gap-1.5 rounded-xl text-xs border-violet-200 text-violet-700 hover:bg-violet-50"
+                      onClick={() => setSendPackageOpen(v => !v)}>
+                      <Package className="w-3.5 h-3.5" />
+                      {sendPackageOpen ? t('compStu.cancelBtn') : t('compStu.sendPackage')}
+                    </Button>
+                    )}
+                  </div>
+
+                  {sendPackageOpen && (
+                    <div className="mb-4 p-4 bg-violet-50 border border-violet-200 rounded-xl space-y-3">
+                      <p className="text-xs font-semibold text-violet-800">{t('compStu.sendPackageTitle')}</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="col-span-3 space-y-1">
+                          <Label className="text-xs">{t('compStu.subjectLabel')}</Label>
+                          <Select value={pkgSubjectId} onValueChange={(v) => {
+                            setPkgSubjectId(v);
+                            const s = packageSubjects.find(s => s.id === v);
+                            if (s) setPkgPrice(s.price);
+                          }}>
+                            <SelectTrigger className="rounded-lg h-8 text-xs">
+                              <SelectValue placeholder={t('compStu.selectPlaceholder')} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {packageSubjects.map(s => (
+                                <SelectItem key={s.id} value={s.id}>
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: s.color }} />
+                                    {s.name}
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">{t('compStu.quantityLabel')}</Label>
+                          <Input type="number" min={1} max={100} value={pkgLessons}
+                            onChange={(e) => setPkgLessons(Math.max(1, parseInt(e.target.value) || 1))}
+                            className="h-8 text-xs rounded-lg" />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">{t('compStu.pricePerLesson')}</Label>
+                          <Input type="number" min={0} step={0.01} value={pkgPrice}
+                            onChange={(e) => setPkgPrice(parseFloat(e.target.value) || 0)}
+                            className="h-8 text-xs rounded-lg" />
+                        </div>
+                        <div className="flex items-end">
+                          <Button size="sm" className="h-8 w-full text-xs rounded-lg bg-violet-600 hover:bg-violet-700"
+                            onClick={handleSendPackage} disabled={pkgSending || !pkgSubjectId}>
+                            {pkgSending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : t('compStu.sendBtn')}
+                          </Button>
+                        </div>
+                      </div>
+                      <p className="text-xs text-violet-600">
+                        {manualPaymentsEnabled
+                          ? t('compStu.manualPaymentHint')
+                          : t('compStu.stripePaymentHint')}
+                      </p>
+                      {pkgSubjectId && pkgLessons > 0 && (
+                        <p className="text-xs font-medium text-violet-800">
+                          {packageSubjects.find((s) => s.id === pkgSubjectId)?.name || '—'}:{' '}
+                          {pkgLessons}{' '}
+                          {pkgLessons === 1
+                            ? t('package.lessonUnit1')
+                            : pkgLessons < 10
+                              ? t('package.lessonUnit2to9')
+                              : t('package.lessonUnit10plus')}{' '}
+                          × {Number(pkgPrice).toFixed(2)} €
+                          {!manualPaymentsEnabled && (
+                            <span className="text-violet-500 font-normal"> {t('package.includingFeesNote')}</span>
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {loadingPackages ? (
+                    <div className="text-center py-3"><Loader2 className="w-5 h-5 animate-spin mx-auto text-gray-400" /></div>
+                  ) : studentPackages.length === 0 ? (
+                    <p className="text-sm text-gray-400 text-center py-3">{t('compStu.noPackages')}</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {studentPackages.map((pkg: any) => (
+                        <div key={pkg.id} className="flex items-center justify-between gap-2 p-3 bg-gray-50 rounded-xl text-sm flex-wrap">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {pkg.subject?.color && <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: pkg.subject.color }} />}
+                            <span className="font-medium text-gray-800">{pkg.subject?.name || '—'}</span>
+                            <span className="text-gray-500">{t('compStu.lessonsCount', { count: String(pkg.total_lessons) })}</span>
+                            {pkg.payment_method === 'manual' && (
+                              <span className="text-[10px] uppercase font-bold text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded">{t('compStu.manualPaymentLabel')}</span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap justify-end">
+                            <span className="text-xs text-gray-500">{t('compStu.remaining', { count: String(pkg.available_lessons) })}</span>
+                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${pkg.payment_status === 'paid' ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
+                              {pkg.payment_status === 'paid' ? t('compStu.paid') : t('compStu.pendingStatus')}
+                            </span>
+                            {manualPaymentsEnabled && pkg.payment_method === 'manual' && !pkg.paid && (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs rounded-lg border-violet-300 text-violet-800"
+                                disabled={confirmingPackageId === pkg.id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void handleConfirmManualPayment(pkg.id);
+                                }}
+                              >
+                                {confirmingPackageId === pkg.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : t('compStu.confirmPayment')}
+                              </Button>
+                            )}
+                            {Number(pkg.available_lessons || 0) === 0 && pkg.active !== false && (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 px-2 text-xs rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50"
+                                disabled={deactivatingPackageId === pkg.id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void handleDeactivatePackage(pkg.id);
+                                }}
+                                title={t('compStu.hidePackage')}
+                              >
+                                {deactivatingPackageId === pkg.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Sessions */}
+                <div className="border-t border-gray-100 pt-4">
+                  <h4 className="font-semibold mb-3 text-gray-900">{t('compStu.studentSessions')}</h4>
+                  {loadingModalSessions ? (
+                    <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground text-sm">
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                      <span>{t('compStu.loadingSessions')}</span>
+                    </div>
+                  ) : (
+                    <SessionList
+                      sessions={modalRecentSessions}
+                      groupBy="none"
+                      showStudent={false}
+                      showTutor={true}
+                    />
+                  )}
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        <SendInvoiceModal
+          isOpen={isInvoiceModalOpen}
+          onClose={() => setIsInvoiceModalOpen(false)}
+          studentId={selectedStudent?.id}
+          studentName={selectedStudent?.full_name}
+          billingTutorId={selectedStudent?.tutor_id}
+          manualPaymentsEnabled={manualPaymentsEnabled}
+          onSuccess={() => {
+            setIsInvoiceModalOpen(false);
+            fetchData();
+          }}
+        />
+
+        <Dialog open={trialModalOpen} onOpenChange={setTrialModalOpen}>
+          <DialogContent className="w-[95vw] sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>{t('compStu.trialLessonTitle')}</DialogTitle>
+              <DialogDescription>
+                {t('compStu.trialDefaultsDesc')}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-2">
+              <div className="space-y-1.5">
+                <Label className="text-xs">{t('compStu.topicLabel')}</Label>
+                <Input
+                  value={trialForm.topic}
+                  onChange={(e) => setTrialForm((p) => ({ ...p, topic: e.target.value }))}
+                  className="rounded-xl"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">{t('compStu.trialDurationMin')}</Label>
+                  <Input
+                    type="number"
+                    min={15}
+                    step={5}
+                    value={trialForm.durationMinutes}
+                    onChange={(e) => setTrialForm((p) => ({ ...p, durationMinutes: Number(e.target.value) }))}
+                    className="rounded-xl"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">{t('compStu.trialPriceEur')}</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={trialForm.priceEur}
+                    onChange={(e) => setTrialForm((p) => ({ ...p, priceEur: Number(e.target.value) }))}
+                    className="rounded-xl"
+                  />
+                </div>
+              </div>
+              <div className="text-xs text-gray-500">
+                {t('compStu.tutorInline')} <span className="font-semibold text-gray-800">{selectedStudent?.tutor?.full_name || '—'}</span>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                type="button"
+                className="rounded-xl"
+                onClick={() => setTrialModalOpen(false)}
+                disabled={trialSending}
+              >
+                {t('compStu.cancelBtn')}
+              </Button>
+              <Button
+                type="button"
+                className="rounded-xl gap-2 bg-amber-500 hover:bg-amber-600 text-white"
+                disabled={trialSending || !selectedStudent}
+                onClick={async () => {
+                  if (!selectedStudent) return;
+                  setTrialSending(true);
+                  try {
+                    const { data: { session } } = await supabase.auth.getSession();
+                    const resp = await fetch('/api/create-trial-package', {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+                      },
+                      body: JSON.stringify({
+                        studentId: selectedStudent.id,
+                        tutorId: trialTutorId || selectedStudent.tutor_id,
+                        topic: trialForm.topic,
+                        durationMinutes: trialForm.durationMinutes,
+                        priceEur: trialForm.priceEur,
+                      }),
+                    });
+                    const json = await resp.json().catch(() => ({}));
+                    if (!resp.ok) throw new Error((json as any).error || t('compStu.trialSendFailed'));
+                    setToastMessage({ message: t('compStu.trialSent'), type: 'success' });
+                    setTrialModalOpen(false);
+                  } catch (e: any) {
+                    setToastMessage({ message: e?.message || t('compStu.trialSendError'), type: 'error' });
+                  }
+                  setTrialSending(false);
+                }}
+              >
+                {trialSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {t('compStu.confirmAndSend')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </CompanyLayout>
+  );
+}

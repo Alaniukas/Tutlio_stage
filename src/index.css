@@ -1,0 +1,504 @@
+@import "tailwindcss";
+
+@theme {
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  /* Override cold colors with warm colors */
+  --color-indigo-50: #fff7ed;
+  --color-indigo-100: #ffedd5;
+  --color-indigo-200: #fed7aa;
+  --color-indigo-300: #fdba74;
+  --color-indigo-400: #fb923c;
+  --color-indigo-500: #f97316;
+  --color-indigo-600: #ea580c;
+  --color-indigo-700: #c2410c;
+  --color-indigo-800: #9a3412;
+  --color-indigo-900: #7c2d12;
+
+  --color-violet-50: #fff1f2;
+  --color-violet-100: #ffe4e6;
+  --color-violet-200: #fecdd3;
+  --color-violet-300: #fda4af;
+  --color-violet-400: #fb7185;
+  --color-violet-500: #f43f5e;
+  --color-violet-600: #e11d48;
+  --color-violet-700: #be123c;
+  --color-violet-800: #9f1239;
+  --color-violet-900: #881337;
+
+  --color-blue-50: #fffbeb;
+  --color-blue-100: #fef3c7;
+  --color-blue-200: #fde68a;
+  --color-blue-300: #fcd34d;
+  --color-blue-400: #fbbf24;
+  --color-blue-500: #f59e0b;
+  --color-blue-600: #d97706;
+  --color-blue-700: #b45309;
+  --color-blue-800: #92400e;
+  --color-blue-900: #78350f;
+}
+
+@layer base {
+  :root {
+    --background: 30 40% 98%;
+    --foreground: 20 10% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 20 10% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 20 10% 15%;
+
+    /* Warm Orange primary */
+    --primary: 24 95% 53%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 30 30% 94%;
+    --secondary-foreground: 20 10% 20%;
+
+    --muted: 30 30% 94%;
+    --muted-foreground: 20 15% 50%;
+
+    --accent: 24 95% 96%;
+    --accent-foreground: 24 95% 40%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 30 30% 88%;
+    --input: 30 30% 88%;
+    --ring: 24 95% 53%;
+
+    --radius: 1rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  }
+
+  /* === CURSOR POINTER FOR ALL INTERACTIVE ELEMENTS === */
+  button,
+  [type="button"],
+  [type="reset"],
+  [type="submit"],
+  a,
+  [role="button"],
+  [role="tab"],
+  [role="option"],
+  [role="menuitem"],
+  [role="checkbox"],
+  [role="radio"],
+  select,
+  summary,
+  label[for],
+  .cursor-clickable {
+    cursor: pointer;
+  }
+
+  /* Radix-ui components */
+  [data-radix-collection-item],
+  [data-state],
+  [data-radix-select-item] {
+    cursor: pointer;
+  }
+}
+
+/* ==============================
+   SIDEBAR STYLES
+   ============================== */
+.sidebar-gradient {
+  background: linear-gradient(160deg, #7c2d12 0%, #c2410c 50%, #ea580c 100%);
+}
+
+/* ==============================
+   REACT BIG CALENDAR OVERRIDES
+   ============================== */
+.rbc-calendar {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.875rem;
+}
+
+.rbc-header {
+  padding: 12px 8px;
+  font-weight: 600;
+  color: #6b7280;
+  border-bottom: 1px solid #e5e7eb;
+  background: #f9fafb;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.75rem;
+}
+
+.rbc-today {
+  background-color: rgba(234, 88, 12, 0.05);
+  /* Orange hint */
+}
+
+.rbc-event {
+  border-radius: 8px !important;
+  border: none !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+  padding: 3px 8px !important;
+  font-size: 0.8rem;
+  font-weight: 500;
+  transition: all 0.15s ease;
+  cursor: pointer !important;
+}
+
+.rbc-event:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2) !important;
+  transform: translateY(-1px);
+}
+
+.rbc-time-view .rbc-row {
+  min-height: 50px;
+}
+
+.rbc-time-header-content {
+  border-left: 1px solid #e5e7eb;
+}
+
+.rbc-time-content {
+  border-top: 1px solid #e5e7eb;
+  touch-action: pan-y !important;
+  overscroll-behavior-y: contain;
+}
+
+.rbc-calendar {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.875rem;
+  touch-action: pan-y !important;
+}
+
+.rbc-timeslot-group {
+  border-bottom: 1px solid #f3f4f6;
+  min-height: 60px;
+}
+
+.rbc-day-slot .rbc-time-slot {
+  border-top: 1px solid #f3f4f6;
+}
+
+.rbc-time-gutter .rbc-timeslot-group {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  font-weight: 500;
+}
+
+.rbc-month-view .rbc-month-row {
+  border-top: 1px solid #e5e7eb;
+}
+
+.rbc-off-range-bg {
+  background-color: #f9fafb;
+}
+
+.rbc-date-cell {
+  font-size: 0.8rem;
+  padding: 4px 8px;
+  color: #374151;
+}
+
+.rbc-date-cell.rbc-now {
+  color: #ea580c;
+  font-weight: 700;
+}
+
+.rbc-show-more {
+  color: #ea580c;
+  font-weight: 600;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+/* Hide default toolbar since we use custom */
+.rbc-toolbar {
+  display: none;
+}
+
+/* Background events (availability/free time) render behind sessions at full width */
+.rbc-background-event {
+  background-color: rgba(16, 185, 129, 0.15) !important;
+  border: 1px dashed rgba(5, 150, 105, 0.45) !important;
+  border-radius: 6px !important;
+  color: #047857 !important;
+  box-shadow: none !important;
+  cursor: pointer !important;
+  opacity: 1 !important;
+  z-index: 0 !important;
+  font-size: 0.7rem !important;
+  pointer-events: auto !important;
+}
+
+.rbc-background-event:hover {
+  background-color: rgba(16, 185, 129, 0.25) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+/* Slot selection highlight */
+.rbc-slot-selection {
+  background-color: rgba(234, 88, 12, 0.2);
+  border: 2px solid #ea580c;
+  border-radius: 6px;
+}
+
+/* ==============================
+   MOBILE CALENDAR FIXES
+   ============================== */
+@media (max-width: 768px) {
+  /* Month view - fix text overflow */
+  .rbc-month-view .rbc-event {
+    font-size: 0.65rem !important;
+    padding: 1px 4px !important;
+    line-height: 1.2;
+    min-height: 18px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .rbc-month-view .rbc-date-cell {
+    font-size: 0.7rem;
+    padding: 2px 4px;
+  }
+
+  .rbc-month-view .rbc-header {
+    font-size: 0.65rem;
+    padding: 8px 2px;
+  }
+
+  /* Week view - better spacing */
+  .rbc-time-view .rbc-header {
+    font-size: 0.65rem;
+    padding: 8px 2px;
+  }
+
+  .rbc-time-view .rbc-event {
+    font-size: 0.7rem !important;
+    padding: 2px 4px !important;
+    min-height: 20px;
+  }
+
+  .rbc-time-gutter .rbc-timeslot-group {
+    font-size: 0.65rem;
+  }
+
+  /* Day view - optimized for mobile */
+  .rbc-day-slot .rbc-event {
+    font-size: 0.75rem !important;
+    padding: 4px 6px !important;
+  }
+
+  /* Darker colors for better visibility on mobile */
+  .rbc-event {
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25) !important;
+    filter: brightness(0.95) saturate(1.2);
+  }
+
+  .rbc-header {
+    background: #f3f4f6 !important;
+    color: #374151 !important;
+    font-weight: 700;
+  }
+
+  .rbc-today {
+    background-color: rgba(234, 88, 12, 0.1) !important;
+  }
+
+  /* Fix event content wrapping */
+  .rbc-event-content {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    width: 100%;
+  }
+
+  /* Month view - prevent text from escaping cells */
+  .rbc-month-view .rbc-row-content {
+    overflow: hidden;
+  }
+
+  .rbc-month-view .rbc-row-segment {
+    padding: 0 1px;
+  }
+
+  .rbc-month-view .rbc-event-label {
+    display: none; /* Hide time labels on mobile month view */
+  }
+}
+
+/* ==============================
+   TIME SPINNER COMPONENT
+   ============================== */
+.time-spinner-container {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 8px 12px;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.04);
+  /* Prevent page scroll when scrolling time on mobile */
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+
+.time-spinner-column {
+  position: relative;
+  height: 120px;
+  width: 52px;
+  overflow: hidden;
+  cursor: ns-resize;
+}
+
+.time-spinner-column::before,
+.time-spinner-column::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 40px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.time-spinner-column::before {
+  top: 0;
+  background: linear-gradient(to bottom, white 0%, rgba(255, 255, 255, 0) 100%);
+}
+
+.time-spinner-column::after {
+  bottom: 0;
+  background: linear-gradient(to top, white 0%, rgba(255, 255, 255, 0) 100%);
+}
+
+.time-spinner-highlight {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 36px;
+  background: rgba(234, 88, 12, 0.08);
+  border-radius: 8px;
+  border: 1px solid rgba(234, 88, 12, 0.15);
+  z-index: 1;
+  pointer-events: none;
+}
+
+.time-spinner-list {
+  position: absolute;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transition: transform 0.15s ease;
+}
+
+.time-spinner-item {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: #9ca3af;
+  width: 100%;
+  border-radius: 8px;
+  transition: color 0.1s, font-weight 0.1s;
+  user-select: none;
+}
+
+.time-spinner-item.active {
+  color: #ea580c;
+  font-weight: 700;
+  font-size: 1.2rem;
+}
+
+/* ==============================
+   CARD & UI ENHANCEMENTS
+   ============================== */
+.stat-card {
+  background: white;
+  border-radius: 16px;
+  padding: 12px 14px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  border: 1px solid #f0f0f0;
+  transition: all 0.2s ease;
+}
+
+@media (min-width: 640px) {
+  .stat-card {
+    padding: 20px 24px;
+  }
+}
+
+.stat-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  transform: translateY(-2px);
+}
+
+/* ==============================
+   ANIMATIONS
+   ============================== */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease forwards;
+}
+
+.animate-slide-in {
+  animation: slideIn 0.3s ease forwards;
+}

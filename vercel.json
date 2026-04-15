@@ -1,0 +1,30 @@
+{
+    "buildCommand": "npm run build",
+    "outputDirectory": "dist",
+    "framework": "vite",
+    "devCommand": null,
+    "rewrites": [
+        {
+            "source": "/((?!api/|@|src/|assets/|node_modules/|\\.vite/|favicon\\.ico|robots\\.txt|manifest\\.webmanifest).*)",
+            "destination": "/index.html"
+        }
+    ],
+    "crons": [
+        {
+            "path": "/api/auto-complete-sessions",
+            "schedule": "*/5 * * * *"
+        },
+        {
+            "path": "/api/send-reminders",
+            "schedule": "*/5 * * * *"
+        },
+        {
+            "path": "/api/payment-deadline-warnings",
+            "schedule": "*/5 * * * *"
+        },
+        {
+            "path": "/api/payment-after-lesson-reminders",
+            "schedule": "*/5 * * * *"
+        }
+    ]
+}
