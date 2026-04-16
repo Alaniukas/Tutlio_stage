@@ -17,9 +17,16 @@ import {
 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { buildLocalizedPath } from '@/lib/i18n';
+import { usePlatform } from '@/contexts/PlatformContext';
+import LecturesLanding from '@/pages/LecturesLanding';
 
 export default function Landing() {
     const { t, locale } = useTranslation();
+    const { platform } = usePlatform();
+
+    if (platform === 'lecturers' || platform === 'teachers') {
+        return <LecturesLanding />;
+    }
 
     return (
         <div className="min-h-screen bg-[#fffefc] flex flex-col font-sans selection:bg-indigo-200 overflow-x-hidden">

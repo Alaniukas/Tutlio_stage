@@ -3,7 +3,8 @@ export type Platform = 'tutors' | 'lecturers' | 'teachers';
 export const SUPPORTED_PLATFORMS: readonly Platform[] = ['tutors', 'lecturers', 'teachers'] as const;
 export const DEFAULT_PLATFORM: Platform = 'tutors';
 
-const PLATFORM_PREFIXES = new Set<string>(['lecturers', 'teachers']);
+// Note: 'lectureres' is an occasional typo we want to be backward-compatible with.
+const PLATFORM_PREFIXES = new Set<string>(['lecturers', 'teachers', 'lectureres']);
 
 export function isPlatformPrefix(value: string): boolean {
   return PLATFORM_PREFIXES.has(value);
@@ -11,7 +12,9 @@ export function isPlatformPrefix(value: string): boolean {
 
 export function detectPlatformFromPathname(pathname: string): Platform {
   const firstSegment = pathname.split('/').filter(Boolean)[0];
-  if (firstSegment && isPlatformPrefix(firstSegment)) return firstSegment as Platform;
+  if (!firstSegment) return DEFAULT_PLATFORM;
+  if (firstSegment === 'lectureres') return 'lecturers';
+  if (isPlatformPrefix(firstSegment)) return firstSegment as Platform;
   return DEFAULT_PLATFORM;
 }
 

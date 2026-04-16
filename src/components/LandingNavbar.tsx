@@ -7,6 +7,8 @@ import { buildLocalizedPath } from '@/lib/i18n';
 
 export default function LandingNavbar() {
     const { t, locale } = useTranslation();
+    const localizedRoot = buildLocalizedPath('/', locale);
+    const lecturesPath = localizedRoot === '/' ? '/lecturers' : `/lecturers${localizedRoot}`;
     return (
         <nav className="fixed top-0 left-0 right-0 h-20 bg-white/80 backdrop-blur-md border-b border-indigo-50 z-50 flex items-center">
             <div className="max-w-6xl mx-auto px-4 w-full flex items-center justify-between">
@@ -26,6 +28,9 @@ export default function LandingNavbar() {
                         </Link>
                         <Link to={buildLocalizedPath('/kontaktai', locale)} className="text-sm font-semibold text-gray-600 hover:text-indigo-600 transition-colors">
                             {t('common.contacts')}
+                        </Link>
+                        <Link to={lecturesPath} className="text-sm font-semibold text-violet-700 hover:text-violet-800 transition-colors">
+                            {locale === 'lt' ? 'Nuotoliniams mokymams' : 'For remote training'}
                         </Link>
                     </div>
                     <LanguageSelector />
