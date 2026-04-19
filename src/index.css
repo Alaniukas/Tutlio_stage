@@ -179,7 +179,11 @@
 }
 
 .rbc-time-view .rbc-row {
-  min-height: 50px;
+  min-height: 0;
+}
+
+.rbc-allday-cell {
+  display: none;
 }
 
 .rbc-time-header-content {
@@ -188,8 +192,25 @@
 
 .rbc-time-content {
   border-top: 1px solid #e5e7eb;
-  touch-action: pan-y !important;
-  overscroll-behavior-y: contain;
+}
+
+.rbc-time-view {
+  border: none;
+}
+
+/* Expand / collapse calendar modes */
+.calendar-expanded .rbc-time-content {
+  overflow: visible !important;
+}
+.calendar-expanded .rbc-time-view {
+  overflow: visible !important;
+}
+
+.calendar-collapsed .rbc-time-content {
+  overflow-y: auto !important;
+}
+.calendar-collapsed .rbc-time-view {
+  overflow: hidden !important;
 }
 
 .rbc-calendar {

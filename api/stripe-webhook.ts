@@ -3,6 +3,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { tryIssueSalesInvoiceForStripePackage } from './_lib/issuePackageSalesInvoice.js';
+import { syncSessionToGoogle } from './_lib/google-calendar.js';
 
 const getStripe = () => {
     const key = process.env.STRIPE_SECRET_KEY;
@@ -402,11 +403,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 // If there are pre-created sessions tied to this package (e.g. trial lessons),
                 // mark them as paid now so the UI doesn't show "awaiting payment".
                 try {
-                    await supabase
+                    const { data: paidSessions } = await supabase
                         .from('sessions')
                         .update({ paid: true, payment_status: 'paid' })
                         .eq('lesson_package_id', packageId)
-                        .eq('paid', false);
+                        .eq('paid', false)
+                        .select('id, tutor_id');
+                    for (const ps of paidSessions || []) {
+                        syncSessionToGoogle(ps.id, ps.tutor_id).catch(() => {});
+                    }
                 } catch (e) {
                     console.error('[stripe-webhook] Error updating sessions for prepaid package:', e);
                 }
@@ -441,10 +446,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
                     if (batchSessions && batchSessions.length > 0) {
                         const sessionIds = batchSessions.map(bs => bs.session_id);
-                        await supabase
+                        const { data: paidBatchSessions } = await supabase
                             .from('sessions')
                             .update({ paid: true, payment_status: 'paid' })
-                            .in('id', sessionIds);
+                            .in('id', sessionIds)
+                            .eq('paid', false)
+                            .select('id, tutor_id');
+
+                        for (const ps of paidBatchSessions || []) {
+                            syncSessionToGoogle(ps.id, ps.tutor_id).catch(() => {});
+                        }
 
                         console.log(`[stripe-webhook] Marked ${sessionIds.length} sessions as paid in batch ${batchId}`);
                     }
@@ -516,6 +527,93 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     console.log(`[stripe-webhook] Billing batch ${batchId} marked as paid successfully`);
                 }
             }
+            // Handle school installment payment
+            else if (session.payment_status === 'paid' && session.metadata?.tutlio_school_installment_id) {
+                const installmentId = session.metadata.tutlio_school_installment_id;
+                const contractId = session.metadata.tutlio_school_contract_id;
+                const studentId = session.metadata.tutlio_student_id;
+
+                console.log(`[stripe-webhook] School installment payment completed: ${installmentId}`);
+
+                const { data: updatedInstallment, error: updateErr } = await supabase
+                    .from('school_payment_installments')
+                    .update({
+                        payment_status: 'paid',
+                        paid_at: new Date().toISOString(),
+                        stripe_payment_intent_id: (session as any).payment_intent || null,
+                    })
+                    .eq('id', installmentId)
+                    .eq('payment_status', 'pending')
+                    .select('id, installment_number, amount, contract_id')
+                    .maybeSingle();
+
+                if (updateErr) {
+                    console.error('[stripe-webhook] Error updating school installment:', updateErr);
+                } else if (updatedInstallment) {
+                    // Check if this is the first installment being paid — auto-generate invite code
+                    const { data: allInstallments } = await supabase
+                        .from('school_payment_installments')
+                        .select('id, payment_status, installment_number')
+                        .eq('contract_id', updatedInstallment.contract_id)
+                        .order('installment_number');
+
+                    const paidCount = (allInstallments || []).filter(i => i.payment_status === 'paid').length;
+                    const isFirstPayment = paidCount === 1 && updatedInstallment.installment_number === (allInstallments || []).find(i => i.payment_status === 'paid')?.installment_number;
+
+                    if (isFirstPayment && studentId) {
+                        // Check if student already has an invite code
+                        const { data: student } = await supabase
+                            .from('students')
+                            .select('id, invite_code, full_name, email, payer_email, payer_name, school_id')
+                            .eq('id', studentId)
+                            .maybeSingle();
+
+                        if (student && !student.invite_code) {
+                            const inviteCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+                            await supabase
+                                .from('students')
+                                .update({ invite_code: inviteCode })
+                                .eq('id', studentId);
+
+                            console.log(`[stripe-webhook] Generated invite code ${inviteCode} for school student ${studentId}`);
+
+                            // Look up school info for the email
+                            const { data: contract } = await supabase
+                                .from('school_contracts')
+                                .select('school_id, schools(name)')
+                                .eq('id', updatedInstallment.contract_id)
+                                .maybeSingle();
+
+                            const schoolName = (contract?.schools as any)?.name || 'School';
+                            const bookingUrl = `${APP_URL}/book/${inviteCode}`;
+                            const recipientEmail = student.email || student.payer_email;
+
+                            if (recipientEmail) {
+                                await fetch(`${APP_URL}/api/send-email`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
+                                    body: JSON.stringify({
+                                        type: 'invite_email',
+                                        to: recipientEmail,
+                                        data: {
+                                            studentName: student.full_name,
+                                            tutorName: schoolName,
+                                            inviteCode,
+                                            bookingUrl,
+                                        },
+                                    }),
+                                }).catch(e => console.error('[stripe-webhook] Error sending school invite email:', e));
+
+                                console.log(`[stripe-webhook] Invite code email sent to ${recipientEmail}`);
+                            }
+                        }
+                    }
+
+                    console.log(`[stripe-webhook] School installment ${installmentId} marked as paid`);
+                } else {
+                    console.log(`[stripe-webhook] School installment ${installmentId} was already paid, skipping`);
+                }
+            }
             // Handle lesson payment — update DB and send emails directly (same pattern as packages)
             // Do NOT call /api/confirm-stripe-payment here: StripeSuccess page also calls that endpoint,
             // and two concurrent callers would race and sometimes both send emails.
@@ -549,7 +647,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         if (updateErr) {
                             console.error('[stripe-webhook] Error updating lesson session:', updateErr);
                         } else if (updated) {
-                            // First update wins — send emails
+                            syncSessionToGoogle(sessionId, (updated as any).tutor_id || (dbSession as any).tutor_id).catch(() => {});
                             const student = (dbSession as any).students;
                             const tutor = (dbSession as any).profiles;
 

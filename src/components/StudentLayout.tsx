@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import OrgSuspendedBanner from '@/components/OrgSuspendedBanner';
 import { useTranslation } from '@/lib/i18n';
 import { useTotalChatUnread } from '@/hooks/useChat';
+import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
 
 interface StudentLayoutProps {
     children: React.ReactNode;
@@ -70,11 +71,21 @@ export default function StudentLayout({ children }: StudentLayoutProps) {
 
                 if (selectedStudentData) {
                     setStudentName(selectedStudentData.full_name || '');
-                    setTutor(selectedStudentData.tutor_id ? {
-                        id: selectedStudentData.tutor_id,
-                        full_name: selectedStudentData.tutor_full_name,
-                        email: selectedStudentData.tutor_email
-                    } : null);
+
+                    if (selectedStudentData.tutor_id) {
+                        const { data: vis } = await supabase.rpc(
+                            'get_tutor_contact_visibility_for_student',
+                            { p_tutor_id: selectedStudentData.tutor_id }
+                        );
+                        const cv = parseOrgContactVisibility((vis as Record<string, unknown>) || null);
+                        setTutor({
+                            id: selectedStudentData.tutor_id,
+                            full_name: selectedStudentData.tutor_full_name,
+                            email: maskTutorContact(selectedStudentData.tutor_email, cv.studentSeesTutorEmail),
+                        });
+                    } else {
+                        setTutor(null);
+                    }
 
                     try {
                         const { data: packages, error: packagesError } = await supabase
@@ -183,7 +194,7 @@ export default function StudentLayout({ children }: StudentLayoutProps) {
                                 <p className="text-sm text-gray-500">{t('common.tutor')}</p>
                             </div>
                         </div>
-                        {tutor?.email && (
+                        {tutor?.email && tutor.email !== '—' && (
                             <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
                                 <Mail className="w-5 h-5 text-gray-400" />
                                 <div>

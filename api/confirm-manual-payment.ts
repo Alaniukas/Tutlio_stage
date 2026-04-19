@@ -5,6 +5,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
+import { syncSessionToGoogle } from './_lib/google-calendar.js';
 
 const supabase = createClient(
     process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -105,11 +106,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         // If there are pre-created sessions tied to this package (e.g. trial),
         // mark them paid so UI stops showing "awaiting payment".
-        await supabase
+        const { data: paidSessions } = await supabase
             .from('sessions')
             .update({ paid: true, payment_status: 'paid' })
             .eq('lesson_package_id', packageId)
-            .eq('paid', false);
+            .eq('paid', false)
+            .select('id, tutor_id');
+        for (const ps of paidSessions || []) {
+            syncSessionToGoogle(ps.id, ps.tutor_id).catch(() => {});
+        }
 
         const student = (updated as any).students || {};
         const subject = (updated as any).subjects || {};

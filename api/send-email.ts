@@ -1319,6 +1319,60 @@ function chatMessageDigest(d: any, locale: Locale) {
   };
 }
 
+function schoolContract(d: any, locale: Locale) {
+  return {
+    subject: `Contract from ${d.schoolName || 'School'} — ${d.studentName || 'Student'}`,
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#059669', '#047857')}">
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Annual Fee Contract</h1>
+        <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'School')}</p>
+      </div>
+      <div class="body">
+        <p class="greeting">Dear ${esc(d.recipientName || d.parentName || d.studentName)},</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          Please review the annual fee contract for <strong>${esc(d.studentName)}</strong> at ${esc(d.schoolName)}.
+        </p>
+        <div class="info-card">
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            ${td('Student', esc(d.studentName))}
+            ${td('Annual Fee', d.annualFee ? `€${d.annualFee}` : '—')}
+            ${td('Date', d.date || new Date().toLocaleDateString('lt-LT'), false)}
+          </table>
+        </div>
+        ${d.contractBody ? `<div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:12px; padding:20px; margin:20px 0; white-space:pre-wrap; font-size:13px; color:#374151; line-height:1.6;">${d.contractBody}</div>` : ''}
+        <p style="color:#6b7280; font-size:13px;">If you have questions, please contact the school at ${esc(d.schoolEmail || '')}.</p>
+      </div>${footerFor(locale)}`, locale),
+  };
+}
+
+function schoolInstallmentRequest(d: any, locale: Locale) {
+  const appUrl = getAppUrl();
+  return {
+    subject: `Payment request — Installment #${d.installmentNumber || ''}`,
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#059669', '#047857')}">
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Payment Request</h1>
+        <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'School')}</p>
+      </div>
+      <div class="body">
+        <p class="greeting">Dear ${esc(d.recipientName || d.parentName || d.studentName)},</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          A payment is due for <strong>${esc(d.studentName)}</strong>'s annual fee at ${esc(d.schoolName)}.
+        </p>
+        <div class="info-card">
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            ${td('Student', esc(d.studentName))}
+            ${td('Installment', `#${d.installmentNumber || '—'} of ${d.totalInstallments || '—'}`)}
+            ${td('Amount', d.amount ? `€${d.amount}` : '—')}
+            ${td('Due Date', d.dueDate || '—', false)}
+          </table>
+        </div>
+        ${d.paymentUrl ? `<div style="text-align:center; margin:24px 0;">${outlookEmailButton(d.paymentUrl, 'Pay Now', '#059669', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}</div>` : ''}
+        <p style="color:#6b7280; font-size:13px;">If you have questions, please contact the school at ${esc(d.schoolEmail || '')}.</p>
+      </div>${footerFor(locale)}`, locale),
+  };
+}
+
 function productUpdateSfAndChat(d: any, locale: Locale) {
   const appUrl = getAppUrl();
   const title = locale === 'en' ? 'Updates in Tutlio' : 'Naujienos Tutlio sistemoje';
@@ -1454,6 +1508,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'chat_new_message': emailContent = chatNewMessage(data, locale); break;
       case 'chat_message_digest': emailContent = chatMessageDigest(data, locale); break;
       case 'product_update_sf_chat': emailContent = productUpdateSfAndChat(data, locale); break;
+      case 'school_contract': emailContent = schoolContract(data, locale); break;
+      case 'school_installment_request': emailContent = schoolInstallmentRequest(data, locale); break;
       default: return res.status(400).json({ error: `Unknown email type: ${type}` });
     }
 

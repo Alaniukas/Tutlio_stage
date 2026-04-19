@@ -10,6 +10,7 @@
 
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
+import { syncSessionToGoogle } from './_lib/google-calendar.js';
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL!,
@@ -39,7 +40,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // - are not cancelled
     const { data: sessions, error } = await supabase
       .from('sessions')
-      .select('id, end_time, status, paid, payment_status, lesson_package_id')
+      .select('id, tutor_id, end_time, status, paid, payment_status, lesson_package_id')
       .eq('status', 'active')
       .lt('end_time', now);
 
@@ -62,6 +63,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (updateErr) {
       console.error('[auto-complete-sessions] update error:', updateErr);
       return res.status(500).json({ error: 'Update error', details: updateErr.message });
+    }
+
+    // Sync completed sessions to Google Calendar (background, best-effort)
+    const tutorSessionMap = new Map<string, string[]>();
+    for (const s of sessions) {
+      const tutorId = (s as any).tutor_id as string;
+      if (!tutorId) continue;
+      const arr = tutorSessionMap.get(tutorId) || [];
+      arr.push(s.id);
+      tutorSessionMap.set(tutorId, arr);
+    }
+    for (const [tutorId, sessionIds] of tutorSessionMap) {
+      for (const sid of sessionIds.slice(0, 20)) {
+        syncSessionToGoogle(sid, tutorId).catch((err) => {
+          console.error('[auto-complete-sessions] Google sync failed:', sid, err);
+        });
+      }
     }
 
     // Update lesson packages: move from reserved to completed (batch optimized)

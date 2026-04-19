@@ -77,6 +77,8 @@ import {
   Users,
   UserX,
   RotateCcw,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { cancelSessionAndFillWaitlist } from '@/lib/lesson-actions';
@@ -199,6 +201,7 @@ export default function CalendarPage() {
     typeof window !== 'undefined' && window.innerWidth < 768 ? Views.DAY : Views.WEEK
   );
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
+  const [calendarExpanded, setCalendarExpanded] = useState(false);
 
   // Modal states
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -268,6 +271,7 @@ export default function CalendarPage() {
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurringEndDate, setRecurringEndDate] = useState('');
   const [recurringFrequency, setRecurringFrequency] = useState<'weekly' | 'biweekly' | 'monthly'>('weekly');
+  const [selectedWeekdays, setSelectedWeekdays] = useState<number[]>([]);
 
   // Waitlist prompt
   // Removed: showWaitlistPrompt (auto-fill is now automatic)
@@ -1141,47 +1145,63 @@ export default function CalendarPage() {
       const studentIdsToCreate = isGroupLesson ? selectedStudentIds : [selectedStudentId];
 
       const tspRecur = getTutorSubjectPrice(subject?.name);
-      // Create recurring template for each student (for group lessons, each student has their own template)
+      // Determine which days to create templates for
+      const daysToCreate = (recurringFrequency !== 'monthly' && selectedWeekdays.length > 0)
+        ? selectedWeekdays
+        : [getDay(startDate)];
+      const timeStr = format(startDate, 'HH:mm:ss');
+      const endTimeStr = format(endDate, 'HH:mm:ss');
+
+      // Create recurring template for each (student × weekday) combination
       const recurringTemplates: any[] = [];
-      for (const studentId of studentIdsToCreate) {
-        // Check for individual pricing for THIS student
-        const pricing = individualPricing.find(
-          (p) => p.student_id === studentId && p.subject_id === selectedSubjectId
-        );
-        const studentPrice = pricing?.price ?? tspRecur?.price ?? subject?.price ?? price;
+      for (const dayOfWeek of daysToCreate) {
+        let firstOccurrence = new Date(startDate);
+        const startDow = firstOccurrence.getDay();
+        if (startDow !== dayOfWeek) {
+          const diff = (dayOfWeek - startDow + 7) % 7;
+          firstOccurrence = addDays(firstOccurrence, diff);
+        }
 
-        const { data: template } = await supabase
-          .from('recurring_individual_sessions')
-          .insert({
-            tutor_id: user.id,
-            student_id: studentId,
-            subject_id: selectedSubjectId || null,
-            day_of_week: getDay(startDate),
-            start_time: format(startDate, 'HH:mm:ss'),
-            end_time: format(endDate, 'HH:mm:ss'),
-            start_date: format(startDate, 'yyyy-MM-dd'),
-            end_date: recurringEndDate,
-            meeting_link: meetingLink || null,
-            topic: topic || null,
-            price: studentPrice, // Individual price per student
-            active: true,
-          })
-          .select('id, student_id')
-          .single();
+        for (const studentId of studentIdsToCreate) {
+          const pricing = individualPricing.find(
+            (p) => p.student_id === studentId && p.subject_id === selectedSubjectId
+          );
+          const studentPrice = pricing?.price ?? tspRecur?.price ?? subject?.price ?? price;
 
-        if (template) {
-          recurringTemplates.push(template);
+          const { data: template } = await supabase
+            .from('recurring_individual_sessions')
+            .insert({
+              tutor_id: user.id,
+              student_id: studentId,
+              subject_id: selectedSubjectId || null,
+              day_of_week: dayOfWeek,
+              start_time: timeStr,
+              end_time: endTimeStr,
+              start_date: format(firstOccurrence, 'yyyy-MM-dd'),
+              end_date: recurringEndDate,
+              meeting_link: meetingLink || null,
+              topic: topic || null,
+              price: studentPrice,
+              active: true,
+            })
+            .select('id, student_id')
+            .single();
+
+          if (template) {
+            recurringTemplates.push({ ...template, firstOccurrence, dayOfWeek });
+          }
         }
       }
 
       // Check for lesson packages for each student template (for recurring sessions)
       const packagesByStudent = new Map();
       if (!isPaid && selectedSubjectId) {
-        for (const template of recurringTemplates) {
+        const uniqueStudentIds = [...new Set(recurringTemplates.map((t: any) => t.student_id))];
+        for (const sid of uniqueStudentIds) {
           const { data: packages } = await supabase
             .from('lesson_packages')
             .select('*')
-            .eq('student_id', template.student_id)
+            .eq('student_id', sid)
             .eq('subject_id', selectedSubjectId)
             .eq('active', true)
             .eq('paid', true)
@@ -1190,14 +1210,13 @@ export default function CalendarPage() {
             .limit(1);
 
           if (packages && packages.length > 0) {
-            packagesByStudent.set(template.student_id, packages[0]);
+            packagesByStudent.set(sid, packages[0]);
           }
         }
       }
 
       const sessions: any[] = [];
       const packagesUsage = new Map();
-      let current = new Date(startDate);
       const endLimit = parseISO(recurringEndDate);
 
       const advanceCurrent = (d: Date): Date => {
@@ -1208,14 +1227,15 @@ export default function CalendarPage() {
         }
       };
 
-      while (!isBefore(endLimit, current)) {
-        const sessionEnd = new Date(current.getTime() + durationMs);
+      for (const template of recurringTemplates) {
+        let current = new Date(template.firstOccurrence);
+        const pricing = individualPricing.find(
+          (p: any) => p.student_id === template.student_id && p.subject_id === selectedSubjectId
+        );
+        const studentPrice = pricing?.price ?? tspRecur?.price ?? subject?.price ?? price;
 
-        for (const template of recurringTemplates) {
-          const pricing = individualPricing.find(
-            (p) => p.student_id === template.student_id && p.subject_id === selectedSubjectId
-          );
-          const studentPrice = pricing?.price ?? tspRecur?.price ?? subject?.price ?? price;
+        while (!isBefore(endLimit, current)) {
+          const sessionEnd = new Date(current.getTime() + durationMs);
 
           let sessionPaid = isPaid;
           let sessionPaymentStatus = isPaid ? 'paid' : 'pending';
@@ -1254,9 +1274,9 @@ export default function CalendarPage() {
             recurring_session_id: template.id,
             available_spots: subject?.is_group ? subject.max_students : null,
           });
-        }
 
-        current = advanceCurrent(current);
+          current = advanceCurrent(current);
+        }
       }
 
       if (sessions.length > 0) {
@@ -3135,7 +3155,7 @@ export default function CalendarPage() {
 
   return (
     <Layout>
-      <div className="flex flex-col w-full flex-1 min-h-0">
+      <div className="flex flex-col w-full">
         {toastMessage && (
           <Toast
             message={toastMessage.message}
@@ -3143,8 +3163,7 @@ export default function CalendarPage() {
             onClose={() => setToastMessage(null)}
           />
         )}
-        {/* Full width + viewport-height workspace (tutor / org_tutor primary tool) */}
-        <div className="flex flex-col w-full max-w-none flex-1 min-h-0 px-0 sm:px-1">
+        <div className="flex flex-col w-full max-w-none px-0 sm:px-1">
         {/* Header */}
         <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center mb-4 flex-shrink-0">
         <div>
@@ -3292,7 +3311,10 @@ export default function CalendarPage() {
       </div>
 
         {/* Calendar card – make it dominant workspace */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex-1 min-h-0 flex flex-col">
+        <div className={cn(
+          'bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col relative mb-4',
+          calendarExpanded ? 'calendar-expanded' : 'calendar-collapsed',
+        )}>
         {/* Custom Toolbar */}
         <div className="flex items-center justify-between gap-2 px-3 sm:px-6 py-3 sm:py-4 border-b border-gray-100">
           {/* Left: prev / today / next */}
@@ -3372,12 +3394,13 @@ export default function CalendarPage() {
 
         <div
           className={cn(
-            'flex-1 min-h-0 p-1.5 sm:p-3',
+            'p-1.5 sm:p-3',
+            !calendarExpanded && 'max-h-[50vh] overflow-y-auto',
             (isAvailabilityModalOpen || isEventModalOpen || isCreateModalOpen || isSlotEditOpen) && 'pointer-events-none',
           )}
         >
           {loading ? (
-            <div className="flex items-center justify-center h-full text-gray-400">
+            <div className="flex items-center justify-center py-32 text-gray-400">
               <div className="text-center">
                 <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-500 rounded-full animate-spin mx-auto mb-3" />
                 <p className="text-sm">Kraunamas kalendorius...</p>
@@ -3390,7 +3413,6 @@ export default function CalendarPage() {
               backgroundEvents={backgroundEvents}
               startAccessor="start_time"
               endAccessor="end_time"
-              style={{ height: '100%' }}
               views={[Views.MONTH, Views.WEEK, Views.DAY]}
               view={currentView}
               date={currentDate}
@@ -3440,6 +3462,17 @@ export default function CalendarPage() {
             />
           )}
         </div>
+
+        {/* Floating expand/collapse toggle pinned to bottom edge */}
+        <button
+          type="button"
+          onClick={() => setCalendarExpanded(prev => !prev)}
+          className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2 z-10 w-7 h-7 flex items-center justify-center rounded-full bg-white border border-gray-200 shadow-sm text-gray-400 hover:text-indigo-500 hover:border-indigo-200 transition-colors cursor-pointer"
+        >
+          {calendarExpanded
+            ? <ChevronUp className="w-3.5 h-3.5" />
+            : <ChevronDown className="w-3.5 h-3.5" />}
+        </button>
       </div>
 
       {/* Legend */}
@@ -3685,7 +3718,17 @@ export default function CalendarPage() {
             <div className="border border-gray-100 rounded-xl p-4 space-y-3 bg-gray-50">
               <button
                 type="button"
-                onClick={() => { setIsRecurring(!isRecurring); setRecurringEndDate(''); setRecurringFrequency('weekly'); }}
+                onClick={() => {
+                  const next = !isRecurring;
+                  setIsRecurring(next);
+                  setRecurringEndDate('');
+                  setRecurringFrequency('weekly');
+                  if (next && startTime) {
+                    setSelectedWeekdays([new Date(startTime).getDay()]);
+                  } else {
+                    setSelectedWeekdays([]);
+                  }
+                }}
                 className="flex items-center justify-between w-full"
               >
                 <div>
@@ -3711,6 +3754,41 @@ export default function CalendarPage() {
                       <option value="monthly">{t('cal.freqMonthly')}</option>
                     </select>
                   </div>
+                  {recurringFrequency !== 'monthly' && (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">{t('cal.weekdaysLabel')}</Label>
+                      <div className="flex gap-1.5 flex-wrap">
+                        {[1, 2, 3, 4, 5, 6, 0].map((day) => {
+                          const labels = [t('cal.wdSun'), t('cal.wdMon'), t('cal.wdTue'), t('cal.wdWed'), t('cal.wdThu'), t('cal.wdFri'), t('cal.wdSat')];
+                          const isSelected = selectedWeekdays.includes(day);
+                          return (
+                            <button
+                              key={day}
+                              type="button"
+                              onClick={() => {
+                                setSelectedWeekdays(prev =>
+                                  isSelected
+                                    ? prev.filter(d => d !== day)
+                                    : [...prev, day]
+                                );
+                              }}
+                              className={cn(
+                                'px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors border',
+                                isSelected
+                                  ? 'bg-indigo-500 text-white border-indigo-500'
+                                  : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300',
+                              )}
+                            >
+                              {labels[day]}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {selectedWeekdays.length === 0 && (
+                        <p className="text-xs text-amber-600">{t('cal.selectAtLeastOneDay')}</p>
+                      )}
+                    </div>
+                  )}
                   <div className="space-y-1.5">
                     <Label className="text-xs">Kartotis iki *</Label>
                     <DateInput
@@ -3723,18 +3801,21 @@ export default function CalendarPage() {
                       const startMs = new Date(startTime).getTime();
                       const endMs = parseISO(recurringEndDate).getTime();
                       const diffMs = endMs - startMs;
-                      let count: number;
+                      let countPerDay: number;
                       if (recurringFrequency === 'monthly') {
                         const s = new Date(startTime);
                         const e = parseISO(recurringEndDate);
-                        count = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth()) + 1;
+                        countPerDay = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth()) + 1;
                       } else {
                         const weekInterval = recurringFrequency === 'biweekly' ? 2 : 1;
-                        count = Math.floor(diffMs / (weekInterval * 7 * 24 * 60 * 60 * 1000)) + 1;
+                        countPerDay = Math.floor(diffMs / (weekInterval * 7 * 24 * 60 * 60 * 1000)) + 1;
                       }
+                      const daysCount = (recurringFrequency !== 'monthly' && selectedWeekdays.length > 0) ? selectedWeekdays.length : 1;
+                      const count = countPerDay * daysCount;
                       return (
                         <p className="text-xs text-indigo-600 font-medium">
                           Bus sukurta ≈{count} pamok{count === 1 ? 'a' : 'os'}
+                          {daysCount > 1 && ` (${daysCount} d/sav × ≈${countPerDay})`}
                         </p>
                       );
                     })()}
@@ -3762,7 +3843,8 @@ export default function CalendarPage() {
                   const selectedSubject = subjects.find(s => s.id === selectedSubjectId);
                   const isGroupLesson = selectedSubject?.is_group;
                   const hasStudents = isGroupLesson ? selectedStudentIds.length > 0 : !!selectedStudentId;
-                  return saving || !hasStudents || !startTime || !endTime || (isRecurring && !recurringEndDate);
+                  const weekdayMissing = isRecurring && recurringFrequency !== 'monthly' && selectedWeekdays.length === 0;
+                  return saving || !hasStudents || !startTime || !endTime || (isRecurring && !recurringEndDate) || weekdayMissing;
                 })()}
                 className="rounded-xl"
               >
@@ -3780,10 +3862,10 @@ export default function CalendarPage() {
             <DialogTitle className="flex items-center gap-2 pr-6">
               <CalendarDays className="w-5 h-5 text-indigo-600 flex-shrink-0" />
               <span className="flex-1 truncate">{t('cal.lessonInfo')}</span>
-              {!isEditingSession && selectedEvent?.status === 'active' && (
+              {!isEditingSession && (selectedEvent?.status === 'active' || selectedEvent?.status === 'completed') && (
                 <div className="flex items-center gap-1 flex-shrink-0">
+                {selectedEvent?.status === 'active' && (
                 <Button variant="ghost" size="sm" onClick={() => {
-                  // For recurring/group sessions, show scope choice dialog first
                   if ((isGroupSession || selectedEvent?.recurring_session_id) && !groupEditChoice) {
                     setGroupEditChoice('single');
                     return;
@@ -3798,6 +3880,7 @@ export default function CalendarPage() {
                 }} className="text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 h-8 px-2 flex-shrink-0">
                   <Edit2 className="w-3.5 h-3.5 mr-1" /> <span className="hidden sm:inline">{t('cal.editBtn')}</span>
                 </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"
@@ -4167,6 +4250,27 @@ export default function CalendarPage() {
           )}
 
           <div className="flex flex-col gap-2 pt-2">
+            {selectedEvent?.status === 'completed' && (
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant={cancelConfirmId === selectedEvent.id ? "default" : "destructive"}
+                  onClick={() => {
+                    if (cancelConfirmId !== selectedEvent.id) {
+                      handleCancelSession();
+                    }
+                  }}
+                  disabled={saving}
+                  size="sm"
+                  className={cn(
+                    "rounded-xl flex-1",
+                    cancelConfirmId === selectedEvent.id ? "bg-orange-500 hover:bg-orange-600 text-white" : ""
+                  )}
+                >
+                  <XCircle className="w-4 h-4 mr-1" />
+                  {cancelConfirmId === selectedEvent.id ? t('cal.cancellingStatus') : t('cal.cancelCompletedLabel')}
+                </Button>
+              </div>
+            )}
             {selectedEvent?.status === 'active' && (
               <div className="flex flex-wrap gap-2">
                 <Button
@@ -4828,7 +4932,7 @@ export default function CalendarPage() {
             </div>
 
             {/* Add Student Button */}
-            <div className="pt-2 border-t border-gray-100">
+            <div className="pt-2 border-t border-gray-100 space-y-2">
               <Button
                 onClick={() => {
                   setAssignStudentId('');
@@ -4844,6 +4948,38 @@ export default function CalendarPage() {
                 <Plus className="w-4 h-4 mr-2" />
                 {t('cal.addStudentToSlot')}
               </Button>
+              {editingSlot?.ruleIsRecurring && (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    if (!editingSlot) return;
+                    const blockDate = format(editingSlot.blockStart, 'yyyy-MM-dd');
+                    const slotStart = editingSlot.ruleStart;
+                    const slotEnd = editingSlot.ruleEnd;
+                    const [sh, sm] = slotStart.split(':').map(Number);
+                    const [eh, em] = slotEnd.split(':').map(Number);
+                    const durMin = (eh * 60 + em) - (sh * 60 + sm);
+                    const lessonDur = Math.min(durMin, 60);
+                    const endH = Math.floor((sh * 60 + sm + lessonDur) / 60);
+                    const endM = (sh * 60 + sm + lessonDur) % 60;
+                    setStartTime(`${blockDate}T${slotStart}`);
+                    setEndTime(`${blockDate}T${String(endH).padStart(2,'0')}:${String(endM).padStart(2,'0')}`);
+                    setMeetingLink(editingSlot.meetingLink || '');
+                    setIsRecurring(true);
+                    setRecurringFrequency('weekly');
+                    setRecurringEndDate('');
+                    setSelectedWeekdays([editingSlot.ruleDayOfWeek ?? new Date(editingSlot.blockStart).getDay()]);
+                    setIsSlotEditOpen(false);
+                    setEditingSlot(null);
+                    setIsCreateModalOpen(true);
+                  }}
+                  className="w-full rounded-xl border-indigo-200 text-indigo-600 hover:bg-indigo-50"
+                  disabled={slotSaving}
+                >
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  {t('cal.addRecurringFromSlot')}
+                </Button>
+              )}
             </div>
 
             <div className="flex gap-2 pt-1">

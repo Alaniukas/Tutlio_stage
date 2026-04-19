@@ -210,19 +210,33 @@ async function deleteTutlioAvailabilityEventsFromGoogle(accessToken: string): Pr
   }
 }
 
-// Format session as Google Calendar event (shows subject, student, payment status)
+function getStatusLabel(session: any): string {
+  const status = session.status;
+  if (status === 'cancelled') return 'Atšaukta';
+  if (status === 'no_show') return 'Neatvyko';
+  if (status === 'completed') return session.paid ? 'Įvykusi ✓' : 'Įvykusi (neapmokėta)';
+  return session.paid ? 'Apmokėta' : 'Laukiama apmokėjimo';
+}
+
+function getStatusColorId(session: any): string {
+  if (session.status === 'cancelled') return '4';  // Flamingo / red
+  if (session.status === 'no_show') return '11';    // Tomato / dark red
+  if (session.status === 'completed') return session.paid ? '2' : '6'; // Sage / Tangerine
+  return session.paid ? '9' : '5'; // Blueberry / Banana
+}
+
 function formatSessionEvent(session: any): GoogleEvent {
   const studentName = session.student?.full_name || 'Student';
   const subject = session.subject?.name || session.topic || 'Pamoka';
-  const paidLabel = session.paid ? 'Paid' : 'Awaiting payment';
-  const summary = `📚 ${subject} - ${studentName} (${paidLabel})`;
+  const statusLabel = getStatusLabel(session);
+  const summary = `📚 ${subject} - ${studentName} (${statusLabel})`;
 
   let description = `Pamoka su ${studentName}\n\n`;
   if (session.student?.email) description += `📧 Email: ${session.student.email}\n`;
   if (session.student?.grade) description += `📚 Grade: ${session.student.grade}\n`;
   if (session.topic) description += `📖 Tema: ${session.topic}\n`;
   if (session.price) description += `💶 Kaina: €${session.price}\n`;
-  description += `💳 Payment: ${paidLabel}\n`;
+  description += `💳 Statusas: ${statusLabel}\n`;
   if (session.meeting_link) description += `\n🔗 Susitikimo nuoroda: ${session.meeting_link}`;
 
   return {
@@ -236,7 +250,7 @@ function formatSessionEvent(session: any): GoogleEvent {
       dateTime: new Date(session.end_time).toISOString(),
       timeZone: 'Europe/Vilnius',
     },
-    colorId: '9', // Blue for sessions
+    colorId: getStatusColorId(session),
   };
 }
 

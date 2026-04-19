@@ -24,7 +24,7 @@ async function sendEmail(body: object) {
     }
 }
 
-async function sendEmailWithTimeout(body: object, timeoutMs = 2500) {
+async function sendEmailWithTimeout(body: object, timeoutMs = 8000) {
     return await Promise.race([
         sendEmail(body),
         new Promise((resolve) => setTimeout(resolve, timeoutMs)),
@@ -146,12 +146,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const packageId = (session as any).lesson_package_id as string | null | undefined;
 
-    const { data: studentModelRow } = await supabase
-        .from('students')
-        .select('payment_model')
-        .eq('id', session.student_id)
-        .maybeSingle();
-    const paymentModelEarly = studentModelRow?.payment_model || 'per_lesson';
+    // Fetch student and tutor data server-side so emails always send
+    const [{ data: studentRow }, { data: tutorRow }] = await Promise.all([
+        supabase
+            .from('students')
+            .select('email, payer_email, payment_model')
+            .eq('id', session.student_id)
+            .maybeSingle(),
+        supabase
+            .from('profiles')
+            .select('email')
+            .eq('id', session.tutor_id || tutorId)
+            .maybeSingle(),
+    ]);
+    const paymentModelEarly = studentRow?.payment_model || 'per_lesson';
+    const resolvedTutorEmail = tutorEmail || tutorRow?.email || null;
+    const resolvedStudentEmail = studentEmail || studentRow?.email || null;
+    const resolvedPayerEmail = payerEmail || studentRow?.payer_email || null;
 
     // If there's a pending credit/refund choice (per_lesson, paid, student cancel),
     // hide automatic refund wording from student email — the UI handles selection
@@ -176,35 +187,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         paymentModelEarly === 'per_lesson';
     const hideStudentRefund = willHavePendingPenalty || willHaveEarlyRefundChoice;
 
-    if (tutorEmail && cancelledBy === 'student') {
+    if (resolvedTutorEmail && cancelledBy === 'student') {
         void sendEmailWithTimeout({
             type: 'session_cancelled',
-            to: tutorEmail,
+            to: resolvedTutorEmail,
             data: {
                 studentName, tutorName, date: emailDate, time: emailTime, cancelledBy, reason,
                 hideRefund: true,
                 locale: 'lt',
             },
-        }, 1500);
+        });
     }
-    if (studentEmail) {
+    if (resolvedStudentEmail) {
         void sendEmailWithTimeout({
             type: 'session_cancelled',
-            to: studentEmail,
+            to: resolvedStudentEmail,
             data: {
                 studentName, tutorName, date: emailDate, time: emailTime, cancelledBy, reason,
                 isPaid: hideStudentRefund ? false : isPaid,
                 sessionPrice: hideStudentRefund ? null : sessionPrice,
                 locale: 'lt',
             },
-        }, 1500);
+        });
     }
 
-    const payerTrim = (payerEmail || '').trim();
+    const payerTrim = (resolvedPayerEmail || '').trim();
     if (
         cancelledBy === 'student' &&
         payerTrim &&
-        normEmail(payerTrim) !== normEmail(studentEmail)
+        normEmail(payerTrim) !== normEmail(resolvedStudentEmail)
     ) {
         void sendEmailWithTimeout({
             type: 'session_cancelled_parent',
@@ -218,7 +229,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 reason,
                 locale: 'lt',
             },
-        }, 1500);
+        });
     }
 
     // ── Penalty + Package credit handling ──────────────────────────────────────
@@ -404,10 +415,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 }, 2000);
             }
 
-            if (tutorEmail) {
+            if (resolvedTutorEmail) {
                 void sendEmailWithTimeout({
                     type: 'waitlist_matched_tutor',
-                    to: tutorEmail,
+                    to: resolvedTutorEmail,
                     data: {
                         studentName: (sData as any).full_name || 'Mokinys',
                         tutorName,

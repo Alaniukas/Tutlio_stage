@@ -41,11 +41,9 @@ export default function Layout({ children }: LayoutProps) {
   const [tutorName, setTutorName] = useState('');
   const [tutorEmail, setTutorEmail] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
-  const [floatingMenuOpen, setFloatingMenuOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const menuRef = useRef<HTMLDivElement>(null);
-  const floatingMenuRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLElement>(null);
 
   const navItems = useMemo(() => {
@@ -87,7 +85,6 @@ export default function Layout({ children }: LayoutProps) {
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
-      if (floatingMenuRef.current && !floatingMenuRef.current.contains(e.target as Node)) setFloatingMenuOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -337,14 +334,14 @@ export default function Layout({ children }: LayoutProps) {
           className={cn(
             'flex-1 min-h-0',
             isCalendarRoute
-              ? 'overflow-hidden flex flex-col px-2 sm:px-3 py-2 sm:py-3'
+              ? 'overflow-y-auto px-2 sm:px-3 py-2 sm:py-3'
               : 'overflow-y-auto px-4 xl:px-6 py-6',
           )}
         >
           <div
             className={cn(
               isCalendarRoute
-                ? 'max-w-none w-full flex-1 min-h-0 flex flex-col'
+                ? 'max-w-none w-full'
                 : 'max-w-screen-xl mx-auto w-full',
             )}
           >
@@ -353,46 +350,6 @@ export default function Layout({ children }: LayoutProps) {
         </main>
       </div>
 
-      {isOrgTutor && !mobileOpen && (
-        <div
-          ref={floatingMenuRef}
-          className={cn(
-            'fixed bottom-5 z-40',
-            sidebarExpanded ? 'lg:left-[19rem]' : 'lg:left-[6rem]',
-            'left-5',
-          )}
-        >
-          <button
-            onClick={() => setFloatingMenuOpen((prev) => !prev)}
-            className="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-sm shadow-lg hover:shadow-xl transition-shadow"
-          >
-            {initials}
-          </button>
-          {floatingMenuOpen && (
-            <div className="absolute bottom-14 left-0 w-56 bg-white rounded-2xl shadow-xl border border-gray-100 py-2">
-              <div className="px-4 py-2 border-b border-gray-50 mb-1">
-                <p className="text-sm font-bold text-gray-900 truncate">{tutorName}</p>
-                <p className="text-xs text-gray-400 truncate">{tutorEmail}</p>
-              </div>
-              <Link
-                to="/settings"
-                onClick={() => setFloatingMenuOpen(false)}
-                className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 hover:text-gray-900"
-              >
-                <Settings className="w-4 h-4 text-gray-400" />
-                {t('common.settings')}
-              </Link>
-              <button
-                onClick={handleLogout}
-                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
-              >
-                <LogOut className="w-4 h-4" />
-                {t('common.logout')}
-              </button>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }

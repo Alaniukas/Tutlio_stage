@@ -1,10 +1,8 @@
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import LandingNavbar from '@/components/LandingNavbar';
 import LandingFooter from '@/components/LandingFooter';
-import { buildLocalizedPath } from '@/lib/i18n';
-import { useTranslation } from '@/lib/i18n';
-import LanguageSelector from '@/components/LanguageSelector';
-import { getPlatformBasename, stripPlatformPrefix, type Platform } from '@/lib/platform';
+import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
 import {
   ArrowRight,
   Building2,
@@ -18,9 +16,7 @@ import {
   Video,
   BellRing,
   CreditCard,
-  ChevronDown,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
 
 type LecturesCopy = {
   badge: string;
@@ -175,94 +171,10 @@ const enCopy: LecturesCopy = {
 export default function LecturesLanding() {
   const { locale } = useTranslation();
   const c = locale === 'lt' ? ltCopy : enCopy;
-  const location = useLocation();
-  const navigate = useNavigate();
-  const [platformOpen, setPlatformOpen] = useState(false);
-  const platformRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (platformRef.current && !platformRef.current.contains(e.target as Node)) {
-        setPlatformOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const goPlatform = useMemo(() => {
-    const withoutPlatform = stripPlatformPrefix(location.pathname);
-    return (target: Platform) => {
-      const prefix = getPlatformBasename(target);
-      const nextPath = `${prefix}${withoutPlatform === '/' ? '' : withoutPlatform}`;
-      // Keep locale segment (if present) and preserve query/hash.
-      navigate(`${nextPath}${location.search}${location.hash}`);
-    };
-  }, [location.hash, location.pathname, location.search, navigate]);
 
   return (
     <div className="min-h-screen bg-white flex flex-col font-sans overflow-x-hidden">
-      <nav className="fixed top-0 left-0 right-0 h-20 bg-white/90 backdrop-blur-md border-b border-slate-200 z-50 flex items-center">
-        <div className="max-w-6xl mx-auto px-4 w-full flex items-center justify-between">
-          <Link to={buildLocalizedPath('/', locale)} className="flex items-center gap-2 group">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
-              <GraduationCap className="w-6 h-6 text-white" />
-            </div>
-            <span className="font-black text-xl text-gray-900 tracking-tight">Tutlio Lectures</span>
-          </Link>
-          <div className="flex items-center gap-3">
-            <Link to={buildLocalizedPath('/apie-mus', locale)} className="text-sm font-semibold text-slate-600 hover:text-indigo-600 transition-colors">
-              {locale === 'lt' ? 'Apie mus' : 'About us'}
-            </Link>
-
-            <div ref={platformRef} className="relative">
-              <button
-                type="button"
-                onClick={() => setPlatformOpen((v) => !v)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
-                aria-label="Select interface"
-              >
-                <span className="whitespace-nowrap">{locale === 'lt' ? 'Nuotoliniai mokymai' : 'Remote training'}</span>
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${platformOpen ? 'rotate-180' : ''}`} />
-              </button>
-
-              {platformOpen && (
-                <div className="absolute right-0 top-full mt-1 w-56 bg-white rounded-xl shadow-lg border border-gray-100 py-1 z-50">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPlatformOpen(false);
-                      goPlatform('tutors');
-                    }}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 text-gray-800"
-                  >
-                    {locale === 'lt' ? 'Korepetitoriai' : 'Tutors'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPlatformOpen(false);
-                      goPlatform('lecturers');
-                    }}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 text-gray-800"
-                  >
-                    {locale === 'lt' ? 'Nuotoliniai mokymai' : 'Remote training'}
-                  </button>
-                </div>
-              )}
-            </div>
-
-            <LanguageSelector />
-
-            <Link to={buildLocalizedPath('/kontaktai', locale)}>
-              <Button className="rounded-xl px-5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold">
-                {c.ctaSecondary}
-                <ArrowRight className="w-4 h-4 ml-2" />
-              </Button>
-            </Link>
-          </div>
-        </div>
-      </nav>
+      <LandingNavbar />
 
       <main className="flex-1 pt-20">
         <section className="relative overflow-hidden py-20 lg:py-28 bg-slate-950">

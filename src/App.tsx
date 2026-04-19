@@ -20,8 +20,15 @@ import StudentSettings from '@/pages/StudentSettings';
 import StudentWaitlist from '@/pages/StudentWaitlist';
 import StudentProtectedRoute from '@/components/StudentProtectedRoute';
 import CompanyProtectedRoute from '@/components/CompanyProtectedRoute';
+import SchoolProtectedRoute from '@/components/SchoolProtectedRoute';
 import AdminPanel from '@/pages/AdminPanel';
 import CompanyLogin from '@/pages/CompanyLogin';
+import SchoolLogin from '@/pages/SchoolLogin';
+import SchoolDashboard from '@/pages/school/SchoolDashboard';
+import SchoolStudents from '@/pages/school/SchoolStudents';
+import SchoolContracts from '@/pages/school/SchoolContracts';
+import SchoolPayments from '@/pages/school/SchoolPayments';
+import SchoolSettings from '@/pages/school/SchoolSettings';
 import CompanyDashboard from '@/pages/company/CompanyDashboard';
 import CompanyTutors from '@/pages/company/CompanyTutors';
 import CompanyStudents from '@/pages/company/CompanyStudents';
@@ -74,6 +81,14 @@ function CompanyProtectedWithUser() {
   return (
     <UserProvider>
       <CompanyProtectedRoute />
+    </UserProvider>
+  );
+}
+
+function SchoolProtectedWithUser() {
+  return (
+    <UserProvider>
+      <SchoolProtectedRoute />
     </UserProvider>
   );
 }
@@ -154,6 +169,16 @@ export default function App({ basename }: { basename: string }) {
           <Route path="/company/settings" element={<CompanySettings />} />
           <Route path="/company/finance" element={<CompanyFinance />} />
           <Route path="/company/invoices" element={<CompanyInvoices />} />
+        </Route>
+
+        {/* School admin routes - WITH UserProvider for caching */}
+        <Route path="/school/login" element={<SchoolLogin />} />
+        <Route element={<SchoolProtectedWithUser />}>
+          <Route path="/school" element={<SchoolDashboard />} />
+          <Route path="/school/students" element={<SchoolStudents />} />
+          <Route path="/school/contracts" element={<SchoolContracts />} />
+          <Route path="/school/payments" element={<SchoolPayments />} />
+          <Route path="/school/settings" element={<SchoolSettings />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/login" replace />} />

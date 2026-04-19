@@ -55,6 +55,11 @@ export default function PrivacyPolicy() {
             <li dangerouslySetInnerHTML={{ __html: t('priv.s3Li6') }} />
           </ul>
 
+          <h2 className="text-xl font-semibold text-gray-900 mt-6 mb-2">{t('priv.s4gTitle')}</h2>
+          <p className="text-gray-600 text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: t('priv.s4gAccess') }} />
+          <p className="text-gray-600 text-sm leading-relaxed mt-3">{t('priv.s4gUsage')}</p>
+          <p className="text-gray-600 text-sm leading-relaxed mt-3" dangerouslySetInnerHTML={{ __html: t('priv.s4gCompliance') }} />
+
           <h2 className="text-xl font-semibold text-gray-900 mt-6 mb-2">{t('priv.s4Title')}</h2>
           <p className="text-gray-600 text-sm leading-relaxed">{t('priv.s4p1')}</p>
 

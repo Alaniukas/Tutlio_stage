@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import SendInvoiceModal from '@/components/SendInvoiceModal';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import OrgTutorFinanceSummary from '@/components/OrgTutorFinanceSummary';
+import TutorFinanceReport from '@/components/TutorFinanceReport';
 import { useTranslation } from '@/lib/i18n';
 
 interface FinanceProfile {
@@ -225,6 +226,10 @@ export default function FinancePage() {
               {savedMessage === 'stripe' ? t('finance.savedStripe') : t('finance.settingsSaved')}
             </span>
           </div>
+        )}
+
+        {profile.stripe_onboarding_complete && userId && (
+          <TutorFinanceReport userId={userId} />
         )}
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6">

@@ -15,6 +15,7 @@ import { cn, normalizeUrl } from '@/lib/utils';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
 import { formatCustomerChargeEur } from '@/lib/stripeLessonPricing';
+import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
 
 interface Session {
     id: string;
@@ -329,7 +330,17 @@ export default function StudentSessions() {
         setCancellationFeePercent(st.tutor_cancellation_fee_percent ?? 0);
         setMinBookingHours(st.tutor_min_booking_hours ?? 1);
         setTutorName(st.tutor_full_name || '');
-        setTutorEmail(st.tutor_email || null);
+        if (st.tutor_id) {
+            const { data: vis } = await supabase.rpc(
+                'get_tutor_contact_visibility_for_student',
+                { p_tutor_id: st.tutor_id }
+            );
+            const cv = parseOrgContactVisibility((vis as Record<string, unknown>) || null);
+            const masked = maskTutorContact(st.tutor_email, cv.studentSeesTutorEmail);
+            setTutorEmail(masked === '—' ? null : masked);
+        } else {
+            setTutorEmail(null);
+        }
         setStudentPaymentModel(st.payment_model || null);
         setCreditBalance(Number(st.credit_balance || 0));
 

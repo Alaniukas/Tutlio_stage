@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
+import { syncSessionToGoogle } from './_lib/google-calendar.js';
 
 function getStripe() {
   return new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
@@ -73,11 +74,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // If there are pre-created sessions tied to this package (e.g. trial lessons),
     // mark them as paid too so UI no longer shows "awaiting payment".
     try {
-      await supabase
+      const { data: paidSessions } = await supabase
         .from('sessions')
         .update({ paid: true, payment_status: 'paid' })
         .eq('lesson_package_id', packageId)
-        .eq('paid', false);
+        .eq('paid', false)
+        .select('id, tutor_id');
+      for (const ps of paidSessions || []) {
+        syncSessionToGoogle(ps.id, ps.tutor_id).catch(() => {});
+      }
     } catch (e) {
       console.error('[confirm-package-payment] Failed to update sessions for prepaid package:', e);
     }

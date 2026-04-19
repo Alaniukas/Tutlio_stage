@@ -23,7 +23,9 @@ type EmailType =
     | 'lesson_confirmed_tutor'
     | 'payment_received_tutor'
     | 'payment_failed'
-    | 'session_comment_added';
+    | 'session_comment_added'
+    | 'school_contract'
+    | 'school_installment_request';
 
 interface SendEmailParams {
     type: EmailType;

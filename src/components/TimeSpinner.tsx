@@ -229,7 +229,7 @@ export function DateTimeSpinner({ value, onChange, label }: DateTimeSpinnerProps
   const [datePart, timePart] = value ? value.split('T') : ['', '08:00'];
   const timeValue = timePart ? timePart.slice(0, 5) : '08:00';
 
-  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleDateChange = (e: { target: { value: string } }) => {
     onChange(`${e.target.value}T${timeValue}`);
   };
 
@@ -248,7 +248,6 @@ export function DateTimeSpinner({ value, onChange, label }: DateTimeSpinnerProps
         <DateInput
           value={datePart}
           onChange={handleDateChange}
-          onWheel={(e) => e.stopPropagation()}
           className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
         />
       </div>

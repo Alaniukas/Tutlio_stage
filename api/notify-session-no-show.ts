@@ -5,6 +5,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { format } from 'date-fns';
 import { verifyRequestAuth } from './_lib/auth.js';
+import { syncSessionToGoogle } from './_lib/google-calendar.js';
 
 async function sendEmail(body: object) {
     const baseUrl = process.env.VERCEL_URL
@@ -63,6 +64,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (session.status !== 'no_show') {
         return res.status(400).json({ error: 'Session is not marked as no-show' });
     }
+
+    syncSessionToGoogle(sessionId, session.tutor_id).catch((err) => {
+        console.error('[notify-session-no-show] Google sync failed:', err);
+    });
 
     // Don't send no-show notification to parents until the lesson time window has ended
     // (org admin may pre-mark a future session without a misleading email).

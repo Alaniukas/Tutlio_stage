@@ -20,6 +20,10 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   const dbSyncedRef = useRef(false);
 
   useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
+
+  useEffect(() => {
     let cancelled = false;
 
     const syncLocaleFromDb = async () => {
