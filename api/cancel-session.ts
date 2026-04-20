@@ -187,28 +187,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         paymentModelEarly === 'per_lesson';
     const hideStudentRefund = willHavePendingPenalty || willHaveEarlyRefundChoice;
 
+    const cancellationEmailTasks: Promise<unknown>[] = [];
     if (resolvedTutorEmail && cancelledBy === 'student') {
-        void sendEmailWithTimeout({
-            type: 'session_cancelled',
-            to: resolvedTutorEmail,
-            data: {
-                studentName, tutorName, date: emailDate, time: emailTime, cancelledBy, reason,
-                hideRefund: true,
-                locale: 'lt',
-            },
-        });
+        cancellationEmailTasks.push(
+            sendEmailWithTimeout({
+                type: 'session_cancelled',
+                to: resolvedTutorEmail,
+                data: {
+                    studentName, tutorName, date: emailDate, time: emailTime, cancelledBy, reason,
+                    hideRefund: true,
+                    locale: 'lt',
+                },
+            })
+        );
     }
     if (resolvedStudentEmail) {
-        void sendEmailWithTimeout({
-            type: 'session_cancelled',
-            to: resolvedStudentEmail,
-            data: {
-                studentName, tutorName, date: emailDate, time: emailTime, cancelledBy, reason,
-                isPaid: hideStudentRefund ? false : isPaid,
-                sessionPrice: hideStudentRefund ? null : sessionPrice,
-                locale: 'lt',
-            },
-        });
+        cancellationEmailTasks.push(
+            sendEmailWithTimeout({
+                type: 'session_cancelled',
+                to: resolvedStudentEmail,
+                data: {
+                    studentName, tutorName, date: emailDate, time: emailTime, cancelledBy, reason,
+                    isPaid: hideStudentRefund ? false : isPaid,
+                    sessionPrice: hideStudentRefund ? null : sessionPrice,
+                    locale: 'lt',
+                },
+            })
+        );
     }
 
     const payerTrim = (resolvedPayerEmail || '').trim();
@@ -217,19 +222,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         payerTrim &&
         normEmail(payerTrim) !== normEmail(resolvedStudentEmail)
     ) {
-        void sendEmailWithTimeout({
-            type: 'session_cancelled_parent',
-            to: payerTrim,
-            data: {
-                studentName,
-                tutorName,
-                date: emailDate,
-                time: emailTime,
-                cancelledBy,
-                reason,
-                locale: 'lt',
-            },
-        });
+        cancellationEmailTasks.push(
+            sendEmailWithTimeout({
+                type: 'session_cancelled_parent',
+                to: payerTrim,
+                data: {
+                    studentName,
+                    tutorName,
+                    date: emailDate,
+                    time: emailTime,
+                    cancelledBy,
+                    reason,
+                    locale: 'lt',
+                },
+            })
+        );
+    }
+
+    if (cancellationEmailTasks.length > 0) {
+        await Promise.allSettled(cancellationEmailTasks);
     }
 
     // ── Penalty + Package credit handling ──────────────────────────────────────

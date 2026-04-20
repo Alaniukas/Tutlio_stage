@@ -295,6 +295,8 @@ export default function CalendarPage() {
   const [assignDuration, setAssignDuration] = useState<number>(60);
   const [assignMeetingLink, setAssignMeetingLink] = useState<string>('');
   const [assignTopic, setAssignTopic] = useState<string>('');
+  const [assignCreateRecurring, setAssignCreateRecurring] = useState(false);
+  const [assignRecurringWeeks, setAssignRecurringWeeks] = useState<number>(3);
   const [assignSaving, setAssignSaving] = useState(false);
 
   // Add student to group lesson states
@@ -1880,117 +1882,123 @@ export default function CalendarPage() {
     }
 
     const subject = subjects.find(s => s.id === assignSubjectId);
-
-    // Determine which students to process
     const studentIdsToProcess = assignStudentIds.length > 0 ? assignStudentIds : [assignStudentId];
-
     const duration = assignDuration;
-
-    // Get the date
-    let dateStr: string;
-    if (editingSlot.ruleIsRecurring) {
-      dateStr = format(editingSlot.blockStart, 'yyyy-MM-dd');
-    } else {
-      dateStr = editingSlot.ruleDate || format(editingSlot.blockStart, 'yyyy-MM-dd');
-    }
-
-    const startDateTime = new Date(`${dateStr}T${assignSelectedSlot}`).toISOString();
-    const endDateTime = new Date(new Date(`${dateStr}T${assignSelectedSlot}`).getTime() + duration * 60 * 1000).toISOString();
-
-    // For group lessons, check if we have enough spots for all students
-    if (subject?.is_group) {
-      const { data: existingSessions } = await supabase
-        .from('sessions')
-        .select('id')
-        .eq('tutor_id', user.id)
-        .eq('start_time', startDateTime)
-        .eq('subject_id', assignSubjectId)
-        .eq('status', 'active');
-
-      const currentCount = existingSessions?.length || 0;
-      const maxStudents = subject.max_students || 5;
-      const spotsNeeded = studentIdsToProcess.length;
-
-      if (currentCount + spotsNeeded > maxStudents) {
-        alert(t('cal.notEnoughSpots', { needed: String(spotsNeeded), available: String(maxStudents - currentCount) }));
-        setAssignSaving(false);
-        return;
-      }
-    }
-
     const tspAssign = getTutorSubjectPrice(subject?.name);
-    for (const studentId of studentIdsToProcess) {
-      const student = students.find(s => s.id === studentId);
 
-      const pricing = individualPricing.find(
-        (p) => p.student_id === studentId && p.subject_id === assignSubjectId
-      );
-      const price = pricing?.price ?? tspAssign?.price ?? subject?.price ?? 25;
+    // Get base date from clicked availability block.
+    const baseDateStr = editingSlot.ruleIsRecurring
+      ? format(editingSlot.blockStart, 'yyyy-MM-dd')
+      : (editingSlot.ruleDate || format(editingSlot.blockStart, 'yyyy-MM-dd'));
 
-      // Check if student has available lesson package for this subject
-      let sessionPaid = false;
-      let sessionPaymentStatus = 'pending';
-      let lessonPackageId = null;
+    const repeatCount =
+      editingSlot.ruleIsRecurring && assignCreateRecurring
+        ? Math.max(1, assignRecurringWeeks)
+        : 1;
 
-      if (assignSubjectId) {
-        const { data: packages } = await supabase
-          .from('lesson_packages')
-          .select('*')
-          .eq('student_id', studentId)
+    const occurrenceDates = Array.from({ length: repeatCount }, (_, i) =>
+      format(addDays(new Date(`${baseDateStr}T00:00:00`), i * 7), 'yyyy-MM-dd')
+    );
+
+    let createdCount = 0;
+
+    for (const dateStr of occurrenceDates) {
+      const startDateTime = new Date(`${dateStr}T${assignSelectedSlot}`).toISOString();
+      const endDateTime = new Date(new Date(`${dateStr}T${assignSelectedSlot}`).getTime() + duration * 60 * 1000).toISOString();
+
+      // For group lessons, check if we have enough spots for all students per occurrence.
+      if (subject?.is_group) {
+        const { data: existingSessions } = await supabase
+          .from('sessions')
+          .select('id')
+          .eq('tutor_id', user.id)
+          .eq('start_time', startDateTime)
           .eq('subject_id', assignSubjectId)
-          .eq('active', true)
-          .eq('paid', true)
-          .gt('available_lessons', 0)
-          .order('created_at', { ascending: true })
-          .limit(1);
+          .eq('status', 'active');
 
-        if (packages && packages.length > 0) {
-          const pkg = packages[0];
-          lessonPackageId = pkg.id;
-          sessionPaid = true;
-          sessionPaymentStatus = 'confirmed';
+        const currentCount = existingSessions?.length || 0;
+        const maxStudents = subject.max_students || 5;
+        const spotsNeeded = studentIdsToProcess.length;
 
-          // Update package: available_lessons-- and reserved_lessons++
-          const { error: pkgError } = await supabase
-            .from('lesson_packages')
-            .update({
-              available_lessons: pkg.available_lessons - 1,
-              reserved_lessons: pkg.reserved_lessons + 1,
-            })
-            .eq('id', pkg.id);
-
-          if (pkgError) {
-            console.error('Error updating lesson package:', pkgError);
-          } else {
-            console.log(`[Calendar] Auto-deducted 1 lesson from package ${pkg.id} for student ${studentId}`);
-          }
+        if (currentCount + spotsNeeded > maxStudents) {
+          console.warn('[Calendar] Skipping recurring occurrence due to group capacity', { dateStr, spotsNeeded, available: maxStudents - currentCount });
+          continue;
         }
       }
 
-      const { data: sessionData, error: sessionError } = await supabase
-        .from('sessions')
-        .insert([{
-          tutor_id: user.id,
-          student_id: studentId,
-          subject_id: assignSubjectId,
-          start_time: startDateTime,
-          end_time: endDateTime,
-          status: 'active',
-          paid: sessionPaid,
-          payment_status: sessionPaymentStatus,
-          lesson_package_id: lessonPackageId,
-          price: price,
-          topic: assignTopic || subject?.name || '',
-          meeting_link: assignMeetingLink || subject?.meeting_link || null,
-          available_spots: null, // Will be updated after all students are added
-        }])
-        .select()
-        .single();
+      for (const studentId of studentIdsToProcess) {
+        const student = students.find(s => s.id === studentId);
 
-      if (sessionError || !sessionData) {
-        console.error(`Error creating session for student ${studentId}:`, sessionError);
-        continue; // Skip this student and continue with others
-      }
+        const pricing = individualPricing.find(
+          (p) => p.student_id === studentId && p.subject_id === assignSubjectId
+        );
+        const price = pricing?.price ?? tspAssign?.price ?? subject?.price ?? 25;
+
+        // Check if student has available lesson package for this subject
+        let sessionPaid = false;
+        let sessionPaymentStatus = 'pending';
+        let lessonPackageId = null;
+
+        if (assignSubjectId) {
+          const { data: packages } = await supabase
+            .from('lesson_packages')
+            .select('*')
+            .eq('student_id', studentId)
+            .eq('subject_id', assignSubjectId)
+            .eq('active', true)
+            .eq('paid', true)
+            .gt('available_lessons', 0)
+            .order('created_at', { ascending: true })
+            .limit(1);
+
+          if (packages && packages.length > 0) {
+            const pkg = packages[0];
+            lessonPackageId = pkg.id;
+            sessionPaid = true;
+            sessionPaymentStatus = 'confirmed';
+
+            // Update package: available_lessons-- and reserved_lessons++
+            const { error: pkgError } = await supabase
+              .from('lesson_packages')
+              .update({
+                available_lessons: pkg.available_lessons - 1,
+                reserved_lessons: pkg.reserved_lessons + 1,
+              })
+              .eq('id', pkg.id);
+
+            if (pkgError) {
+              console.error('Error updating lesson package:', pkgError);
+            } else {
+              console.log(`[Calendar] Auto-deducted 1 lesson from package ${pkg.id} for student ${studentId}`);
+            }
+          }
+        }
+
+        const { data: sessionData, error: sessionError } = await supabase
+          .from('sessions')
+          .insert([{
+            tutor_id: user.id,
+            student_id: studentId,
+            subject_id: assignSubjectId,
+            start_time: startDateTime,
+            end_time: endDateTime,
+            status: 'active',
+            paid: sessionPaid,
+            payment_status: sessionPaymentStatus,
+            lesson_package_id: lessonPackageId,
+            price: price,
+            topic: assignTopic || subject?.name || '',
+            meeting_link: assignMeetingLink || subject?.meeting_link || null,
+            available_spots: null, // Will be updated after all students are added
+          }])
+          .select()
+          .single();
+
+        if (sessionError || !sessionData) {
+          console.error(`Error creating session for student ${studentId}:`, sessionError);
+          continue; // Skip this student and continue with others
+        }
+        createdCount++;
 
       // Notify student & parent/payer
       if (student) {
@@ -2107,34 +2115,35 @@ export default function CalendarPage() {
         }
       }
 
-      // Sync to Google Calendar
-      if (googleCalendarConnected) {
-        void (async () => {
-          await fetch('/api/google-calendar-sync', {
-            method: 'POST',
-            headers: await authHeaders(),
-            body: JSON.stringify({ userId: user.id, sessionId: sessionData.id }),
-          });
-        })().catch(err => console.error('Google Calendar sync error:', err));
+        // Sync to Google Calendar
+        if (googleCalendarConnected) {
+          void (async () => {
+            await fetch('/api/google-calendar-sync', {
+              method: 'POST',
+              headers: await authHeaders(),
+              body: JSON.stringify({ userId: user.id, sessionId: sessionData.id }),
+            });
+          })().catch(err => console.error('Google Calendar sync error:', err));
+        }
       }
-    }
 
-    // Update available_spots for all sessions at this time (for group lessons)
-    if (subject?.is_group) {
-      const { data: allSessionsAtTime } = await supabase
-        .from('sessions')
-        .select('id')
-        .eq('tutor_id', user.id)
-        .eq('start_time', startDateTime)
-        .eq('subject_id', assignSubjectId)
-        .eq('status', 'active');
-
-      if (allSessionsAtTime) {
-        const remaining = (subject.max_students || 5) - allSessionsAtTime.length;
-        await supabase
+      // Update available_spots for all sessions at this occurrence (for group lessons)
+      if (subject?.is_group) {
+        const { data: allSessionsAtTime } = await supabase
           .from('sessions')
-          .update({ available_spots: Math.max(0, remaining) })
-          .in('id', allSessionsAtTime.map(s => s.id));
+          .select('id')
+          .eq('tutor_id', user.id)
+          .eq('start_time', startDateTime)
+          .eq('subject_id', assignSubjectId)
+          .eq('status', 'active');
+
+        if (allSessionsAtTime) {
+          const remaining = (subject.max_students || 5) - allSessionsAtTime.length;
+          await supabase
+            .from('sessions')
+            .update({ available_spots: Math.max(0, remaining) })
+            .in('id', allSessionsAtTime.map(s => s.id));
+        }
       }
     }
 
@@ -2147,8 +2156,13 @@ export default function CalendarPage() {
     setAssignSelectedSlot('');
     setAssignMeetingLink('');
     setAssignTopic('');
+    setAssignCreateRecurring(false);
+    setAssignRecurringWeeks(3);
     fetchData();
     setAssignSaving(false);
+    if (createdCount > 1) {
+      alert(t('cal.lessonsCreated', { count: String(createdCount) }));
+    }
   };
 
   const handleMarkPaid = async () => {
@@ -2660,6 +2674,7 @@ export default function CalendarPage() {
 
   const hardDeleteSelectedWithApproval = async (deleteScope: 'single' | 'future') => {
     if (!selectedEvent) return;
+    const targetSessionId = selectedEvent.id;
     const msg =
       deleteScope === 'future'
         ? t('cal.deleteConfirmFuture')
@@ -2668,15 +2683,20 @@ export default function CalendarPage() {
     if (!confirmed) return;
 
     setSaving(true);
+    // Optimistic UI: close modal and remove the lesson immediately.
+    setIsDeleteRecurringDialogOpen(false);
+    setIsEventModalOpen(false);
+    setSelectedEvent(null);
+    setSelectedGroupSessions([]);
+    setSessions((prev) => prev.filter((s) => s.id !== targetSessionId));
+
     try {
-      await hardDeleteSession(selectedEvent.id, deleteScope);
-      setIsDeleteRecurringDialogOpen(false);
-      setIsEventModalOpen(false);
-      setSelectedEvent(null);
-      setSelectedGroupSessions([]);
+      await hardDeleteSession(targetSessionId, deleteScope);
       fetchData();
     } catch (e: any) {
       alert(e?.message || t('cal.deleteFailed'));
+      // Re-sync from backend in case optimistic removal was wrong.
+      fetchData();
     } finally {
       setSaving(false);
     }
@@ -3408,6 +3428,20 @@ export default function CalendarPage() {
             </div>
           ) : (
             <BigCalendar
+              className={cn(
+                // Month view needs explicit height; otherwise rows can collapse and appear "empty".
+                currentView === Views.MONTH
+                  ? 'h-[620px] sm:h-[700px]'
+                  : calendarExpanded
+                    ? 'h-[900px] sm:h-[1100px]'
+                    : 'h-[620px] sm:h-[700px]'
+              )}
+              style={{
+                // Keep a hard fallback height for React Big Calendar internals in month view.
+                height: currentView === Views.MONTH
+                  ? 700
+                  : (calendarExpanded ? 1100 : 700),
+              }}
               localizer={localizer}
               events={mergedSessions}
               backgroundEvents={backgroundEvents}
@@ -4290,16 +4324,18 @@ export default function CalendarPage() {
                   <XCircle className="w-4 h-4 mr-1" />
                   {cancelConfirmId === selectedEvent.id ? t('cal.cancellingStatus') : t('cal.cancelLabel')}
                 </Button>
-                <Button
-                  variant="outline"
-                  onClick={handleMarkCompleted}
-                  disabled={saving}
-                  size="sm"
-                  className="rounded-xl flex-1 text-green-700 border-green-200 hover:bg-green-50"
-                >
-                  <CheckCircle className="w-4 h-4 mr-1" />
-                  {t('cal.completed')}
-                </Button>
+                {!isAfter(new Date(), selectedEvent.end_time) && (
+                  <Button
+                    variant="outline"
+                    onClick={handleMarkCompleted}
+                    disabled={saving}
+                    size="sm"
+                    className="rounded-xl flex-1 text-green-700 border-green-200 hover:bg-green-50"
+                  >
+                    <CheckCircle className="w-4 h-4 mr-1" />
+                    {t('cal.completed')}
+                  </Button>
+                )}
                 {!isGroupSession && selectedEvent && (
                   <Button
                     variant="outline"
@@ -4308,7 +4344,10 @@ export default function CalendarPage() {
                     }}
                     disabled={saving || noShowSavingId === selectedEvent.id}
                     size="sm"
-                    className="rounded-xl flex-1 text-rose-700 border-rose-200 hover:bg-rose-50"
+                    className={cn(
+                      "rounded-xl flex-1 text-rose-700 border-rose-200 hover:bg-rose-50",
+                      isAfter(new Date(), selectedEvent.end_time) && "bg-rose-50 border-rose-300"
+                    )}
                   >
                     <UserX className="w-4 h-4 mr-1" />
                     {noShowSavingId === selectedEvent.id ? '…' : t('common.noShow')}
@@ -4318,19 +4357,20 @@ export default function CalendarPage() {
             )}
             {!isGroupSession &&
               selectedEvent &&
-              (selectedEvent.status === 'completed' || selectedEvent.status === 'no_show') &&
-              isAfter(selectedEvent.end_time, new Date()) && (
+              (selectedEvent.status === 'completed' || selectedEvent.status === 'no_show') && (
                 <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => void handleRevertSessionToPlanned(selectedEvent)}
-                    disabled={saving || noShowSavingId === selectedEvent.id}
-                    size="sm"
-                    className="rounded-xl flex-1 text-indigo-700 border-indigo-200 hover:bg-indigo-50"
-                  >
-                    <RotateCcw className="w-4 h-4 mr-1" />
-                    {t('dash.revertToPlannedLesson')}
-                  </Button>
+                  {isAfter(selectedEvent.end_time, new Date()) && (
+                    <Button
+                      variant="outline"
+                      onClick={() => void handleRevertSessionToPlanned(selectedEvent)}
+                      disabled={saving || noShowSavingId === selectedEvent.id}
+                      size="sm"
+                      className="rounded-xl flex-1 text-indigo-700 border-indigo-200 hover:bg-indigo-50"
+                    >
+                      <RotateCcw className="w-4 h-4 mr-1" />
+                      {t('dash.revertToPlannedLesson')}
+                    </Button>
+                  )}
                   {selectedEvent.status === 'completed' && (
                     <Button
                       variant="outline"
@@ -4936,10 +4976,13 @@ export default function CalendarPage() {
               <Button
                 onClick={() => {
                   setAssignStudentId('');
+                  setAssignStudentIds([]);
                   setAssignSubjectId('');
                   setAssignSelectedSlot('');
                   setAssignMeetingLink('');
                   setAssignTopic('');
+                  setAssignCreateRecurring(false);
+                  setAssignRecurringWeeks(3);
                   setIsAssignStudentOpen(true);
                 }}
                 className="w-full rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold"
@@ -4948,38 +4991,6 @@ export default function CalendarPage() {
                 <Plus className="w-4 h-4 mr-2" />
                 {t('cal.addStudentToSlot')}
               </Button>
-              {editingSlot?.ruleIsRecurring && (
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    if (!editingSlot) return;
-                    const blockDate = format(editingSlot.blockStart, 'yyyy-MM-dd');
-                    const slotStart = editingSlot.ruleStart;
-                    const slotEnd = editingSlot.ruleEnd;
-                    const [sh, sm] = slotStart.split(':').map(Number);
-                    const [eh, em] = slotEnd.split(':').map(Number);
-                    const durMin = (eh * 60 + em) - (sh * 60 + sm);
-                    const lessonDur = Math.min(durMin, 60);
-                    const endH = Math.floor((sh * 60 + sm + lessonDur) / 60);
-                    const endM = (sh * 60 + sm + lessonDur) % 60;
-                    setStartTime(`${blockDate}T${slotStart}`);
-                    setEndTime(`${blockDate}T${String(endH).padStart(2,'0')}:${String(endM).padStart(2,'0')}`);
-                    setMeetingLink(editingSlot.meetingLink || '');
-                    setIsRecurring(true);
-                    setRecurringFrequency('weekly');
-                    setRecurringEndDate('');
-                    setSelectedWeekdays([editingSlot.ruleDayOfWeek ?? new Date(editingSlot.blockStart).getDay()]);
-                    setIsSlotEditOpen(false);
-                    setEditingSlot(null);
-                    setIsCreateModalOpen(true);
-                  }}
-                  className="w-full rounded-xl border-indigo-200 text-indigo-600 hover:bg-indigo-50"
-                  disabled={slotSaving}
-                >
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                  {t('cal.addRecurringFromSlot')}
-                </Button>
-              )}
             </div>
 
             <div className="flex gap-2 pt-1">
@@ -5053,6 +5064,8 @@ export default function CalendarPage() {
           setAssignSelectedSlot('');
           setAssignMeetingLink('');
           setAssignTopic('');
+          setAssignCreateRecurring(false);
+          setAssignRecurringWeeks(3);
         }
       }}>
         <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
@@ -5240,6 +5253,38 @@ export default function CalendarPage() {
                     </Button>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {editingSlot?.ruleIsRecurring && assignSelectedSlot && (
+              <div className="border border-gray-100 rounded-xl p-4 space-y-3 bg-gray-50">
+                <button
+                  type="button"
+                  onClick={() => setAssignCreateRecurring((v) => !v)}
+                  className="flex items-center justify-between w-full"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-gray-900 text-left">{t('cal.addRecurringFromSlot')}</p>
+                    <p className="text-xs text-gray-500 text-left mt-0.5">{t('cal.recurringFromSlotHint')}</p>
+                  </div>
+                  <div className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 flex-shrink-0 ml-4 ${assignCreateRecurring ? 'bg-indigo-500' : 'bg-gray-300'}`}>
+                    <span className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${assignCreateRecurring ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </div>
+                </button>
+                {assignCreateRecurring && (
+                  <div className="space-y-1.5 pt-1 border-t border-gray-200">
+                    <Label className="text-xs">{t('cal.repeatWeeksLabel')}</Label>
+                    <Input
+                      type="number"
+                      min={2}
+                      max={12}
+                      value={assignRecurringWeeks}
+                      onChange={(e) => setAssignRecurringWeeks(Math.max(2, Math.min(12, Number(e.target.value) || 2)))}
+                      className="rounded-xl text-sm"
+                    />
+                    <p className="text-xs text-indigo-600">{t('cal.repeatWeeksHint', { count: String(assignRecurringWeeks) })}</p>
+                  </div>
+                )}
               </div>
             )}
 

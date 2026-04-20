@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { Plus, Trash2, User, Mail, Phone, Search, CheckCircle, XCircle, Copy, Check } from 'lucide-react';
 import Toast from '@/components/Toast';
+import { useTranslation } from '@/lib/i18n';
 
 interface Student {
   id: string;
@@ -48,6 +49,7 @@ const emptyForm: NewStudentForm = {
 };
 
 export default function SchoolStudents() {
+  const { t } = useTranslation();
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
   const [schoolId, setSchoolId] = useState<string | null>(null);
@@ -108,26 +110,26 @@ export default function SchoolStudents() {
 
     setSaving(false);
     if (error) {
-      setToast({ message: `Error: ${error.message}`, type: 'error' });
+      setToast({ message: t('school.toastError', { msg: error.message }), type: 'error' });
       return;
     }
 
     setStudents((prev) => [data, ...prev]);
     setForm(emptyForm);
     setAddOpen(false);
-    setToast({ message: 'Student added successfully', type: 'success' });
+    setToast({ message: t('school.toastStudentAdded'), type: 'success' });
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to remove this student?')) return;
+    if (!confirm(t('school.confirmDeleteStudent'))) return;
     const { error } = await supabase.from('students').delete().eq('id', id);
     if (error) {
-      setToast({ message: `Error: ${error.message}`, type: 'error' });
+      setToast({ message: t('school.toastError', { msg: error.message }), type: 'error' });
       return;
     }
     setStudents((prev) => prev.filter((s) => s.id !== id));
     if (selectedStudent?.id === id) setSelectedStudent(null);
-    setToast({ message: 'Student removed', type: 'success' });
+    setToast({ message: t('school.toastStudentRemoved'), type: 'success' });
   };
 
   const copyInviteCode = (code: string, studentId: string) => {
@@ -152,48 +154,48 @@ export default function SchoolStudents() {
       <div className="max-w-5xl mx-auto space-y-6">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Students</h1>
-            <p className="text-sm text-gray-500 mt-1">{students.length} student{students.length !== 1 ? 's' : ''} registered</p>
+            <h1 className="text-2xl font-bold text-gray-900">{t('school.studentsTitle')}</h1>
+            <p className="text-sm text-gray-500 mt-1">{t('school.studentsCount', { n: students.length })}</p>
           </div>
           <Dialog open={addOpen} onOpenChange={setAddOpen}>
             <DialogTrigger asChild>
               <Button className="bg-emerald-600 hover:bg-emerald-700">
-                <Plus className="w-4 h-4 mr-2" /> Add Student
+                <Plus className="w-4 h-4 mr-2" /> {t('school.addStudent')}
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-lg">
               <DialogHeader>
-                <DialogTitle>Add New Student</DialogTitle>
+                <DialogTitle>{t('school.addStudentTitle')}</DialogTitle>
               </DialogHeader>
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <Label>Student Name *</Label>
+                  <Label>{t('school.studentName')}</Label>
                   <Input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} placeholder="Jonas Jonaitis" />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
-                    <Label>Student Email</Label>
+                    <Label>{t('school.studentEmail')}</Label>
                     <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="student@email.com" />
                   </div>
                   <div className="space-y-2">
-                    <Label>Student Phone</Label>
+                    <Label>{t('school.studentPhone')}</Label>
                     <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="+370..." />
                   </div>
                 </div>
                 <div className="border-t pt-4">
-                  <p className="text-sm font-medium text-gray-700 mb-3">Parent / Payer Information</p>
+                  <p className="text-sm font-medium text-gray-700 mb-3">{t('school.parentSection')}</p>
                   <div className="space-y-3">
                     <div className="space-y-2">
-                      <Label>Parent Name</Label>
-                      <Input value={form.payer_name} onChange={(e) => setForm({ ...form, payer_name: e.target.value })} placeholder="Parent full name" />
+                      <Label>{t('school.parentName')}</Label>
+                      <Input value={form.payer_name} onChange={(e) => setForm({ ...form, payer_name: e.target.value })} placeholder="Vardas Pavardė" />
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-2">
-                        <Label>Parent Email</Label>
+                        <Label>{t('school.parentEmail')}</Label>
                         <Input type="email" value={form.payer_email} onChange={(e) => setForm({ ...form, payer_email: e.target.value })} placeholder="parent@email.com" />
                       </div>
                       <div className="space-y-2">
-                        <Label>Parent Phone</Label>
+                        <Label>{t('school.parentPhone')}</Label>
                         <Input value={form.payer_phone} onChange={(e) => setForm({ ...form, payer_phone: e.target.value })} placeholder="+370..." />
                       </div>
                     </div>
@@ -201,9 +203,9 @@ export default function SchoolStudents() {
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
+                <Button variant="outline" onClick={() => setAddOpen(false)}>{t('school.cancel')}</Button>
                 <Button onClick={handleAdd} disabled={saving || !form.full_name.trim()} className="bg-emerald-600 hover:bg-emerald-700">
-                  {saving ? 'Adding...' : 'Add Student'}
+                  {saving ? t('school.adding') : t('school.addStudent')}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -215,7 +217,7 @@ export default function SchoolStudents() {
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search students..."
+            placeholder={t('school.searchStudents')}
             className="pl-10"
           />
         </div>
@@ -228,7 +230,7 @@ export default function SchoolStudents() {
           <div className="text-center py-20">
             <User className="w-12 h-12 text-gray-300 mx-auto mb-3" />
             <p className="text-gray-500">
-              {search ? 'No students match your search' : 'No students yet. Add your first student to get started.'}
+              {search ? t('school.noStudentsSearch') : t('school.noStudents')}
             </p>
           </div>
         ) : (
@@ -252,15 +254,15 @@ export default function SchoolStudents() {
                         <p className="font-semibold text-gray-900">{student.full_name}</p>
                         {student.linked_user_id ? (
                           <span className="inline-flex items-center gap-1 text-xs text-green-700 bg-green-50 px-2 py-0.5 rounded-full">
-                            <CheckCircle className="w-3 h-3" /> Registered
+                            <CheckCircle className="w-3 h-3" /> {t('school.statusRegistered')}
                           </span>
                         ) : student.invite_code ? (
                           <span className="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
-                            Invite sent
+                            {t('school.statusInviteSent')}
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
-                            <XCircle className="w-3 h-3" /> Pending
+                            <XCircle className="w-3 h-3" /> {t('school.statusPending')}
                           </span>
                         )}
                       </div>
@@ -277,7 +279,12 @@ export default function SchoolStudents() {
                         )}
                       </div>
                       {student.payer_name && (
-                        <p className="text-xs text-gray-400 mt-1">Payer: {student.payer_name} {student.payer_email ? `(${student.payer_email})` : ''}</p>
+                        <p className="text-xs text-gray-400 mt-1">
+                          {t('school.payerLine', {
+                            name: student.payer_name,
+                            extra: student.payer_email ? ` (${student.payer_email})` : '',
+                          })}
+                        </p>
                       )}
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
@@ -291,7 +298,7 @@ export default function SchoolStudents() {
                           }`}
                         >
                           {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                          {isCopied ? 'Copied' : student.invite_code}
+                          {isCopied ? t('school.copied') : student.invite_code}
                         </button>
                       )}
                       <button
@@ -320,45 +327,45 @@ export default function SchoolStudents() {
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <p className="text-xs text-gray-400 mb-1">Email</p>
+                    <p className="text-xs text-gray-400 mb-1">{t('common.email')}</p>
                     <p className="text-sm font-medium text-gray-900">{selectedStudent.email || '---'}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-gray-400 mb-1">Phone</p>
+                    <p className="text-xs text-gray-400 mb-1">{t('common.phone')}</p>
                     <p className="text-sm font-medium text-gray-900">{selectedStudent.phone || '---'}</p>
                   </div>
                 </div>
                 {(selectedStudent.payer_name || selectedStudent.payer_email) && (
                   <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-                    <p className="text-xs text-gray-500 font-medium mb-2">Parent / Payer</p>
+                    <p className="text-xs text-gray-500 font-medium mb-2">{t('school.detailParent')}</p>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <p className="text-xs text-gray-400">Name</p>
+                        <p className="text-xs text-gray-400">{t('common.name')}</p>
                         <p className="text-sm font-medium">{selectedStudent.payer_name || '---'}</p>
                       </div>
                       <div>
-                        <p className="text-xs text-gray-400">Email</p>
+                        <p className="text-xs text-gray-400">{t('common.email')}</p>
                         <p className="text-sm font-medium">{selectedStudent.payer_email || '---'}</p>
                       </div>
                       <div>
-                        <p className="text-xs text-gray-400">Phone</p>
+                        <p className="text-xs text-gray-400">{t('common.phone')}</p>
                         <p className="text-sm font-medium">{selectedStudent.payer_phone || '---'}</p>
                       </div>
                     </div>
                   </div>
                 )}
                 <div className="flex items-center gap-2">
-                  <p className="text-xs text-gray-400">Status:</p>
+                  <p className="text-xs text-gray-400">{t('school.detailStatus')}</p>
                   {selectedStudent.linked_user_id ? (
                     <span className="inline-flex items-center gap-1 text-xs text-green-700 bg-green-50 px-2 py-0.5 rounded-full">
-                      <CheckCircle className="w-3 h-3" /> Registered on platform
+                      <CheckCircle className="w-3 h-3" /> {t('school.detailRegisteredPlatform')}
                     </span>
                   ) : selectedStudent.invite_code ? (
                     <span className="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
-                      Invite code: <code className="font-mono font-bold">{selectedStudent.invite_code}</code>
+                      {t('school.detailInviteCode', { code: selectedStudent.invite_code })}
                     </span>
                   ) : (
-                    <span className="text-xs text-gray-500">Awaiting contract & payment</span>
+                    <span className="text-xs text-gray-500">{t('school.detailAwaiting')}</span>
                   )}
                 </div>
               </div>

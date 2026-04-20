@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { buildPlatformPath } from '@/lib/platform';
@@ -16,16 +16,18 @@ import {
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/lib/i18n';
 
-const NAV_ITEMS = [
-  { href: '/school', label: 'Overview', icon: LayoutDashboard, exact: true },
-  { href: '/school/students', label: 'Students', icon: GraduationCap },
-  { href: '/school/contracts', label: 'Contracts', icon: FileText },
-  { href: '/school/payments', label: 'Payments', icon: CreditCard },
-  { href: '/school/settings', label: 'Settings', icon: Settings },
-];
-
 export default function SchoolLayout({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation();
+  const navItems = useMemo(
+    () => [
+      { href: '/school', label: t('school.navOverview'), icon: LayoutDashboard, exact: true },
+      { href: '/school/students', label: t('school.navStudents'), icon: GraduationCap },
+      { href: '/school/contracts', label: t('school.navContracts'), icon: FileText },
+      { href: '/school/payments', label: t('school.navPayments'), icon: CreditCard },
+      { href: '/school/settings', label: t('school.navSettings'), icon: Settings },
+    ],
+    [t],
+  );
   const location = useLocation();
   const [schoolName, setSchoolName] = useState('');
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -53,7 +55,7 @@ export default function SchoolLayout({ children }: { children: React.ReactNode }
     window.location.href = `${window.location.origin}${buildPlatformPath('/login')}`;
   };
 
-  const isActive = (item: (typeof NAV_ITEMS)[0]) =>
+  const isActive = (item: (typeof navItems)[0]) =>
     item.exact ? location.pathname === item.href : location.pathname.startsWith(item.href);
 
   const Sidebar = ({ mobile = false }: { mobile?: boolean }) => (
@@ -63,13 +65,13 @@ export default function SchoolLayout({ children }: { children: React.ReactNode }
           <School className="w-5 h-5 text-white" />
         </div>
         <div className="min-w-0">
-          <p className="text-xs text-emerald-300/60 font-medium leading-none mb-0.5">Tutlio School</p>
+          <p className="text-xs text-emerald-300/60 font-medium leading-none mb-0.5">{t('school.brandSubtitle')}</p>
           <p className="text-sm font-semibold text-white truncate">{schoolName || '...'}</p>
         </div>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-1">
-        {NAV_ITEMS.map((item) => (
+        {navItems.map((item) => (
           <Link
             key={item.href}
             to={item.href}

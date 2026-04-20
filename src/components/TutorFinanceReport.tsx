@@ -21,6 +21,7 @@ import {
 } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { DateInput } from '@/components/ui/date-input';
+import { MonthInput } from '@/components/ui/month-input';
 import { useTranslation } from '@/lib/i18n';
 
 const MAX_RANGE_DAYS = 90;
@@ -188,8 +189,7 @@ export default function TutorFinanceReport({ userId }: Props) {
         {periodMode === 'month' ? (
           <div>
             <label className="block text-xs text-gray-500 mb-1">{t('common.month')}</label>
-            <input
-              type="month"
+            <MonthInput
               value={month}
               onChange={(e) => setMonth(e.target.value)}
               className="w-full max-w-xs rounded-xl border border-gray-200 px-3 py-2 text-sm"

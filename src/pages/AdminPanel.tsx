@@ -14,6 +14,13 @@ interface FormState {
   adminPassword: string;
 }
 
+interface SchoolFormState {
+  schoolName: string;
+  schoolEmail: string;
+  adminEmail: string;
+  adminPassword: string;
+}
+
 interface OrgAdminStats {
   lessons_occurred: number;
   paid_revenue_eur: number;
@@ -56,7 +63,7 @@ interface AuditRow {
   details: Record<string, unknown>;
 }
 
-type PanelView = 'list' | 'create' | 'detail';
+type PanelView = 'list' | 'create' | 'createSchool' | 'detail';
 
 export default function AdminPanel() {
   const { t, locale } = useTranslation();
@@ -69,6 +76,12 @@ export default function AdminPanel() {
     orgName: '',
     orgEmail: '',
     tutorLimit: 5,
+    adminEmail: '',
+    adminPassword: '',
+  });
+  const [schoolForm, setSchoolForm] = useState<SchoolFormState>({
+    schoolName: '',
+    schoolEmail: '',
     adminEmail: '',
     adminPassword: '',
   });
@@ -272,6 +285,45 @@ export default function AdminPanel() {
     setLoading(false);
   };
 
+  const handleCreateSchool = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setResult(null);
+
+    try {
+      const res = await fetch('/api/create-school', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-secret': platformAdminSecret,
+        },
+        body: JSON.stringify({
+          schoolName: schoolForm.schoolName.trim(),
+          schoolEmail: schoolForm.schoolEmail.trim(),
+          adminEmail: schoolForm.adminEmail.trim(),
+          adminPassword: schoolForm.adminPassword,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        setResult({
+          success: true,
+          message: t('admin.schoolCreated', { name: schoolForm.schoolName.trim(), email: schoolForm.adminEmail.trim() }),
+        });
+        setSchoolForm({ schoolName: '', schoolEmail: '', adminEmail: '', adminPassword: '' });
+        setPanelView('list');
+      } else {
+        setResult({ success: false, message: data.error || t('admin.failedToCreate') });
+      }
+    } catch {
+      setResult({ success: false, message: t('admin.serverError') });
+    }
+
+    setLoading(false);
+  };
+
   if (step === 'lock') {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center px-4">
@@ -321,7 +373,7 @@ export default function AdminPanel() {
           </div>
         </div>
 
-        <div className="flex gap-2 mb-6">
+        <div className="flex gap-2 mb-6 flex-wrap">
           <button
             type="button"
             onClick={() => { setPanelView('list'); setDetailId(null); }}
@@ -337,6 +389,14 @@ export default function AdminPanel() {
           >
             <Plus className="w-4 h-4" />
             {t('admin.newCompany')}
+          </button>
+          <button
+            type="button"
+            onClick={() => { setPanelView('createSchool'); setDetailId(null); }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${panelView === 'createSchool' ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+          >
+            <Plus className="w-4 h-4" />
+            {t('admin.newSchool')}
           </button>
         </div>
 
@@ -756,6 +816,89 @@ export default function AdminPanel() {
                 <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> {t('admin.creating')}</>
               ) : (
                 <><Plus className="w-4 h-4" /> {t('admin.createCompany')}</>
+              )}
+            </button>
+          </form>
+        )}
+
+        {panelView === 'createSchool' && (
+          <form onSubmit={handleCreateSchool} className="space-y-5 max-w-md">
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-5 space-y-4">
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t('admin.schoolData')}</p>
+
+              <div className="space-y-1.5">
+                <Label className="text-sm text-slate-300">{t('admin.schoolNameLabel')}</Label>
+                <Input
+                  placeholder="Vilniaus gimnazija"
+                  value={schoolForm.schoolName}
+                  onChange={(e) => setSchoolForm({ ...schoolForm, schoolName: e.target.value })}
+                  required
+                  className="bg-white/10 border-white/20 text-white placeholder:text-slate-500 rounded-xl"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-sm text-slate-300">{t('admin.schoolContactEmail')}</Label>
+                <Input
+                  type="email"
+                  placeholder="info@mokykla.lt"
+                  value={schoolForm.schoolEmail}
+                  onChange={(e) => setSchoolForm({ ...schoolForm, schoolEmail: e.target.value })}
+                  required
+                  className="bg-white/10 border-white/20 text-white placeholder:text-slate-500 rounded-xl"
+                />
+              </div>
+            </div>
+
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-5 space-y-4">
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t('admin.adminAccount')}</p>
+
+              <div className="space-y-1.5">
+                <Label className="text-sm text-slate-300">{t('admin.adminEmail')}</Label>
+                <Input
+                  type="email"
+                  placeholder="admin@mokykla.lt"
+                  value={schoolForm.adminEmail}
+                  onChange={(e) => setSchoolForm({ ...schoolForm, adminEmail: e.target.value })}
+                  required
+                  className="bg-white/10 border-white/20 text-white placeholder:text-slate-500 rounded-xl"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-sm text-slate-300">{t('admin.adminPassword')}</Label>
+                <div className="relative">
+                  <Input
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder={t('admin.min8')}
+                    value={schoolForm.adminPassword}
+                    onChange={(e) => setSchoolForm({ ...schoolForm, adminPassword: e.target.value })}
+                    required
+                    minLength={8}
+                    className="bg-white/10 border-white/20 text-white placeholder:text-slate-500 rounded-xl pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                    tabIndex={-1}
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className="text-xs text-slate-500">{t('admin.passwordHintSchool')}</p>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> {t('admin.creating')}</>
+              ) : (
+                <><Plus className="w-4 h-4" /> {t('admin.createSchool')}</>
               )}
             </button>
           </form>

@@ -22,6 +22,7 @@ import { Plus, CreditCard, Send, CheckCircle, Clock, AlertCircle, Trash2, Extern
 import Toast from '@/components/Toast';
 import { authHeaders } from '@/lib/apiHelpers';
 import { sendEmail } from '@/lib/email';
+import { useTranslation } from '@/lib/i18n';
 
 interface Contract {
   id: string;
@@ -50,6 +51,7 @@ interface NewInstallmentRow {
 }
 
 export default function SchoolPayments() {
+  const { t } = useTranslation();
   const [schoolId, setSchoolId] = useState<string | null>(null);
   const [schoolName, setSchoolName] = useState('');
   const [schoolEmail, setSchoolEmail] = useState('');
@@ -152,7 +154,7 @@ export default function SchoolPayments() {
 
       const json = await resp.json();
       if (!resp.ok) {
-        setToast({ message: json.error || 'Failed to create checkout', type: 'error' });
+        setToast({ message: json.error || t('school.toastPaymentError'), type: 'error' });
         setSendingId(null);
         return;
       }
@@ -179,29 +181,29 @@ export default function SchoolPayments() {
             paymentUrl: json.url,
           },
         });
-        setToast({ message: 'Payment link sent', type: 'success' });
+        setToast({ message: t('school.toastPaymentLinkSent'), type: 'success' });
       } else {
         window.open(json.url, '_blank');
-        setToast({ message: 'Checkout session created', type: 'success' });
+        setToast({ message: t('school.toastCheckoutCreated'), type: 'success' });
       }
     } catch (err) {
-      setToast({ message: 'Error sending payment link', type: 'error' });
+      setToast({ message: t('school.toastPaymentError'), type: 'error' });
     }
     setSendingId(null);
   };
 
   const deleteInstallment = async (id: string) => {
-    if (!confirm('Delete this installment?')) return;
+    if (!confirm(t('school.confirmDeleteInstallment'))) return;
     await supabase.from('school_payment_installments').delete().eq('id', id);
     setInstallments((prev) => prev.filter((i) => i.id !== id));
   };
 
   const statusBadge = (s: Installment['payment_status']) => {
     const map = {
-      pending: { label: 'Pending', cls: 'bg-gray-100 text-gray-600', icon: Clock },
-      paid: { label: 'Paid', cls: 'bg-green-50 text-green-700', icon: CheckCircle },
-      overdue: { label: 'Overdue', cls: 'bg-red-50 text-red-700', icon: AlertCircle },
-      failed: { label: 'Failed', cls: 'bg-red-50 text-red-700', icon: AlertCircle },
+      pending: { label: t('school.payStatusPending'), cls: 'bg-gray-100 text-gray-600', icon: Clock },
+      paid: { label: t('school.payStatusPaid'), cls: 'bg-green-50 text-green-700', icon: CheckCircle },
+      overdue: { label: t('school.payStatusOverdue'), cls: 'bg-red-50 text-red-700', icon: AlertCircle },
+      failed: { label: t('school.payStatusFailed'), cls: 'bg-red-50 text-red-700', icon: AlertCircle },
     };
     const { label, cls, icon: Icon } = map[s];
     return <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${cls}`}><Icon className="w-3 h-3" />{label}</span>;
@@ -219,11 +221,11 @@ export default function SchoolPayments() {
       <div className="max-w-5xl mx-auto space-y-6">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Payments</h1>
-            <p className="text-sm text-gray-500 mt-1">Manage installment schedules and payment links</p>
+            <h1 className="text-2xl font-bold text-gray-900">{t('school.paymentsTitle')}</h1>
+            <p className="text-sm text-gray-500 mt-1">{t('school.paymentsSubtitle')}</p>
           </div>
           <Button onClick={() => { setScheduleOpen(true); setSelectedContractId(''); setRows([{ amount: '', due_date: '' }]); }} className="bg-emerald-600 hover:bg-emerald-700" disabled={contracts.length === 0}>
-            <Plus className="w-4 h-4 mr-2" /> New Schedule
+            <Plus className="w-4 h-4 mr-2" /> {t('school.newSchedule')}
           </Button>
         </div>
 
@@ -254,8 +256,8 @@ export default function SchoolPayments() {
                     <div>
                       <p className="font-semibold text-gray-900">{student?.full_name || '—'}</p>
                       <p className="text-sm text-gray-500">
-                        Annual fee: &euro;{Number(contract?.annual_fee || 0).toFixed(2)} &middot;
-                        Paid: &euro;{totalPaid.toFixed(2)} / &euro;{totalDue.toFixed(2)}
+                        {t('school.annualFeeLine')} &euro;{Number(contract?.annual_fee || 0).toFixed(2)} &middot;
+                        {t('school.paidProgress')} &euro;{totalPaid.toFixed(2)} / &euro;{totalDue.toFixed(2)}
                       </p>
                     </div>
                     <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
@@ -270,10 +272,10 @@ export default function SchoolPayments() {
                         <span className="text-sm font-medium text-gray-700 w-6 text-center">#{inst.installment_number}</span>
                         <div>
                           <p className="text-sm font-medium text-gray-900">&euro;{Number(inst.amount).toFixed(2)}</p>
-                          <p className="text-xs text-gray-400">Due: {new Date(inst.due_date).toLocaleDateString('lt-LT')}</p>
+                          <p className="text-xs text-gray-400">{t('school.dueLabel')} {new Date(inst.due_date).toLocaleDateString('lt-LT')}</p>
                         </div>
                         {statusBadge(inst.payment_status)}
-                        {inst.paid_at && <span className="text-xs text-gray-400">Paid {new Date(inst.paid_at).toLocaleDateString('lt-LT')}</span>}
+                        {inst.paid_at && <span className="text-xs text-gray-400">{t('school.paidLabel')} {new Date(inst.paid_at).toLocaleDateString('lt-LT')}</span>}
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         {inst.payment_status === 'pending' && (
@@ -301,13 +303,13 @@ export default function SchoolPayments() {
       <Dialog open={scheduleOpen} onOpenChange={setScheduleOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Create Payment Schedule</DialogTitle>
+            <DialogTitle>{t('school.createScheduleTitle')}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>Contract (signed) *</Label>
+              <Label>{t('school.contractSignedStar')}</Label>
               <Select value={selectedContractId} onValueChange={setSelectedContractId}>
-                <SelectTrigger><SelectValue placeholder="Select contract" /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder={t('school.selectContract')} /></SelectTrigger>
                 <SelectContent>
                   {contracts.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
@@ -319,15 +321,15 @@ export default function SchoolPayments() {
             </div>
 
             <div className="flex items-center justify-between">
-              <p className="text-sm font-medium text-gray-700">Installments</p>
+              <p className="text-sm font-medium text-gray-700">{t('school.installments')}</p>
               <div className="flex items-center gap-2">
                 {selectedContractId && (
                   <Button size="sm" variant="ghost" onClick={autoSplit} className="text-xs">
-                    Auto-split evenly
+                    {t('school.autoSplit')}
                   </Button>
                 )}
                 <Button size="sm" variant="outline" onClick={addRow}>
-                  <Plus className="w-3.5 h-3.5 mr-1" /> Add
+                  <Plus className="w-3.5 h-3.5 mr-1" /> {t('school.add')}
                 </Button>
               </div>
             </div>
@@ -341,7 +343,7 @@ export default function SchoolPayments() {
                     <Input type="number" step="0.01" value={row.amount} onChange={(e) => updateRow(idx, 'amount', e.target.value)} placeholder="100.00" />
                   </div>
                   <div className="flex-1 space-y-1">
-                    <Label className="text-xs">Due Date</Label>
+                    <Label className="text-xs">{t('school.dueDateField')}</Label>
                     <Input type="date" value={row.due_date} onChange={(e) => updateRow(idx, 'due_date', e.target.value)} />
                   </div>
                   {rows.length > 1 && (
@@ -355,18 +357,21 @@ export default function SchoolPayments() {
 
             {selectedContractId && rows.length > 0 && (
               <div className="text-sm text-gray-500 bg-gray-50 rounded-lg p-3">
-                Total: &euro;{rows.reduce((s, r) => s + (Number(r.amount) || 0), 0).toFixed(2)} of &euro;{Number(contracts.find((c) => c.id === selectedContractId)?.annual_fee || 0).toFixed(2)} annual fee
+                {t('school.scheduleTotal', {
+                  sum: rows.reduce((s, r) => s + (Number(r.amount) || 0), 0).toFixed(2),
+                  annual: Number(contracts.find((c) => c.id === selectedContractId)?.annual_fee || 0).toFixed(2),
+                })}
               </div>
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setScheduleOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setScheduleOpen(false)}>{t('school.cancel')}</Button>
             <Button
               onClick={createSchedule}
               disabled={saving || !selectedContractId || rows.some((r) => !r.amount || !r.due_date)}
               className="bg-emerald-600 hover:bg-emerald-700"
             >
-              {saving ? 'Creating...' : 'Create Schedule'}
+              {saving ? t('school.creatingSchedule') : t('school.createSchedule')}
             </Button>
           </DialogFooter>
         </DialogContent>

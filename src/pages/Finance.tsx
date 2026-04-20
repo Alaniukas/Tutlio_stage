@@ -118,7 +118,10 @@ export default function FinancePage() {
   const fetchData = async () => {
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     setUserId(user.id);
 
     const { data: tutorData } = await supabase
@@ -191,6 +194,16 @@ export default function FinancePage() {
     );
   }
 
+  if (loading) {
+    return (
+      <Layout>
+        <div className="max-w-4xl mx-auto py-12 text-center">
+          <Loader2 className="w-6 h-6 animate-spin text-gray-400 mx-auto" />
+        </div>
+      </Layout>
+    );
+  }
+
   if (orgPolicy.isOrgTutor) {
     return (
       <Layout>
@@ -207,7 +220,7 @@ export default function FinancePage() {
 
   return (
     <Layout>
-      <div className="max-w-4xl mx-auto space-y-6 animate-fade-in">
+      <div className="max-w-[1400px] mx-auto space-y-6 animate-fade-in px-4 sm:px-6 lg:px-8">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{t('finance.title')}</h1>
           <p className="text-gray-500 mt-1 text-sm">{t('finance.subtitle')}</p>
@@ -228,11 +241,19 @@ export default function FinancePage() {
           </div>
         )}
 
-        {profile.stripe_onboarding_complete && userId && (
-          <TutorFinanceReport userId={userId} />
-        )}
+        <div className="grid gap-6 xl:grid-cols-12 items-start">
+          {profile.stripe_onboarding_complete && userId && (
+            <div className="xl:col-span-8 min-w-0">
+              <TutorFinanceReport userId={userId} />
+            </div>
+          )}
 
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6">
+        <div
+          className={cn(
+            'bg-white rounded-2xl shadow-sm border border-gray-100 p-6 md:p-7 space-y-6',
+            profile.stripe_onboarding_complete && userId ? 'xl:col-span-4' : 'xl:col-span-12',
+          )}
+        >
           <div>
             <h2 className="text-lg font-semibold text-gray-900 mb-1">{t('finance.stripeAccount')}</h2>
             <p className="text-sm text-gray-500">{t('finance.stripeAccountDesc')}</p>
@@ -320,95 +341,105 @@ export default function FinancePage() {
             </div>
           )}
 
-          {profile.enable_per_lesson && (
-            <>
-              <div className="h-px bg-gray-100" />
-
-              <div>
-                <h3 className="text-sm font-semibold text-gray-900 mb-2">{t('finance.paymentTiming')}</h3>
-                <p className="text-sm text-gray-500 mb-4">{t('finance.paymentTimingDesc')}</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <button
-                type="button"
-                onClick={() => setProfile((p) => ({ ...p, payment_timing: 'before_lesson' }))}
-                className={cn(
-                  'p-4 rounded-xl border-2 text-left transition-all',
-                  profile.payment_timing === 'before_lesson'
-                    ? 'border-violet-500 bg-violet-50'
-                    : 'border-gray-200 hover:border-violet-200'
-                )}
-              >
-                <div className="flex items-center gap-2 font-semibold text-gray-900">
-                  <Clock className="w-5 h-5 text-violet-600" />
-                  {t('finance.beforeLesson')}
-                </div>
-                <p className="text-xs text-gray-600 mt-1">{t('finance.beforeLessonDesc')}</p>
-              </button>
-              <button
-                type="button"
-                onClick={() => setProfile((p) => ({ ...p, payment_timing: 'after_lesson' }))}
-                className={cn(
-                  'p-4 rounded-xl border-2 text-left transition-all',
-                  profile.payment_timing === 'after_lesson'
-                    ? 'border-violet-500 bg-violet-50'
-                    : 'border-gray-200 hover:border-violet-200'
-                )}
-              >
-                <div className="flex items-center gap-2 font-semibold text-gray-900">
-                  <Euro className="w-5 h-5 text-violet-600" />
-                  {t('finance.afterLesson')}
-                </div>
-                <p className="text-xs text-gray-600 mt-1">{t('finance.afterLessonDesc')}</p>
-              </button>
-            </div>
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <label className="text-sm font-medium text-gray-700">
-                {profile.payment_timing === 'before_lesson' ? t('finance.payBefore') : t('finance.payAfter')}
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={168}
-                value={profile.payment_deadline_hours}
-                onChange={(e) => setProfile((p) => ({ ...p, payment_deadline_hours: Math.max(1, parseInt(e.target.value) || 24) }))}
-                className="w-20 px-3 py-2 rounded-xl border border-gray-200 text-sm"
-              />
-              <span className="text-sm text-gray-500">{t('finance.hoursLabel')}</span>
-              {profile.payment_timing === 'before_lesson' && profile.payment_deadline_hours > minBookingHours && (
-                <p className="text-sm text-amber-700 w-full">
-                  {t('finance.deadlineWarning', { hours: minBookingHours })}
-                </p>
-              )}
-              <Button
-                size="sm"
-                onClick={async () => {
-                  if (profile.payment_timing === 'before_lesson' && profile.payment_deadline_hours > minBookingHours) return;
-                  setSavingPaymentSettings(true);
-                  const ok = await persistFinanceProfile({
-                    payment_timing: profile.payment_timing,
-                    payment_deadline_hours: profile.payment_deadline_hours,
-                  });
-                  if (ok) {
-                    setSaved(true);
-                    setSavedMessage('payment_settings');
-                    setTimeout(() => { setSaved(false); setSavedMessage(null); }, 3000);
-                  }
-                  setSavingPaymentSettings(false);
-                }}
-                disabled={savingPaymentSettings || !userId || (profile.payment_timing === 'before_lesson' && profile.payment_deadline_hours > minBookingHours)}
-                className="rounded-xl"
-              >
-                {savingPaymentSettings ? <Loader2 className="w-4 h-4 animate-spin" /> : t('common.save')}
-              </Button>
-            </div>
-
+          <div className="h-px bg-gray-100" />
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900 mb-2">{t('finance.sfInvoicesTitle')}</h3>
+            <p className="text-sm text-gray-500 mb-4">{t('finance.sfInvoicesDesc')}</p>
+            <Button
+              onClick={() => navigate('/invoices')}
+              variant="outline"
+              className="rounded-xl gap-2"
+            >
+              <FileText className="w-4 h-4" />
+              {t('finance.goToInvoices')}
+            </Button>
           </div>
-            </>
+
+        </div>
+
+        <div className="xl:col-span-12 grid gap-6 lg:grid-cols-2">
+          {profile.enable_per_lesson && (
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+              <h3 className="text-sm font-semibold text-gray-900 mb-2">{t('finance.paymentTiming')}</h3>
+              <p className="text-sm text-gray-500 mb-4">{t('finance.paymentTimingDesc')}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <button
+                  type="button"
+                  onClick={() => setProfile((p) => ({ ...p, payment_timing: 'before_lesson' }))}
+                  className={cn(
+                    'p-4 rounded-xl border-2 text-left transition-all',
+                    profile.payment_timing === 'before_lesson'
+                      ? 'border-violet-500 bg-violet-50'
+                      : 'border-gray-200 hover:border-violet-200'
+                  )}
+                >
+                  <div className="flex items-center gap-2 font-semibold text-gray-900">
+                    <Clock className="w-5 h-5 text-violet-600" />
+                    {t('finance.beforeLesson')}
+                  </div>
+                  <p className="text-xs text-gray-600 mt-1">{t('finance.beforeLessonDesc')}</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setProfile((p) => ({ ...p, payment_timing: 'after_lesson' }))}
+                  className={cn(
+                    'p-4 rounded-xl border-2 text-left transition-all',
+                    profile.payment_timing === 'after_lesson'
+                      ? 'border-violet-500 bg-violet-50'
+                      : 'border-gray-200 hover:border-violet-200'
+                  )}
+                >
+                  <div className="flex items-center gap-2 font-semibold text-gray-900">
+                    <Euro className="w-5 h-5 text-violet-600" />
+                    {t('finance.afterLesson')}
+                  </div>
+                  <p className="text-xs text-gray-600 mt-1">{t('finance.afterLessonDesc')}</p>
+                </button>
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <label className="text-sm font-medium text-gray-700">
+                  {profile.payment_timing === 'before_lesson' ? t('finance.payBefore') : t('finance.payAfter')}
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={168}
+                  value={profile.payment_deadline_hours}
+                  onChange={(e) => setProfile((p) => ({ ...p, payment_deadline_hours: Math.max(1, parseInt(e.target.value) || 24) }))}
+                  className="w-20 px-3 py-2 rounded-xl border border-gray-200 text-sm"
+                />
+                <span className="text-sm text-gray-500">{t('finance.hoursLabel')}</span>
+                {profile.payment_timing === 'before_lesson' && profile.payment_deadline_hours > minBookingHours && (
+                  <p className="text-sm text-amber-700 w-full">
+                    {t('finance.deadlineWarning', { hours: minBookingHours })}
+                  </p>
+                )}
+                <Button
+                  size="sm"
+                  onClick={async () => {
+                    if (profile.payment_timing === 'before_lesson' && profile.payment_deadline_hours > minBookingHours) return;
+                    setSavingPaymentSettings(true);
+                    const ok = await persistFinanceProfile({
+                      payment_timing: profile.payment_timing,
+                      payment_deadline_hours: profile.payment_deadline_hours,
+                    });
+                    if (ok) {
+                      setSaved(true);
+                      setSavedMessage('payment_settings');
+                      setTimeout(() => { setSaved(false); setSavedMessage(null); }, 3000);
+                    }
+                    setSavingPaymentSettings(false);
+                  }}
+                  disabled={savingPaymentSettings || !userId || (profile.payment_timing === 'before_lesson' && profile.payment_deadline_hours > minBookingHours)}
+                  className="rounded-xl"
+                >
+                  {savingPaymentSettings ? <Loader2 className="w-4 h-4 animate-spin" /> : t('common.save')}
+                </Button>
+              </div>
+            </div>
           )}
 
-          <div className="h-px bg-gray-100" />
-
-          <div>
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
             <h3 className="text-sm font-semibold text-gray-900 mb-1">{t('finance.studentAccess')}</h3>
             <p className="text-sm text-gray-500 mb-4">{t('finance.studentAccessDesc')}</p>
             <label className="flex items-start gap-3 p-4 rounded-xl border-2 border-gray-200 hover:border-violet-200 cursor-pointer transition-all">
@@ -444,12 +475,10 @@ export default function FinancePage() {
             </Button>
           </div>
 
-          <div className="h-px bg-gray-100" />
-
-          <div>
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 lg:col-span-2">
             <h3 className="text-sm font-semibold text-gray-900 mb-2">{t('finance.paymentModels')}</h3>
             <p className="text-sm text-gray-500 mb-4">{t('finance.paymentModelsDesc')}</p>
-            <div className="space-y-3">
+            <div className="grid gap-3 md:grid-cols-2">
               <label className="flex items-start gap-3 p-4 rounded-xl border-2 border-gray-200 hover:border-violet-200 cursor-pointer transition-all">
                 <input
                   type="checkbox"
@@ -532,75 +561,54 @@ export default function FinancePage() {
           </div>
 
           {profile.enable_monthly_billing && (
-            <>
-              <div className="h-px bg-gray-100" />
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+              <h3 className="text-sm font-semibold text-gray-900 mb-2">{t('finance.monthlyInvoicesTitle')}</h3>
+              <p className="text-sm text-gray-500 mb-4">{t('finance.monthlyInvoicesInfo')}</p>
 
-              <div>
-                <h3 className="text-sm font-semibold text-gray-900 mb-2">{t('finance.monthlyInvoicesTitle')}</h3>
-                <p className="text-sm text-gray-500 mb-4">{t('finance.monthlyInvoicesInfo')}</p>
+              <Button
+                onClick={() => setIsSendInvoiceModalOpen(true)}
+                className="rounded-xl gap-2 bg-indigo-600 hover:bg-indigo-700 mb-4"
+              >
+                <FileText className="w-4 h-4" />
+                {t('finance.sendInvoicesAll')}
+              </Button>
 
-                <Button
-                  onClick={() => setIsSendInvoiceModalOpen(true)}
-                  className="rounded-xl gap-2 bg-indigo-600 hover:bg-indigo-700 mb-4"
-                >
-                  <FileText className="w-4 h-4" />
-                  {t('finance.sendInvoicesAll')}
-                </Button>
-
-                <div className="flex items-start gap-3 p-4 bg-blue-50 border border-blue-200 rounded-xl">
-                  <div className="text-blue-600">ℹ️</div>
-                  <div className="text-sm text-blue-800">
-                    <p className="font-semibold mb-1">{t('finance.monthlyHow')}</p>
-                    <ul className="list-disc list-inside space-y-1 text-xs">
-                      <li>{t('finance.monthlyStep1')}</li>
-                      <li>{t('finance.monthlyStep2')}</li>
-                      <li>{t('finance.monthlyStep3')}</li>
-                      <li>{t('finance.monthlyStep4')}</li>
-                    </ul>
-                  </div>
+              <div className="flex items-start gap-3 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+                <div className="text-blue-600">ℹ️</div>
+                <div className="text-sm text-blue-800">
+                  <p className="font-semibold mb-1">{t('finance.monthlyHow')}</p>
+                  <ul className="list-disc list-inside space-y-1 text-xs">
+                    <li>{t('finance.monthlyStep1')}</li>
+                    <li>{t('finance.monthlyStep2')}</li>
+                    <li>{t('finance.monthlyStep3')}</li>
+                    <li>{t('finance.monthlyStep4')}</li>
+                  </ul>
                 </div>
               </div>
-            </>
+            </div>
           )}
 
           {profile.enable_prepaid_packages && (
-            <>
-              <div className="h-px bg-gray-100" />
-
-              <div>
-                <h3 className="text-sm font-semibold text-gray-900 mb-2">{t('finance.packagesTitle')}</h3>
-                <p className="text-sm text-gray-500 mb-4">{t('finance.packagesInfo')}</p>
-                <div className="flex items-start gap-3 p-4 bg-purple-50 border border-purple-200 rounded-xl">
-                  <div className="text-purple-600">ℹ️</div>
-                  <div className="text-sm text-purple-800">
-                    <p className="font-semibold mb-1">{t('finance.packagesHow')}</p>
-                    <ul className="list-disc list-inside space-y-1 text-xs">
-                      <li>{t('finance.packagesStep1')}</li>
-                      <li>{t('finance.packagesStep2')}</li>
-                      <li>{t('finance.packagesStep3')}</li>
-                      <li>{t('finance.packagesStep4')}</li>
-                      <li>{t('finance.packagesStep5')}</li>
-                    </ul>
-                  </div>
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+              <h3 className="text-sm font-semibold text-gray-900 mb-2">{t('finance.packagesTitle')}</h3>
+              <p className="text-sm text-gray-500 mb-4">{t('finance.packagesInfo')}</p>
+              <div className="flex items-start gap-3 p-4 bg-purple-50 border border-purple-200 rounded-xl">
+                <div className="text-purple-600">ℹ️</div>
+                <div className="text-sm text-purple-800">
+                  <p className="font-semibold mb-1">{t('finance.packagesHow')}</p>
+                  <ul className="list-disc list-inside space-y-1 text-xs">
+                    <li>{t('finance.packagesStep1')}</li>
+                    <li>{t('finance.packagesStep2')}</li>
+                    <li>{t('finance.packagesStep3')}</li>
+                    <li>{t('finance.packagesStep4')}</li>
+                    <li>{t('finance.packagesStep5')}</li>
+                  </ul>
                 </div>
               </div>
-            </>
+            </div>
           )}
 
-          <div className="h-px bg-gray-100" />
-
-          <div>
-            <h3 className="text-sm font-semibold text-gray-900 mb-2">{t('finance.sfInvoicesTitle')}</h3>
-            <p className="text-sm text-gray-500 mb-4">{t('finance.sfInvoicesDesc')}</p>
-            <Button
-              onClick={() => navigate('/invoices')}
-              variant="outline"
-              className="rounded-xl gap-2"
-            >
-              <FileText className="w-4 h-4" />
-              {t('finance.goToInvoices')}
-            </Button>
-          </div>
+        </div>
         </div>
 
       </div>

@@ -6,8 +6,10 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Settings, Save } from 'lucide-react';
 import Toast from '@/components/Toast';
+import { useTranslation } from '@/lib/i18n';
 
 export default function SchoolSettings() {
+  const { t } = useTranslation();
   const [schoolId, setSchoolId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -48,7 +50,7 @@ export default function SchoolSettings() {
     if (error) {
       setToast({ message: error.message, type: 'error' });
     } else {
-      setToast({ message: 'Settings saved', type: 'success' });
+      setToast({ message: t('school.settingsSaved'), type: 'success' });
     }
   };
 
@@ -70,23 +72,23 @@ export default function SchoolSettings() {
               <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center">
                 <Settings className="w-5 h-5" />
               </div>
-              <h2 className="font-semibold text-gray-900">School Information</h2>
+              <h2 className="font-semibold text-gray-900">{t('school.settingsCardTitle')}</h2>
             </div>
 
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label>School Name</Label>
-                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="School name" />
+                <Label>{t('school.settingsName')}</Label>
+                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('school.settingsName')} />
               </div>
               <div className="space-y-2">
-                <Label>Contact Email</Label>
-                <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="admin@school.lt" />
+                <Label>{t('school.settingsEmail')}</Label>
+                <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="admin@mokykla.lt" />
               </div>
             </div>
 
             <Button onClick={handleSave} disabled={saving || !name.trim() || !email.trim()} className="bg-emerald-600 hover:bg-emerald-700">
               <Save className="w-4 h-4 mr-2" />
-              {saving ? 'Saving...' : 'Save Changes'}
+              {saving ? t('school.saving') : t('school.saveChanges')}
             </Button>
           </div>
         )}

@@ -58,7 +58,7 @@ export default function SchoolLogin() {
 
     if (!adminRow) {
       await supabase.auth.signOut();
-      setError('This account is not a school administrator.');
+      setError(t('school.notSchoolAdmin'));
       setLoading(false);
       return;
     }
@@ -81,9 +81,9 @@ export default function SchoolLogin() {
           <div className="w-14 h-14 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center">
             <School className="w-7 h-7 text-white" />
           </div>
-          <h1 className="text-4xl font-bold leading-tight">School Administration</h1>
+          <h1 className="text-4xl font-bold leading-tight">{t('school.loginHeroTitle')}</h1>
           <p className="text-emerald-200 text-lg leading-relaxed font-light">
-            Manage contracts, payments, and student registrations for your school.
+            {t('school.loginHeroSubtitle')}
           </p>
         </div>
 
@@ -102,13 +102,13 @@ export default function SchoolLogin() {
               <School className="w-7 h-7 text-white" />
             </div>
             <h1 className="text-2xl font-bold text-white tracking-tight">Tutlio</h1>
-            <p className="text-emerald-300/70 text-sm mt-1">School Admin Portal</p>
+            <p className="text-emerald-300/70 text-sm mt-1">{t('school.loginPortalBadge')}</p>
           </div>
 
           <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
             <div className="bg-gradient-to-br from-emerald-700 to-teal-900 px-6 py-5">
-              <p className="text-white/70 text-xs font-medium uppercase tracking-wider">School Admin</p>
-              <h2 className="text-white text-xl font-bold mt-0.5">Log in to your account</h2>
+              <p className="text-white/70 text-xs font-medium uppercase tracking-wider">{t('school.loginCardBadge')}</p>
+              <h2 className="text-white text-xl font-bold mt-0.5">{t('school.loginCardTitle')}</h2>
             </div>
 
             <form onSubmit={handleLogin} className="p-6 space-y-4">

@@ -3,6 +3,7 @@ import SchoolLayout from '@/components/SchoolLayout';
 import { supabase } from '@/lib/supabase';
 import { Users, FileText, CreditCard, CheckCircle, Clock, AlertCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from '@/lib/i18n';
 
 interface Stats {
   totalStudents: number;
@@ -26,6 +27,7 @@ const defaultStats: Stats = {
 };
 
 export default function SchoolDashboard() {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [schoolName, setSchoolName] = useState('');
   const [stats, setStats] = useState<Stats>(defaultStats);
@@ -73,27 +75,32 @@ export default function SchoolDashboard() {
 
   const cards = [
     {
-      label: 'Students',
+      label: t('school.cardStudents'),
       value: stats.totalStudents,
-      sub: `${stats.registeredStudents} registered, ${stats.pendingStudents} pending`,
+      sub: t('school.cardStudentsSub', { registered: stats.registeredStudents, pending: stats.pendingStudents }),
       icon: <Users className="w-5 h-5" />,
       iconBg: 'bg-emerald-100',
       iconColor: 'text-emerald-600',
       href: '/school/students',
     },
     {
-      label: 'Contracts',
+      label: t('school.cardContracts'),
       value: stats.totalContracts,
-      sub: `${stats.signedContracts} signed, ${stats.draftContracts} draft`,
+      sub: t('school.cardContractsSub', { signed: stats.signedContracts, draft: stats.draftContracts }),
       icon: <FileText className="w-5 h-5" />,
       iconBg: 'bg-blue-100',
       iconColor: 'text-blue-600',
       href: '/school/contracts',
     },
     {
-      label: 'Payments',
+      label: t('school.cardPayments'),
       value: `${stats.paidInstallments}/${stats.totalInstallments}`,
-      sub: `€${stats.totalPaidAmount.toFixed(2)} of €${stats.totalDueAmount.toFixed(2)} collected`,
+      sub: t('school.cardPaymentsSub', {
+        paid: stats.paidInstallments,
+        total: stats.totalInstallments,
+        collected: stats.totalPaidAmount.toFixed(2),
+        due: stats.totalDueAmount.toFixed(2),
+      }),
       icon: <CreditCard className="w-5 h-5" />,
       iconBg: 'bg-violet-100',
       iconColor: 'text-violet-600',
@@ -136,30 +143,36 @@ export default function SchoolDashboard() {
 
             {/* Quick status */}
             <div className="bg-white rounded-xl border border-gray-200 p-5">
-              <h2 className="font-semibold text-gray-900 mb-4">Quick Status</h2>
+              <h2 className="font-semibold text-gray-900 mb-4">{t('school.quickStatus')}</h2>
               <div className="space-y-3">
                 {stats.draftContracts > 0 && (
                   <div className="flex items-center gap-3 text-sm">
                     <Clock className="w-4 h-4 text-amber-500" />
-                    <span className="text-gray-700"><strong>{stats.draftContracts}</strong> contract{stats.draftContracts !== 1 ? 's' : ''} still in draft — <Link to="/school/contracts" className="text-emerald-600 hover:underline">send them</Link></span>
+                    <span className="text-gray-700">
+                      {t('school.quickDraftPrefix', { n: stats.draftContracts })}
+                      <Link to="/school/contracts" className="text-emerald-600 hover:underline">{t('school.quickDraftLink')}</Link>
+                    </span>
                   </div>
                 )}
                 {stats.pendingInstallments > 0 && (
                   <div className="flex items-center gap-3 text-sm">
                     <AlertCircle className="w-4 h-4 text-red-500" />
-                    <span className="text-gray-700"><strong>{stats.pendingInstallments}</strong> installment{stats.pendingInstallments !== 1 ? 's' : ''} awaiting payment — <Link to="/school/payments" className="text-emerald-600 hover:underline">manage</Link></span>
+                    <span className="text-gray-700">
+                      {t('school.quickPendingPrefix', { n: stats.pendingInstallments })}
+                      <Link to="/school/payments" className="text-emerald-600 hover:underline">{t('school.quickPendingLink')}</Link>
+                    </span>
                   </div>
                 )}
                 {stats.pendingStudents > 0 && (
                   <div className="flex items-center gap-3 text-sm">
                     <Users className="w-4 h-4 text-blue-500" />
-                    <span className="text-gray-700"><strong>{stats.pendingStudents}</strong> student{stats.pendingStudents !== 1 ? 's' : ''} not yet registered on platform</span>
+                    <span className="text-gray-700">{t('school.quickPendingReg', { n: stats.pendingStudents })}</span>
                   </div>
                 )}
                 {stats.draftContracts === 0 && stats.pendingInstallments === 0 && stats.pendingStudents === 0 && (
                   <div className="flex items-center gap-3 text-sm">
                     <CheckCircle className="w-4 h-4 text-green-500" />
-                    <span className="text-gray-700">Everything looks good!</span>
+                    <span className="text-gray-700">{t('school.quickAllGood')}</span>
                   </div>
                 )}
               </div>

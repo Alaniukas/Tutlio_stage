@@ -236,6 +236,8 @@
 
 .rbc-month-view .rbc-month-row {
   border-top: 1px solid #e5e7eb;
+  min-height: 96px;
+  flex: 1 1 0%;
 }
 
 .rbc-off-range-bg {

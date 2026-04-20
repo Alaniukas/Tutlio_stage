@@ -23,6 +23,7 @@ import {
 import { Plus, FileText, Send, CheckCircle, Clock, Edit2, Trash2 } from 'lucide-react';
 import Toast from '@/components/Toast';
 import { sendEmail } from '@/lib/email';
+import { useTranslation } from '@/lib/i18n';
 
 interface Student {
   id: string;
@@ -53,22 +54,6 @@ interface Contract {
   student?: { full_name: string; email: string; payer_name: string | null; payer_email: string | null };
 }
 
-const DEFAULT_TEMPLATE_BODY = `ANNUAL FEE CONTRACT
-
-School: {{school_name}}
-Date: {{date}}
-
-Student: {{student_name}}
-Parent/Guardian: {{parent_name}}
-
-Annual Fee: €{{annual_fee}}
-
-This contract confirms the enrollment of {{student_name}} and the obligation to pay the annual fee of €{{annual_fee}}.
-
-Signatures:
-School representative: ____________________
-Parent/Guardian: ____________________`;
-
 const PLACEHOLDERS = ['{{student_name}}', '{{parent_name}}', '{{parent_email}}', '{{annual_fee}}', '{{date}}', '{{school_name}}'];
 
 function fillPlaceholders(body: string, data: Record<string, string>): string {
@@ -80,6 +65,7 @@ function fillPlaceholders(body: string, data: Record<string, string>): string {
 }
 
 export default function SchoolContracts() {
+  const { t: tr } = useTranslation();
   const [schoolId, setSchoolId] = useState<string | null>(null);
   const [schoolName, setSchoolName] = useState('');
   const [schoolEmail, setSchoolEmail] = useState('');
@@ -91,7 +77,7 @@ export default function SchoolContracts() {
 
   const [templateOpen, setTemplateOpen] = useState(false);
   const [editTemplate, setEditTemplate] = useState<Template | null>(null);
-  const [tForm, setTForm] = useState({ name: '', body: DEFAULT_TEMPLATE_BODY, annual_fee_default: '' });
+  const [tForm, setTForm] = useState({ name: '', body: '', annual_fee_default: '' });
 
   const [contractOpen, setContractOpen] = useState(false);
   const [cForm, setCForm] = useState({ student_id: '', template_id: '', annual_fee: '', filled_body: '' });
@@ -168,7 +154,7 @@ export default function SchoolContracts() {
   };
 
   const openCreateContract = () => {
-    setCForm({ student_id: '', template_id: '', annual_fee: '', filled_body: '' });
+    setCForm({ student_id: '', template_id: '', annual_fee: '', filled_body: tr('school.contract.defaultBody') });
     setContractOpen(true);
   };
 
@@ -223,7 +209,7 @@ export default function SchoolContracts() {
     setSaving(false);
     if (error) { setToast({ message: error.message, type: 'error' }); return; }
     setContractOpen(false);
-    setToast({ message: 'Contract created', type: 'success' });
+    setToast({ message: tr('school.toastContractCreated'), type: 'success' });
     load();
   };
 
@@ -231,7 +217,7 @@ export default function SchoolContracts() {
     const student = contract.student;
     const recipient = student?.payer_email || student?.email;
     if (!recipient) {
-      setToast({ message: 'No email address for this student or parent', type: 'error' });
+      setToast({ message: tr('school.toastNoEmail'), type: 'error' });
       return;
     }
 
@@ -255,10 +241,10 @@ export default function SchoolContracts() {
         .from('school_contracts')
         .update({ signing_status: 'sent', sent_at: new Date().toISOString() })
         .eq('id', contract.id);
-      setToast({ message: 'Contract sent', type: 'success' });
+      setToast({ message: tr('school.toastContractSent'), type: 'success' });
       load();
     } else {
-      setToast({ message: 'Failed to send contract email', type: 'error' });
+      setToast({ message: tr('school.toastContractSendFail'), type: 'error' });
     }
   };
 
@@ -267,21 +253,21 @@ export default function SchoolContracts() {
       .from('school_contracts')
       .update({ signing_status: 'signed', signed_at: new Date().toISOString() })
       .eq('id', contractId);
-    setToast({ message: 'Contract marked as signed', type: 'success' });
+    setToast({ message: tr('school.toastContractSigned'), type: 'success' });
     load();
   };
 
   const deleteContract = async (id: string) => {
-    if (!confirm('Delete this contract?')) return;
+    if (!confirm(tr('school.confirmDeleteContract'))) return;
     await supabase.from('school_contracts').delete().eq('id', id);
     setContracts((prev) => prev.filter((c) => c.id !== id));
   };
 
   const statusBadge = (s: Contract['signing_status']) => {
     const map = {
-      draft: { label: 'Draft', cls: 'bg-gray-100 text-gray-600' },
-      sent: { label: 'Sent', cls: 'bg-amber-50 text-amber-700' },
-      signed: { label: 'Signed', cls: 'bg-green-50 text-green-700' },
+      draft: { label: tr('school.draft'), cls: 'bg-gray-100 text-gray-600' },
+      sent: { label: tr('school.sentStatus'), cls: 'bg-amber-50 text-amber-700' },
+      signed: { label: tr('school.signedStatus'), cls: 'bg-green-50 text-green-700' },
     };
     const { label, cls } = map[s];
     return <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${cls}`}>{label}</span>;
@@ -291,23 +277,23 @@ export default function SchoolContracts() {
     <SchoolLayout>
       <div className="max-w-5xl mx-auto space-y-6">
         <div className="flex items-center justify-between gap-4 flex-wrap">
-          <h1 className="text-2xl font-bold text-gray-900">Contracts</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{tr('school.contractsTitle')}</h1>
           <div className="flex items-center gap-2">
             <div className="bg-gray-100 rounded-lg p-1 flex gap-1">
               <button onClick={() => setTab('contracts')} className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === 'contracts' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>
-                Contracts
+                {tr('school.tabContracts')}
               </button>
               <button onClick={() => setTab('templates')} className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === 'templates' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>
-                Templates
+                {tr('school.tabTemplates')}
               </button>
             </div>
             {tab === 'contracts' ? (
               <Button onClick={openCreateContract} className="bg-emerald-600 hover:bg-emerald-700">
-                <Plus className="w-4 h-4 mr-2" /> New Contract
+                <Plus className="w-4 h-4 mr-2" /> {tr('school.newContract')}
               </Button>
             ) : (
-              <Button onClick={() => { setEditTemplate(null); setTForm({ name: '', body: DEFAULT_TEMPLATE_BODY, annual_fee_default: '' }); setTemplateOpen(true); }} className="bg-emerald-600 hover:bg-emerald-700">
-                <Plus className="w-4 h-4 mr-2" /> New Template
+              <Button onClick={() => { setEditTemplate(null); setTForm({ name: '', body: tr('school.contract.defaultBody'), annual_fee_default: '' }); setTemplateOpen(true); }} className="bg-emerald-600 hover:bg-emerald-700">
+                <Plus className="w-4 h-4 mr-2" /> {tr('school.newTemplate')}
               </Button>
             )}
           </div>
@@ -321,7 +307,7 @@ export default function SchoolContracts() {
           contracts.length === 0 ? (
             <div className="text-center py-20">
               <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-              <p className="text-gray-500">No contracts yet. Create a template first, then create contracts for students.</p>
+              <p className="text-gray-500">{tr('school.noContracts')}</p>
             </div>
           ) : (
             <div className="grid gap-3">
@@ -334,20 +320,20 @@ export default function SchoolContracts() {
                         {statusBadge(c.signing_status)}
                       </div>
                       <p className="text-sm text-gray-500 mt-1">
-                        Annual fee: <span className="font-medium text-gray-700">&euro;{Number(c.annual_fee).toFixed(2)}</span>
-                        {c.sent_at && <span className="ml-3">Sent: {new Date(c.sent_at).toLocaleDateString('lt-LT')}</span>}
-                        {c.signed_at && <span className="ml-3">Signed: {new Date(c.signed_at).toLocaleDateString('lt-LT')}</span>}
+                        {tr('school.annualFee')} <span className="font-medium text-gray-700">&euro;{Number(c.annual_fee).toFixed(2)}</span>
+                        {c.sent_at && <span className="ml-3">{tr('school.sent')} {new Date(c.sent_at).toLocaleDateString('lt-LT')}</span>}
+                        {c.signed_at && <span className="ml-3">{tr('school.signed')} {new Date(c.signed_at).toLocaleDateString('lt-LT')}</span>}
                       </p>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       {c.signing_status === 'draft' && (
                         <Button size="sm" variant="outline" onClick={() => sendContract(c)}>
-                          <Send className="w-3.5 h-3.5 mr-1.5" /> Send
+                          <Send className="w-3.5 h-3.5 mr-1.5" /> {tr('school.send')}
                         </Button>
                       )}
                       {c.signing_status === 'sent' && (
                         <Button size="sm" variant="outline" onClick={() => markSigned(c.id)} className="text-green-700 border-green-200 hover:bg-green-50">
-                          <CheckCircle className="w-3.5 h-3.5 mr-1.5" /> Mark Signed
+                          <CheckCircle className="w-3.5 h-3.5 mr-1.5" /> {tr('school.markSigned')}
                         </Button>
                       )}
                       <button onClick={() => deleteContract(c.id)} className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">
@@ -363,23 +349,23 @@ export default function SchoolContracts() {
           templates.length === 0 ? (
             <div className="text-center py-20">
               <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-              <p className="text-gray-500">No templates yet. Create your first contract template.</p>
+              <p className="text-gray-500">{tr('school.noTemplates')}</p>
             </div>
           ) : (
             <div className="grid gap-3">
-              {templates.map((t) => (
-                <div key={t.id} className="bg-white rounded-xl border border-gray-200 p-4 flex items-center justify-between gap-3">
+              {templates.map((tpl) => (
+                <div key={tpl.id} className="bg-white rounded-xl border border-gray-200 p-4 flex items-center justify-between gap-3">
                   <div>
-                    <p className="font-semibold text-gray-900">{t.name}</p>
+                    <p className="font-semibold text-gray-900">{tpl.name}</p>
                     <p className="text-sm text-gray-500 mt-0.5">
-                      Default fee: {t.annual_fee_default ? `€${t.annual_fee_default}` : 'Not set'}
+                      {tr('school.defaultFee')} {tpl.annual_fee_default ? `€${tpl.annual_fee_default}` : tr('school.defaultFeeNotSet')}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button size="sm" variant="outline" onClick={() => openEditTemplate(t)}>
-                      <Edit2 className="w-3.5 h-3.5 mr-1.5" /> Edit
+                    <Button size="sm" variant="outline" onClick={() => openEditTemplate(tpl)}>
+                      <Edit2 className="w-3.5 h-3.5 mr-1.5" /> {tr('school.edit')}
                     </Button>
-                    <button onClick={() => deleteTemplate(t.id)} className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">
+                    <button onClick={() => deleteTemplate(tpl.id)} className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
@@ -431,14 +417,14 @@ export default function SchoolContracts() {
       <Dialog open={contractOpen} onOpenChange={setContractOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>New Contract</DialogTitle>
+            <DialogTitle>{tr('school.newContractDialog')}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
-                <Label>Student *</Label>
+                <Label>{tr('school.studentName')}</Label>
                 <Select value={cForm.student_id} onValueChange={onStudentSelect}>
-                  <SelectTrigger><SelectValue placeholder="Select student" /></SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder={tr('school.selectStudent')} /></SelectTrigger>
                   <SelectContent>
                     {students.map((s) => (
                       <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
@@ -447,23 +433,23 @@ export default function SchoolContracts() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Template</Label>
+                <Label>{tr('school.templateLabel')}</Label>
                 <Select value={cForm.template_id} onValueChange={onTemplateSelect}>
-                  <SelectTrigger><SelectValue placeholder="Select template" /></SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder={tr('school.selectTemplate')} /></SelectTrigger>
                   <SelectContent>
-                    {templates.map((t) => (
-                      <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                    {templates.map((tpl) => (
+                      <SelectItem key={tpl.id} value={tpl.id}>{tpl.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Annual Fee *</Label>
+              <Label>{tr('school.annualFeeStar')}</Label>
               <Input type="number" step="0.01" value={cForm.annual_fee} onChange={(e) => setCForm({ ...cForm, annual_fee: e.target.value })} placeholder="500.00" />
             </div>
             <div className="space-y-2">
-              <Label>Contract Body</Label>
+              <Label>{tr('school.contractBody')}</Label>
               <Textarea
                 value={cForm.filled_body}
                 onChange={(e) => setCForm({ ...cForm, filled_body: e.target.value })}
@@ -472,9 +458,9 @@ export default function SchoolContracts() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setContractOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setContractOpen(false)}>{tr('school.cancel')}</Button>
             <Button onClick={createContract} disabled={saving || !cForm.student_id || !cForm.annual_fee} className="bg-emerald-600 hover:bg-emerald-700">
-              {saving ? 'Creating...' : 'Create Contract'}
+              {saving ? tr('school.creating') : tr('school.createContract')}
             </Button>
           </DialogFooter>
         </DialogContent>
