@@ -1380,16 +1380,16 @@ function productUpdateSfAndChat(d: any, locale: Locale) {
     ? 'Tutlio updates: invoices + messaging'
     : 'Tutlio naujienos: sąskaitos faktūros + susirašinėjimas';
   const intro = locale === 'en'
-    ? 'We’ve added a few improvements to make your work easier.'
-    : 'Pridėjome kelis patobulinimus, kad naudotis būtų dar patogiau.';
+    ? 'These updates are already live in Tutlio — they should make your day-to-day work a bit easier.'
+    : 'Šiuos atnaujinimus jau įdiegėme platformoje – turėtų būti patogiau dirbti kasdien.';
   const bullets = locale === 'en'
     ? [
-        'Sales invoices (S.F.) improvements',
+        'Improved sales invoices (S.F.)',
         'New messaging channels (student ↔ tutor communication)',
       ]
     : [
-        'Atnaujintas sąskaitų faktūrų (S.F.) išrašymas',
-        'Nauji susirašinėjimo kanalai (mokinio ↔ korepetitoriaus komunikacija)',
+        'Atnaujinome sąskaitų faktūrų (S.F.) išrašymą',
+        'Įdiegėme naujus susirašinėjimo kanalus (mokinio ↔ korepetitoriaus komunikacija)',
       ];
   const closing = locale === 'en'
     ? `We’re really happy you’re using Tutlio. If you have any questions or something is unclear, feel free to email us at <a href="mailto:info@tutlio.lt" style="color:#4f46e5; font-weight:700; text-decoration:none;">info@tutlio.lt</a>.`

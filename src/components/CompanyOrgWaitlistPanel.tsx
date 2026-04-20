@@ -32,6 +32,7 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
+import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
 
 export type OrgTutorOption = {
   id: string;
@@ -198,7 +199,7 @@ export default function CompanyOrgWaitlistPanel({
   }, [dialogOpen, newEntry.tutor_id]);
 
   const studentsForTutor = useMemo(
-    () => students.filter((s) => s.tutor_id === newEntry.tutor_id),
+    () => sortStudentsByFullName(students.filter((s) => s.tutor_id === newEntry.tutor_id)),
     [students, newEntry.tutor_id]
   );
 

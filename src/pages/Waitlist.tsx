@@ -21,6 +21,7 @@ import {
 import { Trash2, Plus, Clock, User, BookOpen, AlertCircle, CheckCircle, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
 import { format } from 'date-fns';
 import { useTranslation } from '@/lib/i18n';
+import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
 
 interface WaitlistEntry {
   id: string;
@@ -381,7 +382,9 @@ export default function WaitlistPage() {
               <Select value={newEntry.student_id} onValueChange={(val) => setNewEntry({ ...newEntry, student_id: val })}>
                 <SelectTrigger className="rounded-xl"><SelectValue placeholder={t('waitlist.selectStudent')} /></SelectTrigger>
                 <SelectContent>
-                  {students.map((s) => (<SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>))}
+                  {sortStudentsByFullName(students).map((s) => (
+                    <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

@@ -53,6 +53,7 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { DateInput } from '@/components/ui/date-input';
 import { cn, normalizeUrl } from '@/lib/utils';
+import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
 import TimeSpinner, { DateTimeSpinner } from '@/components/TimeSpinner';
 import AvailabilityManager from '@/components/AvailabilityManager';
 import SessionFiles from '@/components/SessionFiles';
@@ -3607,7 +3608,7 @@ export default function CalendarPage() {
                       {students.length === 0 ? (
                         <p className="text-sm text-gray-400 text-center py-2">{t('cal.noStudents')}</p>
                       ) : (
-                        students.map((student) => (
+                        sortStudentsByFullName(students).map((student) => (
                           <label key={student.id} className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded-lg cursor-pointer">
                             <input
                               type="checkbox"
@@ -3643,7 +3644,7 @@ export default function CalendarPage() {
                         <SelectValue placeholder={t('cal.selectStudentPlaceholder')} />
                       </SelectTrigger>
                       <SelectContent>
-                        {students.map((student) => (
+                        {sortStudentsByFullName(students).map((student) => (
                           <SelectItem key={student.id} value={student.id}>
                             {student.full_name}
                           </SelectItem>
@@ -4541,9 +4542,9 @@ export default function CalendarPage() {
             <div className="space-y-2">
               <Label>{t('cal.studentsLabel')}</Label>
               <div className="max-h-48 overflow-y-auto border rounded-lg p-2 space-y-1">
-                {students
-                  .filter(student => !selectedGroupSessions.some(s => s.student_id === student.id))
-                  .map(student => (
+                {sortStudentsByFullName(
+                  students.filter(student => !selectedGroupSessions.some(s => s.student_id === student.id)),
+                ).map(student => (
                     <label key={student.id} className="flex items-center gap-2 cursor-pointer p-2 hover:bg-gray-50 rounded">
                       <input
                         type="checkbox"
@@ -5146,7 +5147,7 @@ export default function CalendarPage() {
                       {students.length === 0 ? (
                         <p className="text-sm text-gray-400 text-center py-2">{t('cal.noStudents')}</p>
                       ) : (
-                        students.map((student) => (
+                        sortStudentsByFullName(students).map((student) => (
                           <label key={student.id} className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded-lg cursor-pointer">
                             <input
                               type="checkbox"
@@ -5188,7 +5189,7 @@ export default function CalendarPage() {
                         <SelectValue placeholder={t('cal.selectStudentPlaceholderDots')} />
                       </SelectTrigger>
                       <SelectContent>
-                        {students.map(s => (
+                        {sortStudentsByFullName(students).map(s => (
                           <SelectItem key={s.id} value={s.id}>
                             {s.full_name}
                             {s.grade && <span className="text-xs text-gray-500 ml-2">({s.grade})</span>}

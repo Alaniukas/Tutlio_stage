@@ -24,6 +24,7 @@ import { Plus, FileText, Send, CheckCircle, Clock, Edit2, Trash2 } from 'lucide-
 import Toast from '@/components/Toast';
 import { sendEmail } from '@/lib/email';
 import { useTranslation } from '@/lib/i18n';
+import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
 
 interface Student {
   id: string;
@@ -426,7 +427,7 @@ export default function SchoolContracts() {
                 <Select value={cForm.student_id} onValueChange={onStudentSelect}>
                   <SelectTrigger><SelectValue placeholder={tr('school.selectStudent')} /></SelectTrigger>
                   <SelectContent>
-                    {students.map((s) => (
+                    {sortStudentsByFullName(students).map((s) => (
                       <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
                     ))}
                   </SelectContent>

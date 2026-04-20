@@ -61,6 +61,7 @@ import { DateInput } from '@/components/ui/date-input';
 import { Checkbox } from '@/components/ui/checkbox';
 import TimeSpinner, { DateTimeSpinner } from '@/components/TimeSpinner';
 import { cn } from '@/lib/utils';
+import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
 import {
   ChevronLeft,
   ChevronRight,
@@ -1815,7 +1816,7 @@ export default function CompanyTvarkarastis() {
               const selSubj = subjects.find(s => s.id === createSubjectId);
               const isGrp = Boolean(selSubj?.is_group);
               const maxSt = selSubj?.max_students || 1;
-              const list = students.filter(s => !createTutorId || s.tutor_id === createTutorId);
+              const list = sortStudentsByFullName(students.filter(s => !createTutorId || s.tutor_id === createTutorId));
               if (isGrp) {
                 return (
                   <div className="space-y-2">
@@ -2301,11 +2302,11 @@ export default function CompanyTvarkarastis() {
                       <SelectValue placeholder={t('compSch.selectPlaceholder')} />
                     </SelectTrigger>
                     <SelectContent>
-                      {students
-                        .filter(s => !editTutorId || s.tutor_id === editTutorId)
-                        .map(s => (
+                      {sortStudentsByFullName(students.filter(s => !editTutorId || s.tutor_id === editTutorId)).map(
+                        (s) => (
                           <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
-                        ))}
+                        ),
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -2615,9 +2616,9 @@ export default function CompanyTvarkarastis() {
                       <div className="space-y-1.5">
                         <Label className="text-xs">{t('compSch.studentsGroup')}</Label>
                         <div className="border border-indigo-200 rounded-lg bg-white p-2 max-h-36 overflow-y-auto space-y-1.5">
-                          {students
-                            .filter(s => s.tutor_id === editingAvailability?.tutor_id)
-                            .map(s => (
+                          {sortStudentsByFullName(
+                            students.filter(s => s.tutor_id === editingAvailability?.tutor_id),
+                          ).map(s => (
                               <label key={s.id} className="flex items-center gap-2 text-sm cursor-pointer">
                                 <Checkbox
                                   checked={createFromAvailStudentIds.includes(s.id)}
@@ -2640,9 +2641,9 @@ export default function CompanyTvarkarastis() {
                             <SelectValue placeholder={t('compSch.selectStudentPlaceholderDots')} />
                           </SelectTrigger>
                           <SelectContent>
-                            {students
-                              .filter(s => s.tutor_id === editingAvailability?.tutor_id)
-                              .map(s => (
+                            {sortStudentsByFullName(
+                              students.filter(s => s.tutor_id === editingAvailability?.tutor_id),
+                            ).map(s => (
                                 <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
                               ))}
                           </SelectContent>

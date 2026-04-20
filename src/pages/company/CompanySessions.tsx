@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/dialog';
 import StatusBadge from '@/components/StatusBadge';
 import { cn } from '@/lib/utils';
+import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
 import { DateRangeFilter } from '@/components/DateRangeFilter';
 import { DateTimeSpinner } from '@/components/TimeSpinner';
 
@@ -682,11 +683,11 @@ export default function CompanySessions() {
                       <Select value={editStudentId} onValueChange={setEditStudentId}>
                         <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          {students
-                            .filter(s => !editTutorId || s.tutor_id === editTutorId)
-                            .map(s => (
+                          {sortStudentsByFullName(students.filter(s => !editTutorId || s.tutor_id === editTutorId)).map(
+                            (s) => (
                               <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
-                            ))}
+                            ),
+                          )}
                         </SelectContent>
                       </Select>
                     </div>
