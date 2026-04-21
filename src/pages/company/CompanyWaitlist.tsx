@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import CompanyLayout from '@/components/CompanyLayout';
 import CompanyOrgWaitlistPanel, { type OrgTutorOption } from '@/components/CompanyOrgWaitlistPanel';
 import { getCached, setCache } from '@/lib/dataCache';
 import { supabase } from '@/lib/supabase';
@@ -50,16 +49,16 @@ export default function CompanyWaitlist() {
 
   if (loading) {
     return (
-      <CompanyLayout>
+      <>
         <div className="max-w-5xl mx-auto flex justify-center py-16">
           <div className="w-8 h-8 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
         </div>
-      </CompanyLayout>
+      </>
     );
   }
 
   return (
-    <CompanyLayout>
+    <>
       <div className="max-w-5xl mx-auto space-y-5">
         <Link
           to="/company/sessions"
@@ -81,6 +80,6 @@ export default function CompanyWaitlist() {
 
         <CompanyOrgWaitlistPanel tutors={tutors} variant="page" />
       </div>
-    </CompanyLayout>
+    </>
   );
 }

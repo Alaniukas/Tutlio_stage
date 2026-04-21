@@ -33,26 +33,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (userErr || !user) return json(res, 401, { error: 'Invalid token' });
 
   const { data: admin } = await supabase
-    .from('school_admins')
-    .select('school_id')
+    .from('organization_admins')
+    .select('organization_id')
     .eq('user_id', user.id)
     .maybeSingle();
 
-  if (!admin?.school_id) return json(res, 403, { error: 'Not a school admin' });
+  if (!admin?.organization_id) return json(res, 403, { error: 'Not a school admin' });
 
   const { installmentId } = req.body as { installmentId?: string };
   if (!installmentId) return json(res, 400, { error: 'installmentId is required' });
 
   const { data: installment } = await supabase
     .from('school_payment_installments')
-    .select('*, contract:school_contracts(*, student:students(full_name, email, payer_email, payer_name), school:schools(name, email))')
+    .select('*, contract:school_contracts(*, student:students(full_name, email, payer_email, payer_name), org:organizations(name, email))')
     .eq('id', installmentId)
     .maybeSingle();
 
   if (!installment) return json(res, 404, { error: 'Installment not found' });
 
   const contract = installment.contract as any;
-  if (!contract || contract.school_id !== admin.school_id) {
+  if (!contract || contract.organization_id !== admin.organization_id) {
     return json(res, 403, { error: 'Installment does not belong to your school' });
   }
 
@@ -61,7 +61,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const student = contract.student;
-  const school = contract.school;
+  const org = contract.org;
   const payerEmail = student?.payer_email || student?.email;
 
   if (!payerEmail) return json(res, 400, { error: 'No payer email on student' });
@@ -77,8 +77,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           currency: 'eur',
           unit_amount: amountCents,
           product_data: {
-            name: `${school?.name || 'School'} — Installment #${installment.installment_number}`,
-            description: `Annual fee installment for ${student?.full_name || 'Student'}`,
+            name: `${org?.name || 'Mokykla'} — Įmoka #${installment.installment_number}`,
+            description: `Metinio mokesčio įmoka: ${student?.full_name || 'Mokinys'}`,
           },
         },
         quantity: 1,
@@ -89,8 +89,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       tutlio_school_contract_id: contract.id,
       tutlio_student_id: contract.student_id,
     },
-    success_url: `${APP_URL}/school/payments?success=1&installment=${installment.id}`,
-    cancel_url: `${APP_URL}/school/payments?cancelled=1`,
+    success_url: `${APP_URL}/company/contracts?success=1&installment=${installment.id}`,
+    cancel_url: `${APP_URL}/company/contracts?cancelled=1`,
   });
 
   await supabase

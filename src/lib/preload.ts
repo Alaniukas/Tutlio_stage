@@ -13,7 +13,7 @@ function getOrgAdmin(userId: string) {
   return dedupeAsync('org_admin_row', async () => {
     const { data } = await supabase
       .from('organization_admins')
-      .select('organization_id, organizations(name, tutor_limit)')
+      .select('organization_id, organizations(name, tutor_limit, entity_type)')
       .eq('user_id', userId)
       .maybeSingle();
     return data;
@@ -166,7 +166,7 @@ async function preloadDashboard(
     );
 
     setCache('company_dashboard', {
-      orgName: org?.name || '', tutorLimit: org?.tutor_limit || 0,
+      orgName: org?.name || '', entityType: org?.entity_type || 'company', tutorLimit: org?.tutor_limit || 0,
       activeTutors: tutorIds.length, pendingInvites: pendingCount || 0,
       sessionsThisMonth: completed.length, upcomingSessions: upcoming.length,
       earningsThisMonth: completed.reduce((sum: number, s: any) => sum + (s.price || 0), 0),

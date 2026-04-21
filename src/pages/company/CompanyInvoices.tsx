@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from 'react';
-import CompanyLayout from '@/components/CompanyLayout';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
 import { getCached, setCache } from '@/lib/dataCache';
@@ -153,7 +152,7 @@ export default function CompanyInvoices() {
   };
 
   return (
-    <CompanyLayout>
+    <>
       <div className="max-w-5xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
           <div>
@@ -283,6 +282,6 @@ export default function CompanyInvoices() {
         orgTutors={tutors}
         manualPaymentsEnabled={manualPaymentsEnabled}
       />
-    </CompanyLayout>
+    </>
   );
 }

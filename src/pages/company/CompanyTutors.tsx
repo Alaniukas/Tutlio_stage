@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import CompanyLayout from '@/components/CompanyLayout';
 import { supabase } from '@/lib/supabase';
 import { getCached, setCache } from '@/lib/dataCache';
 import {
@@ -770,11 +769,11 @@ export default function CompanyTutors() {
   const unusedInvites = invites.filter(i => !i.used);
 
   if (loading) {
-    return <CompanyLayout><div className="flex items-center justify-center h-64"><div className="w-8 h-8 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" /></div></CompanyLayout>;
+    return <><div className="flex items-center justify-center h-64"><div className="w-8 h-8 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" /></div></>;
   }
 
   return (
-    <CompanyLayout>
+    <>
       <div className="max-w-4xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between gap-4">
@@ -1260,6 +1259,6 @@ export default function CompanyTutors() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </CompanyLayout>
+    </>
   );
 }

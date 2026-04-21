@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import CompanyLayout from '@/components/CompanyLayout';
 import { supabase } from '@/lib/supabase';
 import { getCached, setCache } from '@/lib/dataCache';
 import {
@@ -383,16 +382,16 @@ export default function CompanyDashboard() {
 
   if (loading) {
     return (
-      <CompanyLayout>
+      <>
         <div className="flex items-center justify-center h-64">
           <div className="w-8 h-8 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
         </div>
-      </CompanyLayout>
+      </>
     );
   }
 
   return (
-    <CompanyLayout>
+    <>
       <div className="max-w-5xl mx-auto space-y-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Sveiki, {orgName}</h1>
@@ -727,6 +726,6 @@ export default function CompanyDashboard() {
           </Link>
         </div>
       </div>
-    </CompanyLayout>
+    </>
   );
 }

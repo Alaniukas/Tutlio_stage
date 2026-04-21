@@ -564,7 +564,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         // Check if student already has an invite code
                         const { data: student } = await supabase
                             .from('students')
-                            .select('id, invite_code, full_name, email, payer_email, payer_name, school_id')
+                            .select('id, invite_code, full_name, email, payer_email, payer_name, organization_id')
                             .eq('id', studentId)
                             .maybeSingle();
 
@@ -577,14 +577,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
                             console.log(`[stripe-webhook] Generated invite code ${inviteCode} for school student ${studentId}`);
 
-                            // Look up school info for the email
                             const { data: contract } = await supabase
                                 .from('school_contracts')
-                                .select('school_id, schools(name)')
+                                .select('organization_id, organizations:organizations(name)')
                                 .eq('id', updatedInstallment.contract_id)
                                 .maybeSingle();
 
-                            const schoolName = (contract?.schools as any)?.name || 'School';
+                            const schoolName = (contract?.organizations as any)?.name || 'School';
                             const bookingUrl = `${APP_URL}/book/${inviteCode}`;
                             const recipientEmail = student.email || student.payer_email;
 

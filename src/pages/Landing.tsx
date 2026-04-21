@@ -18,14 +18,14 @@ import {
 import { useTranslation } from '@/lib/i18n';
 import { buildLocalizedPath } from '@/lib/i18n';
 import { usePlatform } from '@/contexts/PlatformContext';
-import LecturesLanding from '@/pages/LecturesLanding';
+import SchoolsLanding from '@/pages/SchoolsLanding';
 
 export default function Landing() {
     const { t, locale } = useTranslation();
     const { platform } = usePlatform();
 
-    if (platform === 'lecturers' || platform === 'teachers') {
-        return <LecturesLanding />;
+    if (platform === 'schools' || platform === 'teachers') {
+        return <SchoolsLanding />;
     }
 
     return (

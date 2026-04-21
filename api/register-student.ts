@@ -93,23 +93,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       accepted_terms_at: acceptedAt || null,
     }).eq('id', studentId);
 
-    // If the student belongs to a school, propagate school_id to their profile
-    const { data: studentFull } = await supabase
-      .from('students')
-      .select('school_id')
-      .eq('id', studentId)
-      .maybeSingle();
-
-    if (studentFull?.school_id) {
-      await supabase.from('profiles').upsert({
-        id: authData.user.id,
-        email,
-        full_name: fullName,
-        phone: phone || null,
-        school_id: studentFull.school_id,
-      }, { onConflict: 'id' });
-    }
-
     return res.status(200).json({ success: true, userId: authData.user.id });
   } catch (err: any) {
     console.error('[register-student] Error:', err?.message || err);

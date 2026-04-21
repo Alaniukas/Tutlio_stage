@@ -1,6 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import CompanyLayout from '@/components/CompanyLayout';
 import { SessionStatCards } from '@/components/SessionStatCards';
 import { calculateSessionStats } from '@/lib/session-stats';
 import { supabase } from '@/lib/supabase';
@@ -381,16 +380,16 @@ export default function CompanySessions() {
 
   if (loading) {
     return (
-      <CompanyLayout>
+      <>
         <div className="flex items-center justify-center h-64">
           <div className="w-8 h-8 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
         </div>
-      </CompanyLayout>
+      </>
     );
   }
 
   return (
-    <CompanyLayout>
+    <>
       <div className="max-w-5xl mx-auto space-y-5">
         {/* Header */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -886,6 +885,6 @@ export default function CompanySessions() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </CompanyLayout>
+    </>
   );
 }

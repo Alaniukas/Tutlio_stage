@@ -31,7 +31,6 @@ import { enUS } from 'date-fns/locale';
 import type { Locale } from 'date-fns';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 
-import CompanyLayout from '@/components/CompanyLayout';
 import { useTranslation } from '@/lib/i18n';
 import { getCached, setCache } from '@/lib/dataCache';
 import { supabase } from '@/lib/supabase';
@@ -1391,17 +1390,17 @@ export default function CompanyTvarkarastis() {
   // Check if feature is enabled
   if (featuresLoading) {
     return (
-      <CompanyLayout>
+      <>
         <div className="flex items-center justify-center h-64">
           <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
         </div>
-      </CompanyLayout>
+      </>
     );
   }
 
   if (!canView) {
     return (
-      <CompanyLayout>
+      <>
         <div className="max-w-2xl mx-auto mt-12">
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 text-center">
             <AlertCircle className="w-12 h-12 text-amber-600 mx-auto mb-3" />
@@ -1416,12 +1415,12 @@ export default function CompanyTvarkarastis() {
             </p>
           </div>
         </div>
-      </CompanyLayout>
+      </>
     );
   }
 
   return (
-    <CompanyLayout>
+    <>
       <div className="space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -2815,6 +2814,6 @@ export default function CompanyTvarkarastis() {
         saving={noShowSaving}
         onConfirm={(w) => void confirmMarkStudentNoShowSchedule(w)}
       />
-    </CompanyLayout>
+    </>
   );
 }

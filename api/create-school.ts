@@ -1,4 +1,4 @@
-// POST /api/create-school — platform admin: create school + first school admin (mirrors create-company).
+// POST /api/create-school — platform admin: create school org + first admin (mirrors create-company).
 
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
@@ -50,21 +50,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    const { data: schoolRow, error: schoolErr } = await supabase
-      .from('schools')
+    const { data: orgRow, error: orgErr } = await supabase
+      .from('organizations')
       .insert({
         name: schoolName.trim(),
         email: schoolEmail.trim(),
         status: 'active',
+        entity_type: 'school',
       })
       .select('id')
       .single();
 
-    if (schoolErr || !schoolRow) {
-      return res.status(500).json({ error: schoolErr?.message || 'Failed to create school' });
+    if (orgErr || !orgRow) {
+      return res.status(500).json({ error: orgErr?.message || 'Failed to create school' });
     }
 
-    const schoolId = schoolRow.id;
+    const orgId = orgRow.id;
 
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email: adminEmail.trim(),
@@ -73,7 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     if (authError || !authData.user) {
-      await supabase.from('schools').delete().eq('id', schoolId);
+      await supabase.from('organizations').delete().eq('id', orgId);
       return res.status(400).json({ error: authError?.message || 'Failed to create user' });
     }
 
@@ -85,24 +86,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           id: userId,
           email: adminEmail.trim(),
           full_name: `${schoolName.trim()} — administratorius`,
-          school_id: schoolId,
+          organization_id: orgId,
         },
         { onConflict: 'id' },
       );
 
       if (profileError) {
         await supabase.auth.admin.deleteUser(userId);
-        await supabase.from('schools').delete().eq('id', schoolId);
+        await supabase.from('organizations').delete().eq('id', orgId);
         return res.status(500).json({ error: profileError.message });
       }
 
       const { error: adminError } = await supabase
-        .from('school_admins')
-        .insert({ user_id: userId, school_id: schoolId });
+        .from('organization_admins')
+        .insert({ user_id: userId, organization_id: orgId });
 
       if (adminError) {
         await supabase.auth.admin.deleteUser(userId);
-        await supabase.from('schools').delete().eq('id', schoolId);
+        await supabase.from('organizations').delete().eq('id', orgId);
         return res.status(500).json({ error: adminError.message });
       }
 
@@ -112,15 +113,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           schoolName: schoolName.trim(),
           schoolEmail: schoolEmail.trim(),
           adminEmail: adminEmail.trim(),
-          schoolId,
+          schoolId: orgId,
         },
       });
       if (auditErr) console.warn('[create-school] platform_admin_audit insert failed:', auditErr.message);
 
-      return res.status(200).json({ success: true, schoolId, userId });
+      return res.status(200).json({ success: true, schoolId: orgId, userId });
     } catch (err: any) {
       await supabase.auth.admin.deleteUser(userId);
-      await supabase.from('schools').delete().eq('id', schoolId);
+      await supabase.from('organizations').delete().eq('id', orgId);
       return res.status(500).json({ error: err?.message || 'Unknown error' });
     }
   } catch (err: any) {

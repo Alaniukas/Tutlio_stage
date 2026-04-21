@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo } from 'react';
-import CompanyLayout from '@/components/CompanyLayout';
 import { supabase } from '@/lib/supabase';
 import { getCached, setCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
@@ -824,18 +823,18 @@ export default function CompanyStudents() {
 
   if (loading) {
     return (
-      <CompanyLayout>
+      <>
         <div className="max-w-6xl mx-auto">
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8">
             <p className="text-center text-gray-500">{t('compStu.loadingText')}</p>
           </div>
         </div>
-      </CompanyLayout>
+      </>
     );
   }
 
   return (
-    <CompanyLayout>
+    <>
       {toastMessage && (
         <Toast
           message={toastMessage.message}
@@ -2183,6 +2182,6 @@ export default function CompanyStudents() {
           </DialogContent>
         </Dialog>
       </div>
-    </CompanyLayout>
+    </>
   );
 }

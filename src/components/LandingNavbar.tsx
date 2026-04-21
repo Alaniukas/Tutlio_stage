@@ -6,7 +6,7 @@ import LanguageSelector from '@/components/LanguageSelector';
 import { usePlatform } from '@/contexts/PlatformContext';
 import { useEffect, useRef, useState } from 'react';
 
-function navigateToPlatform(platform: 'tutors' | 'lecturers', locale: string) {
+function navigateToPlatform(platform: 'tutors' | 'schools', locale: string) {
   const localeSegment = locale === 'lt' ? '' : `/${locale}`;
   const prefix = platform === 'tutors' ? '' : `/${platform}`;
   window.location.href = `${prefix}${localeSegment}` || '/';
@@ -28,11 +28,11 @@ export default function LandingNavbar() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const isLecturers = platform === 'lecturers' || platform === 'teachers';
-  const brandName = isLecturers ? 'Tutlio Lectures' : 'Tutlio';
+  const isSchools = platform === 'schools' || platform === 'teachers';
+  const brandName = isSchools ? 'Tutlio Schools' : 'Tutlio';
 
-  const dropdownLabel = isLecturers
-    ? (locale === 'lt' ? 'Nuotoliniai mokymai' : 'Remote training')
+  const dropdownLabel = isSchools
+    ? (locale === 'lt' ? 'Mokykloms' : 'Schools')
     : (locale === 'lt' ? 'Korepetitoriai' : 'Tutors');
 
   return (
@@ -79,10 +79,10 @@ export default function LandingNavbar() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => { setPlatformOpen(false); navigateToPlatform('lecturers', locale); }}
+                    onClick={() => { setPlatformOpen(false); navigateToPlatform('schools', locale); }}
                     className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 text-gray-800"
                   >
-                    {locale === 'lt' ? 'Nuotoliniai mokymai' : 'Remote training'}
+                    {locale === 'lt' ? 'Mokykloms' : 'Schools'}
                   </button>
                 </div>
               )}
@@ -91,7 +91,7 @@ export default function LandingNavbar() {
 
           <LanguageSelector />
 
-          <Link to="/login">
+          <Link to={isSchools ? '/company/login' : '/login'}>
             <Button className="rounded-xl px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-bold tracking-wide shadow-md shadow-indigo-200 gap-2">
               {t('common.login')}
               <AppWindow className="w-4 h-4" />

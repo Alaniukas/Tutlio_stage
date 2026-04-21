@@ -12,52 +12,64 @@ interface PlatformConfig {
   locales: Partial<Record<Locale, PlatformLocaleConfig>>;
 }
 
-// ── Lecturers platform ────────────────────────────────────────────────
-const lecturersEn: PlatformLocaleConfig = {
+// ── Schools platform (same term replacements as teachers) ─────────────
+const schoolsEn: PlatformLocaleConfig = {
   replacements: [
-    ['tutoring', 'lecturing'],
-    ['tutors', 'lecturers'],
-    ['tutor', 'lecturer'],
-    ['korep', 'lect'],
+    ['tutoring', 'teaching'],
+    ['tutors', 'teachers'],
+    ['tutor', 'teacher'],
+    ['korep', 'teach'],
   ],
 };
 
-const lecturersLt: PlatformLocaleConfig = {
+const schoolsLt: PlatformLocaleConfig = {
   replacements: [
-    ['korepetitor', 'lektor', 'stem'],
-    ['korep', 'lekt'],
+    ['pas korepetitorių', 'pas mokytoją'],
+    ['į korepetitorių', 'į mokytoją'],
+    ['kaip korepetitorių', 'kaip mokytoją'],
+    ['pagal korepetitorių', 'pagal mokytoją'],
+    ['naują korepetitorių', 'naują mokytoją'],
+    ['šį korepetitorių', 'šį mokytoją'],
+    ['aktyvų korepetitorių', 'aktyvų mokytoją'],
+    ['vieną korepetitorių', 'vieną mokytoją'],
+    ['pasirinkite korepetitorių', 'pasirinkite mokytoją'],
+    ['pašalinti korepetitorių', 'pašalinti mokytoją'],
+    ['pridėti korepetitorių', 'pridėti mokytoją'],
+    ['pridėjus korepetitorių', 'pridėjus mokytoją'],
+    ['informuokite korepetitorių', 'informuokite mokytoją'],
+    ['redaguoti korepetitorius', 'redaguoti mokytojus'],
+    ['priskirti korepetitorius', 'priskirti mokytojus'],
+    ['kelis korepetitorius', 'kelis mokytojus'],
+    ['valdyti korepetitorius', 'valdyti mokytojus'],
+    ['korepetitoriais', 'mokytojais'],
+    ['korepetitoriaus', 'mokytojo'],
+    ['korepetitoriams', 'mokytojams'],
+    ['korepetitoriumi', 'mokytoju'],
+    ['korepetitoriui', 'mokytojui'],
+    ['korepetitoriai', 'mokytojai'],
+    ['korepetitorių', 'mokytojų'],
+    ['korepetitorius', 'mokytojas'],
+    ['korep', 'mokyt'],
   ],
 };
 
-const lecturersPl: PlatformLocaleConfig = {
-  replacements: [['korepetytor', 'lektor', 'stem']],
-};
-
-const lecturersLv: PlatformLocaleConfig = {
+const schoolsPl: PlatformLocaleConfig = {
   replacements: [
-    ['privātskolotāj', 'lektor', 'stem'],
-    ['skolotāj', 'lektor', 'stem'],
+    ['korepetytorzy', 'nauczyciele'],
+    ['korepetytorów', 'nauczycieli'],
+    ['korepetytor', 'nauczyciel', 'stem'],
   ],
 };
 
-const lecturersEe: PlatformLocaleConfig = {
+const schoolsLv: PlatformLocaleConfig = {
   replacements: [
-    ['eraõpetajatele', 'lektoritele'],
-    ['eraõpetajatega', 'lektoritega'],
-    ['eraõpetajate', 'lektorite'],
-    ['eraõpetajana', 'lektorina'],
-    ['eraõpetajalt', 'lektorilt'],
-    ['eraõpetajale', 'lektorile'],
-    ['eraõpetajad', 'lektorid'],
-    ['eraõpetaja', 'lektor'],
-    ['õpetajatele', 'lektoritele'],
-    ['õpetajatega', 'lektoritega'],
-    ['õpetajate', 'lektorite'],
-    ['õpetajana', 'lektorina'],
-    ['õpetajalt', 'lektorilt'],
-    ['õpetajale', 'lektorile'],
-    ['õpetajad', 'lektorid'],
-    ['õpetaja', 'lektor'],
+    ['privātskolotāj', 'skolotāj', 'stem'],
+  ],
+};
+
+const schoolsEe: PlatformLocaleConfig = {
+  replacements: [
+    ['eraõpetaja', 'õpetaja', 'stem'],
   ],
 };
 
@@ -131,13 +143,13 @@ const teachersEe: PlatformLocaleConfig = {
 
 // ── Registry ──────────────────────────────────────────────────────────
 const platformConfigs: Partial<Record<Platform, PlatformConfig>> = {
-  lecturers: {
+  schools: {
     locales: {
-      en: lecturersEn,
-      lt: lecturersLt,
-      pl: lecturersPl,
-      lv: lecturersLv,
-      ee: lecturersEe,
+      en: schoolsEn,
+      lt: schoolsLt,
+      pl: schoolsPl,
+      lv: schoolsLv,
+      ee: schoolsEe,
     },
   },
   teachers: {

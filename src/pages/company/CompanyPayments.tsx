@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import SchoolLayout from '@/components/SchoolLayout';
 import { supabase } from '@/lib/supabase';
+import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, CreditCard, Send, CheckCircle, Clock, AlertCircle, Trash2, ExternalLink, Loader2 } from 'lucide-react';
+import { Plus, CreditCard, Send, CheckCircle, Clock, AlertCircle, Trash2, Loader2 } from 'lucide-react';
 import Toast from '@/components/Toast';
 import { authHeaders } from '@/lib/apiHelpers';
 import { sendEmail } from '@/lib/email';
@@ -50,14 +50,17 @@ interface NewInstallmentRow {
   due_date: string;
 }
 
-export default function SchoolPayments() {
+const PAYMENTS_CACHE_KEY = 'company_payments';
+
+export default function CompanyPayments() {
   const { t } = useTranslation();
-  const [schoolId, setSchoolId] = useState<string | null>(null);
-  const [schoolName, setSchoolName] = useState('');
-  const [schoolEmail, setSchoolEmail] = useState('');
-  const [contracts, setContracts] = useState<Contract[]>([]);
-  const [installments, setInstallments] = useState<Installment[]>([]);
-  const [loading, setLoading] = useState(true);
+  const pc = getCached<any>(PAYMENTS_CACHE_KEY);
+  const [orgId, setOrgId] = useState<string | null>(pc?.orgId ?? null);
+  const [orgName, setOrgName] = useState(pc?.orgName ?? '');
+  const [orgEmail, setOrgEmail] = useState(pc?.orgEmail ?? '');
+  const [contracts, setContracts] = useState<Contract[]>(pc?.contracts ?? []);
+  const [installments, setInstallments] = useState<Installment[]>(pc?.installments ?? []);
+  const [loading, setLoading] = useState(!pc);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -66,41 +69,48 @@ export default function SchoolPayments() {
   const [saving, setSaving] = useState(false);
   const [sendingId, setSendingId] = useState<string | null>(null);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { if (!getCached(PAYMENTS_CACHE_KEY)) load(); }, []);
 
   const load = async () => {
+    if (!getCached(PAYMENTS_CACHE_KEY)) setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) { setLoading(false); return; }
 
     const { data: admin } = await supabase
-      .from('school_admins')
-      .select('school_id, schools(name, email)')
+      .from('organization_admins')
+      .select('organization_id, organizations(name, email)')
       .eq('user_id', user.id)
       .maybeSingle();
 
-    if (!admin?.school_id) { setLoading(false); return; }
-    setSchoolId(admin.school_id);
-    setSchoolName((admin.schools as any)?.name || '');
-    setSchoolEmail((admin.schools as any)?.email || '');
+    if (!admin?.organization_id) { setLoading(false); return; }
+    setOrgId(admin.organization_id);
+    const name = (admin.organizations as any)?.name || '';
+    const email = (admin.organizations as any)?.email || '';
+    setOrgName(name);
+    setOrgEmail(email);
 
     const [cRes, iRes] = await Promise.all([
       supabase
         .from('school_contracts')
         .select('id, student_id, annual_fee, signing_status, student:students(full_name, email, payer_email, payer_name)')
-        .eq('school_id', admin.school_id)
+        .eq('organization_id', admin.organization_id)
         .eq('signing_status', 'signed')
         .order('created_at', { ascending: false }),
       supabase
         .from('school_payment_installments')
-        .select('*, contract:school_contracts(id, student_id, annual_fee, signing_status, school_id, student:students(full_name, email, payer_email, payer_name))')
+        .select('*, contract:school_contracts(id, student_id, annual_fee, signing_status, organization_id, student:students(full_name, email, payer_email, payer_name))')
         .order('due_date', { ascending: true }),
     ]);
 
-    setContracts(cRes.data || []);
-    const filtered = (iRes.data || []).filter((i: any) => i.contract?.school_id === admin.school_id);
+    const cData = cRes.data || [];
+    const filtered = (iRes.data || []).filter((i: any) => i.contract?.organization_id === admin.organization_id);
+    setContracts(cData);
     setInstallments(filtered);
+    setCache(PAYMENTS_CACHE_KEY, { orgId: admin.organization_id, orgName: name, orgEmail: email, contracts: cData, installments: filtered });
     setLoading(false);
   };
+
+  const reload = () => { invalidateCache(PAYMENTS_CACHE_KEY); load(); };
 
   const addRow = () => setRows([...rows, { amount: '', due_date: '' }]);
   const removeRow = (idx: number) => setRows(rows.filter((_, i) => i !== idx));
@@ -138,8 +148,8 @@ export default function SchoolPayments() {
     setScheduleOpen(false);
     setRows([{ amount: '', due_date: '' }]);
     setSelectedContractId('');
-    setToast({ message: 'Payment schedule created', type: 'success' });
-    load();
+    setToast({ message: t('school.toastScheduleCreated'), type: 'success' });
+    reload();
   };
 
   const sendPaymentLink = async (installment: Installment) => {
@@ -169,8 +179,8 @@ export default function SchoolPayments() {
           type: 'school_installment_request',
           to: recipient,
           data: {
-            schoolName,
-            schoolEmail,
+            schoolName: orgName,
+            schoolEmail: orgEmail,
             studentName: student?.full_name || '',
             parentName: student?.payer_name || student?.full_name || '',
             recipientName: student?.payer_name || student?.full_name || '',
@@ -186,7 +196,7 @@ export default function SchoolPayments() {
         window.open(json.url, '_blank');
         setToast({ message: t('school.toastCheckoutCreated'), type: 'success' });
       }
-    } catch (err) {
+    } catch {
       setToast({ message: t('school.toastPaymentError'), type: 'error' });
     }
     setSendingId(null);
@@ -217,7 +227,7 @@ export default function SchoolPayments() {
   }, {});
 
   return (
-    <SchoolLayout>
+    <>
       <div className="max-w-5xl mx-auto space-y-6">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
@@ -238,8 +248,8 @@ export default function SchoolPayments() {
             <CreditCard className="w-12 h-12 text-gray-300 mx-auto mb-3" />
             <p className="text-gray-500">
               {contracts.length === 0
-                ? 'No signed contracts yet. Sign a contract first, then create a payment schedule.'
-                : 'No payment schedules yet. Create one for a signed contract.'}
+                ? t('school.noPaymentsNoContracts')
+                : t('school.noPaymentsYet')}
             </p>
           </div>
         ) : (
@@ -281,7 +291,7 @@ export default function SchoolPayments() {
                         {inst.payment_status === 'pending' && (
                           <Button size="sm" variant="outline" onClick={() => sendPaymentLink(inst)} disabled={sendingId === inst.id}>
                             {sendingId === inst.id ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <Send className="w-3.5 h-3.5 mr-1.5" />}
-                            Send Link
+                            {t('school.sendLink')}
                           </Button>
                         )}
                         {inst.payment_status !== 'paid' && (
@@ -299,7 +309,6 @@ export default function SchoolPayments() {
         )}
       </div>
 
-      {/* Create schedule dialog */}
       <Dialog open={scheduleOpen} onOpenChange={setScheduleOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -339,7 +348,7 @@ export default function SchoolPayments() {
                 <div key={idx} className="flex items-end gap-2">
                   <span className="text-sm text-gray-400 font-medium w-6 text-center pb-2">#{idx + 1}</span>
                   <div className="flex-1 space-y-1">
-                    <Label className="text-xs">Amount</Label>
+                    <Label className="text-xs">{t('school.amount')}</Label>
                     <Input type="number" step="0.01" value={row.amount} onChange={(e) => updateRow(idx, 'amount', e.target.value)} placeholder="100.00" />
                   </div>
                   <div className="flex-1 space-y-1">
@@ -378,6 +387,6 @@ export default function SchoolPayments() {
       </Dialog>
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
-    </SchoolLayout>
+    </>
   );
 }

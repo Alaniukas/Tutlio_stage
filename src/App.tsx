@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { UserProvider } from '@/contexts/UserContext';
 import Login from '@/pages/Login';
 import AuthCallback from '@/pages/AuthCallback';
@@ -20,15 +20,9 @@ import StudentSettings from '@/pages/StudentSettings';
 import StudentWaitlist from '@/pages/StudentWaitlist';
 import StudentProtectedRoute from '@/components/StudentProtectedRoute';
 import CompanyProtectedRoute from '@/components/CompanyProtectedRoute';
-import SchoolProtectedRoute from '@/components/SchoolProtectedRoute';
 import AdminPanel from '@/pages/AdminPanel';
 import CompanyLogin from '@/pages/CompanyLogin';
-import SchoolLogin from '@/pages/SchoolLogin';
-import SchoolDashboard from '@/pages/school/SchoolDashboard';
-import SchoolStudents from '@/pages/school/SchoolStudents';
-import SchoolContracts from '@/pages/school/SchoolContracts';
-import SchoolPayments from '@/pages/school/SchoolPayments';
-import SchoolSettings from '@/pages/school/SchoolSettings';
+import CompanyLayout from '@/components/CompanyLayout';
 import CompanyDashboard from '@/pages/company/CompanyDashboard';
 import CompanyTutors from '@/pages/company/CompanyTutors';
 import CompanyStudents from '@/pages/company/CompanyStudents';
@@ -39,6 +33,8 @@ import CompanyStats from '@/pages/company/CompanyStats';
 import CompanySettings from '@/pages/company/CompanySettings';
 import CompanyFinance from '@/pages/company/CompanyFinance';
 import CompanyInvoices from '@/pages/company/CompanyInvoices';
+import CompanyContracts from '@/pages/company/CompanyContracts';
+import CompanyPayments from '@/pages/company/CompanyPayments';
 import InvoicesPage from '@/pages/Invoices';
 
 import Landing from '@/pages/Landing';
@@ -60,7 +56,6 @@ import StudentMessages from '@/pages/StudentMessages';
 import CompanyMessages from '@/pages/company/CompanyMessages';
 import SupabaseAuthHashErrors from '@/components/SupabaseAuthHashErrors';
 
-// Wrapper to provide UserContext only to authenticated routes
 function ProtectedWithUser() {
   return (
     <UserProvider>
@@ -81,14 +76,6 @@ function CompanyProtectedWithUser() {
   return (
     <UserProvider>
       <CompanyProtectedRoute />
-    </UserProvider>
-  );
-}
-
-function SchoolProtectedWithUser() {
-  return (
-    <UserProvider>
-      <SchoolProtectedRoute />
     </UserProvider>
   );
 }
@@ -154,31 +141,26 @@ export default function App({ basename }: { basename: string }) {
         {/* Platform owner admin */}
         <Route path="/admin" element={<AdminPanel />} />
 
-        {/* Company admin routes - WITH UserProvider for caching */}
+        {/* Organization admin routes (company + school) - WITH UserProvider for caching */}
         <Route path="/company/login" element={<CompanyLogin />} />
+        <Route path="/school/login" element={<Navigate to="/company/login" replace />} />
         <Route element={<CompanyProtectedWithUser />}>
-          <Route path="/company" element={<CompanyDashboard />} />
-          <Route path="/company/tutors" element={<CompanyTutors />} />
-          <Route path="/company/students" element={<CompanyStudents />} />
-          <Route path="/company/waitlist" element={<CompanyWaitlist />} />
-          <Route path="/company/sessions" element={<CompanySessions />} />
-          <Route path="/company/schedule" element={<CompanyTvarkarastis />} />
-          <Route path="/company/messages" element={<CompanyMessages />} />
-          <Route path="/company/stats" element={<CompanyStats />} />
-          <Route path="/company/instructions" element={<CompanyInstructions />} />
-          <Route path="/company/settings" element={<CompanySettings />} />
-          <Route path="/company/finance" element={<CompanyFinance />} />
-          <Route path="/company/invoices" element={<CompanyInvoices />} />
-        </Route>
-
-        {/* School admin routes - WITH UserProvider for caching */}
-        <Route path="/school/login" element={<SchoolLogin />} />
-        <Route element={<SchoolProtectedWithUser />}>
-          <Route path="/school" element={<SchoolDashboard />} />
-          <Route path="/school/students" element={<SchoolStudents />} />
-          <Route path="/school/contracts" element={<SchoolContracts />} />
-          <Route path="/school/payments" element={<SchoolPayments />} />
-          <Route path="/school/settings" element={<SchoolSettings />} />
+          <Route element={<CompanyLayout />}>
+            <Route path="/company" element={<CompanyDashboard />} />
+            <Route path="/company/tutors" element={<CompanyTutors />} />
+            <Route path="/company/students" element={<CompanyStudents />} />
+            <Route path="/company/waitlist" element={<CompanyWaitlist />} />
+            <Route path="/company/sessions" element={<CompanySessions />} />
+            <Route path="/company/schedule" element={<CompanyTvarkarastis />} />
+            <Route path="/company/messages" element={<CompanyMessages />} />
+            <Route path="/company/stats" element={<CompanyStats />} />
+            <Route path="/company/instructions" element={<CompanyInstructions />} />
+            <Route path="/company/settings" element={<CompanySettings />} />
+            <Route path="/company/finance" element={<CompanyFinance />} />
+            <Route path="/company/invoices" element={<CompanyInvoices />} />
+            <Route path="/company/contracts" element={<CompanyContracts />} />
+            <Route path="/company/payments" element={<CompanyPayments />} />
+          </Route>
         </Route>
 
         <Route path="*" element={<Navigate to="/login" replace />} />

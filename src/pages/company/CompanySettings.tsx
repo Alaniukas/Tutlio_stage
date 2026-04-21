@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import CompanyLayout from '@/components/CompanyLayout';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -622,18 +621,18 @@ export default function CompanySettings() {
 
   if (loading) {
     return (
-      <CompanyLayout>
+      <>
         <div className="w-full max-w-[1600px] mx-auto">
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8">
             <p className="text-center text-gray-500">{t('compSet.loading')}</p>
           </div>
         </div>
-      </CompanyLayout>
+      </>
     );
   }
 
   return (
-    <CompanyLayout>
+    <>
       {toastMessage && (
         <Toast message={toastMessage.message} type={toastMessage.type} onClose={() => setToastMessage(null)} />
       )}
@@ -1214,6 +1213,6 @@ export default function CompanySettings() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </CompanyLayout>
+    </>
   );
 }

@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import CompanyLayout from '@/components/CompanyLayout';
 import { supabase } from '@/lib/supabase';
 import { authHeaders } from '@/lib/apiHelpers';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
@@ -358,18 +357,18 @@ export default function CompanyFinance() {
 
   if (loading) {
     return (
-      <CompanyLayout>
+      <>
         <div className="max-w-3xl mx-auto">
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8">
             <p className="text-center text-gray-500">{t('common.loading')}</p>
           </div>
         </div>
-      </CompanyLayout>
+      </>
     );
   }
 
   return (
-    <CompanyLayout>
+    <>
       {toastMessage && (
         <Toast message={toastMessage.message} type={toastMessage.type} onClose={() => setToastMessage(null)} />
       )}
@@ -782,6 +781,6 @@ export default function CompanyFinance() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </CompanyLayout>
+    </>
   );
 }

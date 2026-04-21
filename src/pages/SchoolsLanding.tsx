@@ -18,7 +18,7 @@ import {
   CreditCard,
 } from 'lucide-react';
 
-type LecturesCopy = {
+type SchoolsCopy = {
   badge: string;
   title: string;
   subtitle: string;
@@ -36,109 +36,109 @@ type LecturesCopy = {
   finalDesc: string;
 };
 
-const ltCopy: LecturesCopy = {
-  badge: 'Tutlio Lectures',
-  title: 'Profesionali platforma imoniu nuotoliniams mokymams',
+const ltCopy: SchoolsCopy = {
+  badge: 'Tutlio Schools',
+  title: 'Profesionali platforma mokyklų valdymui',
   subtitle:
-    'Planuokite mokymu ciklus, valdykite lektorius, dalyvius ir lankomuma vienoje saugioje sistemoje. Maziau rankinio darbo, daugiau kokybisku mokymu.',
+    'Tvarkykite mokytojus, mokinius, sutartis ir mokėjimus vienoje saugioje sistemoje. Mažiau rankinio darbo, daugiau kokybiškų pamokų.',
   ctaSecondary: 'Susisiekti',
-  trust: 'Sukurta organizacijoms, kurios vykdo vidinius ar klientinius nuotolinius mokymus.',
-  problemTitle: 'Kas dazniausiai stabdo mokymu komandas',
+  trust: 'Sukurta mokykloms, kurios nori skaitmenizuoti administravimą ir pamokų valdymą.',
+  problemTitle: 'Kas dažniausiai stabdo mokyklas',
   problems: [
-    'Mokymu tvarkarasciai, registracijos ir dalyviu sarasai issibarste per kelis irankius.',
-    'Lektoriai neturi vieningos vietos, kur matyti sesijas, dalyvius ir uzduotis.',
-    'Ataskaitos apie lankomuma ir progresa ruosiamos rankiniu budu.',
+    'Tvarkaraščiai, registracijos ir mokinių sąrašai išsibarstę per kelis įrankius.',
+    'Mokytojai neturi vieningos vietos, kur matyti pamokas, mokinius ir užduotis.',
+    'Sutarčių ir mokėjimų administravimas vis dar atliekamas rankiniu būdu.',
   ],
-  solutionTitle: 'Vieninga valdymo erdve mokymu operacijoms',
+  solutionTitle: 'Vieninga valdymo erdvė mokykloms',
   solutionLead:
-    'Tutlio Lectures sujungia planavima, komunikacija ir rezultatu stebejima, kad komanda galetu susitelkti i turini ir dalyviu patirti.',
-  featuresTitle: 'Viskas, ko reikia nuotoliniams mokymams imoneje',
+    'Tutlio Schools sujungia planavimą, komunikaciją ir mokėjimų valdymą, kad administracija galėtų susitelkti į mokymo kokybę.',
+  featuresTitle: 'Viskas, ko reikia mokyklos valdymui',
   features: [
     {
-      title: 'Mokymu ciklu planavimas',
-      desc: 'Valdykite vienkartines ir pasikartojancias sesijas, temas ir lektoriu apkrovas viename kalendoriuje.',
+      title: 'Pamokų planavimas',
+      desc: 'Valdykite vienkartines ir pasikartojančias pamokas, temas ir mokytojų apkrovas viename kalendoriuje.',
     },
     {
-      title: 'Lektoriu ir grupiu valdymas',
-      desc: 'Priskirkite lektorius, dalyviu grupes ir atsakomybes be rankiniu sarasu ar pasikartojanciu el. laisku.',
+      title: 'Mokytojų ir mokinių valdymas',
+      desc: 'Priskirkite mokytojus, mokinių grupes ir atsakomybes be rankinių sąrašų ar pasikartojančių el. laiškų.',
     },
     {
-      title: 'Dalyviu patirtis',
-      desc: 'Aiski prisijungimo ir sesiju aplinka dalyviams: tvarkarastis, priminimai ir visa svarbi informacija vienoje vietoje.',
+      title: 'Mokinių patirtis',
+      desc: 'Aiški prisijungimo ir pamokų aplinka mokiniams: tvarkaraštis, priminimai ir visa svarbi informacija vienoje vietoje.',
     },
     {
       title: 'Ataskaitos ir KPI',
-      desc: 'Stebekite lankomuma, aktyvuma ir mokymu rezultatus, kad greitai matytumete poveiki verslo tikslams.',
+      desc: 'Stebėkite lankomumą, aktyvumą ir mokymosi rezultatus, kad greitai matytumėte poveikį.',
     },
     {
       title: 'Sauga ir patikimumas',
-      desc: 'Rolemis paremta prieiga, centralizuoti duomenys ir procesai, kurie tinka augancioms organizacijoms.',
+      desc: 'Rolėmis paremta prieiga, centralizuoti duomenys ir procesai, kurie tinka augančioms mokykloms.',
     },
     {
       title: 'Automatizuota komunikacija',
-      desc: 'Automatiniai priminimai ir pranesimai sumazina neatvykimu skaiciu ir administracini triuksmą.',
+      desc: 'Automatiniai priminimai ir pranešimai sumažina neatvykimų skaičių ir administracinį triukšmą.',
     },
   ],
   processTitle: 'Kaip tai veikia',
   process: [
     {
       step: '01',
-      title: 'Strukturizuojate mokymu modelį',
-      desc: 'Sukuriate temas, grupes, lektoriu rolės ir sesiju taisykles pagal savo organizacijos poreikius.',
+      title: 'Sukuriate mokyklos struktūrą',
+      desc: 'Sukuriate dalykus, grupes, mokytojų roles ir pamokų taisykles pagal savo mokyklos poreikius.',
     },
     {
       step: '02',
-      title: 'Paleidziate cikla',
-      desc: 'Pakvieciate dalyvius, suplanuojate sesijas ir aktyvuojate automatinius priminimus.',
+      title: 'Paleidžiate procesą',
+      desc: 'Pakviečiate mokinius, suplanuojate pamokas ir aktyvuojate automatinius priminimus.',
     },
     {
       step: '03',
-      title: 'Matuojate rezultata',
-      desc: 'Realiu laiku matote lankomuma ir progresa, o komandai pateikiate aiskias ataskaitas.',
+      title: 'Matuojate rezultatą',
+      desc: 'Realiu laiku matote lankomumą ir progresą, o komandai pateikiate aiškias ataskaitas.',
     },
   ],
-  finalTitle: 'Paruoskite savo mokymu operacijas augimui',
+  finalTitle: 'Paruoškite savo mokyklą augimui',
   finalDesc:
-    'Jei jūsų komanda vykdo nuotolinius mokymus, Tutlio Lectures pades dirbti struktūruotai, profesionaliai ir skaidriai.',
+    'Jei jūsų mokykla ieško profesionalaus įrankio administravimui, Tutlio Schools padės dirbti struktūruotai, skaidriai ir efektyviai.',
 };
 
-const enCopy: LecturesCopy = {
-  badge: 'Tutlio Lectures',
-  title: 'A professional platform for corporate remote training',
+const enCopy: SchoolsCopy = {
+  badge: 'Tutlio Schools',
+  title: 'A professional platform for school management',
   subtitle:
-    'Plan training cycles, manage lecturers, participants, and attendance in one secure system. Less manual work, more high-quality training delivery.',
-  ctaSecondary: 'Contact sales',
-  trust: 'Built for organizations that run internal or client-facing remote training programs.',
-  problemTitle: 'Common blockers for training teams',
+    'Manage teachers, students, contracts, and payments in one secure system. Less manual work, more high-quality teaching.',
+  ctaSecondary: 'Contact us',
+  trust: 'Built for schools that want to digitize administration and lesson management.',
+  problemTitle: 'Common blockers for schools',
   problems: [
-    'Schedules, registrations, and participant lists are spread across multiple tools.',
-    'Lecturers lack one place to see sessions, participants, and preparation context.',
-    'Attendance and progress reporting is still done manually.',
+    'Schedules, registrations, and student lists are spread across multiple tools.',
+    'Teachers lack one place to see lessons, students, and preparation context.',
+    'Contract and payment administration is still done manually.',
   ],
-  solutionTitle: 'One operating layer for training delivery',
+  solutionTitle: 'One operating layer for schools',
   solutionLead:
-    'Tutlio Lectures unifies planning, communication, and performance tracking so teams can focus on content quality and learner outcomes.',
-  featuresTitle: 'Everything needed for enterprise remote training',
+    'Tutlio Schools unifies planning, communication, and payment management so administration can focus on teaching quality.',
+  featuresTitle: 'Everything needed for school management',
   features: [
     {
-      title: 'Training cycle planning',
-      desc: 'Manage one-time and recurring sessions, topics, and lecturer workloads in a single calendar.',
+      title: 'Lesson planning',
+      desc: 'Manage one-time and recurring lessons, topics, and teacher workloads in a single calendar.',
     },
     {
-      title: 'Lecturer and cohort management',
-      desc: 'Assign lecturers, participant cohorts, and responsibilities without spreadsheet overhead.',
+      title: 'Teacher and student management',
+      desc: 'Assign teachers, student groups, and responsibilities without spreadsheet overhead.',
     },
     {
-      title: 'Participant experience',
-      desc: 'A clear participant workspace for schedule, reminders, and session context in one place.',
+      title: 'Student experience',
+      desc: 'A clear student workspace for schedule, reminders, and lesson context in one place.',
     },
     {
       title: 'Reporting and KPIs',
-      desc: 'Track attendance, engagement, and progress to connect training outcomes with business goals.',
+      desc: 'Track attendance, engagement, and progress to measure educational impact.',
     },
     {
       title: 'Security and governance',
-      desc: 'Role-based access and centralized data flows designed for growing organizations.',
+      desc: 'Role-based access and centralized data flows designed for growing schools.',
     },
     {
       title: 'Automated communication',
@@ -149,13 +149,13 @@ const enCopy: LecturesCopy = {
   process: [
     {
       step: '01',
-      title: 'Define your training model',
-      desc: 'Set up topics, cohorts, lecturer roles, and delivery rules based on your organization.',
+      title: 'Set up your school structure',
+      desc: 'Configure subjects, groups, teacher roles, and lesson rules based on your school.',
     },
     {
       step: '02',
-      title: 'Launch and run sessions',
-      desc: 'Invite participants, publish schedules, and keep operations aligned with automated reminders.',
+      title: 'Launch and run lessons',
+      desc: 'Invite students, publish schedules, and keep operations aligned with automated reminders.',
     },
     {
       step: '03',
@@ -163,12 +163,12 @@ const enCopy: LecturesCopy = {
       desc: 'Use attendance and progress insights to improve program quality and impact.',
     },
   ],
-  finalTitle: 'Scale training operations with confidence',
+  finalTitle: 'Scale your school operations with confidence',
   finalDesc:
-    'If your team delivers remote learning, Tutlio Lectures helps you run a structured, professional, and measurable training operation.',
+    'If your school is looking for a professional administration tool, Tutlio Schools helps you run a structured, transparent, and efficient operation.',
 };
 
-export default function LecturesLanding() {
+export default function SchoolsLanding() {
   const { locale } = useTranslation();
   const c = locale === 'lt' ? ltCopy : enCopy;
 
@@ -199,7 +199,6 @@ export default function LecturesLanding() {
               </Link>
             </div>
             <p className="mt-6 text-sm text-slate-300">{c.trust}</p>
-
           </div>
         </section>
 
@@ -246,16 +245,16 @@ export default function LecturesLanding() {
           <div className="max-w-6xl mx-auto px-4">
             <div className="grid lg:grid-cols-3 gap-6">
               <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-sm">
-                <img src="/landing/dashboard.png" alt="Training dashboard overview" className="w-full h-48 object-cover" loading="lazy" />
+                <img src="/landing/dashboard.png" alt="School dashboard overview" className="w-full h-48 object-cover" loading="lazy" />
                 <div className="p-5">
                   <p className="text-sm font-semibold text-indigo-700 flex items-center gap-2 mb-2">
                     <MessageSquareText className="w-4 h-4" />
-                    {locale === 'lt' ? 'Susirasinejimo kanalai' : 'Messaging channels'}
+                    {locale === 'lt' ? 'Susirašinėjimo kanalai' : 'Messaging channels'}
                   </p>
                   <p className="text-sm text-slate-600">
                     {locale === 'lt'
-                      ? 'Lektoriai, koordinatoriai ir dalyviai komunikuoja vienoje vietoje su pilna konteksto istorija.'
-                      : 'Lecturers, coordinators, and participants communicate in one place with full context history.'}
+                      ? 'Mokytojai, administratoriai ir mokiniai komunikuoja vienoje vietoje su pilna konteksto istorija.'
+                      : 'Teachers, administrators, and students communicate in one place with full context history.'}
                   </p>
                 </div>
               </div>
@@ -265,11 +264,11 @@ export default function LecturesLanding() {
                 <div className="p-5">
                   <p className="text-sm font-semibold text-indigo-700 flex items-center gap-2 mb-2">
                     <CreditCard className="w-4 h-4" />
-                    {locale === 'lt' ? 'Automatiniai apmokejimai' : 'Automated payments'}
+                    {locale === 'lt' ? 'Automatiniai apmokėjimai' : 'Automated payments'}
                   </p>
                   <p className="text-sm text-slate-600">
                     {locale === 'lt'
-                      ? 'Mokejimu surinkimas ir stebejimas automatizuojamas, kad komanda maziau laiko skirtu rankiniam administravimui.'
+                      ? 'Mokėjimų surinkimas ir stebėjimas automatizuojamas, kad administracija mažiau laiko skirtų rankiniam darbui.'
                       : 'Collection and tracking are automated so your team spends less time on manual billing operations.'}
                   </p>
                 </div>
@@ -284,7 +283,7 @@ export default function LecturesLanding() {
                   </p>
                   <p className="text-sm text-slate-600">
                     {locale === 'lt'
-                      ? 'Sistema primena apie sesijas ir svarbius veiksmus automatiskai, sumazindama neatvykimu rizika.'
+                      ? 'Sistema primena apie pamokas ir svarbius veiksmus automatiškai, sumažindama neatvykimų riziką.'
                       : 'The system sends reminders automatically, reducing no-shows and missed actions.'}
                   </p>
                 </div>
@@ -312,7 +311,7 @@ export default function LecturesLanding() {
           <div className="max-w-4xl mx-auto px-4 text-center">
             <div className="inline-flex items-center gap-2 text-sm font-semibold text-indigo-600 mb-4">
               <Building2 className="w-4 h-4" />
-              B2B training operations
+              {locale === 'lt' ? 'Mokyklų valdymas' : 'School management'}
             </div>
             <h2 className="text-3xl md:text-4xl font-black text-slate-900">{c.finalTitle}</h2>
             <p className="mt-4 text-slate-600 text-lg leading-relaxed">{c.finalDesc}</p>

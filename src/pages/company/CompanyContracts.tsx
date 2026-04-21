@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import SchoolLayout from '@/components/SchoolLayout';
 import { supabase } from '@/lib/supabase';
+import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,7 +11,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog';
 import {
   Select,
@@ -20,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, FileText, Send, CheckCircle, Clock, Edit2, Trash2 } from 'lucide-react';
+import { Plus, FileText, Send, CheckCircle, Edit2, Trash2 } from 'lucide-react';
 import Toast from '@/components/Toast';
 import { sendEmail } from '@/lib/email';
 import { useTranslation } from '@/lib/i18n';
@@ -43,7 +42,7 @@ interface Template {
 
 interface Contract {
   id: string;
-  school_id: string;
+  organization_id: string;
   template_id: string | null;
   student_id: string;
   filled_body: string;
@@ -65,15 +64,18 @@ function fillPlaceholders(body: string, data: Record<string, string>): string {
   return result;
 }
 
-export default function SchoolContracts() {
+const CONTRACTS_CACHE_KEY = 'company_contracts';
+
+export default function CompanyContracts() {
   const { t: tr } = useTranslation();
-  const [schoolId, setSchoolId] = useState<string | null>(null);
-  const [schoolName, setSchoolName] = useState('');
-  const [schoolEmail, setSchoolEmail] = useState('');
-  const [templates, setTemplates] = useState<Template[]>([]);
-  const [contracts, setContracts] = useState<Contract[]>([]);
-  const [students, setStudents] = useState<Student[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cc = getCached<any>(CONTRACTS_CACHE_KEY);
+  const [orgId, setOrgId] = useState<string | null>(cc?.orgId ?? null);
+  const [orgName, setOrgName] = useState(cc?.orgName ?? '');
+  const [orgEmail, setOrgEmail] = useState(cc?.orgEmail ?? '');
+  const [templates, setTemplates] = useState<Template[]>(cc?.templates ?? []);
+  const [contracts, setContracts] = useState<Contract[]>(cc?.contracts ?? []);
+  const [students, setStudents] = useState<Student[]>(cc?.students ?? []);
+  const [loading, setLoading] = useState(!cc);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const [templateOpen, setTemplateOpen] = useState(false);
@@ -86,41 +88,50 @@ export default function SchoolContracts() {
 
   const [tab, setTab] = useState<'contracts' | 'templates'>('contracts');
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { if (!getCached(CONTRACTS_CACHE_KEY)) load(); }, []);
 
   const load = async () => {
+    if (!getCached(CONTRACTS_CACHE_KEY)) setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) { setLoading(false); return; }
 
     const { data: admin } = await supabase
-      .from('school_admins')
-      .select('school_id, schools(name, email)')
+      .from('organization_admins')
+      .select('organization_id, organizations(name, email)')
       .eq('user_id', user.id)
       .maybeSingle();
 
-    if (!admin?.school_id) { setLoading(false); return; }
-    setSchoolId(admin.school_id);
-    setSchoolName((admin.schools as any)?.name || '');
-    setSchoolEmail((admin.schools as any)?.email || '');
+    if (!admin?.organization_id) { setLoading(false); return; }
+    setOrgId(admin.organization_id);
+    const name = (admin.organizations as any)?.name || '';
+    const email = (admin.organizations as any)?.email || '';
+    setOrgName(name);
+    setOrgEmail(email);
 
     const [tRes, cRes, sRes] = await Promise.all([
-      supabase.from('school_contract_templates').select('*').eq('school_id', admin.school_id).order('created_at', { ascending: false }),
-      supabase.from('school_contracts').select('*, student:students(full_name, email, payer_name, payer_email)').eq('school_id', admin.school_id).order('created_at', { ascending: false }),
-      supabase.from('students').select('id, full_name, email, payer_name, payer_email').eq('school_id', admin.school_id).order('full_name'),
+      supabase.from('school_contract_templates').select('*').eq('organization_id', admin.organization_id).order('created_at', { ascending: false }),
+      supabase.from('school_contracts').select('*, student:students(full_name, email, payer_name, payer_email)').eq('organization_id', admin.organization_id).order('created_at', { ascending: false }),
+      supabase.from('students').select('id, full_name, email, payer_name, payer_email').eq('organization_id', admin.organization_id).order('full_name'),
     ]);
 
-    setTemplates(tRes.data || []);
-    setContracts(cRes.data || []);
-    setStudents(sRes.data || []);
+    const tData = tRes.data || [];
+    const cData = cRes.data || [];
+    const sData = sRes.data || [];
+    setTemplates(tData);
+    setContracts(cData);
+    setStudents(sData);
+    setCache(CONTRACTS_CACHE_KEY, { orgId: admin.organization_id, orgName: name, orgEmail: email, templates: tData, contracts: cData, students: sData });
     setLoading(false);
   };
 
+  const reload = () => { invalidateCache(CONTRACTS_CACHE_KEY); load(); };
+
   const saveTemplate = async () => {
-    if (!schoolId || !tForm.name.trim()) return;
+    if (!orgId || !tForm.name.trim()) return;
     setSaving(true);
 
     const payload = {
-      school_id: schoolId,
+      organization_id: orgId,
       name: tForm.name.trim(),
       body: tForm.body,
       annual_fee_default: tForm.annual_fee_default ? Number(tForm.annual_fee_default) : null,
@@ -137,13 +148,13 @@ export default function SchoolContracts() {
     setSaving(false);
     setTemplateOpen(false);
     setEditTemplate(null);
-    setTForm({ name: '', body: DEFAULT_TEMPLATE_BODY, annual_fee_default: '' });
-    setToast({ message: editTemplate ? 'Template updated' : 'Template created', type: 'success' });
-    load();
+    setTForm({ name: '', body: tr('school.contract.defaultBody'), annual_fee_default: '' });
+    setToast({ message: editTemplate ? tr('school.toastTemplateUpdated') : tr('school.toastTemplateCreated'), type: 'success' });
+    reload();
   };
 
   const deleteTemplate = async (id: string) => {
-    if (!confirm('Delete this template?')) return;
+    if (!confirm(tr('school.confirmDeleteTemplate'))) return;
     await supabase.from('school_contract_templates').delete().eq('id', id);
     setTemplates((prev) => prev.filter((t) => t.id !== id));
   };
@@ -181,7 +192,7 @@ export default function SchoolContracts() {
           '{{parent_email}}': s.payer_email || '',
           '{{annual_fee}}': prev.annual_fee || '',
           '{{date}}': new Date().toLocaleDateString('lt-LT'),
-          '{{school_name}}': schoolName,
+          '{{school_name}}': orgName,
         });
       }
       return { ...prev, student_id: studentId, filled_body: body };
@@ -189,17 +200,17 @@ export default function SchoolContracts() {
   };
 
   const createContract = async () => {
-    if (!schoolId || !cForm.student_id || !cForm.annual_fee) return;
+    if (!orgId || !cForm.student_id || !cForm.annual_fee) return;
     setSaving(true);
 
     const finalBody = fillPlaceholders(cForm.filled_body, {
       '{{annual_fee}}': cForm.annual_fee,
       '{{date}}': new Date().toLocaleDateString('lt-LT'),
-      '{{school_name}}': schoolName,
+      '{{school_name}}': orgName,
     });
 
     const { error } = await supabase.from('school_contracts').insert({
-      school_id: schoolId,
+      organization_id: orgId,
       template_id: cForm.template_id || null,
       student_id: cForm.student_id,
       filled_body: finalBody,
@@ -211,7 +222,7 @@ export default function SchoolContracts() {
     if (error) { setToast({ message: error.message, type: 'error' }); return; }
     setContractOpen(false);
     setToast({ message: tr('school.toastContractCreated'), type: 'success' });
-    load();
+    reload();
   };
 
   const sendContract = async (contract: Contract) => {
@@ -226,8 +237,8 @@ export default function SchoolContracts() {
       type: 'school_contract',
       to: recipient,
       data: {
-        schoolName,
-        schoolEmail,
+        schoolName: orgName,
+        schoolEmail: orgEmail,
         studentName: student?.full_name || '',
         parentName: student?.payer_name || student?.full_name || '',
         recipientName: student?.payer_name || student?.full_name || '',
@@ -243,7 +254,7 @@ export default function SchoolContracts() {
         .update({ signing_status: 'sent', sent_at: new Date().toISOString() })
         .eq('id', contract.id);
       setToast({ message: tr('school.toastContractSent'), type: 'success' });
-      load();
+      reload();
     } else {
       setToast({ message: tr('school.toastContractSendFail'), type: 'error' });
     }
@@ -255,7 +266,7 @@ export default function SchoolContracts() {
       .update({ signing_status: 'signed', signed_at: new Date().toISOString() })
       .eq('id', contractId);
     setToast({ message: tr('school.toastContractSigned'), type: 'success' });
-    load();
+    reload();
   };
 
   const deleteContract = async (id: string) => {
@@ -275,7 +286,7 @@ export default function SchoolContracts() {
   };
 
   return (
-    <SchoolLayout>
+    <>
       <div className="max-w-5xl mx-auto space-y-6">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <h1 className="text-2xl font-bold text-gray-900">{tr('school.contractsTitle')}</h1>
@@ -377,44 +388,42 @@ export default function SchoolContracts() {
         )}
       </div>
 
-      {/* Template dialog */}
       <Dialog open={templateOpen} onOpenChange={setTemplateOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editTemplate ? 'Edit Template' : 'New Template'}</DialogTitle>
+            <DialogTitle>{editTemplate ? tr('school.editTemplate') : tr('school.newTemplateDialog')}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
-                <Label>Template Name *</Label>
-                <Input value={tForm.name} onChange={(e) => setTForm({ ...tForm, name: e.target.value })} placeholder="Annual fee 2026" />
+                <Label>{tr('school.templateName')}</Label>
+                <Input value={tForm.name} onChange={(e) => setTForm({ ...tForm, name: e.target.value })} placeholder={tr('school.templateNamePlaceholder')} />
               </div>
               <div className="space-y-2">
-                <Label>Default Annual Fee</Label>
+                <Label>{tr('school.templateDefaultFee')}</Label>
                 <Input type="number" step="0.01" value={tForm.annual_fee_default} onChange={(e) => setTForm({ ...tForm, annual_fee_default: e.target.value })} placeholder="500.00" />
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Contract Body</Label>
-              <p className="text-xs text-gray-400">Available placeholders: {PLACEHOLDERS.join(', ')}</p>
+              <Label>{tr('school.contractBody')}</Label>
+              <p className="text-xs text-gray-400">{tr('school.placeholdersHint')} {PLACEHOLDERS.join(', ')}</p>
               <Textarea
                 value={tForm.body}
                 onChange={(e) => setTForm({ ...tForm, body: e.target.value })}
                 className="min-h-[300px] font-mono text-sm"
-                placeholder="Enter contract template..."
+                placeholder={tr('school.enterTemplatePlaceholder')}
               />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setTemplateOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setTemplateOpen(false)}>{tr('school.cancel')}</Button>
             <Button onClick={saveTemplate} disabled={saving || !tForm.name.trim()} className="bg-emerald-600 hover:bg-emerald-700">
-              {saving ? 'Saving...' : editTemplate ? 'Update' : 'Create'}
+              {saving ? tr('school.savingTemplate') : editTemplate ? tr('school.update') : tr('school.create')}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Create contract dialog */}
       <Dialog open={contractOpen} onOpenChange={setContractOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -468,6 +477,6 @@ export default function SchoolContracts() {
       </Dialog>
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
-    </SchoolLayout>
+    </>
   );
 }

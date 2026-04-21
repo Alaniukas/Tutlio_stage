@@ -1,5 +1,4 @@
 import { Navigate } from 'react-router-dom';
-import CompanyLayout from '@/components/CompanyLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Play } from 'lucide-react';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
@@ -30,7 +29,7 @@ export default function CompanyInstructions() {
   ] as const;
 
   return (
-    <CompanyLayout>
+    <>
       <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-6">
         <div className="text-center space-y-2">
           <h1 className="text-3xl font-bold text-gray-900">{t('companyInstr.title')}</h1>
@@ -93,6 +92,6 @@ export default function CompanyInstructions() {
           </CardContent>
         </Card>
       </div>
-    </CompanyLayout>
+    </>
   );
 }

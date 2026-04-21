@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import CompanyLayout from '@/components/CompanyLayout';
 import { useTranslation } from '@/lib/i18n';
 import { supabase } from '@/lib/supabase';
 import { useConversations } from '@/hooks/useChat';
@@ -210,7 +209,7 @@ export default function CompanyMessages() {
   };
 
   return (
-    <CompanyLayout>
+    <>
       <div className="flex-1 p-6">
         <h1 className="text-2xl font-bold text-gray-900 mb-4">{t('chat.title')}</h1>
 
@@ -282,6 +281,6 @@ export default function CompanyMessages() {
           </div>
         </div>
       </div>
-    </CompanyLayout>
+    </>
   );
 }
