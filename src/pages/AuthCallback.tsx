@@ -12,7 +12,7 @@ export default function AuthCallback() {
     let done = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
-    const navigateSafe = (path: '/login' | '/reset-password') => {
+    const navigateSafe = (path: string) => {
       if (done) return;
       done = true;
       if (timeoutId !== undefined) clearTimeout(timeoutId);
@@ -44,6 +44,13 @@ export default function AuthCallback() {
         if (done) return;
         if (!error && (type === 'recovery' || wantsReset)) {
           navigateSafe('/reset-password');
+        } else if (!error) {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user?.user_metadata?.org_token) {
+            navigateSafe('/dashboard');
+          } else {
+            navigateSafe('/login');
+          }
         } else {
           navigateSafe('/login');
         }

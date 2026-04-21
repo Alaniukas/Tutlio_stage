@@ -31,10 +31,8 @@ import CompanySessions from '@/pages/company/CompanySessions';
 import CompanyTvarkarastis from '@/pages/company/CompanyTvarkarastis';
 import CompanyStats from '@/pages/company/CompanyStats';
 import CompanySettings from '@/pages/company/CompanySettings';
-import CompanyFinance from '@/pages/company/CompanyFinance';
-import CompanyInvoices from '@/pages/company/CompanyInvoices';
 import CompanyContracts from '@/pages/company/CompanyContracts';
-import CompanyPayments from '@/pages/company/CompanyPayments';
+import CompanyFinanceHub from '@/pages/company/CompanyFinanceHub';
 import InvoicesPage from '@/pages/Invoices';
 
 import Landing from '@/pages/Landing';
@@ -156,10 +154,8 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/company/stats" element={<CompanyStats />} />
             <Route path="/company/instructions" element={<CompanyInstructions />} />
             <Route path="/company/settings" element={<CompanySettings />} />
-            <Route path="/company/finance" element={<CompanyFinance />} />
-            <Route path="/company/invoices" element={<CompanyInvoices />} />
+            <Route path="/company/finance" element={<CompanyFinanceHub />} />
             <Route path="/company/contracts" element={<CompanyContracts />} />
-            <Route path="/company/payments" element={<CompanyPayments />} />
           </Route>
         </Route>
 

@@ -61,17 +61,14 @@ export default function CompanyLayout() {
       { href: '/company/messages', label: t('companyNav.messages'), icon: MessageSquare },
       { href: '/company/stats', label: t('companyNav.stats'), icon: BarChart3 },
       { href: '/company/settings', label: t('companyNav.lessonSettings'), icon: Settings },
-      { href: '/company/finance', label: t('companyNav.finance'), icon: CreditCard },
-      { href: '/company/invoices', label: t('companyNav.invoices'), icon: FileText },
-      { href: '/company/instructions', label: t('companyNav.instructions'), icon: HelpCircle },
     ];
     if (isSchool) {
-      const financeIdx = base.findIndex((i) => i.href === '/company/finance');
-      base.splice(financeIdx, 0,
-        { href: '/company/contracts', label: t('companyNav.contracts'), icon: FileText, exact: false },
-        { href: '/company/payments', label: t('companyNav.payments'), icon: CreditCard, exact: false },
-      );
+      base.push({ href: '/company/contracts', label: t('companyNav.contracts'), icon: FileText });
     }
+    base.push(
+      { href: '/company/finance', label: t('companyNav.finance'), icon: CreditCard },
+      { href: '/company/instructions', label: t('companyNav.instructions'), icon: HelpCircle },
+    );
     return base;
   }, [t, isSchool]);
 

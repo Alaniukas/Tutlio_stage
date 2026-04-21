@@ -146,22 +146,36 @@ export default function ProtectedRoute() {
       if (orgToken && !profile?.organization_id) {
         const { data: invite } = await supabase
           .from('tutor_invites')
-          .select('id, organization_id, used, subjects_preset')
+          .select('id, organization_id, used, subjects_preset, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent')
           .eq('token', orgToken)
           .maybeSingle();
 
-        if (invite && !invite.used) {
+        if (invite) {
           await supabase
             .from('profiles')
-            .update({ organization_id: invite.organization_id })
-            .eq('id', ctxUser.id);
+            .upsert({
+              id: ctxUser.id,
+              email: ctxUser.email,
+              full_name: ctxUser.user_metadata?.full_name,
+              phone: ctxUser.user_metadata?.phone || '',
+              organization_id: invite.organization_id,
+              cancellation_hours: invite.cancellation_hours ?? 24,
+              cancellation_fee_percent: invite.cancellation_fee_percent ?? 0,
+              reminder_student_hours: invite.reminder_student_hours ?? 2,
+              reminder_tutor_hours: invite.reminder_tutor_hours ?? 2,
+              break_between_lessons: invite.break_between_lessons ?? 0,
+              min_booking_hours: invite.min_booking_hours ?? 1,
+              company_commission_percent: invite.company_commission_percent ?? 0,
+            });
 
-          await supabase
-            .from('tutor_invites')
-            .update({ used: true, used_by_profile_id: ctxUser.id })
-            .eq('id', invite.id);
+          if (!invite.used) {
+            await supabase
+              .from('tutor_invites')
+              .update({ used: true, used_by_profile_id: ctxUser.id })
+              .eq('id', invite.id);
 
-          await ensureTutorPresetSubjects(ctxUser.id, invite.subjects_preset as any);
+            await ensureTutorPresetSubjects(ctxUser.id, invite.subjects_preset as any);
+          }
           linkedToOrg = true;
         }
       }

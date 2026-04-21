@@ -174,14 +174,14 @@ export default function Login() {
       .from('profiles').select('id, organization_id, subscription_status, manual_subscription_exempt').eq('id', user.id).maybeSingle();
 
     const meta = user.user_metadata || {};
-    if (meta.org_token) {
+    if (meta.org_token && !profile?.organization_id) {
       const { data: invite } = await supabase
         .from('tutor_invites')
         .select('id, organization_id, used, subjects_preset, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent')
         .eq('token', meta.org_token)
         .maybeSingle();
 
-      if (invite && !invite.used) {
+      if (invite) {
         const profileData = {
           id: user.id,
           full_name: profile ? undefined : meta.full_name,
@@ -197,11 +197,13 @@ export default function Login() {
           company_commission_percent: invite.company_commission_percent ?? 0,
         };
         await supabase.from('profiles').upsert(profileData);
-        await supabase
-          .from('tutor_invites')
-          .update({ used: true, used_by_profile_id: user.id })
-          .eq('id', invite.id);
-        await ensureTutorPresetSubjects(user.id, invite.subjects_preset as any);
+        if (!invite.used) {
+          await supabase
+            .from('tutor_invites')
+            .update({ used: true, used_by_profile_id: user.id })
+            .eq('id', invite.id);
+          await ensureTutorPresetSubjects(user.id, invite.subjects_preset as any);
+        }
         const { data: updated } = await supabase
           .from('profiles').select('id, organization_id, subscription_status, manual_subscription_exempt').eq('id', user.id).maybeSingle();
         profile = updated;
@@ -355,18 +357,13 @@ export default function Login() {
         console.log('🔍 SIGNUP FLOW - ORG TOKEN FROM METADATA:', meta.org_token);
 
         if (meta.org_token) {
-          console.log('🔍 SIGNUP FLOW - SEARCHING FOR INVITE WITH TOKEN:', meta.org_token);
           const { data: invite, error: inviteError } = await supabase
             .from('tutor_invites')
             .select('id, organization_id, used, subjects_preset, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent')
             .eq('token', meta.org_token)
             .maybeSingle();
 
-          console.log('🔍 SIGNUP FLOW - INVITE QUERY RESULT:', invite);
-          console.log('🔍 SIGNUP FLOW - INVITE QUERY ERROR:', inviteError);
-
-          if (invite && !invite.used) {
-            console.log('🟢 SIGNUP FLOW - FULL INVITE DATA FROM DB:', invite);
+          if (invite) {
             const profileData = {
               id: data.user.id,
               full_name: tutorData ? undefined : meta.full_name,
@@ -381,21 +378,18 @@ export default function Login() {
               min_booking_hours: invite.min_booking_hours ?? 1,
               company_commission_percent: invite.company_commission_percent ?? 0,
             };
-            console.log('🟢 SIGNUP FLOW - UPSERTING PROFILE WITH DATA:', profileData);
             const { error: upsertError } = await supabase.from('profiles').upsert(profileData);
             if (upsertError) {
-              console.error('❌ SIGNUP FLOW - PROFILE UPSERT ERROR:', upsertError);
-            } else {
-              console.log('✅ SIGNUP FLOW - PROFILE UPSERTED SUCCESSFULLY');
+              console.error('[Login] Profile upsert error:', upsertError);
             }
-            await supabase
-              .from('tutor_invites')
-              .update({ used: true, used_by_profile_id: data.user.id })
-              .eq('id', invite.id);
+            if (!invite.used) {
+              await supabase
+                .from('tutor_invites')
+                .update({ used: true, used_by_profile_id: data.user.id })
+                .eq('id', invite.id);
+              await ensureTutorPresetSubjects(data.user.id, invite.subjects_preset as any);
+            }
 
-            await ensureTutorPresetSubjects(data.user.id, invite.subjects_preset as any);
-
-            // Refresh profile
             const { data: updated } = await supabase
               .from('profiles').select('id').eq('id', data.user.id).maybeSingle();
             tutorData = updated;

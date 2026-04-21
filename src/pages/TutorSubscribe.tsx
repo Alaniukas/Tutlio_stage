@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, Link, useSearchParams, useLocation } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -244,13 +244,13 @@ export default function TutorSubscribe() {
 
       <div className="relative z-10 container mx-auto px-4 py-12 max-w-6xl">
         <div className="mb-8">
-          <Link
-            to="/login"
+          <button
+            onClick={() => navigate(-1)}
             className="inline-flex items-center gap-2 text-white/70 hover:text-white transition-colors mb-6"
           >
             <ArrowLeft className="w-4 h-4" />
-            {isRegistrationSubscription ? t('subscribe.logoutLink') : t('subscribe.backToLogin')}
-          </Link>
+            {t('subscribe.goBack')}
+          </button>
 
           {canceled && (
             <p className="mb-4 text-amber-200 text-sm bg-amber-500/20 border border-amber-500/40 rounded-xl px-4 py-2 inline-block">
