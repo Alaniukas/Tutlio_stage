@@ -141,7 +141,7 @@ export default function App({ basename }: { basename: string }) {
 
         {/* Organization admin routes (company + school) - WITH UserProvider for caching */}
         <Route path="/company/login" element={<CompanyLogin />} />
-        <Route path="/school/login" element={<Navigate to="/company/login" replace />} />
+        <Route path="/school/login" element={<CompanyLogin />} />
         <Route element={<CompanyProtectedWithUser />}>
           <Route element={<CompanyLayout />}>
             <Route path="/company" element={<CompanyDashboard />} />
@@ -156,6 +156,19 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/company/settings" element={<CompanySettings />} />
             <Route path="/company/finance" element={<CompanyFinanceHub />} />
             <Route path="/company/contracts" element={<CompanyContracts />} />
+
+            <Route path="/school" element={<CompanyDashboard />} />
+            <Route path="/school/tutors" element={<CompanyTutors />} />
+            <Route path="/school/students" element={<CompanyStudents />} />
+            <Route path="/school/waitlist" element={<CompanyWaitlist />} />
+            <Route path="/school/sessions" element={<CompanySessions />} />
+            <Route path="/school/schedule" element={<CompanyTvarkarastis />} />
+            <Route path="/school/messages" element={<CompanyMessages />} />
+            <Route path="/school/stats" element={<CompanyStats />} />
+            <Route path="/school/instructions" element={<CompanyInstructions />} />
+            <Route path="/school/settings" element={<CompanySettings />} />
+            <Route path="/school/finance" element={<CompanyFinanceHub />} />
+            <Route path="/school/contracts" element={<CompanyContracts />} />
           </Route>
         </Route>
 

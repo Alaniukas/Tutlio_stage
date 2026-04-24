@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,6 +14,14 @@ export default function CompanyLogin() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const location = useLocation();
+  const isSchoolLogin = location.pathname.startsWith('/school');
+  const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
+  const heroTitle = isSchoolLogin ? t('school.loginHeroTitle') : t('companyLogin.title');
+  const heroSubtitle = isSchoolLogin ? t('school.loginHeroSubtitle') : t('companyLogin.subtitle');
+  const portalBadge = isSchoolLogin ? t('school.loginPortalBadge') : t('companyLogin.adminLogin');
+  const cardBadge = isSchoolLogin ? t('school.loginCardBadge') : t('companyLogin.loginTitle');
+  const cardTitle = isSchoolLogin ? t('school.loginCardTitle') : t('companyLogin.loginSubtitle');
 
   useEffect(() => {
     (async () => {
@@ -24,9 +32,9 @@ export default function CompanyLogin() {
         .select('id')
         .eq('user_id', session.user.id)
         .maybeSingle();
-      if (adminRow) navigate('/company', { replace: true });
+      if (adminRow) navigate(orgBasePath, { replace: true });
     })();
-  }, [navigate]);
+  }, [navigate, orgBasePath]);
 
   const handleGoToMainLogin = async () => {
     sessionStorage.setItem('tutlio_logout_intent', '1');
@@ -58,12 +66,12 @@ export default function CompanyLogin() {
 
     if (!adminRow) {
       await supabase.auth.signOut();
-      setError(t('companyLogin.noAdminAccount'));
+      setError(isSchoolLogin ? t('school.notSchoolAdmin') : t('companyLogin.noAdminAccount'));
       setLoading(false);
       return;
     }
 
-    navigate('/company');
+    navigate(orgBasePath);
   };
 
   return (
@@ -81,8 +89,8 @@ export default function CompanyLogin() {
           <div className="w-14 h-14 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center">
             <Building2 className="w-7 h-7 text-white" />
           </div>
-          <h1 className="text-4xl font-bold leading-tight">{t('companyLogin.title')}</h1>
-          <p className="text-slate-300 text-lg leading-relaxed font-light">{t('companyLogin.subtitle')}</p>
+          <h1 className="text-4xl font-bold leading-tight">{heroTitle}</h1>
+          <p className="text-slate-300 text-lg leading-relaxed font-light">{heroSubtitle}</p>
         </div>
 
         <div className="text-sm text-slate-400">
@@ -100,13 +108,13 @@ export default function CompanyLogin() {
               <Building2 className="w-7 h-7 text-white" />
             </div>
             <h1 className="text-2xl font-bold text-white tracking-tight">Tutlio</h1>
-            <p className="text-slate-400 text-sm mt-1">{t('companyLogin.adminLogin')}</p>
+            <p className="text-slate-400 text-sm mt-1">{portalBadge}</p>
           </div>
 
           <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
             <div className="bg-gradient-to-br from-slate-700 to-slate-900 px-6 py-5">
-              <p className="text-white/70 text-xs font-medium uppercase tracking-wider">{t('companyLogin.loginTitle')}</p>
-              <h2 className="text-white text-xl font-bold mt-0.5">{t('companyLogin.loginSubtitle')}</h2>
+              <p className="text-white/70 text-xs font-medium uppercase tracking-wider">{cardBadge}</p>
+              <h2 className="text-white text-xl font-bold mt-0.5">{cardTitle}</h2>
             </div>
 
             <form onSubmit={handleLogin} className="p-6 space-y-4">

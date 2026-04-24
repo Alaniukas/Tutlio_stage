@@ -38,6 +38,7 @@ interface Template {
   name: string;
   body: string;
   annual_fee_default: number | null;
+  pdf_url?: string | null;
 }
 
 interface Contract {
@@ -51,7 +52,13 @@ interface Contract {
   signed_at: string | null;
   sent_at: string | null;
   created_at: string;
+  pdf_url?: string | null;
   student?: { full_name: string; email: string; payer_name: string | null; payer_email: string | null };
+}
+
+interface InstallmentDraft {
+  amount: string;
+  due_date: string;
 }
 
 const PLACEHOLDERS = ['{{student_name}}', '{{parent_name}}', '{{parent_email}}', '{{annual_fee}}', '{{date}}', '{{school_name}}'];
@@ -80,10 +87,14 @@ export default function CompanyContracts() {
 
   const [templateOpen, setTemplateOpen] = useState(false);
   const [editTemplate, setEditTemplate] = useState<Template | null>(null);
-  const [tForm, setTForm] = useState({ name: '', body: '', annual_fee_default: '' });
+  const [tForm, setTForm] = useState({ name: '', body: '', annual_fee_default: '', pdf_url: '' });
+  const [templatePdfFile, setTemplatePdfFile] = useState<File | null>(null);
 
   const [contractOpen, setContractOpen] = useState(false);
   const [cForm, setCForm] = useState({ student_id: '', template_id: '', annual_fee: '', filled_body: '' });
+  const [sendImmediately, setSendImmediately] = useState(true);
+  const [paymentMode, setPaymentMode] = useState<'full' | 'installments'>('full');
+  const [installmentRows, setInstallmentRows] = useState<InstallmentDraft[]>([{ amount: '', due_date: '' }]);
   const [saving, setSaving] = useState(false);
 
   const [tab, setTab] = useState<'contracts' | 'templates'>('contracts');
@@ -135,7 +146,25 @@ export default function CompanyContracts() {
       name: tForm.name.trim(),
       body: tForm.body,
       annual_fee_default: tForm.annual_fee_default ? Number(tForm.annual_fee_default) : null,
+      pdf_url: tForm.pdf_url || null,
     };
+
+    if (templatePdfFile) {
+      const fileExt = templatePdfFile.name.split('.').pop()?.toLowerCase() || 'pdf';
+      const path = `${orgId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
+      const { error: uploadErr } = await supabase.storage.from('school-contracts').upload(path, templatePdfFile, {
+        cacheControl: '3600',
+        upsert: false,
+        contentType: templatePdfFile.type || 'application/pdf',
+      });
+      if (uploadErr) {
+        setToast({ message: uploadErr.message, type: 'error' });
+        setSaving(false);
+        return;
+      }
+      const { data } = supabase.storage.from('school-contracts').getPublicUrl(path);
+      payload.pdf_url = data.publicUrl;
+    }
 
     if (editTemplate) {
       const { error } = await supabase.from('school_contract_templates').update(payload).eq('id', editTemplate.id);
@@ -148,7 +177,8 @@ export default function CompanyContracts() {
     setSaving(false);
     setTemplateOpen(false);
     setEditTemplate(null);
-    setTForm({ name: '', body: tr('school.contract.defaultBody'), annual_fee_default: '' });
+    setTemplatePdfFile(null);
+    setTForm({ name: '', body: tr('school.contract.defaultBody'), annual_fee_default: '', pdf_url: '' });
     setToast({ message: editTemplate ? tr('school.toastTemplateUpdated') : tr('school.toastTemplateCreated'), type: 'success' });
     reload();
   };
@@ -161,67 +191,140 @@ export default function CompanyContracts() {
 
   const openEditTemplate = (t: Template) => {
     setEditTemplate(t);
-    setTForm({ name: t.name, body: t.body, annual_fee_default: t.annual_fee_default?.toString() || '' });
+    setTemplatePdfFile(null);
+    setTForm({ name: t.name, body: t.body, annual_fee_default: t.annual_fee_default?.toString() || '', pdf_url: t.pdf_url || '' });
     setTemplateOpen(true);
   };
 
   const openCreateContract = () => {
     setCForm({ student_id: '', template_id: '', annual_fee: '', filled_body: tr('school.contract.defaultBody') });
+    setSendImmediately(true);
+    setPaymentMode('full');
+    setInstallmentRows([{ amount: '', due_date: '' }]);
     setContractOpen(true);
+  };
+
+  const buildFilledBody = (opts: { templateBody?: string; annualFee: string; studentId: string }) => {
+    const s = students.find((st) => st.id === opts.studentId);
+    const sourceBody = opts.templateBody ?? cForm.filled_body;
+    return fillPlaceholders(sourceBody, {
+      '{{student_name}}': s?.full_name || '',
+      '{{parent_name}}': s?.payer_name || '',
+      '{{parent_email}}': s?.payer_email || '',
+      '{{annual_fee}}': opts.annualFee || '',
+      '{{date}}': new Date().toLocaleDateString('lt-LT'),
+      '{{school_name}}': orgName,
+    });
   };
 
   const onTemplateSelect = (templateId: string) => {
     const tpl = templates.find((t) => t.id === templateId);
     if (!tpl) return;
+    const nextAnnual = tpl.annual_fee_default?.toString() || cForm.annual_fee;
     setCForm((prev) => ({
       ...prev,
       template_id: templateId,
-      annual_fee: tpl.annual_fee_default?.toString() || prev.annual_fee,
-      filled_body: tpl.body,
+      annual_fee: nextAnnual,
+      filled_body: buildFilledBody({ templateBody: tpl.body, annualFee: nextAnnual, studentId: prev.student_id }),
     }));
   };
 
   const onStudentSelect = (studentId: string) => {
-    const s = students.find((st) => st.id === studentId);
-    setCForm((prev) => {
-      let body = prev.filled_body;
-      if (s) {
-        body = fillPlaceholders(body, {
-          '{{student_name}}': s.full_name || '',
-          '{{parent_name}}': s.payer_name || '',
-          '{{parent_email}}': s.payer_email || '',
-          '{{annual_fee}}': prev.annual_fee || '',
-          '{{date}}': new Date().toLocaleDateString('lt-LT'),
-          '{{school_name}}': orgName,
-        });
-      }
-      return { ...prev, student_id: studentId, filled_body: body };
-    });
+    setCForm((prev) => ({
+      ...prev,
+      student_id: studentId,
+      filled_body: buildFilledBody({ annualFee: prev.annual_fee, studentId }),
+    }));
   };
 
   const createContract = async () => {
     if (!orgId || !cForm.student_id || !cForm.annual_fee) return;
+    if (paymentMode === 'installments' && installmentRows.some((r) => !r.amount || !r.due_date)) {
+      setToast({ message: tr('school.installmentsRequired'), type: 'error' });
+      return;
+    }
+    if (paymentMode === 'installments') {
+      const installmentsTotal = installmentRows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+      const annual = Number(cForm.annual_fee);
+      if (Math.abs(installmentsTotal - annual) > 0.01) {
+        setToast({ message: tr('school.installmentsTotalMismatch'), type: 'error' });
+        return;
+      }
+    }
     setSaving(true);
 
-    const finalBody = fillPlaceholders(cForm.filled_body, {
-      '{{annual_fee}}': cForm.annual_fee,
-      '{{date}}': new Date().toLocaleDateString('lt-LT'),
-      '{{school_name}}': orgName,
-    });
+    const finalBody = buildFilledBody({ annualFee: cForm.annual_fee, studentId: cForm.student_id });
 
-    const { error } = await supabase.from('school_contracts').insert({
+    const { data: created, error } = await supabase.from('school_contracts').insert({
       organization_id: orgId,
       template_id: cForm.template_id || null,
       student_id: cForm.student_id,
       filled_body: finalBody,
+      pdf_url: templates.find((t) => t.id === cForm.template_id)?.pdf_url || null,
       annual_fee: Number(cForm.annual_fee),
-      signing_status: 'draft',
-    });
+      signing_status: sendImmediately ? 'sent' : 'draft',
+      sent_at: sendImmediately ? new Date().toISOString() : null,
+    }).select('*, student:students(full_name, email, payer_name, payer_email)').single();
 
     setSaving(false);
     if (error) { setToast({ message: error.message, type: 'error' }); return; }
+
+    if (paymentMode === 'installments' && created) {
+      const schedule = installmentRows.map((r, idx) => ({
+        contract_id: created.id,
+        installment_number: idx + 1,
+        amount: Number(r.amount),
+        due_date: r.due_date,
+      }));
+      const { error: installmentsErr } = await supabase.from('school_payment_installments').insert(schedule);
+      if (installmentsErr) {
+        setToast({ message: installmentsErr.message, type: 'error' });
+        reload();
+        return;
+      }
+    }
+
+    if (sendImmediately && created) {
+      const recipient = created.student?.payer_email || created.student?.email;
+      if (recipient) {
+        const ok = await sendEmail({
+          type: 'school_contract',
+          to: recipient,
+          data: {
+            schoolName: orgName,
+            schoolEmail: orgEmail,
+            studentName: created.student?.full_name || '',
+            parentName: created.student?.payer_name || created.student?.full_name || '',
+            recipientName: created.student?.payer_name || created.student?.full_name || '',
+            annualFee: created.annual_fee,
+            contractBody: created.filled_body,
+            pdfUrl: created.pdf_url || undefined,
+            date: new Date().toLocaleDateString('lt-LT'),
+          },
+        });
+        if (!ok) {
+          await supabase.from('school_contracts').update({ signing_status: 'draft', sent_at: null }).eq('id', created.id);
+          setToast({ message: tr('school.toastContractSendFail'), type: 'error' });
+          reload();
+          return;
+        }
+      } else {
+        await supabase.from('school_contracts').update({ signing_status: 'draft', sent_at: null }).eq('id', created.id);
+        setToast({ message: tr('school.toastNoEmail'), type: 'error' });
+        reload();
+        return;
+      }
+    }
+
     setContractOpen(false);
-    setToast({ message: tr('school.toastContractCreated'), type: 'success' });
+    setToast({
+      message: sendImmediately
+        ? tr('school.toastContractSent')
+        : paymentMode === 'installments'
+          ? tr('school.toastContractAndInstallmentsCreated')
+          : tr('school.toastContractCreated'),
+      type: 'success',
+    });
     reload();
   };
 
@@ -244,6 +347,7 @@ export default function CompanyContracts() {
         recipientName: student?.payer_name || student?.full_name || '',
         annualFee: contract.annual_fee,
         contractBody: contract.filled_body,
+        pdfUrl: contract.pdf_url || undefined,
         date: new Date().toLocaleDateString('lt-LT'),
       },
     });
@@ -304,7 +408,7 @@ export default function CompanyContracts() {
                 <Plus className="w-4 h-4 mr-2" /> {tr('school.newContract')}
               </Button>
             ) : (
-              <Button onClick={() => { setEditTemplate(null); setTForm({ name: '', body: tr('school.contract.defaultBody'), annual_fee_default: '' }); setTemplateOpen(true); }} className="bg-emerald-600 hover:bg-emerald-700">
+              <Button onClick={() => { setEditTemplate(null); setTemplatePdfFile(null); setTForm({ name: '', body: tr('school.contract.defaultBody'), annual_fee_default: '', pdf_url: '' }); setTemplateOpen(true); }} className="bg-emerald-600 hover:bg-emerald-700">
                 <Plus className="w-4 h-4 mr-2" /> {tr('school.newTemplate')}
               </Button>
             )}
@@ -372,6 +476,11 @@ export default function CompanyContracts() {
                     <p className="text-sm text-gray-500 mt-0.5">
                       {tr('school.defaultFee')} {tpl.annual_fee_default ? `€${tpl.annual_fee_default}` : tr('school.defaultFeeNotSet')}
                     </p>
+                    {tpl.pdf_url && (
+                      <a className="text-xs text-emerald-700 hover:underline" href={tpl.pdf_url} target="_blank" rel="noreferrer">
+                        {tr('school.openPdfTemplate')}
+                      </a>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     <Button size="sm" variant="outline" onClick={() => openEditTemplate(tpl)}>
@@ -413,6 +522,19 @@ export default function CompanyContracts() {
                 className="min-h-[300px] font-mono text-sm"
                 placeholder={tr('school.enterTemplatePlaceholder')}
               />
+            </div>
+            <div className="space-y-2">
+              <Label>{tr('school.templatePdf')}</Label>
+              <Input
+                type="file"
+                accept="application/pdf"
+                onChange={(e) => setTemplatePdfFile(e.target.files?.[0] || null)}
+              />
+              {tForm.pdf_url && (
+                <a className="text-xs text-emerald-700 hover:underline" href={tForm.pdf_url} target="_blank" rel="noreferrer">
+                  {tr('school.openPdfTemplate')}
+                </a>
+              )}
             </div>
           </div>
           <DialogFooter>
@@ -456,8 +578,79 @@ export default function CompanyContracts() {
             </div>
             <div className="space-y-2">
               <Label>{tr('school.annualFeeStar')}</Label>
-              <Input type="number" step="0.01" value={cForm.annual_fee} onChange={(e) => setCForm({ ...cForm, annual_fee: e.target.value })} placeholder="500.00" />
+              <Input
+                type="number"
+                step="0.01"
+                value={cForm.annual_fee}
+                onChange={(e) => setCForm({ ...cForm, annual_fee: e.target.value, filled_body: buildFilledBody({ annualFee: e.target.value, studentId: cForm.student_id }) })}
+                placeholder="500.00"
+              />
             </div>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={sendImmediately}
+                onChange={(e) => setSendImmediately(e.target.checked)}
+                className="w-4 h-4 rounded border-gray-300 text-emerald-600"
+              />
+              {tr('school.sendContractImmediately')}
+            </label>
+            <div className="space-y-2">
+              <Label>{tr('school.paymentPlan')}</Label>
+              <Select value={paymentMode} onValueChange={(v: 'full' | 'installments') => setPaymentMode(v)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="full">{tr('school.payFull')}</SelectItem>
+                  <SelectItem value="installments">{tr('school.payInstallments')}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {paymentMode === 'installments' && (
+              <div className="space-y-3 rounded-xl border border-gray-200 p-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-gray-700">{tr('school.installments')}</p>
+                  <Button type="button" size="sm" variant="outline" onClick={() => setInstallmentRows((prev) => [...prev, { amount: '', due_date: '' }])}>
+                    <Plus className="w-3.5 h-3.5 mr-1" /> {tr('school.add')}
+                  </Button>
+                </div>
+                {installmentRows.map((row, idx) => (
+                  <div key={idx} className="grid grid-cols-[32px_1fr_1fr_32px] gap-2 items-end">
+                    <span className="text-xs text-gray-500 pb-2">#{idx + 1}</span>
+                    <div className="space-y-1">
+                      <Label className="text-xs">{tr('school.amount')}</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={row.amount}
+                        onChange={(e) =>
+                          setInstallmentRows((prev) => prev.map((r, i) => (i === idx ? { ...r, amount: e.target.value } : r)))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">{tr('school.dueDateField')}</Label>
+                      <Input
+                        type="date"
+                        value={row.due_date}
+                        onChange={(e) =>
+                          setInstallmentRows((prev) => prev.map((r, i) => (i === idx ? { ...r, due_date: e.target.value } : r)))
+                        }
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      disabled={installmentRows.length === 1}
+                      onClick={() => setInstallmentRows((prev) => prev.filter((_, i) => i !== idx))}
+                      className="p-2 text-gray-400 hover:text-red-500 disabled:opacity-40"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="space-y-2">
               <Label>{tr('school.contractBody')}</Label>
               <Textarea

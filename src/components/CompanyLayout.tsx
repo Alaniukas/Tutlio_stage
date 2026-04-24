@@ -32,6 +32,7 @@ export default function CompanyLayout() {
   const { t } = useTranslation();
   const chatUnreadTotal = useTotalChatUnread();
   const location = useLocation();
+  const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
   const ENTITY_KEY = 'tutlio_entity_type';
   const dashCache = getCached<any>('company_dashboard');
   const [orgName, setOrgName] = useState(dashCache?.orgName ?? '');
@@ -53,24 +54,24 @@ export default function CompanyLayout() {
 
   const NAV_ITEMS = useMemo(() => {
     const base = [
-      { href: '/company', label: t('companyNav.overview'), icon: LayoutDashboard, exact: true },
-      { href: '/company/tutors', label: isSchool ? t('companyNav.teachers') : t('companyNav.tutors'), icon: Users },
-      { href: '/company/students', label: t('companyNav.students'), icon: GraduationCap },
-      { href: '/company/sessions', label: t('companyNav.sessions'), icon: BookOpen },
-      { href: '/company/schedule', label: t('companyNav.schedule'), icon: CalendarDays },
-      { href: '/company/messages', label: t('companyNav.messages'), icon: MessageSquare },
-      { href: '/company/stats', label: t('companyNav.stats'), icon: BarChart3 },
-      { href: '/company/settings', label: t('companyNav.lessonSettings'), icon: Settings },
+      { href: `${orgBasePath}`, label: t('companyNav.overview'), icon: LayoutDashboard, exact: true },
+      { href: `${orgBasePath}/tutors`, label: isSchool ? t('companyNav.teachers') : t('companyNav.tutors'), icon: Users },
+      { href: `${orgBasePath}/students`, label: t('companyNav.students'), icon: GraduationCap },
+      { href: `${orgBasePath}/sessions`, label: t('companyNav.sessions'), icon: BookOpen },
+      { href: `${orgBasePath}/schedule`, label: t('companyNav.schedule'), icon: CalendarDays },
+      { href: `${orgBasePath}/messages`, label: t('companyNav.messages'), icon: MessageSquare },
+      { href: `${orgBasePath}/stats`, label: t('companyNav.stats'), icon: BarChart3 },
+      { href: `${orgBasePath}/settings`, label: t('companyNav.lessonSettings'), icon: Settings },
     ];
     if (isSchool) {
-      base.push({ href: '/company/contracts', label: t('companyNav.contracts'), icon: FileText });
+      base.push({ href: `${orgBasePath}/contracts`, label: t('companyNav.contracts'), icon: FileText });
     }
     base.push(
-      { href: '/company/finance', label: t('companyNav.finance'), icon: CreditCard },
-      { href: '/company/instructions', label: t('companyNav.instructions'), icon: HelpCircle },
+      { href: `${orgBasePath}/finance`, label: t('companyNav.finance'), icon: CreditCard },
+      { href: `${orgBasePath}/instructions`, label: t('companyNav.instructions'), icon: HelpCircle },
     );
     return base;
-  }, [t, isSchool]);
+  }, [t, isSchool, orgBasePath]);
 
   useEffect(() => {
     let cancelled = false;
@@ -131,7 +132,7 @@ export default function CompanyLayout() {
 
       <div className="flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-1">
         {NAV_ITEMS.map((item) => {
-          const showChatBadge = item.href === '/company/messages' && chatUnreadTotal > 0;
+          const showChatBadge = item.href === `${orgBasePath}/messages` && chatUnreadTotal > 0;
           return (
             <Link
               key={item.href}

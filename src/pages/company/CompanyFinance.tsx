@@ -33,6 +33,7 @@ export default function CompanyFinance() {
   const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
   const manualPaymentsEnabled = !orgFeaturesLoading && hasFeature('manual_payments');
   const location = useLocation();
+  const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
   const [loading, setLoading] = useState(!fc);
   const [orgId, setOrgId] = useState<string | null>(fc?.orgId ?? null);
 
@@ -320,7 +321,7 @@ export default function CompanyFinance() {
     if (!orgId) return;
     setStripeLoading(true); setStripeError(null);
     try {
-      const returnUrl = window.location.origin + '/company/finance';
+      const returnUrl = window.location.origin + `${orgBasePath}/finance`;
       const res = await fetch('/api/stripe-connect', {
         method: 'POST', headers: await authHeaders(),
         body: JSON.stringify({ action, entity: 'org', entityId: orgId, returnUrl }),
@@ -390,13 +391,13 @@ export default function CompanyFinance() {
                 <p className="font-semibold">{t('companyFinance.manualPayments')}</p>
                 <p>
                   {t('companyFinance.manualInfo')}{' '}
-                  <Link to="/company/students" className="font-medium underline underline-offset-2 hover:text-violet-800">
+                  <Link to={`${orgBasePath}/students`} className="font-medium underline underline-offset-2 hover:text-violet-800">
                     {t('companyFinance.students')}
                   </Link>
                   .
                 </p>
                 <p>
-                  <Link to="/company/instructions#apmokejimai" className="font-medium underline underline-offset-2 hover:text-violet-800">
+                  <Link to={`${orgBasePath}/instructions#apmokejimai`} className="font-medium underline underline-offset-2 hover:text-violet-800">
                     {t('companyFinance.fullInstructions')}
                   </Link>
                 </p>

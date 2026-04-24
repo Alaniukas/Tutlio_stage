@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useLocation } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { getCached, setCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
@@ -83,6 +84,8 @@ function adminShowPhone(v: string | null | undefined) {
 }
 
 export default function CompanyStudents() {
+  const location = useLocation();
+  const isSchoolView = location.pathname.startsWith('/school');
   const { t } = useTranslation();
   const { hasFeature, loading: orgFeaturesLoading } = useOrgFeatures();
   const manualPaymentsEnabled = !orgFeaturesLoading && hasFeature('manual_payments');
@@ -107,6 +110,7 @@ export default function CompanyStudents() {
   const [customCancellationHours, setCustomCancellationHours] = useState(24);
   const [customCancellationFee, setCustomCancellationFee] = useState(0);
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [sendingInviteNow, setSendingInviteNow] = useState(false);
 
   // Past sessions for student modal (fetched by student_id when modal opens — reliable vs org-wide cache/timing)
   const [modalRecentSessions, setModalRecentSessions] = useState<Session[]>([]);
@@ -821,6 +825,36 @@ export default function CompanyStudents() {
     }
   };
 
+  const handleSendInviteNow = async () => {
+    if (!selectedStudent) return;
+    const recipient = (selectedStudent.email || '').trim() || (selectedStudent.payer_email || '').trim();
+    if (!recipient) {
+      setToastMessage({ message: t('compStu.noInviteRecipient'), type: 'error' });
+      return;
+    }
+    if (!selectedStudent.invite_code) {
+      setToastMessage({ message: t('compStu.inviteMissingCode'), type: 'error' });
+      return;
+    }
+    setSendingInviteNow(true);
+    const bookingUrl = `${baseUrl}/book/${selectedStudent.invite_code}`;
+    const ok = await sendEmail({
+      type: 'invite_email',
+      to: recipient,
+      data: {
+        studentName: selectedStudent.full_name,
+        tutorName: selectedStudent.tutor?.full_name || t('compStu.tutorFallback'),
+        inviteCode: selectedStudent.invite_code,
+        bookingUrl,
+      },
+    });
+    setSendingInviteNow(false);
+    setToastMessage({
+      message: ok ? t('compStu.inviteSentNowSuccess') : t('compStu.inviteSentNowFailed'),
+      type: ok ? 'success' : 'error',
+    });
+  };
+
   if (loading) {
     return (
       <>
@@ -1117,7 +1151,7 @@ export default function CompanyStudents() {
 
                   <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3">
                     <p className="text-xs text-indigo-700">
-                      {t('compStu.inviteCodeHint')}
+                      {t(isSchoolView ? 'compStu.inviteCodeHintSchool' : 'compStu.inviteCodeHint')}
                     </p>
                   </div>
                 </div>
@@ -1449,6 +1483,16 @@ export default function CompanyStudents() {
                       {t('compStu.codeInline')} <code className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">{selectedStudent.invite_code}</code>
                     </p>
                     <div className="pt-1 flex items-center gap-2 flex-wrap">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2.5 text-[11px]"
+                        disabled={sendingInviteNow}
+                        onClick={() => void handleSendInviteNow()}
+                      >
+                        {sendingInviteNow ? t('compStu.sendingNow') : t('compStu.sendInviteNow')}
+                      </Button>
                       {selectedStudent.linked_user_id ? (
                         <span className="inline-flex items-center gap-1 text-green-700 bg-green-50 border border-green-200 rounded-md px-2 py-1 text-xs">
                           <CheckCircle className="w-3.5 h-3.5" /> {t('compStu.connected')}

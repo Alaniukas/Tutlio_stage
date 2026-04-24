@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Navigate, Outlet } from 'react-router-dom';
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { useUser } from '@/contexts/UserContext';
 
 export default function CompanyProtectedRoute() {
+  const location = useLocation();
   const { user: ctxUser, loading: ctxLoading } = useUser();
   const [status, setStatus] = useState<'loading' | 'admin' | 'none'>('loading');
+  const loginPath = location.pathname.startsWith('/school') ? '/school/login' : '/company/login';
 
   useEffect(() => {
     let cancelled = false;
@@ -65,5 +67,5 @@ export default function CompanyProtectedRoute() {
     );
   }
 
-  return status === 'admin' ? <Outlet /> : <Navigate to="/company/login" replace />;
+  return status === 'admin' ? <Outlet /> : <Navigate to={loginPath} replace />;
 }

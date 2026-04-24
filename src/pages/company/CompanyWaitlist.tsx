@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import CompanyOrgWaitlistPanel, { type OrgTutorOption } from '@/components/CompanyOrgWaitlistPanel';
 import { getCached, setCache } from '@/lib/dataCache';
 import { supabase } from '@/lib/supabase';
@@ -8,6 +8,8 @@ import { ArrowLeft, ListOrdered } from 'lucide-react';
 
 export default function CompanyWaitlist() {
   const { t } = useTranslation();
+  const location = useLocation();
+  const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
   const wc = getCached<{ tutors: OrgTutorOption[] }>('company_waitlist');
   const [loading, setLoading] = useState(!wc);
   const [tutors, setTutors] = useState<OrgTutorOption[]>(wc?.tutors ?? []);
@@ -61,7 +63,7 @@ export default function CompanyWaitlist() {
     <>
       <div className="max-w-5xl mx-auto space-y-5">
         <Link
-          to="/company/sessions"
+          to={`${orgBasePath}/sessions`}
           className="inline-flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-800"
         >
           <ArrowLeft className="w-4 h-4" />

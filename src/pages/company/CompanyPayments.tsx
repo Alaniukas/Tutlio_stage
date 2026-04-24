@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
+import { useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -54,6 +55,8 @@ const PAYMENTS_CACHE_KEY = 'company_payments';
 
 export default function CompanyPayments() {
   const { t } = useTranslation();
+  const location = useLocation();
+  const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
   const pc = getCached<any>(PAYMENTS_CACHE_KEY);
   const [orgId, setOrgId] = useState<string | null>(pc?.orgId ?? null);
   const [orgName, setOrgName] = useState(pc?.orgName ?? '');
@@ -159,7 +162,7 @@ export default function CompanyPayments() {
       const resp = await fetch('/api/create-school-installment-checkout', {
         method: 'POST',
         headers: { ...hdrs, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ installmentId: installment.id }),
+        body: JSON.stringify({ installmentId: installment.id, returnPath: `${orgBasePath}/contracts` }),
       });
 
       const json = await resp.json();

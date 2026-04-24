@@ -40,8 +40,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (!admin?.organization_id) return json(res, 403, { error: 'Not a school admin' });
 
-  const { installmentId } = req.body as { installmentId?: string };
+  const { installmentId, returnPath } = req.body as { installmentId?: string; returnPath?: string };
   if (!installmentId) return json(res, 400, { error: 'installmentId is required' });
+  const safeReturnPath =
+    typeof returnPath === 'string' && /^\/(school|company)\/[a-z0-9\-_/]*$/i.test(returnPath)
+      ? returnPath
+      : '/company/contracts';
 
   const { data: installment } = await supabase
     .from('school_payment_installments')
@@ -89,8 +93,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       tutlio_school_contract_id: contract.id,
       tutlio_student_id: contract.student_id,
     },
-    success_url: `${APP_URL}/company/contracts?success=1&installment=${installment.id}`,
-    cancel_url: `${APP_URL}/company/contracts?cancelled=1`,
+    success_url: `${APP_URL}${safeReturnPath}?success=1&installment=${installment.id}`,
+    cancel_url: `${APP_URL}${safeReturnPath}?cancelled=1`,
   });
 
   await supabase

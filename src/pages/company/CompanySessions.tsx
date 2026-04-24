@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { SessionStatCards } from '@/components/SessionStatCards';
 import { calculateSessionStats } from '@/lib/session-stats';
 import { supabase } from '@/lib/supabase';
@@ -62,6 +62,8 @@ interface Subject {
 
 export default function CompanySessions() {
   const { t, locale, dateFnsLocale } = useTranslation();
+  const location = useLocation();
+  const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
 
   const statusOptions = useMemo(
     () => [
@@ -398,7 +400,7 @@ export default function CompanySessions() {
             <p className="text-sm text-gray-500 mt-0.5">{t('compSess.totalCount', { count: sessions.length })}</p>
           </div>
           <Button variant="outline" className="gap-2 rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50 shrink-0" asChild>
-            <Link to="/company/waitlist">
+            <Link to={`${orgBasePath}/waitlist`}>
               <ListOrdered className="w-4 h-4" />
               {t('compSess.waitlist')}
             </Link>

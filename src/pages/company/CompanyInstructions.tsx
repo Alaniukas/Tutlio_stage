@@ -1,4 +1,4 @@
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Play } from 'lucide-react';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
@@ -6,11 +6,13 @@ import { useTranslation } from '@/lib/i18n';
 
 export default function CompanyInstructions() {
   const { t } = useTranslation();
+  const location = useLocation();
   const { loading: featuresLoading, hasFeature } = useOrgFeatures();
+  const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
 
   // For manual (off-Stripe) orgs we don't show instructions page.
   if (!featuresLoading && hasFeature('manual_payments')) {
-    return <Navigate to="/company" replace />;
+    return <Navigate to={orgBasePath} replace />;
   }
 
   const videoUrl = 'https://www.youtube.com/embed/FSOmO86hiQE';

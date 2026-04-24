@@ -15,7 +15,7 @@ import {
   Clock,
 } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, isAfter, isBefore, addDays, subDays } from 'date-fns';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import StatusBadge from '@/components/StatusBadge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useTranslation } from '@/lib/i18n';
@@ -62,6 +62,8 @@ const DASH_CACHE_KEY = 'company_dashboard';
 
 export default function CompanyDashboard() {
   const { t, dateFnsLocale } = useTranslation();
+  const location = useLocation();
+  const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
   const cached = getCached<any>(DASH_CACHE_KEY);
   const [loading, setLoading] = useState(!cached);
   const [orgName, setOrgName] = useState(cached?.orgName ?? '');
@@ -421,7 +423,7 @@ export default function CompanyDashboard() {
                   <CalendarDays className="w-5 h-5 text-blue-600" />
                   <h2 className="text-lg font-bold text-gray-900">{t('companyDash.upcomingLessons')}</h2>
                 </div>
-                <Link to="/company/sessions" className="text-xs text-indigo-600 hover:underline flex items-center gap-1">
+                <Link to={`${orgBasePath}/sessions`} className="text-xs text-indigo-600 hover:underline flex items-center gap-1">
                   {t('companyDash.allLabel')} <ChevronRight className="w-3 h-3" />
                 </Link>
               </div>
@@ -532,7 +534,7 @@ export default function CompanyDashboard() {
                   <CreditCard className="w-5 h-5 text-emerald-600" />
                   <h2 className="text-lg font-bold text-gray-900">{t('companyDash.recentPayments')}</h2>
                 </div>
-                <Link to="/company/finance" className="text-xs text-indigo-600 hover:underline flex items-center gap-1">
+                <Link to={`${orgBasePath}/finance`} className="text-xs text-indigo-600 hover:underline flex items-center gap-1">
                   {t('common.finance')} <ChevronRight className="w-3 h-3" />
                 </Link>
               </div>
@@ -564,7 +566,7 @@ export default function CompanyDashboard() {
                   <CheckCircle className="w-5 h-5 text-red-400" />
                   <h2 className="text-lg font-bold text-gray-900">{t('companyDash.cancelledPaid')}</h2>
                 </div>
-                <Link to="/company/sessions" className="text-xs text-indigo-600 hover:underline flex items-center gap-1">
+                <Link to={`${orgBasePath}/sessions`} className="text-xs text-indigo-600 hover:underline flex items-center gap-1">
                   {t('companyDash.allLabel')} <ChevronRight className="w-3 h-3" />
                 </Link>
               </div>
@@ -670,7 +672,7 @@ export default function CompanyDashboard() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Link
-            to="/company/tutors"
+            to={`${orgBasePath}/tutors`}
             className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex items-center gap-4 hover:border-indigo-200 hover:shadow-md transition-all group"
           >
             <div className="w-11 h-11 rounded-xl bg-indigo-100 flex items-center justify-center flex-shrink-0 group-hover:bg-indigo-200 transition-colors">
@@ -685,7 +687,7 @@ export default function CompanyDashboard() {
           </Link>
 
           <Link
-            to="/company/stats"
+            to={`${orgBasePath}/stats`}
             className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex items-center gap-4 hover:border-violet-200 hover:shadow-md transition-all group"
           >
             <div className="w-11 h-11 rounded-xl bg-violet-100 flex items-center justify-center flex-shrink-0 group-hover:bg-violet-200 transition-colors">
@@ -698,7 +700,7 @@ export default function CompanyDashboard() {
           </Link>
 
           <Link
-            to="/company/sessions"
+            to={`${orgBasePath}/sessions`}
             className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex items-center gap-4 hover:border-blue-200 hover:shadow-md transition-all group"
           >
             <div className="w-11 h-11 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0 group-hover:bg-blue-200 transition-colors">
@@ -711,7 +713,7 @@ export default function CompanyDashboard() {
           </Link>
 
           <Link
-            to="/company/tutors"
+            to={`${orgBasePath}/tutors`}
             className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex items-center gap-4 hover:border-red-200 hover:shadow-md transition-all group"
           >
             <div className="w-11 h-11 rounded-xl bg-red-50 flex items-center justify-center flex-shrink-0 group-hover:bg-red-100 transition-colors">

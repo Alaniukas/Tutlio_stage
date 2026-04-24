@@ -1225,7 +1225,7 @@ export default function CompanyTutors() {
                   </div>
                 )}
 
-                {selectedTutor.subjects.length === 0 && !showAddSubject && (
+                {selectedTutor.subjects.length === 0 && orgTemplates.length === 0 && !showAddSubject && (
                   <p className="text-xs text-gray-400 italic">{t('compTut.noSubjects')}</p>
                 )}
 

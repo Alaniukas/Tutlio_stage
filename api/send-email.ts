@@ -1340,6 +1340,7 @@ function schoolContract(d: any, locale: Locale) {
           </table>
         </div>
         ${d.contractBody ? `<div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:12px; padding:20px; margin:20px 0; white-space:pre-wrap; font-size:13px; color:#374151; line-height:1.6;">${d.contractBody}</div>` : ''}
+        ${d.pdfUrl ? `<div style="margin:16px 0 20px;">${outlookEmailButton(d.pdfUrl, 'Open PDF Contract', '#059669', { fontWeight: '600', fontSize: '14px', padding: '12px 24px' })}</div>` : ''}
         <p style="color:#6b7280; font-size:13px;">If you have questions, please contact the school at ${esc(d.schoolEmail || '')}.</p>
       </div>${footerFor(locale)}`, locale),
   };

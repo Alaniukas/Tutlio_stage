@@ -91,7 +91,7 @@ export default function LandingNavbar() {
 
           <LanguageSelector />
 
-          <Link to={isSchools ? '/company/login' : '/login'}>
+          <Link to={isSchools ? '/school/login' : '/login'}>
             <Button className="rounded-xl px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-bold tracking-wide shadow-md shadow-indigo-200 gap-2">
               {t('common.login')}
               <AppWindow className="w-4 h-4" />
