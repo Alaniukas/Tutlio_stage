@@ -38,7 +38,7 @@ export default function TutorSubscribe() {
   const [searchParams] = useSearchParams();
   const fromRegister = searchParams.get('from') === 'register';
   const canceled = searchParams.get('canceled') === '1';
-  const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'yearly'>('monthly');
+  const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'yearly' | 'subscription_only'>('monthly');
   const [couponCode, setCouponCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -268,7 +268,7 @@ export default function TutorSubscribe() {
           </div>
         </div>
 
-        <div className="grid md:grid-cols-2 gap-6 mb-12 max-w-4xl mx-auto">
+        <div className="grid md:grid-cols-3 gap-6 mb-12 max-w-5xl mx-auto">
           <button
             onClick={() => setSelectedPlan('monthly')}
             className={`relative bg-white rounded-3xl p-8 text-left transition-all transform hover:scale-105 ${
@@ -341,6 +341,43 @@ export default function TutorSubscribe() {
               <li className="flex items-center gap-2 text-gray-700">
                 <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />
                 {t('subscribe.save60')}
+              </li>
+            </ul>
+          </button>
+
+          <button
+            onClick={() => setSelectedPlan('subscription_only')}
+            className={`relative bg-white rounded-3xl p-8 text-left transition-all transform hover:scale-105 ${
+              selectedPlan === 'subscription_only'
+                ? 'ring-4 ring-amber-500 shadow-2xl'
+                : 'shadow-xl hover:shadow-2xl'
+            }`}
+          >
+            {selectedPlan === 'subscription_only' && (
+              <div className="absolute -top-3 right-6 bg-amber-600 text-white text-xs font-bold px-4 py-1.5 rounded-full">
+                {t('subscribe.selected')}
+              </div>
+            )}
+            <div className="mb-6">
+              <h3 className="text-2xl font-bold text-gray-900 mb-2">{t('subscribe.subscriptionOnlyTitle')}</h3>
+              <div className="flex items-baseline gap-2">
+                <span className="text-5xl font-bold text-amber-600">€35</span>
+                <span className="text-gray-500">{t('subscribe.perMonth')}</span>
+              </div>
+              <p className="text-sm text-gray-500 mt-2">{t('subscribe.subscriptionOnlyDesc')}</p>
+            </div>
+            <ul className="space-y-3">
+              <li className="flex items-center gap-2 text-gray-700">
+                <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />
+                {t('subscribe.allFeatures')}
+              </li>
+              <li className="flex items-center gap-2 text-gray-700">
+                <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />
+                {t('subscribe.manualPayments')}
+              </li>
+              <li className="flex items-center gap-2 text-gray-700">
+                <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />
+                {t('subscribe.noCommission')}
               </li>
             </ul>
           </button>

@@ -97,20 +97,6 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     defaultValue: false,
     pricingTier: 'premium',
   },
-
-  /** When enabled, org sends prepaid packages outside Stripe; payer gets instructions / optional payment URL; org admin confirms in Students. */
-  manual_payments: {
-    id: 'manual_payments',
-    name: 'Rankiniai (ne-Stripe) paketų mokėjimai',
-    nameEn: 'Manual (off-Stripe) package payments',
-    description:
-      'Įjungus: paketai be Stripe — mokėtojui laiškas su suma. Žemiau (violetinė sekcija) galite įrašyti mokėjimo puslapio URL. Org admin „Mokiniai“ patvirtina gavimą.',
-    descriptionEn: 'Org prepaid packages without Stripe; optional payment URL in admin section below.',
-    category: 'payments',
-    defaultValue: false,
-    requiresSetup: true,
-    pricingTier: 'enterprise',
-  },
 };
 
 /**

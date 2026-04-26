@@ -20,7 +20,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Trash2, Copy, Mail, ExternalLink, Check, User, UserX, Clock, CalendarDays, Wallet, CheckCircle, XCircle, Euro, Sparkles, Package, FileText, Edit2, RotateCcw } from 'lucide-react';
+import { Plus, Trash2, Copy, Mail, ExternalLink, Check, User, UserX, Clock, CalendarDays, Wallet, CheckCircle, XCircle, Euro, Sparkles, Package, FileText, Edit2, RotateCcw, Loader2 } from 'lucide-react';
 import SendPackageModal from '@/components/SendPackageModal';
 import SendInvoiceModal from '@/components/SendInvoiceModal';
 import { format, isAfter, isBefore } from 'date-fns';
@@ -219,6 +219,7 @@ export default function StudentsPage() {
   const [studentSessions, setStudentSessions] = useState<any[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
+  const [confirmingPackageId, setConfirmingPackageId] = useState<string | null>(null);
   const [dismissedInvoiceIds, setDismissedInvoiceIds] = useState<string[]>([]);
   const dismissedInvoicesKey = user?.id ? `dismissed_invoice_batches_${user.id}` : null;
   const cardInvoicePollRef = useRef<{ intervalId: ReturnType<typeof setInterval>; attempts: number } | null>(null);
@@ -1210,8 +1211,6 @@ export default function StudentsPage() {
       soloPaymentOverrideEnabled,
       !!profile?.organization_id,
     );
-  const manualPaymentsEnabled = !orgFeaturesLoading && hasFeature('manual_payments');
-
   const paymentActions = useMemo(() => {
     if (!selectedStudent) return { canSendInvoice: false, canSendPackage: false };
     return getEffectivePaymentActions(tutorPaymentFlags, selectedStudent.payment_model, showPaymentModelUi);
@@ -1228,6 +1227,38 @@ export default function StudentsPage() {
     () => selectedStudentPackages.filter((p: any) => !p.paid && p.payment_status === 'pending'),
     [selectedStudentPackages],
   );
+
+  const handleConfirmManualPayment = async (packageId: string) => {
+    setConfirmingPackageId(packageId);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch('/api/confirm-manual-payment', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
+        body: JSON.stringify({ packageId }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error((json as any).error || t('stu.confirmFailed'));
+      }
+      setToastMessage({ message: t('stu.paymentConfirmed'), type: 'success' });
+      if (selectedStudent) {
+        const { data } = await supabase
+          .from('lesson_packages')
+          .select('*, subject:subjects(name, color)')
+          .eq('student_id', selectedStudent.id)
+          .or('active.eq.true,payment_status.eq.pending')
+          .order('created_at', { ascending: false });
+        setSelectedStudentPackages(data || []);
+      }
+    } catch (e: any) {
+      setToastMessage({ message: e?.message || t('stu.confirmFailed'), type: 'error' });
+    }
+    setConfirmingPackageId(null);
+  };
 
   return (
     <Layout>
@@ -1440,10 +1471,10 @@ export default function StudentsPage() {
                   const initials = student.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
                   const visibleEmail = contactVisibility
                     ? formatContactForTutorView(student.email, student.payer_email, contactVisibility.tutorSeesStudentEmail)
-                    : (student.email || '—');
+                    : ((orgPolicy.isOrgTutor || orgPolicy.loading) ? '—' : (student.email || '—'));
                   const visiblePhone = contactVisibility
                     ? formatContactForTutorView(student.phone, student.payer_phone, contactVisibility.tutorSeesStudentPhone)
-                    : (student.phone || '—');
+                    : ((orgPolicy.isOrgTutor || orgPolicy.loading) ? '—' : (student.phone || '—'));
                   return (
                     <div
                       key={student.id}
@@ -1551,7 +1582,7 @@ export default function StudentsPage() {
                           </div>
 
                           {/* Invite code section */}
-                          {student.invite_code && (
+                          {!orgPolicy.isOrgTutor && !orgPolicy.loading && student.invite_code && (
                             <div className="mt-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
                               <div className="flex items-center justify-between gap-2 flex-wrap">
                                 <div>
@@ -1773,12 +1804,12 @@ export default function StudentsPage() {
                     <p className="text-gray-500 text-sm mt-1">
                       {contactVisibility
                         ? formatContactForTutorView(selectedStudent.email, selectedStudent.payer_email, contactVisibility.tutorSeesStudentEmail)
-                        : selectedStudent.email}
+                        : ((orgPolicy.isOrgTutor || orgPolicy.loading) ? '—' : selectedStudent.email)}
                     </p>
                     <p className="text-gray-500 text-sm">
                       {contactVisibility
                         ? formatContactForTutorView(selectedStudent.phone, selectedStudent.payer_phone, contactVisibility.tutorSeesStudentPhone)
-                        : (selectedStudent.phone || '—')}
+                        : ((orgPolicy.isOrgTutor || orgPolicy.loading) ? '—' : (selectedStudent.phone || '—'))}
                     </p>
                     {shouldShowPayerContactSection(selectedStudent) && (
                       (contactVisibility ? (
@@ -1786,7 +1817,7 @@ export default function StudentsPage() {
                         contactVisibility.tutorSeesStudentEmail === 'parent' ||
                         contactVisibility.tutorSeesStudentPhone === 'both' ||
                         contactVisibility.tutorSeesStudentPhone === 'parent'
-                      ) : true)
+                      ) : !(orgPolicy.isOrgTutor || orgPolicy.loading))
                     ) && (
                     <div className="mt-3 pt-3 border-t border-gray-100 text-sm text-gray-600 space-y-1">
                       <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">{t('stu.payerParent')}</p>
@@ -1844,9 +1875,26 @@ export default function StudentsPage() {
                             <span className="font-medium text-amber-900">
                               {pkg.subject?.name || pkg.subjects?.name || '—'} · {n} {unit}
                             </span>
-                            <span className="text-amber-700">
-                              {format(new Date(pkg.created_at), 'd MMM yyyy HH:mm', { locale: dateFnsLocale })}
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-amber-700">
+                                {format(new Date(pkg.created_at), 'd MMM yyyy HH:mm', { locale: dateFnsLocale })}
+                              </span>
+                              {pkg.payment_method === 'manual' && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-6 text-[11px] rounded-lg border-violet-300 text-violet-800 px-2"
+                                  disabled={confirmingPackageId === pkg.id}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void handleConfirmManualPayment(pkg.id);
+                                  }}
+                                >
+                                  {confirmingPackageId === pkg.id ? <Loader2 className="w-3 h-3 animate-spin" /> : t('stu.confirmPayment')}
+                                </Button>
+                              )}
+                            </div>
                           </div>
                           );
                         })}
@@ -1980,7 +2028,7 @@ export default function StudentsPage() {
                         payment_deadline_hours: lessonPaymentInherited.payment_deadline_hours,
                       }}
                       minBookingHours={lessonPaymentInherited.min_booking_hours}
-                      allowPerLesson={!manualPaymentsEnabled}
+                      allowPerLesson
                       onSaved={(patch) => {
                         setSelectedStudent((s) => (s ? { ...s, ...patch } : null));
                         fetchStudents();
@@ -2315,7 +2363,7 @@ export default function StudentsPage() {
                         selectedStudentForFilter.payer_email,
                         contactVisibility.tutorSeesStudentEmail,
                       )
-                      : (selectedStudentForFilter.email || '—')}
+                      : ((orgPolicy.isOrgTutor || orgPolicy.loading) ? '—' : (selectedStudentForFilter.email || '—'))}
                   </p>
                   <p className="text-gray-500 text-sm">
                     {contactVisibility
@@ -2324,7 +2372,7 @@ export default function StudentsPage() {
                         selectedStudentForFilter.payer_phone,
                         contactVisibility.tutorSeesStudentPhone,
                       )
-                      : (selectedStudentForFilter.phone || '—')}
+                      : ((orgPolicy.isOrgTutor || orgPolicy.loading) ? '—' : (selectedStudentForFilter.phone || '—'))}
                   </p>
                 </div>
               </div>

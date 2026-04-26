@@ -86,6 +86,12 @@ export default function StudentOnboarding() {
     const [payerEmail, setPayerEmail] = useState('');
     const [payerPhone, setPayerPhone] = useState('');
 
+    const [wantsParentAccount, setWantsParentAccount] = useState(false);
+    const [parentRegEmail, setParentRegEmail] = useState('');
+    const [parentRegSent, setParentRegSent] = useState(false);
+    const [parentRegError, setParentRegError] = useState<string | null>(null);
+    const [parentRegSubmitting, setParentRegSubmitting] = useState(false);
+
     const [password, setPassword] = useState('');
     const [passwordConfirm, setPasswordConfirm] = useState('');
     const [showPass, setShowPass] = useState(false);
@@ -538,6 +544,81 @@ export default function StudentOnboarding() {
                                 {t('onboard.confirmEmailDesc', { email: studentData?.email || '' })}
                             </div>
                         </div>
+
+                        {/* Parent account registration */}
+                        {!parentRegSent ? (
+                            <div className="border border-gray-200 rounded-xl p-4 mb-4 text-left">
+                                <div className="flex items-center gap-3 mb-3">
+                                    <Users className="w-5 h-5 text-violet-600" />
+                                    <h3 className="text-sm font-bold text-gray-900">{t('onboard.parentAccountTitle')}</h3>
+                                </div>
+                                {!wantsParentAccount ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setWantsParentAccount(true);
+                                            if (payerType === 'parent' && payerEmail) setParentRegEmail(payerEmail);
+                                        }}
+                                        className="w-full py-2.5 rounded-xl bg-violet-50 text-violet-700 font-medium text-sm hover:bg-violet-100 transition-colors"
+                                    >
+                                        {t('onboard.createParentAccount')}
+                                    </button>
+                                ) : (
+                                    <div className="space-y-3">
+                                        <p className="text-xs text-gray-500">{t('onboard.parentAccountDesc')}</p>
+                                        <div>
+                                            <label className="text-xs text-gray-500 font-medium">{t('onboard.parentAccountEmail')}</label>
+                                            <input
+                                                type="email"
+                                                value={parentRegEmail}
+                                                onChange={(e) => setParentRegEmail(e.target.value)}
+                                                className="w-full mt-1 rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                                                placeholder="tevas@email.com"
+                                            />
+                                        </div>
+                                        {parentRegError && <p className="text-red-500 text-xs">{parentRegError}</p>}
+                                        <button
+                                            type="button"
+                                            disabled={parentRegSubmitting || !parentRegEmail.trim()}
+                                            onClick={async () => {
+                                                setParentRegSubmitting(true);
+                                                setParentRegError(null);
+                                                try {
+                                                    const resp = await fetch('/api/create-parent-invite', {
+                                                        method: 'POST',
+                                                        headers: { 'Content-Type': 'application/json' },
+                                                        body: JSON.stringify({
+                                                            parentEmail: parentRegEmail.trim(),
+                                                            studentId: studentData?.id,
+                                                            parentName: payerType === 'parent' ? payerName : undefined,
+                                                        }),
+                                                    });
+                                                    if (!resp.ok) {
+                                                        const err = await resp.json().catch(() => ({ error: 'Failed' }));
+                                                        setParentRegError(err.error || 'Failed to send invite');
+                                                    } else {
+                                                        setParentRegSent(true);
+                                                    }
+                                                } catch {
+                                                    setParentRegError(t('common.error'));
+                                                } finally {
+                                                    setParentRegSubmitting(false);
+                                                }
+                                            }}
+                                            className="w-full py-2.5 rounded-xl bg-violet-600 text-white font-medium text-sm hover:bg-violet-700 transition-colors disabled:opacity-50"
+                                        >
+                                            {parentRegSubmitting ? t('common.loading') : t('onboard.sendParentInvite')}
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-4 text-left text-sm text-green-800">
+                                <Check className="w-4 h-4 inline mr-1" />
+                                {t('onboard.parentInviteSent', { email: parentRegEmail })}
+                            </div>
+                        )}
+
                         <button
                             onClick={() => navigate('/login')}
                             className="mt-2 w-full py-3.5 rounded-2xl bg-gray-100 text-gray-700 font-bold text-sm hover:bg-gray-200 transition-colors"

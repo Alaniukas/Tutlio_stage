@@ -100,7 +100,6 @@ export default function AdminPanel() {
   const [editTutorLimit, setEditTutorLimit] = useState(5);
   const [editStatus, setEditStatus] = useState<'active' | 'suspended'>('active');
   const [editFeatures, setEditFeatures] = useState<Record<string, boolean>>({});
-  const [editManualPaymentUrl, setEditManualPaymentUrl] = useState('');
   const [detailName, setDetailName] = useState('');
   const [saveLoading, setSaveLoading] = useState(false);
   const [detailFeaturesBase, setDetailFeaturesBase] = useState<Record<string, unknown>>({});
@@ -162,9 +161,6 @@ export default function AdminPanel() {
       });
       setEditFeatures(mergedFeatures);
       setDetailFeaturesBase(orgFeatures as Record<string, unknown>);
-      const mpUrl = (orgFeatures as Record<string, unknown>).manual_payment_url;
-      setEditManualPaymentUrl(typeof mpUrl === 'string' ? mpUrl : '');
-
       setDetailTutors(data.tutors || []);
       setDetailStudents(data.students || []);
       setDetailAudit(data.audit || []);
@@ -186,13 +182,6 @@ export default function AdminPanel() {
         ...detailFeaturesBase,
         ...editFeatures,
       };
-      const trimmedUrl = editManualPaymentUrl.trim();
-      if (trimmedUrl) {
-        merged.manual_payment_url = trimmedUrl;
-      } else {
-        delete merged.manual_payment_url;
-      }
-
       const res = await fetch(`/api/admin-organizations?id=${encodeURIComponent(detailId)}`, {
         method: 'PATCH',
         headers: {
@@ -647,25 +636,6 @@ export default function AdminPanel() {
                           </div>
                         </div>
                       ))}
-                    </div>
-
-                    <div className="space-y-3 rounded-xl border border-violet-500/25 bg-violet-500/5 p-4">
-                      <div>
-                        <Label className="text-slate-200 text-sm font-semibold">{t('admin.manualPaymentsTitle')}</Label>
-                        <p className="text-xs text-slate-400 mt-1">{t('admin.manualPaymentsDesc')}</p>
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-slate-400 text-xs">{t('admin.paymentPageUrl')}</Label>
-                        <Input
-                          type="url"
-                          inputMode="url"
-                          placeholder="https://example.com/apmoketi"
-                          value={editManualPaymentUrl}
-                          onChange={(e) => setEditManualPaymentUrl(e.target.value)}
-                          className="bg-white/10 border-white/20 text-white placeholder:text-slate-500 rounded-xl"
-                        />
-                        <p className="text-[11px] text-slate-500">{t('admin.leaveEmptyNoButton')}</p>
-                      </div>
                     </div>
 
                     <button

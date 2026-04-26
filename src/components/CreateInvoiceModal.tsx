@@ -10,7 +10,7 @@ import { useTranslation } from '@/lib/i18n';
 import { Loader2, FileText, Calendar, Receipt, CalendarDays, FileStack, Building2, User } from 'lucide-react';
 import { format, subDays } from 'date-fns';
 import { cn } from '@/lib/utils';
-import { fetchPaidManualSalesInvoiceCandidates, fetchPaidSalesInvoiceCandidates } from '@/lib/manualSalesInvoicePreview';
+import { fetchPaidSalesInvoiceCandidates } from '@/lib/manualSalesInvoicePreview';
 
 type GroupingType = 'per_payment' | 'per_week' | 'single';
 
@@ -32,7 +32,6 @@ interface CreateInvoiceModalProps {
   isOrgTutor?: boolean;
   onSuccess?: () => void;
   orgTutors?: { id: string; full_name: string }[];
-  manualPaymentsEnabled?: boolean;
 }
 
 export default function CreateInvoiceModal({
@@ -44,7 +43,6 @@ export default function CreateInvoiceModal({
   isOrgTutor,
   onSuccess,
   orgTutors,
-  manualPaymentsEnabled = false,
 }: CreateInvoiceModalProps) {
   const { t } = useTranslation();
   const [periodStart, setPeriodStart] = useState('');
@@ -167,26 +165,16 @@ export default function CreateInvoiceModal({
           setPreviewMode(true);
         }
       } else {
-        const previewFetch =
-          manualPaymentsEnabled
-            ? fetchPaidManualSalesInvoiceCandidates(supabase, {
-                tutorIds: tutorIdsForQuery,
-                periodStart,
-                periodEnd,
-                studentId,
-              })
-            : fetchPaidSalesInvoiceCandidates(supabase, {
-                tutorIds: tutorIdsForQuery,
-                periodStart,
-                periodEnd,
-                studentId,
-                mode: 'stripe',
-              });
-
-        const { rows, error: prevErr } = await previewFetch;
+        const { rows, error: prevErr } = await fetchPaidSalesInvoiceCandidates(supabase, {
+          tutorIds: tutorIdsForQuery,
+          periodStart,
+          periodEnd,
+          studentId,
+          mode: 'stripe',
+        });
         if (prevErr) throw prevErr;
         if (!rows.length) {
-          setError(manualPaymentsEnabled ? t('invoice.noPaidForPeriod') : t('invoiceCreate.noPaidStripePeriod'));
+          setError(t('invoiceCreate.noPaidStripePeriod'));
           setSessions([]);
           setPreviewMode(false);
         } else {
@@ -228,7 +216,7 @@ export default function CreateInvoiceModal({
       const tutorKeys = Object.keys(groupedByTutor);
       if (tutorKeys.length === 0) throw new Error(t('invoiceCreate.noSessions'));
 
-      const groupingForApi = manualPaymentsEnabled ? 'single' : effectiveGrouping;
+      const groupingForApi = effectiveGrouping;
 
       for (const tid of tutorKeys) {
         const { sessionIds, packageIds } = groupedByTutor[tid];
@@ -326,10 +314,8 @@ export default function CreateInvoiceModal({
             <>
               <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
                 <p className="text-sm text-blue-900">
-                  {manualPaymentsEnabled
-                    ? t('invoiceCreate.orgManualInfo')
-                    : isOrgTutor
-                      ? t('invoiceCreate.orgTutorInfo')
+                  {isOrgTutor
+                    ? t('invoiceCreate.orgTutorInfo')
                       : orgTutors && orgTutors.length > 0
                         ? t('invoiceCreate.orgAdminInfo')
                         : t('invoiceCreate.selectPeriodInfo')}
@@ -361,7 +347,7 @@ export default function CreateInvoiceModal({
                 </div>
               </div>
 
-              {!isOrgTutor && !manualPaymentsEnabled && (
+              {!isOrgTutor && (
                 <div>
                   <Label className="text-sm font-semibold text-gray-700 mb-2 block">
                     {t('invoiceCreate.groupingType')}
@@ -428,13 +414,10 @@ export default function CreateInvoiceModal({
                       {t('invoiceCreate.sessionsCount', { count: sessions.length })} |{' '}
                       {t('common.total')}: {'\u20AC'}{totalAmount.toFixed(2)}
                     </p>
-                    {!isOrgTutor && !manualPaymentsEnabled && (
+                    {!isOrgTutor && (
                       <p className="text-xs text-indigo-600 mt-1">
                         {t('invoiceCreate.groupingLabel')}: {t(`invoiceCreate.${groupingType}`)}
                       </p>
-                    )}
-                    {manualPaymentsEnabled && (
-                      <p className="text-xs text-indigo-600 mt-1">{t('invoice.manualSfFooterNote')}</p>
                     )}
                   </div>
                   <Button variant="ghost" size="sm" onClick={() => setPreviewMode(false)} className="text-xs">

@@ -13,7 +13,6 @@ import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { useTranslation } from '@/lib/i18n';
 import { getCached, setCache } from '@/lib/dataCache';
-import { fetchPaidManualSalesInvoiceCandidates } from '@/lib/manualSalesInvoicePreview';
 
 type CompanyFinanceCache = {
   orgId: string;
@@ -30,8 +29,7 @@ type CompanyFinanceCache = {
 export default function CompanyFinance() {
   const { t } = useTranslation();
   const fc = getCached<CompanyFinanceCache>('company_finance');
-  const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
-  const manualPaymentsEnabled = !orgFeaturesLoading && hasFeature('manual_payments');
+  const { loading: orgFeaturesLoading } = useOrgFeatures();
   const location = useLocation();
   const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
   const [loading, setLoading] = useState(!fc);
@@ -77,17 +75,9 @@ export default function CompanyFinance() {
 
   useEffect(() => {
     if (!orgId || orgFeaturesLoading) return;
-    if (manualPaymentsEnabled) return;
     const params = new URLSearchParams(location.search);
     if (params.get('stripe') === 'success') verifyStripe();
-  }, [orgId, location.search, orgFeaturesLoading, manualPaymentsEnabled]);
-
-  useEffect(() => {
-    if (orgFeaturesLoading) return;
-    if (manualPaymentsEnabled) {
-      setEnablePerLesson(false);
-    }
-  }, [orgFeaturesLoading, manualPaymentsEnabled]);
+  }, [orgId, location.search, orgFeaturesLoading]);
 
   const fetchFinanceSettings = async () => {
     if (!getCached('company_finance')) setLoading(true);
@@ -173,7 +163,7 @@ export default function CompanyFinance() {
       .update({
         payment_timing: paymentTiming,
         payment_deadline_hours: paymentDeadlineHours,
-        enable_per_lesson: manualPaymentsEnabled ? false : enablePerLesson,
+        enable_per_lesson: enablePerLesson,
         enable_monthly_billing: enableMonthlyBilling,
         enable_prepaid_packages: enablePrepaidPackages,
         restrict_booking_on_overdue: restrictBookingOnOverdue,
@@ -201,49 +191,29 @@ export default function CompanyFinance() {
     setInvoiceLoading(true);
     setInvoiceError(null);
     try {
-      if (manualPaymentsEnabled) {
-        const { rows: merged, error: manualPrevErr } = await fetchPaidManualSalesInvoiceCandidates(supabase, {
-          tutorIds: targetTutorIds,
-          periodStart: invoicePeriodStart,
-          periodEnd: invoicePeriodEnd,
-        });
-        if (manualPrevErr) throw manualPrevErr;
+      const { data, error } = await supabase
+        .from('sessions')
+        .select('*, students!inner(full_name, email), subjects(name)')
+        .in('tutor_id', targetTutorIds)
+        .neq('status', 'cancelled')
+        .gte('start_time', invoicePeriodStart + 'T00:00:00')
+        .lte('start_time', invoicePeriodEnd + 'T23:59:59')
+        .lte('start_time', new Date().toISOString())
+        .eq('paid', false)
+        .is('payment_batch_id', null)
+        .is('lesson_package_id', null)
+        .order('start_time', { ascending: false });
 
-        if (merged.length === 0) {
-          setInvoiceError(t('companyFinance.noPaidSessions'));
-          setInvoiceUnpaidSessions([]);
-          setInvoicePreview(false);
-        } else {
-          setInvoiceUnpaidSessions(merged);
-          setInvoicePreview(true);
-          setInvoiceError(null);
-          setExpandedStudents(new Set());
-        }
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        setInvoiceError(t('companyFinance.noUnpaid'));
+        setInvoiceUnpaidSessions([]);
+        setInvoicePreview(false);
       } else {
-        const { data, error } = await supabase
-          .from('sessions')
-          .select('*, students!inner(full_name, email), subjects(name)')
-          .in('tutor_id', targetTutorIds)
-          .neq('status', 'cancelled')
-          .gte('start_time', invoicePeriodStart + 'T00:00:00')
-          .lte('start_time', invoicePeriodEnd + 'T23:59:59')
-          .lte('start_time', new Date().toISOString())
-          .eq('paid', false)
-          .is('payment_batch_id', null)
-          .is('lesson_package_id', null)
-          .order('start_time', { ascending: false });
-
-        if (error) throw error;
-        if (!data || data.length === 0) {
-          setInvoiceError(t('companyFinance.noUnpaid'));
-          setInvoiceUnpaidSessions([]);
-          setInvoicePreview(false);
-        } else {
-          setInvoiceUnpaidSessions(data);
-          setInvoicePreview(true);
-          setInvoiceError(null);
-          setExpandedStudents(new Set());
-        }
+        setInvoiceUnpaidSessions(data);
+        setInvoicePreview(true);
+        setInvoiceError(null);
+        setExpandedStudents(new Set());
       }
     } catch (err: any) {
       setInvoiceError(err.message);
@@ -269,42 +239,20 @@ export default function CompanyFinance() {
 
       const tutorIds = Object.keys(groupedByTutor);
 
-      if (manualPaymentsEnabled) {
-        for (const tutorId of tutorIds) {
-          const { sessionIds, packageIds } = groupedByTutor[tutorId];
-          if (sessionIds.length === 0 && packageIds.length === 0) continue;
-          const response = await fetch('/api/generate-invoice', {
-            method: 'POST',
-            headers: await authHeaders(),
-            body: JSON.stringify({
-              periodStart: invoicePeriodStart,
-              periodEnd: invoicePeriodEnd,
-              groupingType: 'single',
-              tutorId,
-              onlyPaid: true,
-              sessionIds: sessionIds.length > 0 ? sessionIds : undefined,
-              packageIds: packageIds.length > 0 ? packageIds : undefined,
-            }),
-          });
-          const json = await response.json();
-          if (!response.ok) throw new Error(json.error || t('common.error'));
-        }
-      } else {
-        for (const tutorId of tutorIds) {
-          const response = await fetch('/api/create-monthly-invoice', {
-            method: 'POST',
-            headers: await authHeaders(),
-            body: JSON.stringify({
-              tutorId,
-              periodStartDate: invoicePeriodStart,
-              periodEndDate: invoicePeriodEnd,
-              paymentDeadlineDays: invoiceDeadlineDays,
-              sessionIds: groupedByTutor[tutorId].sessionIds,
-            }),
-          });
-          const json = await response.json();
-          if (!response.ok) throw new Error(json.error || t('common.error'));
-        }
+      for (const tutorId of tutorIds) {
+        const response = await fetch('/api/create-monthly-invoice', {
+          method: 'POST',
+          headers: await authHeaders(),
+          body: JSON.stringify({
+            tutorId,
+            periodStartDate: invoicePeriodStart,
+            periodEndDate: invoicePeriodEnd,
+            paymentDeadlineDays: invoiceDeadlineDays,
+            sessionIds: groupedByTutor[tutorId].sessionIds,
+          }),
+        });
+        const json = await response.json();
+        if (!response.ok) throw new Error(json.error || t('common.error'));
       }
 
       setToastMessage({ message: t('companyFinance.invoicesSent', { count: String(tutorIds.length) }), type: 'success' });
@@ -379,34 +327,10 @@ export default function CompanyFinance() {
             <Wallet className="w-6 h-6 text-indigo-600" /> {t('companyFinance.title')}
           </h1>
           <p className="text-gray-500 mt-1">
-            {manualPaymentsEnabled ? t('companyFinance.manualDesc') : t('companyFinance.stripeDesc')}
+            {t('companyFinance.stripeDesc')}
           </p>
         </div>
 
-        {manualPaymentsEnabled && (
-          <div className="rounded-2xl border border-violet-200 bg-violet-50/80 p-5 space-y-3">
-            <div className="flex items-start gap-3">
-              <Info className="w-5 h-5 text-violet-700 flex-shrink-0 mt-0.5" />
-              <div className="space-y-2 text-sm text-violet-950">
-                <p className="font-semibold">{t('companyFinance.manualPayments')}</p>
-                <p>
-                  {t('companyFinance.manualInfo')}{' '}
-                  <Link to={`${orgBasePath}/students`} className="font-medium underline underline-offset-2 hover:text-violet-800">
-                    {t('companyFinance.students')}
-                  </Link>
-                  .
-                </p>
-                <p>
-                  <Link to={`${orgBasePath}/instructions#apmokejimai`} className="font-medium underline underline-offset-2 hover:text-violet-800">
-                    {t('companyFinance.fullInstructions')}
-                  </Link>
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {!manualPaymentsEnabled && (
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-5">
           <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
             <CreditCard className="w-5 h-5 text-violet-600" /> {t('companyFinance.stripePayments')}
@@ -442,31 +366,28 @@ export default function CompanyFinance() {
             </div>
           )}
         </div>
-        )}
 
         <div id="billing-models" className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-5 scroll-mt-24">
           <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
             <Layers className="w-5 h-5 text-indigo-600" /> {t('companyFinance.paymentModels')}
           </h2>
           <p className="text-sm text-gray-500">
-            {manualPaymentsEnabled ? t('companyFinance.paymentModelsManualDesc') : t('companyFinance.paymentModelsDesc')}
+            {t('companyFinance.paymentModelsDesc')}
           </p>
           <div className="space-y-4">
             <label className="flex items-start gap-3 cursor-pointer">
               <input
                 type="checkbox"
                 className="mt-1 w-4 h-4 rounded border-gray-300 text-violet-600"
-                checked={manualPaymentsEnabled ? false : enablePerLesson}
-                disabled={manualPaymentsEnabled}
+                checked={enablePerLesson}
                 onChange={(e) => {
-                  if (manualPaymentsEnabled) return;
                   setEnablePerLesson(e.target.checked);
                 }}
               />
               <span className="text-sm text-gray-800">
                 <span className="font-medium">{t('companyFinance.payPerLesson')}</span>
                 <span className="block text-xs text-gray-500">
-                  {manualPaymentsEnabled ? t('companyFinance.payPerLessonManualOff') : t('companyFinance.payPerLessonHint')}
+                  {t('companyFinance.payPerLessonHint')}
                 </span>
               </span>
             </label>
@@ -488,15 +409,9 @@ export default function CompanyFinance() {
                 <div className="ml-7 p-4 bg-blue-50 border border-blue-100 rounded-xl space-y-3">
                   <div className="flex items-start gap-2">
                     <FileText className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
-                    {manualPaymentsEnabled ? (
-                      <p className="text-xs text-blue-800">
-                        {t('companyFinance.manualPaymentNote')}
-                      </p>
-                    ) : (
-                      <p className="text-xs text-blue-800">
-                        {t('companyFinance.monthlyInvoiceNote')}
-                      </p>
-                    )}
+                    <p className="text-xs text-blue-800">
+                      {t('companyFinance.monthlyInvoiceNote')}
+                    </p>
                   </div>
                   <Button size="sm" className="gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-xs" onClick={() => {
                     setIsSendInvoiceOpen(true);
@@ -511,7 +426,7 @@ export default function CompanyFinance() {
                     setInvoicePeriodEnd(today.toISOString().slice(0, 10));
                   }}>
                     <FileText className="w-3.5 h-3.5" />
-                    {manualPaymentsEnabled ? t('companyFinance.generateInvoicesForPaid') : t('companyFinance.sendInvoices')}
+                    {t('companyFinance.sendInvoices')}
                   </Button>
                 </div>
               )}
@@ -535,9 +450,6 @@ export default function CompanyFinance() {
                   <Package className="w-4 h-4 text-violet-600 flex-shrink-0 mt-0.5" />
                   <p className="text-xs text-violet-800">
                     {t('companyFinance.packageSendHint')}
-                    {manualPaymentsEnabled && (
-                      <> {t('companyFinance.manualPackageNote')}</>
-                    )}
                   </p>
                 </div>
               )}
@@ -550,7 +462,7 @@ export default function CompanyFinance() {
           </div>
         </div>
 
-        {!manualPaymentsEnabled && enablePerLesson && (
+        {enablePerLesson && (
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-6">
             <h2 className="text-lg font-semibold text-gray-900">{t('companyFinance.paymentRules')}</h2>
 
@@ -692,7 +604,7 @@ export default function CompanyFinance() {
                 disabled={invoiceLoading || (invoiceScope === 'selected_tutors' && invoiceTutorIds.length === 0)}
                 className="w-full rounded-xl"
               >
-                {invoiceLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{t('common.loading')}</> : (manualPaymentsEnabled ? t('companyFinance.previewPaidSessions') : t('companyFinance.previewUnpaid'))}
+                {invoiceLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{t('common.loading')}</> : t('companyFinance.previewUnpaid')}
               </Button>
             ) : (() => {
               const grouped = invoiceUnpaidSessions.reduce<Record<string, { name: string; sessions: any[] }>>((acc, s: any) => {
@@ -713,9 +625,7 @@ export default function CompanyFinance() {
               return (
                 <div className="space-y-3">
                   <p className="text-sm font-semibold text-gray-700">
-                    {manualPaymentsEnabled
-                      ? t('companyFinance.paidItemsForInvoice', { count: String(invoiceUnpaidSessions.length) })
-                      : t('companyFinance.unpaidSessions', { count: String(invoiceUnpaidSessions.length) })}
+                    {t('companyFinance.unpaidSessions', { count: String(invoiceUnpaidSessions.length) })}
                     {' · '}
                     {studentEntries.length} {studentEntries.length === 1 ? t('companyFinance.studentSingular') : t('companyFinance.studentPlural')}
                   </p>
@@ -734,13 +644,7 @@ export default function CompanyFinance() {
                               <div className="min-w-0">
                                 <p className="text-sm font-semibold text-gray-900 text-left truncate">{name}</p>
                                 <p className="text-xs text-gray-500 text-left">
-                                  {manualPaymentsEnabled
-                                    ? t('companyFinance.previewEntryCount', {
-                                        count: String(sList.length),
-                                        lessons: String(sList.filter((x: any) => x.invoice_row_kind !== 'package').length),
-                                        packages: String(sList.filter((x: any) => x.invoice_row_kind === 'package').length),
-                                      })
-                                    : `${sList.length} ${sList.length === 1 ? t('companyFinance.lessonSingular') : t('companyFinance.lessonPlural')}`}
+                                  {`${sList.length} ${sList.length === 1 ? t('companyFinance.lessonSingular') : t('companyFinance.lessonPlural')}`}
                                 </p>
                               </div>
                             </div>

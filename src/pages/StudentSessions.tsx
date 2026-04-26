@@ -7,7 +7,7 @@ import { sendEmail } from '@/lib/email';
 import { authHeaders } from '@/lib/apiHelpers';
 import { format, isAfter, differenceInHours, addDays, getDay } from 'date-fns';
 import { useTranslation } from '@/lib/i18n';
-import { Clock, CheckCircle, XCircle, CalendarDays, RefreshCw, ShieldAlert, ListOrdered, Mail, Video, ChevronLeft, ChevronRight, CreditCard, Loader2, Package, Users } from 'lucide-react';
+import { Clock, CheckCircle, XCircle, CalendarDays, RefreshCw, ShieldAlert, ListOrdered, Mail, Video, ChevronLeft, ChevronRight, CreditCard, Loader2, Package, Users, FileText } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import SessionFiles from '@/components/SessionFiles';
 import { Button } from '@/components/ui/button';
@@ -75,6 +75,9 @@ export default function StudentSessions() {
     const [sessions, setSessions] = useState<Session[]>(ssCache?.sessions ?? []);
     const [waitlistEntries, setWaitlistEntries] = useState<WaitlistEntry[]>(ssCache?.waitlist ?? []);
     const [loading, setLoading] = useState(!ssCache);
+    const [activeTab, setActiveTab] = useState<'lessons' | 'files'>('lessons');
+    const [sessionFiles, setSessionFiles] = useState<{ name: string; sessionTopic: string; sessionDate: string; url: string }[]>([]);
+    const [loadingFiles, setLoadingFiles] = useState(false);
     const [filter, setFilter] = useState<'all' | 'upcoming' | 'past' | 'paid' | 'unpaid' | 'cancelled'>('all');
     const [selectedSession, setSelectedSession] = useState<Session | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -117,6 +120,31 @@ export default function StudentSessions() {
 
     useEffect(() => { fetchSessions(); }, []);
     useEffect(() => { setShowAllSessions(false); }, [filter]);
+
+    useEffect(() => {
+      if (activeTab !== 'files' || sessions.length === 0) return;
+      setLoadingFiles(true);
+      (async () => {
+        const files: { name: string; sessionTopic: string; sessionDate: string; url: string }[] = [];
+        for (const session of sessions) {
+          const folder = `${session.id}/`;
+          const { data: fileList } = await supabase.storage.from('session-files').list(folder);
+          if (fileList) {
+            for (const f of fileList) {
+              const { data: urlData } = await supabase.storage.from('session-files').createSignedUrl(`${folder}${f.name}`, 3600);
+              files.push({
+                name: f.name,
+                sessionTopic: session.topic || '—',
+                sessionDate: format(new Date(session.start_time), 'yyyy-MM-dd'),
+                url: urlData?.signedUrl || '',
+              });
+            }
+          }
+        }
+        setSessionFiles(files);
+        setLoadingFiles(false);
+      })();
+    }, [activeTab, sessions]);
 
     // After monthly invoice payment from Stripe success_url
     useEffect(() => {
@@ -715,6 +743,52 @@ export default function StudentSessions() {
                     </div>
                 )}
 
+                {/* Tabs: Lessons / Files */}
+                <div className="flex gap-2 mb-4 bg-gray-100 rounded-xl p-1">
+                    <button
+                        onClick={() => setActiveTab('lessons')}
+                        className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-colors ${activeTab === 'lessons' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+                    >
+                        <CalendarDays className="w-4 h-4 inline mr-1.5" />{t('stuSess.tabLessons')}
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('files')}
+                        className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-colors ${activeTab === 'files' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+                    >
+                        <FileText className="w-4 h-4 inline mr-1.5" />{t('stuSess.tabFiles')}
+                    </button>
+                </div>
+
+                {activeTab === 'files' ? (
+                    <div className="space-y-3">
+                        {loadingFiles ? (
+                            <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-indigo-500" /></div>
+                        ) : sessionFiles.length === 0 ? (
+                            <div className="text-center py-12">
+                                <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                                <p className="text-gray-500">{t('files.noFilesTutor')}</p>
+                            </div>
+                        ) : (
+                            sessionFiles.map((f, i) => (
+                                <a
+                                    key={i}
+                                    href={f.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-3 p-3 border border-gray-200 rounded-xl hover:border-indigo-200 transition-colors"
+                                >
+                                    <FileText className="w-5 h-5 text-indigo-500 flex-shrink-0" />
+                                    <div className="min-w-0 flex-1">
+                                        <p className="text-sm font-medium text-gray-900 truncate">{f.name}</p>
+                                        <p className="text-xs text-gray-500">{f.sessionDate} &middot; {f.sessionTopic}</p>
+                                    </div>
+                                </a>
+                            ))
+                        )}
+                    </div>
+                ) : (
+                <>
+
                 {/* Filter pills */}
                 <div className="flex gap-2 mb-5 overflow-x-auto pb-1 scrollbar-hide">
                     {(['all', 'upcoming', 'past', 'paid', 'unpaid', 'cancelled'] as const).map((f) => {
@@ -886,6 +960,8 @@ export default function StudentSessions() {
                             </button>
                         )}
                     </div>
+                )}
+                </>
                 )}
             </div>
 

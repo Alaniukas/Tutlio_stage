@@ -78,6 +78,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
+import FindTutorModal from '@/components/FindTutorModal';
 import { buildNoShowSessionPatch, noShowWhenLabelLt, type NoShowWhen } from '@/lib/noShowWhen';
 
 const locales = { lt, en: enUS };
@@ -358,6 +359,7 @@ export default function CompanyTvarkarastis() {
   const [saving, setSaving] = useState(false);
   const [noShowDialogOpen, setNoShowDialogOpen] = useState(false);
   const [noShowSaving, setNoShowSaving] = useState(false);
+  const [findLessonOpen, setFindLessonOpen] = useState(false);
 
   useEffect(() => {
     if (!featuresLoading && organizationId && !getCached('company_tvarkarastis')) {
@@ -397,7 +399,7 @@ export default function CompanyTvarkarastis() {
         .from('sessions')
         .select(`
           *,
-          student:students(full_name, email),
+          student:students(full_name, email, admin_comment),
           tutor:profiles!sessions_tutor_id_fkey(full_name)
         `)
         .in('tutor_id', tutorIds)
@@ -568,7 +570,7 @@ export default function CompanyTvarkarastis() {
     if (!showOnlyAvailability) {
       events.push(...filteredSessions.map(session => ({
         id: session.id,
-        title: `${session.student?.full_name || 'Mokinys'} - ${session.tutor?.full_name || 'Tutorius'}`,
+        title: `${session.student?.full_name || 'Mokinys'}${session.student?.admin_comment ? ' ❓' : ''} - ${session.tutor?.full_name || 'Tutorius'}`,
         start: session.start_time,
         end: session.end_time,
         resource: {
@@ -844,10 +846,41 @@ export default function CompanyTvarkarastis() {
     const session = event.resource?.session;
     if (!session) return {};
 
+    if (session.status === 'cancelled') {
+      return {
+        style: {
+          backgroundColor: '#ef4444',
+          borderColor: '#ef4444',
+          opacity: 0.5,
+          color: '#fff',
+        },
+      };
+    }
+    if (session.status === 'no_show') {
+      return {
+        style: {
+          backgroundColor: '#fda4af',
+          borderColor: '#fda4af',
+          color: '#fff',
+        },
+      };
+    }
+
+    const endAt = session.end_time instanceof Date ? session.end_time : new Date(session.end_time);
+    const hasEnded = endAt.getTime() <= Date.now();
+    const isPaid = session.paid === true || session.payment_status === 'paid' || session.payment_status === 'confirmed';
+
+    const unpaidOccurred =
+      (session.status === 'completed' && !isPaid) ||
+      (session.status === 'active' && hasEnded && !isPaid) ||
+      (hasEnded && session.payment_status === 'paid_by_student');
+
     let bgColor = '#3b82f6'; // blue - active
-    if (session.status === 'cancelled') bgColor = '#ef4444'; // red
-    if (session.status === 'completed') bgColor = '#10b981'; // green
-    if (session.status === 'no_show') bgColor = '#be123c'; // rose-700
+    if (unpaidOccurred) {
+      bgColor = '#ca8a04'; // amber - completed unpaid
+    } else if (isPaid || session.status === 'completed') {
+      bgColor = '#10b981'; // green - completed paid
+    }
 
     return {
       style: {
@@ -1432,6 +1465,10 @@ export default function CompanyTvarkarastis() {
             </p>
           </div>
           <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setFindLessonOpen(true)}>
+              <Search className="w-4 h-4 mr-2" />
+              {t('compSch.findLesson')}
+            </Button>
             {canFullControl && (
               <Button variant="outline" onClick={() => setIsCreateAvailabilityOpen(true)}>
                 <Plus className="w-4 h-4 mr-2" />
@@ -1670,21 +1707,25 @@ export default function CompanyTvarkarastis() {
         </div>
 
         {/* Legend */}
-        <div className="bg-gray-50 rounded-lg p-3 flex items-center gap-6 text-sm">
+        <div className="bg-gray-50 rounded-lg p-3 flex flex-wrap items-center gap-4 sm:gap-6 text-sm">
           <div className="flex items-center gap-2">
             <div className="w-4 h-4 bg-green-500 rounded opacity-60"></div>
             <span>{t('compSch.freeTime')}</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 bg-blue-500 rounded"></div>
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#3b82f6' }}></div>
             <span>{t('compSch.activeLesson')}</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 bg-gray-500 rounded"></div>
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#10b981' }}></div>
             <span>{t('compSch.completedLesson')}</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 bg-red-500 rounded"></div>
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#ca8a04' }}></div>
+            <span>{t('compSch.unpaidLesson')}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#ef4444', opacity: 0.5 }}></div>
             <span>{t('compSch.cancelledLesson')}</span>
           </div>
         </div>
@@ -2133,6 +2174,13 @@ export default function CompanyTvarkarastis() {
                   {selectedEvent.status === 'active' ? t('compSch.statusActive') : selectedEvent.status === 'cancelled' ? t('compSch.statusCancelled') : t('compSch.statusCompleted')}
                 </span>
               </div>
+
+              {selectedEvent.status === 'cancelled' && (selectedEvent as any).cancellation_reason && (
+                <div className="p-3 rounded-xl bg-red-50 text-red-800 text-sm border border-red-100 mb-2">
+                  <span className="font-semibold block mb-1">{t('compSch.cancellationReason')}</span>
+                  {(selectedEvent as any).cancellation_reason}
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4 py-2">
                 <div className="space-y-1">
@@ -2814,6 +2862,7 @@ export default function CompanyTvarkarastis() {
         saving={noShowSaving}
         onConfirm={(w) => void confirmMarkStudentNoShowSchedule(w)}
       />
+      <FindTutorModal isOpen={findLessonOpen} onClose={() => setFindLessonOpen(false)} orgId={organizationId} />
     </>
   );
 }

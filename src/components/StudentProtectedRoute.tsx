@@ -6,6 +6,7 @@ import { useUser } from '@/contexts/UserContext';
 export default function StudentProtectedRoute() {
     const { user: ctxUser, profile: ctxProfile, loading: ctxLoading } = useUser();
     const [status, setStatus] = useState<'loading' | 'student' | 'none'>('loading');
+    const [isFrozen, setIsFrozen] = useState(false);
     const location = useLocation();
     const params = new URLSearchParams(location.search);
     // Allow rendering success UI right after Stripe redirect,
@@ -52,7 +53,10 @@ export default function StudentProtectedRoute() {
                 if (rpcError) throw rpcError;
 
                 const studentData = studentRows?.[0] ?? null;
-                if (!cancelled) setStatus(studentData ? 'student' : 'none');
+                if (!cancelled) {
+                    setStatus(studentData ? 'student' : 'none');
+                    setIsFrozen(!!studentData?.detached_at);
+                }
             } catch (err) {
                 console.error('[StudentProtectedRoute] Error checking student status:', err);
                 if (!cancelled) setStatus('none');
@@ -74,7 +78,16 @@ export default function StudentProtectedRoute() {
         );
     }
 
-    if (status === 'student') return <Outlet />;
+    if (status === 'student') return (
+        <>
+            {isFrozen && (
+                <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-center text-sm text-amber-800 font-medium">
+                    Your account is currently frozen. You can view your data but cannot make changes.
+                </div>
+            )}
+            <Outlet context={{ isFrozen }} />
+        </>
+    );
     if (allowInvoiceSuccess) return <Outlet />;
     return <Navigate to="/login" replace />;
 }

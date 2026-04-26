@@ -125,7 +125,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         console.log(`[stripe-webhook] Ignoring canceled sub ${subscription.id}, using active sub ${otherActive.id} for profile ${profile.id}`);
                     }
                 }
-                const plan = subToUse.items.data[0]?.price.recurring?.interval === 'year' ? 'yearly' : 'monthly';
+                const subOnlyPriceId = process.env.STRIPE_SUBSCRIPTION_ONLY_PRICE_ID;
+                const priceItem = subToUse.items.data[0];
+                const plan = priceItem?.price.id === subOnlyPriceId
+                    ? 'subscription_only'
+                    : priceItem?.price.recurring?.interval === 'year' ? 'yearly' : 'monthly';
                 const periodEnd = new Date((subToUse as Stripe.Subscription & { current_period_end: number }).current_period_end * 1000).toISOString();
                 const statusToSave = subToUse.status === 'canceled' || (subToUse as any).cancel_at_period_end ? 'canceled' : subToUse.status;
                 const isTrialing = statusToSave === 'trialing';
@@ -390,6 +394,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     }
 
                     console.log(`[stripe-webhook] Package ${packageId} activated successfully`);
+
+                    // Mark any pre-payment invoices for this package as 'paid'
+                    try {
+                        const { data: invLineItems } = await supabase
+                            .from('invoice_line_items')
+                            .select('invoice_id, session_ids')
+                            .contains('session_ids', [packageId]);
+                        if (invLineItems?.length) {
+                            const invoiceIds = [...new Set(invLineItems.map(li => li.invoice_id))];
+                            await supabase.from('invoices').update({ status: 'paid' }).in('id', invoiceIds).eq('status', 'issued');
+                        }
+                    } catch (invErr) {
+                        console.error('[stripe-webhook] Error updating invoice status:', invErr);
+                    }
 
                     try {
                         await tryIssueSalesInvoiceForStripePackage(supabase, updatedPackage as any);

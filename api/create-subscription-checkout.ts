@@ -16,12 +16,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const { plan, couponCode, successRedirect } = req.body as {
-      plan: 'monthly' | 'yearly';
+      plan: 'monthly' | 'yearly' | 'subscription_only';
       couponCode?: string;
       successRedirect?: 'dashboard' | 'register';
     };
 
-    if (!plan || !['monthly', 'yearly'].includes(plan)) {
+    if (!plan || !['monthly', 'yearly', 'subscription_only'].includes(plan)) {
       return res.status(400).json({ error: 'Neteisingas planas' });
     }
 
@@ -45,18 +45,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // Get the correct price ID from environment variables
-    // You'll need to set these in Vercel after creating products in Stripe
-    const priceId = plan === 'monthly'
-      ? process.env.STRIPE_MONTHLY_PRICE_ID
-      : process.env.STRIPE_YEARLY_PRICE_ID;
+    const priceId = plan === 'subscription_only'
+      ? process.env.STRIPE_SUBSCRIPTION_ONLY_PRICE_ID
+      : plan === 'monthly'
+        ? process.env.STRIPE_MONTHLY_PRICE_ID
+        : process.env.STRIPE_YEARLY_PRICE_ID;
 
     if (!priceId) {
       console.error(`Missing price ID for plan: ${plan}`);
       return res.status(500).json({ error: 'Configuration error - contact support' });
     }
 
-    // Yearly = one-time payment, 12 months access. Monthly = recurring subscription.
+    // Yearly = one-time payment, 12 months access. Monthly and subscription_only = recurring subscription.
     const isYearlyOneTime = plan === 'yearly';
 
     if (isYearlyOneTime) {

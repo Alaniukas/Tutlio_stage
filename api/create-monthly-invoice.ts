@@ -6,6 +6,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
+import { generateInvoicePdf, type InvoicePdfData } from './_lib/invoicePdf.js';
 
 // Stripe/platform fee helpers (inlined to avoid _lib import issues on Vercel)
 const STRIPE_FEE_PERCENT = 0.015;
@@ -287,6 +288,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 .update({ stripe_checkout_session_id: checkoutSession.id })
                 .eq('id', billingBatch.id);
 
+            // Auto-generate S.F. if invoice profile exists (before email so PDF can be attached)
+            let sfPdfBase64: string | null = null;
+            let sfInvoiceNumber: string | null = null;
+            try {
+                const sfResult = await autoGenerateSF(tutorId, billingBatch.id, periodStartDate, periodEndDate, payerSessions, payerName, payerEmail, tutor);
+                if (sfResult) {
+                    sfPdfBase64 = sfResult.pdfBase64 ?? null;
+                    sfInvoiceNumber = sfResult.invoiceNumber ?? null;
+                }
+            } catch (sfErr) {
+                console.error('[create-monthly-invoice] S.F. auto-generation failed (non-blocking):', sfErr);
+            }
+
             // Prepare session details for email
             const sessionsForEmail = payerSessions.map(s => {
                 const sessionDate = new Date(s.start_time);
@@ -299,32 +313,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 };
             });
 
-            // Send invoice email (non-blocking)
+            // Send invoice email with optional S.F. PDF attachment
             if (checkoutSession.url) {
                 try {
+                    const emailPayload: Record<string, unknown> = {
+                        type: 'monthly_invoice',
+                        to: payerEmail,
+                        data: {
+                            recipientName: payerName,
+                            studentName: student.full_name,
+                            tutorName: ownerName,
+                            periodText,
+                            sessions: sessionsForEmail,
+                            totalAmount: totalWithFeesEur.toFixed(2),
+                            paymentDeadline: paymentDeadlineDate.toLocaleDateString('lt-LT', {
+                                year: 'numeric',
+                                month: '2-digit',
+                                day: '2-digit',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                            }),
+                            paymentLink: checkoutSession.url,
+                        },
+                    };
+                    if (sfPdfBase64 && sfInvoiceNumber) {
+                        (emailPayload as any).attachments = [{ filename: `${sfInvoiceNumber}.pdf`, content: sfPdfBase64 }];
+                    }
                     await fetch(`${APP_URL}/api/send-email`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
-                        body: JSON.stringify({
-                            type: 'monthly_invoice',
-                            to: payerEmail,
-                            data: {
-                                recipientName: payerName,
-                                studentName: student.full_name,
-                                tutorName: ownerName,
-                                periodText,
-                                sessions: sessionsForEmail,
-                                totalAmount: totalWithFeesEur.toFixed(2),
-                                paymentDeadline: paymentDeadlineDate.toLocaleDateString('lt-LT', {
-                                    year: 'numeric',
-                                    month: '2-digit',
-                                    day: '2-digit',
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                }),
-                                paymentLink: checkoutSession.url,
-                            },
-                        }),
+                        body: JSON.stringify(emailPayload),
                     });
                 } catch (e) {
                     console.error('[create-monthly-invoice] Error sending email:', e);
@@ -340,13 +358,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             });
 
             console.log(`[create-monthly-invoice] Created batch ${billingBatch.id} for ${payerEmail} with ${lessonCount} sessions`);
-
-            // Auto-generate S.F. if invoice profile exists
-            try {
-                await autoGenerateSF(tutorId, billingBatch.id, periodStartDate, periodEndDate, payerSessions, payerName, payerEmail, tutor);
-            } catch (sfErr) {
-                console.error('[create-monthly-invoice] S.F. auto-generation failed (non-blocking):', sfErr);
-            }
         }
 
         return res.status(200).json({
@@ -369,7 +380,7 @@ async function autoGenerateSF(
     payerName: string,
     payerEmail: string,
     tutor: any
-) {
+): Promise<{ invoiceNumber: string; pdfBase64: string | null } | null> {
     let invoiceProfile: any = null;
     if (tutor.organization_id) {
         const { data: orgProf } = await supabase
@@ -384,7 +395,7 @@ async function autoGenerateSF(
         invoiceProfile = userProf;
     }
 
-    if (!invoiceProfile) return;
+    if (!invoiceProfile) return null;
 
     const isCompany = ['mb', 'uab', 'ii'].includes(invoiceProfile.entity_type);
     const sellerName = isCompany ? invoiceProfile.business_name : tutor.full_name;
@@ -436,7 +447,7 @@ async function autoGenerateSF(
         .select('id')
         .single();
 
-    if (!invoice) return;
+    if (!invoice) return null;
 
     const subjectMap = new Map<string, { name: string; sessions: any[] }>();
     for (const s of sessions) {
@@ -460,5 +471,40 @@ async function autoGenerateSF(
 
     await supabase.from('invoice_line_items').insert(lineItems);
 
+    // Generate PDF and upload
+    try {
+        const pdfData: InvoicePdfData = {
+            invoiceNumber,
+            issueDate: new Date().toLocaleDateString('lt-LT'),
+            periodStart: new Date(periodStart).toLocaleDateString('lt-LT'),
+            periodEnd: new Date(periodEnd).toLocaleDateString('lt-LT'),
+            seller: sellerSnapshot,
+            buyer: buyerSnapshot,
+            lineItems: lineItems.map(li => ({
+                description: li.description,
+                quantity: li.quantity,
+                unitPrice: li.unit_price,
+                totalPrice: li.total_price,
+            })),
+            totalAmount,
+        };
+
+        const pdfBytes = await generateInvoicePdf(pdfData);
+        const storagePath = `${tutorId}/${invoice.id}.pdf`;
+
+        const { error: uploadErr } = await supabase.storage
+            .from('invoices')
+            .upload(storagePath, pdfBytes, { contentType: 'application/pdf', upsert: true });
+
+        if (!uploadErr) {
+            await supabase.from('invoices').update({ pdf_storage_path: storagePath }).eq('id', invoice.id);
+        }
+
+        return { invoiceNumber, pdfBase64: Buffer.from(pdfBytes).toString('base64') };
+    } catch (pdfErr) {
+        console.error('[create-monthly-invoice] PDF generation error:', pdfErr);
+    }
+
     console.log(`[create-monthly-invoice] Auto-generated S.F. ${invoiceNumber} for batch ${billingBatchId}`);
+    return { invoiceNumber, pdfBase64: null };
 }

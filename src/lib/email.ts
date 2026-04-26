@@ -24,6 +24,7 @@ type EmailType =
     | 'payment_received_tutor'
     | 'payment_failed'
     | 'session_comment_added'
+    | 'tutor_student_assigned'
     | 'school_contract'
     | 'school_installment_request';
 

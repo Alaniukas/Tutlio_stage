@@ -122,6 +122,9 @@ export default function CompanySettings() {
   const [trialCommentMode, setTrialCommentMode] = useState<TrialCommentMode>(
     sc?.trialCommentMode ?? 'internal_only'
   );
+  const [trialCommentRequired, setTrialCommentRequired] = useState(sc?.trialCommentRequired ?? false);
+  const [notifyTutorsOnAssign, setNotifyTutorsOnAssign] = useState(sc?.notifyTutorsOnAssign ?? false);
+  const [tutorLicenseCount, setTutorLicenseCount] = useState(sc?.tutorLicenseCount ?? 0);
 
   useEffect(() => { if (!getCached('company_settings')) fetchSettings(); }, []);
 
@@ -149,7 +152,7 @@ export default function CompanySettings() {
 
     const { data: orgData } = await supabase
       .from('organizations')
-      .select('default_cancellation_hours, default_cancellation_fee_percent, default_reminder_student_hours, default_reminder_tutor_hours, default_break_between_lessons, default_min_booking_hours, default_company_commission_percent, org_tutors_can_edit_lesson_settings, org_tutor_lesson_edit, org_subject_templates, features')
+      .select('default_cancellation_hours, default_cancellation_fee_percent, default_reminder_student_hours, default_reminder_tutor_hours, default_break_between_lessons, default_min_booking_hours, default_company_commission_percent, org_tutors_can_edit_lesson_settings, org_tutor_lesson_edit, org_subject_templates, features, tutor_license_count')
       .eq('id', adminRow.organization_id)
       .single();
 
@@ -182,6 +185,7 @@ export default function CompanySettings() {
       if (typeof fp === 'number' && Number.isFinite(fp) && fp >= 0) nextTrialPriceEur = fp;
       const fcm = featObj['trial_lesson_comment_mode'];
       if (fcm === 'student_and_parent' || fcm === 'internal_only') nextTrialCommentMode = fcm;
+      const fcr = featObj['trial_comment_required'];
       nextSettings = {
         cancellation_hours: orgData.default_cancellation_hours || 24,
         cancellation_fee_percent: orgData.default_cancellation_fee_percent || 50,
@@ -204,6 +208,9 @@ export default function CompanySettings() {
       setTrialDurationMinutes(nextTrialDurationMinutes);
       setTrialPriceEur(nextTrialPriceEur);
       setTrialCommentMode(nextTrialCommentMode);
+      setTrialCommentRequired(fcr === true);
+      setNotifyTutorsOnAssign(featObj['notify_tutors_on_student_assign'] === true);
+      setTutorLicenseCount((orgData as any).tutor_license_count ?? 0);
       setSettings(nextSettings);
       setLessonEditScope(nextLessonEditScope);
     }
@@ -302,6 +309,7 @@ export default function CompanySettings() {
         trialDurationMinutes: nextTrialDurationMinutes,
         trialPriceEur: nextTrialPriceEur,
         trialCommentMode: nextTrialCommentMode,
+        trialCommentRequired: fcr === true,
         orgTutors: tutorList,
         subjects: merged,
       });
@@ -538,6 +546,8 @@ export default function CompanySettings() {
       trial_lesson_duration_minutes: Math.max(15, Number(trialDurationMinutes) || 60),
       trial_lesson_price_eur: Math.max(0, Number(trialPriceEur) || 0),
       trial_lesson_comment_mode: trialCommentMode,
+      trial_comment_required: trialCommentRequired,
+      notify_tutors_on_student_assign: notifyTutorsOnAssign,
     };
 
     const { error } = await supabase
@@ -553,6 +563,7 @@ export default function CompanySettings() {
         org_tutor_lesson_edit: lessonEditScope,
         org_tutors_can_edit_lesson_settings: anyLessonEdit,
         features: mergedFeatures,
+        tutor_license_count: Math.max(0, Number(tutorLicenseCount) || 0),
       })
       .eq('id', orgId);
 
@@ -655,6 +666,39 @@ export default function CompanySettings() {
         </div>
 
         <div className="space-y-4">
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center flex-shrink-0">
+                <Users className="w-5 h-5 text-indigo-600" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-lg font-semibold text-gray-900">{t('compSet.tutorNotifications')}</h2>
+                <p className="text-xs text-gray-500 mt-0.5">{t('compSet.tutorNotificationsDesc')}</p>
+              </div>
+            </div>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={notifyTutorsOnAssign}
+                onChange={(e) => setNotifyTutorsOnAssign(e.target.checked)}
+                className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+              />
+              <span className="text-sm text-gray-700">{t('compSet.notifyTutorsOnAssign')}</span>
+            </label>
+            <p className="text-xs text-gray-400 ml-8">{t('compSet.notifyTutorsOnAssignDesc')}</p>
+            <div className="pt-4 border-t border-gray-100">
+              <Label className="text-sm font-medium text-gray-700">{t('compSet.tutorLicenseCount')}</Label>
+              <p className="text-xs text-gray-400 mb-2">{t('compSet.tutorLicenseCountDesc')}</p>
+              <Input
+                type="number"
+                min={0}
+                value={tutorLicenseCount}
+                onChange={e => setTutorLicenseCount(Math.max(0, Number(e.target.value) || 0))}
+                className="rounded-xl w-32"
+              />
+            </div>
+          </div>
+
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
             <div className="flex items-start gap-3">
               <div className="w-10 h-10 rounded-xl bg-sky-50 border border-sky-100 flex items-center justify-center flex-shrink-0">
@@ -768,6 +812,18 @@ export default function CompanySettings() {
                     <SelectItem value="student_and_parent">{t('compSet.commentPublic')}</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="space-y-1.5 col-span-full">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={trialCommentRequired}
+                    onChange={(e) => setTrialCommentRequired(e.target.checked)}
+                    className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-sm text-gray-700">{t('compSet.trialCommentRequired')}</span>
+                </label>
+                <p className="text-xs text-gray-400 ml-6">{t('compSet.trialCommentRequiredDesc')}</p>
               </div>
             </div>
           </div>

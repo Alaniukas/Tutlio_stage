@@ -179,6 +179,7 @@ export default function CalendarPage() {
   const { t, locale, dateFnsLocale } = useTranslation();
   const navigate = useNavigate();
   const orgPolicy = useOrgTutorPolicy();
+  const licenseFrozen = orgPolicy.isOrgTutor && orgPolicy.orgUsesLicenses && !orgPolicy.hasActiveLicense;
   const { contactVisibility } = useOrgFeatures();
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -203,6 +204,10 @@ export default function CalendarPage() {
   );
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [calendarExpanded, setCalendarExpanded] = useState(false);
+
+  // Slot choice popup (C2: Calendar day click → create free time or lesson)
+  const [slotChoiceOpen, setSlotChoiceOpen] = useState(false);
+  const [pendingSlot, setPendingSlot] = useState<{ start: Date; end: Date } | null>(null);
 
   // Modal states
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -234,6 +239,7 @@ export default function CalendarPage() {
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]); // For group lessons
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>('');
   const [meetingLink, setMeetingLink] = useState('');
+  const [tutorMeetingLink, setTutorMeetingLink] = useState('');
   const [topic, setTopic] = useState('');
   const [price, setPrice] = useState<number>(25);
   const [startTime, setStartTime] = useState('');
@@ -391,12 +397,13 @@ export default function CalendarPage() {
     // Use UserContext profile instead of fetching again
     const { data: profileData } = await supabase
       .from('profiles')
-      .select('stripe_account_id, google_calendar_connected, organization_id')
+      .select('stripe_account_id, google_calendar_connected, organization_id, personal_meeting_link')
       .eq('id', user.id)
       .single();
     setIsOrgTutor(!!profileData?.organization_id);
     setStripeConnected(!!profileData?.stripe_account_id);
     setGoogleCalendarConnected(!!profileData?.google_calendar_connected);
+    setTutorMeetingLink((profileData as any)?.personal_meeting_link || '');
 
     // Auto-hide cancelled sessions older than 12 hours (client-side)
     const now = new Date();
@@ -423,7 +430,7 @@ export default function CalendarPage() {
     // Note: Use .not() instead of .eq(false) to include NULL values (for backwards compatibility)
     const { data: sessionsData } = await supabase
       .from('sessions')
-      .select('*, student:students(full_name, email, phone, payer_email, payer_phone, grade)')
+      .select('*, student:students(full_name, email, phone, payer_email, payer_phone, grade, admin_comment)')
       .eq('tutor_id', user.id)
       .not('hidden_from_calendar', 'eq', true)
       .limit(1000);
@@ -437,7 +444,7 @@ export default function CalendarPage() {
 
     const { data: studentsData } = await supabase
       .from('students')
-      .select('id, full_name, grade, email, payment_payer, payer_email, payment_model')
+      .select('id, full_name, grade, email, payment_payer, payer_email, payment_model, personal_meeting_link')
       .eq('tutor_id', user.id);
     setStudents(studentsData || []);
 
@@ -831,6 +838,14 @@ export default function CalendarPage() {
     }
   };
 
+  const resolveMeetingLink = useCallback((subjectLink: string | undefined, studentId?: string) => {
+    const student = studentId ? students.find(s => s.id === studentId) : undefined;
+    const studentLink = (student as any)?.personal_meeting_link;
+    if (studentLink) return studentLink;
+    if (tutorMeetingLink) return tutorMeetingLink;
+    return subjectLink || '';
+  }, [students, tutorMeetingLink]);
+
   const handleSelectSlot = useCallback(({ start, end }: { start: Date; end: Date }, opts?: { forceCreate?: boolean }) => {
     if (isAvailabilityModalOpen || isEventModalOpen || isCreateModalOpen || isUpcomingListModalOpen) return;
     // Only require Stripe + subjects for individual tutors. Org tutors manage calendars/sessions without their own Stripe.
@@ -859,9 +874,16 @@ export default function CalendarPage() {
         return;
       }
     }
-    setSelectedSlot({ start, end });
-    setStartTime(format(start, "yyyy-MM-dd'T'HH:mm"));
-    setEndTime(format(end, "yyyy-MM-dd'T'HH:mm"));
+    setPendingSlot({ start, end });
+    setSlotChoiceOpen(true);
+  }, [isAvailabilityModalOpen, isEventModalOpen, isCreateModalOpen, isUpcomingListModalOpen, backgroundEvents, stripeConnected, subjects.length, isOrgTutor]);
+
+  const openCreateLessonFromSlot = () => {
+    if (!pendingSlot) return;
+    setSlotChoiceOpen(false);
+    setSelectedSlot(pendingSlot);
+    setStartTime(format(pendingSlot.start, "yyyy-MM-dd'T'HH:mm"));
+    setEndTime(format(pendingSlot.end, "yyyy-MM-dd'T'HH:mm"));
     setSelectedStudentId('');
     setSelectedSubjectId('');
     setMeetingLink('');
@@ -872,7 +894,12 @@ export default function CalendarPage() {
     setIsRecurring(false);
     setRecurringEndDate('');
     setIsCreateModalOpen(true);
-  }, [isAvailabilityModalOpen, isEventModalOpen, isCreateModalOpen, isUpcomingListModalOpen, backgroundEvents, stripeConnected, subjects.length, isOrgTutor]);
+  };
+
+  const openCreateFreeTimeFromSlot = () => {
+    setSlotChoiceOpen(false);
+    setIsAvailabilityModalOpen(true);
+  };
 
   const handleSelectEvent = useCallback((event: any) => {
     if (event.isBackground) {
@@ -933,7 +960,7 @@ export default function CalendarPage() {
     if (typeof effectivePrice === 'number') {
       setPrice(effectivePrice);
     }
-    setMeetingLink(subj.meeting_link || '');
+    setMeetingLink(resolveMeetingLink(subj.meeting_link, selectedStudentId));
 
     // Auto-adjust end time based on individual duration (if available) or subject duration
     const durationMinutes =
@@ -973,7 +1000,7 @@ export default function CalendarPage() {
         // Use individual pricing
         setTopic(subj.name);
         setPrice(pricing.price);
-        setMeetingLink(subj.meeting_link || '');
+        setMeetingLink(resolveMeetingLink(subj.meeting_link, selectedStudentId));
         // Auto-adjust end time based on individual duration
         if (startTime) {
           const start = new Date(startTime);
@@ -984,7 +1011,7 @@ export default function CalendarPage() {
         const tsp = getTutorSubjectPrice(subj.name);
         setTopic(subj.name);
         setPrice(tsp?.price ?? subj.price);
-        setMeetingLink(subj.meeting_link || '');
+        setMeetingLink(resolveMeetingLink(subj.meeting_link, selectedStudentId));
         const dur = tsp?.duration_minutes ?? subj.duration_minutes ?? 60;
         if (startTime) {
           const start = new Date(startTime);
@@ -2723,6 +2750,21 @@ export default function CalendarPage() {
       .eq('id', selectedEvent.id);
 
     if (!error) {
+      if (orgPolicy.isOrgTutor && selectedEvent.subjects?.is_trial) {
+        const { data: { user } } = await supabase.auth.getUser();
+        const orgId = user ? (await supabase.from('profiles').select('organization_id').eq('id', user.id).maybeSingle()).data?.organization_id : null;
+        if (orgId) {
+          const { data: orgRow } = await supabase.from('organizations').select('features').eq('id', orgId).maybeSingle();
+          const feat = (orgRow as any)?.features;
+          const featObj = feat && typeof feat === 'object' && !Array.isArray(feat) ? (feat as Record<string, unknown>) : {};
+          if (featObj['trial_comment_required'] === true && !viewCommentText.trim()) {
+            setToastMessage({ message: t('cal.trialCommentReminder'), type: 'warning' });
+            setSaving(false);
+            fetchData();
+            return;
+          }
+        }
+      }
       setIsEventModalOpen(false);
       fetchData();
     }
@@ -3114,15 +3156,21 @@ export default function CalendarPage() {
       event.payment_status === 'paid' ||
       event.payment_status === 'confirmed';
 
-    const unpaidOccurred =
-      (event.status === 'completed' && !isPaid) ||
-      (event.status === 'active' && hasEnded && !isPaid) ||
-      (hasEnded && event.payment_status === 'paid_by_student');
+    if (orgPolicy.isOrgTutor) {
+      if (event.status === 'completed' || (event.status === 'active' && hasEnded)) {
+        backgroundColor = '#10b981';
+      }
+    } else {
+      const unpaidOccurred =
+        (event.status === 'completed' && !isPaid) ||
+        (event.status === 'active' && hasEnded && !isPaid) ||
+        (hasEnded && event.payment_status === 'paid_by_student');
 
-    if (unpaidOccurred) {
-      backgroundColor = '#ca8a04';
-    } else if (isPaid || event.status === 'completed') {
-      backgroundColor = '#10b981';
+      if (unpaidOccurred) {
+        backgroundColor = '#ca8a04';
+      } else if (isPaid || event.status === 'completed') {
+        backgroundColor = '#10b981';
+      }
     }
 
     return {
@@ -3264,6 +3312,17 @@ export default function CalendarPage() {
           </Button>
         </div>
       </div>
+
+      {/* License frozen banner */}
+      {licenseFrozen && (
+        <div className="mb-4 p-4 rounded-2xl border border-amber-200 bg-amber-50 flex flex-wrap items-center gap-3">
+          <AlertCircle className="w-6 h-6 text-amber-600 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-gray-900">{t('cal.licenseFrozenTitle')}</p>
+            <p className="text-xs text-amber-700">{t('cal.licenseFrozenDesc')}</p>
+          </div>
+        </div>
+      )}
 
       {/* Reminder: Stripe / lesson types – individual tutors only, not org_tutor */}
       {!isOrgTutor && (!stripeConnected || subjects.length === 0) && (
@@ -3477,6 +3536,7 @@ export default function CalendarPage() {
                 if (event.isBackground) return t('cal.freeSlot');
 
                 const name = event.student?.full_name || t('cal.unknown');
+                const commentIndicator = event.student?.admin_comment ? ' ❓' : '';
                 const topic = event.topic ? ` · ${event.topic}` : '';
 
                 let statusText = '';
@@ -3492,7 +3552,7 @@ export default function CalendarPage() {
                   statusText = t('cal.statusPending');
                 }
 
-                return `${name}${topic}${statusText}`;
+                return `${name}${commentIndicator}${topic}${statusText}`;
               }}
             />
           )}
@@ -3522,7 +3582,7 @@ export default function CalendarPage() {
         {[
           { color: '#6366f1', label: t('cal.legendReserved') },
           { color: '#10b981', label: t('cal.legendCompleted') },
-          { color: '#ca8a04', label: t('cal.legendUnpaidOccurred') },
+          ...(!orgPolicy.isOrgTutor ? [{ color: '#ca8a04', label: t('cal.legendUnpaidOccurred') }] : []),
           { color: '#ef4444', label: t('cal.legendCancelled'), opacity: true },
         ].map((item) => (
           <div key={item.label} className="flex items-center gap-2">
@@ -3533,11 +3593,13 @@ export default function CalendarPage() {
             <span className="text-xs text-gray-500">{item.label}</span>
           </div>
         ))}
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-500 font-medium">
-            {orgPolicy.isOrgTutor ? t('cal.legendConfirmed') : t('cal.legendPaid')}
-          </span>
-        </div>
+        {!orgPolicy.isOrgTutor && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 font-medium">
+              {t('cal.legendPaid')}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* === CREATE SESSION MODAL === */}
@@ -4122,7 +4184,7 @@ export default function CalendarPage() {
                           selectedEvent?.student?.payer_email,
                           contactVisibility.tutorSeesStudentEmail,
                         )
-                        : ((selectedEvent?.student?.email || '').trim() || '—')}
+                        : (orgPolicy.isOrgTutor ? '—' : ((selectedEvent?.student?.email || '').trim() || '—'))}
                     </p>
                     <p className="text-xs text-gray-500 truncate">
                       {contactVisibility
@@ -4131,7 +4193,7 @@ export default function CalendarPage() {
                           selectedEvent?.student?.payer_phone,
                           contactVisibility.tutorSeesStudentPhone,
                         )
-                        : ((selectedEvent?.student?.phone || '').trim() || '—')}
+                        : (orgPolicy.isOrgTutor ? '—' : ((selectedEvent?.student?.phone || '').trim() || '—'))}
                     </p>
                     {selectedEvent?.topic && (
                       <p className="text-xs text-indigo-600 mt-0.5 font-medium">{selectedEvent.topic}</p>
@@ -4773,6 +4835,31 @@ export default function CalendarPage() {
               {t('cal.continueCancel')}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* === SLOT CHOICE POPUP (C2) === */}
+      <Dialog open={slotChoiceOpen} onOpenChange={setSlotChoiceOpen}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle>{t('cal.slotChoiceTitle')}</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3 pt-2">
+            <Button variant="outline" className="justify-start gap-3 h-12" onClick={openCreateFreeTimeFromSlot}>
+              <Clock className="w-5 h-5 text-green-600" />
+              {t('cal.createFreeTime')}
+            </Button>
+            <Button
+              variant="outline"
+              className="justify-start gap-3 h-12"
+              onClick={openCreateLessonFromSlot}
+              disabled={licenseFrozen}
+              title={licenseFrozen ? t('cal.licenseFrozenTitle') : undefined}
+            >
+              <Plus className="w-5 h-5 text-indigo-600" />
+              {t('cal.createLessonOption')}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 

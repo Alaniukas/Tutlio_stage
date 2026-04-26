@@ -8,8 +8,6 @@ import {
   FileText,
   Plus,
   Download,
-  CheckCircle2,
-  XCircle,
   Loader2,
   ChevronDown,
   ChevronUp,
@@ -55,7 +53,8 @@ interface Invoice {
 
 export default function OrgTutorFinanceSummary() {
   const { t, dateFnsLocale } = useTranslation();
-  const { payPerLessonEur, loading: policyLoading } = useOrgTutorPolicy();
+  const { payPerLessonEur, loading: policyLoading, invoiceIssuerMode } = useOrgTutorPolicy();
+  const tutorCanIssueInvoice = invoiceIssuerMode !== 'company';
 
   const [periodMode, setPeriodMode] = useState<'month' | 'range'>('month');
   const [month, setMonth] = useState(() => format(new Date(), 'yyyy-MM'));
@@ -69,7 +68,6 @@ export default function OrgTutorFinanceSummary() {
   const [invoicesLoading, setInvoicesLoading] = useState(true);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<string>('all');
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   const rangeLabel = useMemo(() => {
@@ -155,24 +153,18 @@ export default function OrgTutorFinanceSummary() {
 
     setInvoicesLoading(true);
 
-    let query = supabase
+    const { data, error } = await supabase
       .from('invoices')
       .select('*')
       .eq('issued_by_user_id', user.id)
       .order('created_at', { ascending: false });
-
-    if (statusFilter !== 'all') {
-      query = query.eq('status', statusFilter);
-    }
-
-    const { data, error } = await query;
     if (error) {
       console.error('[OrgTutorFinanceSummary] invoices fetch:', error);
     } else {
       setInvoices((data || []) as Invoice[]);
     }
     setInvoicesLoading(false);
-  }, [statusFilter]);
+  }, []);
 
   useEffect(() => {
     fetchInvoices();
@@ -196,19 +188,6 @@ export default function OrgTutorFinanceSummary() {
       console.error('[OrgTutorFinanceSummary] download:', err);
     } finally {
       setDownloadingId(null);
-    }
-  };
-
-  const handleStatusChange = async (invoiceId: string, newStatus: 'paid' | 'cancelled') => {
-    const { error } = await supabase
-      .from('invoices')
-      .update({ status: newStatus })
-      .eq('id', invoiceId);
-
-    if (!error) {
-      setInvoices(prev =>
-        prev.map(inv => inv.id === invoiceId ? { ...inv, status: newStatus } : inv)
-      );
     }
   };
 
@@ -331,12 +310,12 @@ export default function OrgTutorFinanceSummary() {
         )}
       </div>
 
-      {/* Invoices section */}
+      {/* Invoice settings (rekvizitai) — always visible */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
             <FileText className="w-5 h-5 text-indigo-600" />
-            {t('invoices.title')}
+            {tutorCanIssueInvoice ? t('invoices.title') : t('invoices.settingsTitle')}
           </h2>
           <div className="flex gap-2">
             <Button
@@ -348,14 +327,16 @@ export default function OrgTutorFinanceSummary() {
               <Settings className="w-4 h-4" />
               {showSettings ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
             </Button>
-            <Button
-              onClick={() => setIsCreateOpen(true)}
-              className="rounded-xl gap-2 bg-indigo-600 hover:bg-indigo-700"
-              size="sm"
-            >
-              <Plus className="w-4 h-4" />
-              {t('orgFinance.issueSF')}
-            </Button>
+            {tutorCanIssueInvoice && (
+              <Button
+                onClick={() => setIsCreateOpen(true)}
+                className="rounded-xl gap-2 bg-indigo-600 hover:bg-indigo-700"
+                size="sm"
+              >
+                <Plus className="w-4 h-4" />
+                {t('orgFinance.issueSF')}
+              </Button>
+            )}
           </div>
         </div>
 
@@ -370,112 +351,77 @@ export default function OrgTutorFinanceSummary() {
           </div>
         )}
 
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex gap-2">
-            {['all', 'issued', 'paid', 'cancelled'].map((status) => (
-              <button
-                key={status}
-                onClick={() => setStatusFilter(status)}
-                className={cn(
-                  'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
-                  statusFilter === status
-                    ? 'bg-indigo-100 text-indigo-700'
-                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-                )}
-              >
-                {status === 'all' ? t('invoices.filterAll') : t(`invoices.status${status.charAt(0).toUpperCase() + status.slice(1)}`)}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {invoicesLoading ? (
-          <div className="flex justify-center py-8">
-            <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
-          </div>
-        ) : invoices.length === 0 ? (
-          <div className="text-center py-8">
-            <FileText className="w-10 h-10 text-gray-300 mx-auto mb-2" />
-            <p className="text-gray-500 text-sm">{t('invoices.empty')}</p>
-            <p className="text-xs text-gray-400 mt-1">{t('invoices.emptyHint')}</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {invoices.map((inv) => (
-              <div
-                key={inv.id}
-                className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:border-gray-300 transition-colors"
-              >
-                <div className="flex items-center gap-4 min-w-0">
-                  <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center flex-shrink-0">
-                    <FileText className="w-5 h-5 text-indigo-600" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-gray-900 text-sm">{inv.invoice_number}</span>
-                      {statusBadge(inv.status)}
-                    </div>
-                    <p className="text-xs text-gray-500 truncate">
-                      {(inv.buyer_snapshot as any)?.name || '-'} {' \u00B7 '}
-                      {format(new Date(inv.issue_date), 'yyyy-MM-dd')} {' \u00B7 '}
-                      {'\u20AC'}{Number(inv.total_amount).toFixed(2)}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1 flex-shrink-0">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleDownloadPdf(inv.id)}
-                    disabled={downloadingId === inv.id}
-                    className="rounded-lg"
-                    title={t('invoices.downloadPdf')}
-                  >
-                    {downloadingId === inv.id ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Download className="w-4 h-4" />
-                    )}
-                  </Button>
-                  {inv.status === 'issued' && (
-                    <>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleStatusChange(inv.id, 'paid')}
-                        className="rounded-lg text-green-600 hover:text-green-700 hover:bg-green-50"
-                        title={t('invoices.markPaid')}
-                      >
-                        <CheckCircle2 className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleStatusChange(inv.id, 'cancelled')}
-                        className="rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50"
-                        title={t('invoices.markCancelled')}
-                      >
-                        <XCircle className="w-4 h-4" />
-                      </Button>
-                    </>
-                  )}
-                </div>
+        {tutorCanIssueInvoice && (
+          <>
+            {invoicesLoading ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
               </div>
-            ))}
-          </div>
+            ) : invoices.length === 0 ? (
+              <div className="text-center py-8">
+                <FileText className="w-10 h-10 text-gray-300 mx-auto mb-2" />
+                <p className="text-gray-500 text-sm">{t('invoices.empty')}</p>
+                <p className="text-xs text-gray-400 mt-1">{t('invoices.emptyHint')}</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {invoices.map((inv) => (
+                  <div
+                    key={inv.id}
+                    className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:border-gray-300 transition-colors"
+                  >
+                    <div className="flex items-center gap-4 min-w-0">
+                      <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center flex-shrink-0">
+                        <FileText className="w-5 h-5 text-indigo-600" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-gray-900 text-sm">{inv.invoice_number}</span>
+                          {statusBadge(inv.status)}
+                        </div>
+                        <p className="text-xs text-gray-500 truncate">
+                          {(inv.buyer_snapshot as any)?.name || '-'} {' \u00B7 '}
+                          {format(new Date(inv.issue_date), 'yyyy-MM-dd')} {' \u00B7 '}
+                          {'\u20AC'}{Number(inv.total_amount).toFixed(2)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDownloadPdf(inv.id)}
+                        disabled={downloadingId === inv.id}
+                        className="rounded-lg"
+                        title={t('invoices.downloadPdf')}
+                      >
+                        {downloadingId === inv.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Download className="w-4 h-4" />
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
 
-      <CreateInvoiceModal
-        isOpen={isCreateOpen}
-        onClose={() => setIsCreateOpen(false)}
-        isOrgTutor
-        onSuccess={() => {
-          setIsCreateOpen(false);
-          fetchInvoices();
-        }}
-      />
+      {tutorCanIssueInvoice && (
+        <CreateInvoiceModal
+          isOpen={isCreateOpen}
+          onClose={() => setIsCreateOpen(false)}
+          isOrgTutor
+          onSuccess={() => {
+            setIsCreateOpen(false);
+            fetchInvoices();
+          }}
+        />
+      )}
     </div>
   );
 }

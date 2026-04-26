@@ -58,6 +58,8 @@ export default function SendPackageModal({
   const [loadingSubjects, setLoadingSubjects] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isManual, setIsManual] = useState(false);
+  const [isIndividualTutor, setIsIndividualTutor] = useState(false);
+  const [expiresAt, setExpiresAt] = useState('');
 
   useEffect(() => { if (isOpen) fetchSubjects(); }, [isOpen]);
 
@@ -94,12 +96,9 @@ export default function SendPackageModal({
 
     {
       const { data: profile } = await supabase.from('profiles').select('organization_id').eq('id', effectiveTutorId).single();
-      if (profile?.organization_id) {
-        const { data: orgData } = await supabase.from('organizations').select('features').eq('id', profile.organization_id).single();
-        setIsManual(!!(orgData?.features as Record<string, unknown> | null)?.manual_payments);
-      } else {
-        setIsManual(false);
-      }
+      const individual = !profile?.organization_id;
+      setIsIndividualTutor(individual);
+      if (!individual) setIsManual(false);
     }
 
     const [subjectsResult, pricingResult] = await Promise.all([
@@ -154,6 +153,7 @@ export default function SendPackageModal({
           subjectId: selectedSubjectId,
           totalLessons,
           pricePerLesson,
+          ...(expiresAt ? { expiresAt } : {}),
         }),
         signal: controller.signal,
       });
@@ -249,6 +249,40 @@ export default function SendPackageModal({
                     <>{t('package.defaultPrice', { price: subjects.find(s => s.id === selectedSubjectId)?.price })}</>
                   )}
                 </p>
+              </div>
+
+              {isIndividualTutor && (
+                <div>
+                  <Label className="text-sm font-semibold text-gray-700">{t('package.paymentMethod')}</Label>
+                  <div className="flex mt-1 rounded-lg border border-gray-200 overflow-hidden">
+                    <button
+                      type="button"
+                      className={`flex-1 py-2 text-sm font-medium transition-colors ${!isManual ? 'bg-violet-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                      onClick={() => setIsManual(false)}
+                    >
+                      Stripe
+                    </button>
+                    <button
+                      type="button"
+                      className={`flex-1 py-2 text-sm font-medium transition-colors ${isManual ? 'bg-violet-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                      onClick={() => setIsManual(true)}
+                    >
+                      {t('package.manualPaymentLabel')}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <Label className="text-sm font-semibold text-gray-700">{t('package.validUntil')}</Label>
+                <Input
+                  type="date"
+                  value={expiresAt}
+                  onChange={(e) => setExpiresAt(e.target.value)}
+                  min={new Date().toISOString().split('T')[0]}
+                  className="mt-1 rounded-lg"
+                />
+                <p className="text-xs text-gray-500 mt-1">{t('package.validUntilHint')}</p>
               </div>
 
               {isManual ? (

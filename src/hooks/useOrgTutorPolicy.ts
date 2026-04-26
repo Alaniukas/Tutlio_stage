@@ -20,6 +20,9 @@ export interface OrgTutorPolicy {
   hideMoney: boolean;
   canEditLessonPricing: boolean;
   canToggleSessionPaid: boolean;
+  invoiceIssuerMode: 'company' | 'tutor' | 'both';
+  hasActiveLicense: boolean;
+  orgUsesLicenses: boolean;
 }
 
 const defaultPolicy: OrgTutorPolicy = {
@@ -36,6 +39,9 @@ const defaultPolicy: OrgTutorPolicy = {
   hideMoney: false,
   canEditLessonPricing: true,
   canToggleSessionPaid: true,
+  invoiceIssuerMode: 'both',
+  hasActiveLicense: true,
+  orgUsesLicenses: false,
 };
 
 export function useOrgTutorPolicy(): OrgTutorPolicy {
@@ -85,7 +91,7 @@ export function useOrgTutorPolicy(): OrgTutorPolicy {
 
       const { data: org, error } = await supabase
         .from('organizations')
-        .select('org_tutor_lesson_edit, org_tutors_can_edit_lesson_settings')
+        .select('org_tutor_lesson_edit, org_tutors_can_edit_lesson_settings, invoice_issuer_mode, tutor_license_count')
         .eq('id', profile.organization_id)
         .maybeSingle();
 
@@ -97,7 +103,7 @@ export function useOrgTutorPolicy(): OrgTutorPolicy {
 
       const { data: prof } = await supabase
         .from('profiles')
-        .select('company_commission_percent')
+        .select('company_commission_percent, has_active_license')
         .eq('id', user.id)
         .maybeSingle();
 
@@ -107,6 +113,11 @@ export function useOrgTutorPolicy(): OrgTutorPolicy {
       const raw = org?.org_tutor_lesson_edit as Record<string, unknown> | null | undefined;
       const scope = parseOrgLessonEditScope(raw, legacy);
       const pay = Number(prof?.company_commission_percent) || 0;
+
+      const issuerMode = (org?.invoice_issuer_mode as 'company' | 'tutor' | 'both') || 'both';
+      const licenseCount = Number(org?.tutor_license_count) || 0;
+      const orgUsesLicenses = licenseCount > 0;
+      const hasActiveLicense = prof?.has_active_license !== false;
 
       setState({
         loading: false,
@@ -122,6 +133,9 @@ export function useOrgTutorPolicy(): OrgTutorPolicy {
         hideMoney: true,
         canEditLessonPricing: anyOrgLessonEdit(scope),
         canToggleSessionPaid: false,
+        invoiceIssuerMode: issuerMode,
+        hasActiveLicense,
+        orgUsesLicenses,
       });
     };
 

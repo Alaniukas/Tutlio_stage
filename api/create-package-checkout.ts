@@ -71,12 +71,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const auth = await verifyRequestAuth(req);
     if (!auth) return json(res, 401, { error: 'Unauthorized' });
 
-    const { tutorId, studentId, subjectId, totalLessons, pricePerLesson: requestedPriceRaw } = req.body as {
+    const { tutorId, studentId, subjectId, totalLessons, pricePerLesson: requestedPriceRaw, expiresAt } = req.body as {
         tutorId: string;
         studentId: string;
         subjectId: string;
         totalLessons: number;
         pricePerLesson?: number;
+        expiresAt?: string;
     };
 
     if (!tutorId || !studentId || !subjectId || !totalLessons) {
@@ -208,8 +209,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 total_price: basePriceEur,
                 paid: false,
                 payment_status: 'pending',
-                active: false, // Will activate after payment
+                active: false,
                 payment_method: 'stripe',
+                ...(expiresAt ? { expires_at: new Date(expiresAt).toISOString() } : {}),
             })
             .select()
             .single();
@@ -285,27 +287,66 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .update({ stripe_checkout_session_id: checkoutSession.id })
             .eq('id', lessonPackage.id);
 
-        // 9. Send email to payer with package details and payment link (must await on Vercel or the isolate may exit first)
+        // 9. Generate pre-payment invoice (S.F.) and attach PDF to email
+        let invoicePdfBase64: string | null = null;
+        let invoiceNumber: string | null = null;
+        try {
+            const invRes = await postJsonWithTimeout(
+                resolveSendEmailUrl(req).replace('/send-email', '/generate-invoice'),
+                {
+                    periodStart: new Date().toISOString().slice(0, 10),
+                    periodEnd: new Date().toISOString().slice(0, 10),
+                    groupingType: 'single',
+                    tutorId,
+                    studentId,
+                    packageIds: [lessonPackage.id],
+                },
+                15000,
+            );
+            if (invRes.ok) {
+                const invData = await invRes.json() as any;
+                if (invData.invoiceIds?.[0]) {
+                    const invId = invData.invoiceIds[0];
+                    const { data: inv } = await supabase.from('invoices').select('invoice_number, pdf_storage_path').eq('id', invId).single();
+                    if (inv?.pdf_storage_path) {
+                        invoiceNumber = inv.invoice_number;
+                        const { data: blob } = await supabase.storage.from('invoices').download(inv.pdf_storage_path);
+                        if (blob) {
+                            const arrayBuf = await blob.arrayBuffer();
+                            invoicePdfBase64 = Buffer.from(arrayBuf).toString('base64');
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('[create-package-checkout] pre-payment invoice error:', e);
+        }
+
+        // 10. Send email to payer with package details, payment link, and optional invoice PDF
         let emailSent = false;
         const toEmail = (customerEmail || '').trim();
         if (toEmail && checkoutSession.url) {
             try {
+                const emailPayload: Record<string, unknown> = {
+                    type: 'prepaid_package_request',
+                    to: toEmail,
+                    data: {
+                        recipientName: student.payer_name || student.full_name,
+                        studentName: student.full_name,
+                        tutorName: ownerName,
+                        subjectName: subject.name,
+                        totalLessons,
+                        pricePerLesson: pricePerLesson.toFixed(2),
+                        totalPrice: totalWithFeesEur.toFixed(2),
+                        paymentLink: checkoutSession.url,
+                    },
+                };
+                if (invoicePdfBase64 && invoiceNumber) {
+                    emailPayload.attachments = [{ filename: `${invoiceNumber}.pdf`, content: invoicePdfBase64 }];
+                }
                 const emailRes = await postJsonWithTimeout(
                     resolveSendEmailUrl(req),
-                    {
-                        type: 'prepaid_package_request',
-                        to: toEmail,
-                        data: {
-                            recipientName: student.payer_name || student.full_name,
-                            studentName: student.full_name,
-                            tutorName: ownerName,
-                            subjectName: subject.name,
-                            totalLessons,
-                            pricePerLesson: pricePerLesson.toFixed(2),
-                            totalPrice: totalWithFeesEur.toFixed(2),
-                            paymentLink: checkoutSession.url,
-                        },
-                    },
+                    emailPayload,
                     20000,
                 );
                 emailSent = emailRes.ok;

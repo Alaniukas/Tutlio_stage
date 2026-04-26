@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, Trash2, User, Mail, Phone, GraduationCap, CheckCircle, XCircle, Sparkles, Package, Loader2, FileText, Search, Euro, Clock } from 'lucide-react';
+import { Plus, Trash2, User, Mail, Phone, GraduationCap, CheckCircle, XCircle, Sparkles, Package, Loader2, FileText, Search, Euro, Clock, MessageSquare, Archive, ArchiveRestore } from 'lucide-react';
 import { sendEmail } from '@/lib/email';
 import Toast from '@/components/Toast';
 import { useTranslation } from '@/lib/i18n';
@@ -40,6 +40,7 @@ import {
   type LessonPaymentTiming,
 } from '@/lib/studentPaymentModel';
 import StudentPaymentModelSection from '@/components/StudentPaymentModelSection';
+import StudentPaymentMethodsSection from '@/components/StudentPaymentMethodsSection';
 import SendInvoiceModal from '@/components/SendInvoiceModal';
 import { shouldShowPayerContactSection } from '@/lib/orgContactVisibility';
 
@@ -56,6 +57,10 @@ interface Student {
   payment_model?: string | null;
   linked_user_id?: string | null;
   created_at: string;
+  admin_comment?: string | null;
+  admin_comment_visible_to_tutor?: boolean;
+  personal_meeting_link?: string | null;
+  detached_at?: string | null;
   tutor?: {
     full_name: string;
   };
@@ -87,8 +92,7 @@ export default function CompanyStudents() {
   const location = useLocation();
   const isSchoolView = location.pathname.startsWith('/school');
   const { t } = useTranslation();
-  const { hasFeature, loading: orgFeaturesLoading } = useOrgFeatures();
-  const manualPaymentsEnabled = !orgFeaturesLoading && hasFeature('manual_payments');
+  const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
   const stc = getCached<any>('company_students');
   const [students, setStudents] = useState<Student[]>(stc?.students ?? []);
   const [tutors, setTutors] = useState<Tutor[]>(stc?.tutors ?? []);
@@ -120,6 +124,15 @@ export default function CompanyStudents() {
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
 
+  // Trash bin state
+  const [showTrashBin, setShowTrashBin] = useState(false);
+
+  // Admin comment state
+  const [editingComment, setEditingComment] = useState(false);
+  const [commentDraft, setCommentDraft] = useState('');
+  const [commentVisibleToTutor, setCommentVisibleToTutor] = useState(false);
+  const [savingComment, setSavingComment] = useState(false);
+
   // Package state (student modal)
   const [studentPackages, setStudentPackages] = useState<any[]>([]);
   const [packageSubjects, setPackageSubjects] = useState<any[]>([]);
@@ -129,7 +142,6 @@ export default function CompanyStudents() {
   const [pkgLessons, setPkgLessons] = useState(5);
   const [pkgPrice, setPkgPrice] = useState(0);
   const [pkgSending, setPkgSending] = useState(false);
-  const [confirmingPackageId, setConfirmingPackageId] = useState<string | null>(null);
   const [deactivatingPackageId, setDeactivatingPackageId] = useState<string | null>(null);
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
   const [studentSearch, setStudentSearch] = useState('');
@@ -271,9 +283,14 @@ export default function CompanyStudents() {
   }, [students]);
 
   const filteredGroups = useMemo(() => {
-    if (!normalizedSearch) return groupedStudents;
-    return groupedStudents.filter((g) => g.primary.full_name.toLowerCase().includes(normalizedSearch));
-  }, [groupedStudents, normalizedSearch]);
+    let groups = groupedStudents.filter((g) =>
+      showTrashBin ? g.primary.detached_at : !g.primary.detached_at
+    );
+    if (normalizedSearch) {
+      groups = groups.filter((g) => g.primary.full_name.toLowerCase().includes(normalizedSearch));
+    }
+    return groups;
+  }, [groupedStudents, normalizedSearch, showTrashBin]);
 
   const paymentActions = useMemo(() => {
     if (!selectedStudent) return { canSendInvoice: false, canSendPackage: false };
@@ -511,48 +528,22 @@ export default function CompanyStudents() {
     if (!selectedStudent || !pkgSubjectId || pkgLessons <= 0) return;
     setPkgSending(true);
     try {
-      if (manualPaymentsEnabled) {
-        const { data: { session } } = await supabase.auth.getSession();
-        const response = await fetch('/api/create-manual-package', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
-          },
-          body: JSON.stringify({
-            tutorId: selectedStudent.tutor_id,
-            studentId: selectedStudent.id,
-            subjectId: pkgSubjectId,
-            totalLessons: pkgLessons,
-            pricePerLesson: pkgPrice,
-          }),
-        });
-        const errBody = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          throw new Error((errBody as any).error || (errBody as any).details || t('compStu.errorManualPackage'));
-        }
-        setToastMessage({
-          message: t('compStu.manualPackageCreated'),
-          type: 'success',
-        });
-      } else {
-        const response = await fetch('/api/create-package-checkout', {
-          method: 'POST',
-          headers: await authHeaders(),
-          body: JSON.stringify({
-            tutorId: selectedStudent.tutor_id,
-            studentId: selectedStudent.id,
-            subjectId: pkgSubjectId,
-            totalLessons: pkgLessons,
-            pricePerLesson: pkgPrice,
-          }),
-        });
-        if (!response.ok) {
-          const err = await response.json().catch(() => ({}));
-          throw new Error((err as any).error || t('compStu.errorSendingPackage'));
-        }
-        setToastMessage({ message: t('compStu.packageSent', { name: selectedStudent.full_name }), type: 'success' });
+      const response = await fetch('/api/create-package-checkout', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({
+          tutorId: selectedStudent.tutor_id,
+          studentId: selectedStudent.id,
+          subjectId: pkgSubjectId,
+          totalLessons: pkgLessons,
+          pricePerLesson: pkgPrice,
+        }),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error((err as any).error || t('compStu.errorSendingPackage'));
       }
+      setToastMessage({ message: t('compStu.packageSent', { name: selectedStudent.full_name }), type: 'success' });
       setSendPackageOpen(false);
       const { data } = await supabase
         .from('lesson_packages')
@@ -565,38 +556,6 @@ export default function CompanyStudents() {
       setToastMessage({ message: err.message, type: 'error' });
     }
     setPkgSending(false);
-  };
-
-  const handleConfirmManualPayment = async (packageId: string) => {
-    setConfirmingPackageId(packageId);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const response = await fetch('/api/confirm-manual-payment', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
-        },
-        body: JSON.stringify({ packageId }),
-      });
-      const json = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error((json as any).error || t('compStu.confirmFailed'));
-      }
-      setToastMessage({ message: t('compStu.paymentConfirmed'), type: 'success' });
-      if (selectedStudent) {
-        const { data } = await supabase
-          .from('lesson_packages')
-          .select('*, subject:subjects(name, color)')
-          .eq('student_id', selectedStudent.id)
-          .or('active.eq.true,payment_status.eq.pending')
-          .order('created_at', { ascending: false });
-        setStudentPackages(data || []);
-      }
-    } catch (e: any) {
-      setToastMessage({ message: e?.message || t('compStu.errorGeneric'), type: 'error' });
-    }
-    setConfirmingPackageId(null);
   };
 
   const handleDeactivatePackage = async (packageId: string) => {
@@ -796,6 +755,25 @@ export default function CompanyStudents() {
       }
     }
 
+    // Notify assigned tutors about new student
+    if (orgId && inserted.length > 0) {
+      const { data: orgRow } = await supabase.from('organizations').select('features').eq('id', orgId).single();
+      const feat = orgRow?.features as Record<string, unknown> | null;
+      if (feat?.notify_tutors_on_student_assign) {
+        for (const row of inserted) {
+          if (!row.tutor_id) continue;
+          const { data: tutorProfile } = await supabase.from('profiles').select('email, full_name').eq('id', row.tutor_id).single();
+          if (tutorProfile?.email) {
+            void sendEmail({
+              type: 'tutor_student_assigned',
+              to: tutorProfile.email,
+              data: { tutorName: tutorProfile.full_name, studentName: newStudent.full_name, studentEmail: newStudent.email },
+            });
+          }
+        }
+      }
+    }
+
     setToastMessage({
       message: newStudent.email?.trim() && !emailOk
         ? t('compStu.emailSendFailed')
@@ -811,6 +789,50 @@ export default function CompanyStudents() {
     setCustomCancellationFee(0);
     fetchData();
     setSaving(false);
+  };
+
+  const handleSaveComment = async () => {
+    if (!selectedStudent) return;
+    setSavingComment(true);
+    const { error } = await supabase
+      .from('students')
+      .update({
+        admin_comment: commentDraft.trim() || null,
+        admin_comment_visible_to_tutor: commentVisibleToTutor,
+      })
+      .eq('id', selectedStudent.id);
+    if (error) {
+      setToastMessage({ message: t('compStu.commentSaveFailed'), type: 'error' });
+    } else {
+      setSelectedStudent((s) =>
+        s ? { ...s, admin_comment: commentDraft.trim() || null, admin_comment_visible_to_tutor: commentVisibleToTutor } : null,
+      );
+      setToastMessage({ message: t('compStu.commentSaved'), type: 'success' });
+      setEditingComment(false);
+      fetchData();
+    }
+    setSavingComment(false);
+  };
+
+  const handleDetachStudent = async (id: string) => {
+    if (!confirm(t('compStu.confirmDetachStudent'))) return;
+    const { error } = await supabase.from('students').update({ detached_at: new Date().toISOString() }).eq('id', id);
+    if (!error) {
+      setToastMessage({ message: t('compStu.studentDetached'), type: 'success' });
+      fetchData();
+    } else {
+      setToastMessage({ message: t('compStu.errorPrefix', { msg: error.message }), type: 'error' });
+    }
+  };
+
+  const handleRestoreStudent = async (id: string) => {
+    const { error } = await supabase.from('students').update({ detached_at: null }).eq('id', id);
+    if (!error) {
+      setToastMessage({ message: t('compStu.studentRestored'), type: 'success' });
+      fetchData();
+    } else {
+      setToastMessage({ message: t('compStu.errorPrefix', { msg: error.message }), type: 'error' });
+    }
   };
 
   const handleDeleteStudent = async (id: string) => {
@@ -895,6 +917,15 @@ export default function CompanyStudents() {
                 aria-label={t('compStu.searchAriaLabel')}
               />
             </div>
+              <Button
+                variant={showTrashBin ? 'default' : 'outline'}
+                size="sm"
+                className="rounded-xl gap-1.5"
+                onClick={() => setShowTrashBin(v => !v)}
+              >
+                <Archive className="w-4 h-4" />
+                {showTrashBin ? t('compStu.activeStudents') : t('compStu.trashBin')}
+              </Button>
               <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                 <DialogTrigger asChild>
                   <Button className="gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700">
@@ -1277,15 +1308,15 @@ export default function CompanyStudents() {
                           </code>
                           <button
                             type="button"
-                            className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                            className={`p-2 rounded-lg transition-colors ${showTrashBin ? 'text-green-400 hover:text-green-600 hover:bg-green-50' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
                             onClick={(e) => {
                               e.stopPropagation();
-                              void handleDeleteStudent(student.id);
+                              showTrashBin ? void handleRestoreStudent(student.id) : void handleDetachStudent(student.id);
                             }}
-                            aria-label={t('compStu.deleteStudentLabel')}
-                            title={t('compStu.deleteBtn')}
+                            aria-label={showTrashBin ? t('compStu.restoreBtn') : t('compStu.deleteStudentLabel')}
+                            title={showTrashBin ? t('compStu.restoreBtn') : t('compStu.detachBtn')}
                           >
-                            <Trash2 className="w-4 h-4" />
+                            {showTrashBin ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
                           </button>
                         </div>
                       </div>
@@ -1393,11 +1424,11 @@ export default function CompanyStudents() {
                         </td>
                         <td className="px-6 py-4 text-right">
                           <button
-                            onClick={() => handleDeleteStudent(student.id)}
-                            className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                            title={t('compStu.deleteBtn')}
+                            onClick={() => showTrashBin ? handleRestoreStudent(student.id) : handleDetachStudent(student.id)}
+                            className={`p-2 rounded-lg transition-colors ${showTrashBin ? 'text-green-400 hover:text-green-600 hover:bg-green-50' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
+                            title={showTrashBin ? t('compStu.restoreBtn') : t('compStu.detachBtn')}
                           >
-                            <Trash2 className="w-4 h-4" />
+                            {showTrashBin ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
                           </button>
                         </td>
                       </tr>
@@ -1653,6 +1684,22 @@ export default function CompanyStudents() {
                               }
                               setAddingTutorId('');
                               fetchData();
+
+                              // Notify tutor about assigned student if org setting is enabled
+                              if (orgId && addingTutorId) {
+                                const { data: orgRow } = await supabase.from('organizations').select('features').eq('id', orgId).single();
+                                const feat = orgRow?.features as Record<string, unknown> | null;
+                                if (feat?.notify_tutors_on_student_assign) {
+                                  const { data: tutorProfile } = await supabase.from('profiles').select('email, full_name').eq('id', addingTutorId).single();
+                                  if (tutorProfile?.email) {
+                                    void sendEmail({
+                                      type: 'tutor_student_assigned',
+                                      to: tutorProfile.email,
+                                      data: { tutorName: tutorProfile.full_name, studentName: selectedStudent.full_name, studentEmail: selectedStudent.email },
+                                    });
+                                  }
+                                }
+                              }
                             }
                             setTutorsSaving(false);
                           }}
@@ -1664,6 +1711,92 @@ export default function CompanyStudents() {
                         {t('compStu.addTutorHint')}
                       </p>
                     </div>
+                  </div>
+                )}
+
+                {/* Admin comment */}
+                {selectedStudent && (
+                  <div className="mt-4 pt-4 border-t border-gray-100">
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="font-semibold text-gray-900 flex items-center gap-2">
+                        <MessageSquare className="w-4 h-4 text-blue-500" />
+                        {t('compStu.adminComment')}
+                      </h4>
+                      {!editingComment && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="text-xs rounded-lg"
+                          onClick={() => {
+                            setCommentDraft(selectedStudent.admin_comment || '');
+                            setCommentVisibleToTutor(selectedStudent.admin_comment_visible_to_tutor ?? false);
+                            setEditingComment(true);
+                          }}
+                        >
+                          {selectedStudent.admin_comment ? t('compStu.editBtn') : t('compStu.addBtn')}
+                        </Button>
+                      )}
+                    </div>
+                    {editingComment ? (
+                      <div className="space-y-2">
+                        <textarea
+                          value={commentDraft}
+                          onChange={(e) => setCommentDraft(e.target.value)}
+                          rows={3}
+                          className="w-full rounded-xl border border-gray-200 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 resize-none"
+                          placeholder={t('compStu.commentPlaceholder')}
+                        />
+                        <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={commentVisibleToTutor}
+                            onChange={(e) => setCommentVisibleToTutor(e.target.checked)}
+                            className="rounded border-gray-300"
+                          />
+                          {t('compStu.commentVisibleToTutor')}
+                        </label>
+                        <div className="flex gap-2">
+                          <Button type="button" variant="outline" className="flex-1 rounded-lg text-xs" disabled={savingComment} onClick={() => setEditingComment(false)}>
+                            {t('compStu.cancelBtn')}
+                          </Button>
+                          <Button type="button" className="flex-1 rounded-lg text-xs" disabled={savingComment} onClick={() => void handleSaveComment()}>
+                            {savingComment ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : t('compStu.saveBtn')}
+                          </Button>
+                        </div>
+                      </div>
+                    ) : selectedStudent.admin_comment ? (
+                      <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-sm text-gray-800 whitespace-pre-wrap">
+                        {selectedStudent.admin_comment}
+                        <p className="text-[11px] text-gray-500 mt-1">
+                          {selectedStudent.admin_comment_visible_to_tutor ? t('compStu.commentVisibleBoth') : t('compStu.commentVisibleAdmin')}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-400 text-center py-2">{t('compStu.noComment')}</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Student meeting link */}
+                {selectedStudent && (
+                  <div className="mt-4 pt-4 border-t border-gray-100">
+                    <h4 className="font-semibold text-gray-900 text-sm mb-2">{t('compStu.personalMeetingLink')}</h4>
+                    <div className="flex gap-2">
+                      <input
+                        type="url"
+                        className="flex-1 rounded-xl border border-gray-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                        placeholder="https://meet.google.com/..."
+                        defaultValue={selectedStudent.personal_meeting_link || ''}
+                        onBlur={async (e) => {
+                          const val = e.target.value.trim() || null;
+                          if (val === (selectedStudent.personal_meeting_link || null)) return;
+                          await supabase.from('students').update({ personal_meeting_link: val }).eq('id', selectedStudent.id);
+                          setSelectedStudent(s => s ? { ...s, personal_meeting_link: val } : null);
+                        }}
+                      />
+                    </div>
+                    <p className="text-[11px] text-gray-500 mt-1">{t('compStu.personalMeetingLinkDesc')}</p>
                   </div>
                 )}
 
@@ -1890,13 +2023,15 @@ export default function CompanyStudents() {
                     perLessonTiming={(selectedStudent as any).per_lesson_payment_timing ?? null}
                     perLessonDeadlineHours={(selectedStudent as any).per_lesson_payment_deadline_hours ?? null}
                     inheritedLessonPayment={{ payment_timing: 'before_lesson', payment_deadline_hours: 24 }}
-                    allowPerLesson={!manualPaymentsEnabled}
+                    allowPerLesson
                     onSaved={(patch) => {
                       setSelectedStudent((s) => (s ? { ...s, ...patch } : null));
                       fetchData();
                     }}
                   />
                 )}
+
+                <StudentPaymentMethodsSection studentId={selectedStudent.id} />
 
                 {paymentActions.canSendInvoice && (
                   <Button
@@ -2015,9 +2150,7 @@ export default function CompanyStudents() {
                         </div>
                       </div>
                       <p className="text-xs text-violet-600">
-                        {manualPaymentsEnabled
-                          ? t('compStu.manualPaymentHint')
-                          : t('compStu.stripePaymentHint')}
+                        {t('compStu.stripePaymentHint')}
                       </p>
                       {pkgSubjectId && pkgLessons > 0 && (
                         <p className="text-xs font-medium text-violet-800">
@@ -2029,9 +2162,7 @@ export default function CompanyStudents() {
                               ? t('package.lessonUnit2to9')
                               : t('package.lessonUnit10plus')}{' '}
                           × {Number(pkgPrice).toFixed(2)} €
-                          {!manualPaymentsEnabled && (
-                            <span className="text-violet-500 font-normal"> {t('package.includingFeesNote')}</span>
-                          )}
+                          <span className="text-violet-500 font-normal"> {t('package.includingFeesNote')}</span>
                         </p>
                       )}
                     </div>
@@ -2049,30 +2180,19 @@ export default function CompanyStudents() {
                             {pkg.subject?.color && <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: pkg.subject.color }} />}
                             <span className="font-medium text-gray-800">{pkg.subject?.name || '—'}</span>
                             <span className="text-gray-500">{t('compStu.lessonsCount', { count: String(pkg.total_lessons) })}</span>
-                            {pkg.payment_method === 'manual' && (
-                              <span className="text-[10px] uppercase font-bold text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded">{t('compStu.manualPaymentLabel')}</span>
-                            )}
                           </div>
                           <div className="flex items-center gap-2 flex-wrap justify-end">
                             <span className="text-xs text-gray-500">{t('compStu.remaining', { count: String(pkg.available_lessons) })}</span>
-                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${pkg.payment_status === 'paid' ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
-                              {pkg.payment_status === 'paid' ? t('compStu.paid') : t('compStu.pendingStatus')}
-                            </span>
-                            {manualPaymentsEnabled && pkg.payment_method === 'manual' && !pkg.paid && (
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="h-7 text-xs rounded-lg border-violet-300 text-violet-800"
-                                disabled={confirmingPackageId === pkg.id}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  void handleConfirmManualPayment(pkg.id);
-                                }}
-                              >
-                                {confirmingPackageId === pkg.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : t('compStu.confirmPayment')}
-                              </Button>
+                            {pkg.expires_at && (
+                              <span className={`text-xs px-2 py-0.5 rounded-full ${new Date(pkg.expires_at) < new Date() ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
+                                {new Date(pkg.expires_at) < new Date()
+                                  ? t('package.expired')
+                                  : t('package.expiresAt', { date: new Date(pkg.expires_at).toLocaleDateString() })}
+                              </span>
                             )}
+                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${pkg.payment_status === 'paid' ? 'bg-green-50 text-green-700' : pkg.payment_status === 'expired' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>
+                              {pkg.payment_status === 'paid' ? t('compStu.paid') : pkg.payment_status === 'expired' ? t('package.expired') : t('compStu.pendingStatus')}
+                            </span>
                             {Number(pkg.available_lessons || 0) === 0 && pkg.active !== false && (
                               <Button
                                 type="button"
@@ -2124,7 +2244,6 @@ export default function CompanyStudents() {
           studentId={selectedStudent?.id}
           studentName={selectedStudent?.full_name}
           billingTutorId={selectedStudent?.tutor_id}
-          manualPaymentsEnabled={manualPaymentsEnabled}
           onSuccess={() => {
             setIsInvoiceModalOpen(false);
             fetchData();

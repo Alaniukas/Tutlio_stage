@@ -70,16 +70,36 @@ export async function preloadOrgAdminData() {
       });
     }
 
-    if (tutorIds.length === 0) return;
+    const tutorList = visibleTutors.map((t: any) => ({ id: t.id, full_name: t.full_name }));
+
+    if (tutorIds.length === 0) {
+      // Still fetch unassigned org students even when no tutors exist
+      if (!getCached('company_students')) {
+        const { data: unassignedStudents } = await supabase
+          .from('students')
+          .select('*, linked_user_id')
+          .is('tutor_id', null)
+          .eq('organization_id', orgId)
+          .order('created_at', { ascending: false });
+        setCache('company_students', { students: unassignedStudents || [], tutors: tutorList });
+      }
+      return;
+    }
 
     const threeMonthsAgo = new Date();
     threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
 
-    const [studentsRes, sessionsRes] = await Promise.all([
+    const [studentsRes, unassignedStudentsRes, sessionsRes] = await Promise.all([
       supabase
         .from('students')
         .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
         .in('tutor_id', tutorIds)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('students')
+        .select('*, linked_user_id')
+        .is('tutor_id', null)
+        .eq('organization_id', orgId)
         .order('created_at', { ascending: false }),
       supabase
         .from('sessions')
@@ -90,10 +110,10 @@ export async function preloadOrgAdminData() {
         .limit(2000),
     ]);
 
-    const tutorList = visibleTutors.map((t: any) => ({ id: t.id, full_name: t.full_name }));
-
     if (!getCached('company_students')) {
-      setCache('company_students', { students: studentsRes.data || [], tutors: tutorList });
+      const allStudents = [...(studentsRes.data || []), ...(unassignedStudentsRes.data || [])]
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      setCache('company_students', { students: allStudents, tutors: tutorList });
     }
 
     if (!getCached('company_sessions')) {

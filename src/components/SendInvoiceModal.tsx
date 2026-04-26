@@ -10,7 +10,6 @@ import { Loader2, FileText, Calendar, ChevronDown } from 'lucide-react';
 import { format, subDays } from 'date-fns';
 import { useTranslation } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { fetchPaidManualSalesInvoiceCandidates } from '@/lib/manualSalesInvoicePreview';
 
 interface SendInvoiceModalProps {
   isOpen: boolean;
@@ -18,7 +17,6 @@ interface SendInvoiceModalProps {
   studentId?: string;
   studentName?: string;
   billingTutorId?: string;
-  manualPaymentsEnabled?: boolean;
   onSuccess?: () => void;
 }
 
@@ -28,7 +26,6 @@ export default function SendInvoiceModal({
   studentId,
   studentName,
   billingTutorId,
-  manualPaymentsEnabled = false,
   onSuccess,
 }: SendInvoiceModalProps) {
   const { t } = useTranslation();
@@ -82,8 +79,7 @@ export default function SendInvoiceModal({
 
       const tutorScopeId = billingTutorId ?? user.id;
 
-      // Clean up orphaned billing batches (created but Stripe checkout never completed)
-      if (!manualPaymentsEnabled) {
+      {
         const { data: orphanedBatches } = await supabase
           .from('billing_batches')
           .select('id')
@@ -99,25 +95,7 @@ export default function SendInvoiceModal({
         }
       }
 
-      if (manualPaymentsEnabled) {
-        const { rows, error: manualErr } = await fetchPaidManualSalesInvoiceCandidates(supabase, {
-          tutorIds: [tutorScopeId],
-          periodStart: periodStartDate,
-          periodEnd: periodEndDate,
-          studentId,
-        });
-        if (manualErr) throw manualErr;
-        if (!rows.length) {
-          setError(t('invoice.noPaidForPeriod'));
-          setUnpaidSessions([]);
-          setPreviewMode(false);
-          setPayerLessonListOpen({});
-        } else {
-          setUnpaidSessions(rows as any[]);
-          setPayerLessonListOpen({});
-          setPreviewMode(true);
-        }
-      } else {
+      {
         let query = supabase
           .from('sessions')
           .select('*, students!inner(full_name, email, payer_email, payer_name), subjects(name)')
@@ -173,63 +151,21 @@ export default function SendInvoiceModal({
 
       const tutorScopeId = billingTutorId ?? user.id;
 
+      const sessionIds = unpaidSessions.map(s => s.id);
+      const response = await fetch('/api/create-monthly-invoice', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({
+          tutorId: tutorScopeId,
+          periodStartDate,
+          periodEndDate,
+          paymentDeadlineDays,
+          sessionIds,
+        }),
+      });
       let result: any;
-
-      if (manualPaymentsEnabled) {
-        const groupedByTutor = unpaidSessions.reduce(
-          (acc: Record<string, { sessionIds: string[]; packageIds: string[] }>, row: any) => {
-            const tid = row.tutor_id || tutorScopeId;
-            if (!acc[tid]) acc[tid] = { sessionIds: [], packageIds: [] };
-            if (row.invoice_row_kind === 'package') acc[tid].packageIds.push(row.id);
-            else acc[tid].sessionIds.push(row.id);
-            return acc;
-          },
-          {}
-        );
-        let lastJson: any = null;
-        let sent = 0;
-        for (const tid of Object.keys(groupedByTutor)) {
-          const { sessionIds, packageIds } = groupedByTutor[tid];
-          if (sessionIds.length === 0 && packageIds.length === 0) continue;
-          const response = await fetch('/api/generate-invoice', {
-            method: 'POST',
-            headers: await authHeaders(),
-            body: JSON.stringify({
-              periodStart: periodStartDate,
-              periodEnd: periodEndDate,
-              groupingType: 'single',
-              tutorId: tid,
-              onlyPaid: true,
-              sessionIds: sessionIds.length > 0 ? sessionIds : undefined,
-              packageIds: packageIds.length > 0 ? packageIds : undefined,
-            }),
-          });
-          try {
-            lastJson = await response.json();
-          } catch {
-            throw new Error(t('invoice.failedToCreateInvoice'));
-          }
-          if (!response.ok) throw new Error(lastJson?.error || t('invoice.failedToCreateInvoice'));
-          sent += 1;
-        }
-        if (sent === 0) throw new Error(t('invoice.noSessionsToSend'));
-        result = { totalBatches: sent, ...(lastJson || {}) };
-      } else {
-        const sessionIds = unpaidSessions.map(s => s.id);
-        const response = await fetch('/api/create-monthly-invoice', {
-          method: 'POST',
-          headers: await authHeaders(),
-          body: JSON.stringify({
-            tutorId: tutorScopeId,
-            periodStartDate,
-            periodEndDate,
-            paymentDeadlineDays,
-            sessionIds,
-          }),
-        });
-        try { result = await response.json(); } catch { throw new Error(t('invoice.failedToCreateInvoice')); }
-        if (!response.ok) throw new Error(result?.error || t('invoice.failedToCreateInvoice'));
-      }
+      try { result = await response.json(); } catch { throw new Error(t('invoice.failedToCreateInvoice')); }
+      if (!response.ok) throw new Error(result?.error || t('invoice.failedToCreateInvoice'));
 
 
       if (onSuccess) onSuccess();
@@ -282,7 +218,7 @@ export default function SendInvoiceModal({
             <>
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
                 <p className="text-sm text-amber-900">
-                  {manualPaymentsEnabled ? t('invoice.selectPeriodInfoManual') : t('invoice.selectPeriodInfo')}
+                  {t('invoice.selectPeriodInfo')}
                 </p>
               </div>
 
@@ -336,13 +272,7 @@ export default function SendInvoiceModal({
                         ·
                       </span>
                       <span>
-                        {manualPaymentsEnabled
-                          ? t('invoice.manualPreviewItems', {
-                              count: String(unpaidSessions.length),
-                              lessons: String(unpaidSessions.filter((s: any) => s.invoice_row_kind !== 'package').length),
-                              packages: String(unpaidSessions.filter((s: any) => s.invoice_row_kind === 'package').length),
-                            })
-                          : t('invoice.lessonsCount', { count: unpaidSessions.length })}
+                        {t('invoice.lessonsCount', { count: unpaidSessions.length })}
                       </span>
                       <span className="text-indigo-400" aria-hidden>
                         ·
@@ -452,7 +382,7 @@ export default function SendInvoiceModal({
               </div>
 
               <p className="text-xs text-gray-500 text-center">
-                {manualPaymentsEnabled ? t('invoice.manualSfFooterNote') : t('invoice.emailNote', { days: paymentDeadlineDays })}
+                {t('invoice.emailNote', { days: paymentDeadlineDays })}
               </p>
             </>
           )}

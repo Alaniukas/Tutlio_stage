@@ -87,6 +87,8 @@ export default function StudentSchedule() {
     const [studentId, setStudentId] = useState('');
     const { blocked: bookingBlocked, loading: blockLoading, refetch: refetchBookingBlock } = useStudentPaymentBlock(studentId || null);
     const [tutorId, setTutorId] = useState('');
+    const [tutorPersonalMeetingLink, setTutorPersonalMeetingLink] = useState('');
+    const [studentPersonalMeetingLink, setStudentPersonalMeetingLink] = useState('');
     const [subjects, setSubjects] = useState<Subject[]>([]);
 
     // Calendar State
@@ -342,6 +344,7 @@ export default function StudentSchedule() {
         }
         setStudentId(st.id);
         setTutorId(st.tutor_id);
+        setStudentPersonalMeetingLink((st as any).personal_meeting_link || '');
         setStudentPaymentModel((st as { payment_model?: string | null }).payment_model ?? null);
         setStudentPaymentOverrideActive(!!(st as { payment_override_active?: boolean }).payment_override_active);
         setStudentPaymentPayer(st.payment_payer || null);
@@ -357,7 +360,7 @@ export default function StudentSchedule() {
         const studentGrade = parseStudentGrade(st.grade);
 
         const [tutorProfile, subs, individualPricing, availabilityRes, packageRes, sessionsRes] = await Promise.all([
-            supabase.from('profiles').select('cancellation_hours, cancellation_fee_percent, min_booking_hours, break_between_lessons, payment_timing, payment_deadline_hours, organization_id').eq('id', st.tutor_id).single(),
+            supabase.from('profiles').select('cancellation_hours, cancellation_fee_percent, min_booking_hours, break_between_lessons, payment_timing, payment_deadline_hours, organization_id, has_active_license, personal_meeting_link').eq('id', st.tutor_id).single(),
             supabase.from('subjects').select('*').eq('tutor_id', st.tutor_id).order('name'),
             supabase
                 .from('student_individual_pricing')
@@ -382,6 +385,7 @@ export default function StudentSchedule() {
 
         // Process tutor profile data
         if (tutorProfile.data) {
+            setTutorPersonalMeetingLink((tutorProfile.data as any).personal_meeting_link || '');
             setCancellationHours(tutorProfile.data.cancellation_hours ?? 24);
             setCancellationFeePercent(tutorProfile.data.cancellation_fee_percent ?? 0);
             const rawMinBooking = tutorProfile.data.min_booking_hours ?? 1;
@@ -435,10 +439,23 @@ export default function StudentSchedule() {
         }
         setSubjects(finalSubjects);
 
-        const filteredAvailability = (availabilityRes.data || []).filter((avail: any) => {
+        let filteredAvailability = (availabilityRes.data || []).filter((avail: any) => {
             if (!avail.subject_ids || avail.subject_ids.length === 0) return true;
             return avail.subject_ids.some((subjectId: string) => finalSubjects.some((s) => s.id === subjectId));
         });
+
+        // Hide availability from unlicensed tutors in orgs that use license system
+        if (tutorProfile.data?.organization_id && tutorProfile.data?.has_active_license === false) {
+            const { data: orgRow } = await supabase
+                .from('organizations')
+                .select('tutor_license_count')
+                .eq('id', tutorProfile.data.organization_id)
+                .single();
+            if ((Number(orgRow?.tutor_license_count) || 0) > 0) {
+                filteredAvailability = [];
+            }
+        }
+
         setAvailability(filteredAvailability);
         setActivePackages((packageRes.data || []) as LessonPackageSummary[]);
 
@@ -810,7 +827,7 @@ export default function StudentSchedule() {
             payment_status: usesPackage ? 'paid' : 'pending',
             topic: selectedSubject?.name || null,
             price: selectedSubject?.price || null,
-            meeting_link: selectedSubject?.meeting_link || null,
+            meeting_link: studentPersonalMeetingLink || tutorPersonalMeetingLink || selectedSubject?.meeting_link || null,
             lesson_package_id: usesPackage && activePackage ? activePackage.id : null,
             available_spots: selectedSubject?.is_group ? (selectedSubject.max_students ?? 5) - 1 : null,
         }]).select().single();
@@ -934,7 +951,7 @@ export default function StudentSchedule() {
                             cancellationHours: hasPayer ? null : cancellationHours,
                             cancellationFeePercent: hasPayer ? null : cancellationFeePercent,
                             paymentStatus: hasPayer ? null : (usesPackage || creditFullyCovered ? 'paid' : 'pending'),
-                            meetingLink: selectedSubject?.meeting_link || null,
+                            meetingLink: studentPersonalMeetingLink || tutorPersonalMeetingLink || selectedSubject?.meeting_link || null,
                             hidePaymentInfo: hasPayer,
                             paymentLink: selfPayLink,
                         },
@@ -974,7 +991,7 @@ export default function StudentSchedule() {
                             cancellationHours,
                             cancellationFeePercent,
                             paymentStatus: usesPackage ? 'paid' : 'pending',
-                            meetingLink: selectedSubject?.meeting_link || null,
+                            meetingLink: studentPersonalMeetingLink || tutorPersonalMeetingLink || selectedSubject?.meeting_link || null,
                         },
                     }).catch((err) => console.error('Error sending payer booking confirmation:', err));
 

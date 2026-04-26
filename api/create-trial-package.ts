@@ -106,8 +106,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const trialPriceEur =
       typeof priceEur === 'number' && Number.isFinite(priceEur) ? Math.max(0, priceEur) : defaultPriceEur;
 
-    const paymentMode = (features.manual_payments ? 'manual' : 'stripe') as 'manual' | 'stripe';
-
     const { data: student, error: studentErr } = await supabase
       .from('students')
       .select('id, full_name, email, payer_email, payer_name, trial_offer_disabled')
@@ -172,71 +170,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!subjectId) {
       return json(res, 500, { error: 'subjectId missing after create' });
-    }
-
-    if (paymentMode === 'manual') {
-      const { data: lessonPackage, error: packageErr } = await supabase
-        .from('lesson_packages')
-        .insert({
-          tutor_id: tutorId,
-          student_id: studentId,
-          subject_id: subjectId,
-          total_lessons: 1,
-          available_lessons: 1,
-          reserved_lessons: 0,
-          completed_lessons: 0,
-          price_per_lesson: trialPriceEur,
-          total_price: trialPriceEur,
-          paid: false,
-          payment_status: 'pending',
-          // Keep visible to org_admin for manual payment confirmation flow.
-          active: true,
-          payment_method: 'manual',
-        })
-        .select()
-        .single();
-
-      if (packageErr || !lessonPackage) {
-        return json(res, 500, { error: 'Nepavyko sukurti bandomosios pamokos paketo', details: packageErr?.message });
-      }
-
-      const toEmail = (student.payer_email || student.email || '').trim();
-      if (toEmail) {
-        const paymentUrl =
-          typeof features.manual_payment_url === 'string' && features.manual_payment_url.trim()
-            ? String(features.manual_payment_url).trim()
-            : '';
-        const requestOrigin = req.headers.origin ? String(req.headers.origin) : null;
-        const sendEmailUrl = `${requestOrigin || APP_URL}/api/send-email`;
-          // Important: don't block the request; email sending can be slow.
-          void fetch(sendEmailUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
-            body: JSON.stringify({
-              type: 'manual_package_request',
-              to: toEmail,
-              data: {
-                recipientName: student.payer_name || student.full_name,
-                studentName: student.full_name,
-                orgName: org?.name || 'Organizacija',
-                subjectName: trialTopic,
-                totalLessons: 1,
-                pricePerLesson: trialPriceEur.toFixed(2),
-                totalPrice: trialPriceEur.toFixed(2),
-                paymentUrl: paymentUrl || undefined,
-              },
-            }),
-          })
-            .then(async (r) => {
-              if (!r.ok) {
-                const txt = await r.text().catch(() => '');
-                console.error('[create-trial-package] Failed to send manual_package_request email:', r.status, txt);
-              }
-            })
-            .catch((e) => console.error('[create-trial-package] Error calling /api/send-email (manual):', e));
-      }
-
-      return json(res, 200, { success: true, mode: 'manual', packageId: lessonPackage.id });
     }
 
     const stripe = new Stripe(stripeSecretKey, { apiVersion: '2023-10-16' as any });

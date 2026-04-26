@@ -52,6 +52,12 @@ import CompanyInstructions from '@/pages/company/CompanyInstructions';
 import Messages from '@/pages/Messages';
 import StudentMessages from '@/pages/StudentMessages';
 import CompanyMessages from '@/pages/company/CompanyMessages';
+import ParentProtectedRoute from '@/components/ParentProtectedRoute';
+import ParentDashboard from '@/pages/ParentDashboard';
+import ParentSessions from '@/pages/ParentSessions';
+import ParentInvoices from '@/pages/ParentInvoices';
+import ParentMessages from '@/pages/ParentMessages';
+import ParentRegister from '@/pages/ParentRegister';
 import SupabaseAuthHashErrors from '@/components/SupabaseAuthHashErrors';
 
 function ProtectedWithUser() {
@@ -66,6 +72,14 @@ function StudentProtectedWithUser() {
   return (
     <UserProvider>
       <StudentProtectedRoute />
+    </UserProvider>
+  );
+}
+
+function ParentProtectedWithUser() {
+  return (
+    <UserProvider>
+      <ParentProtectedRoute />
     </UserProvider>
   );
 }
@@ -107,6 +121,7 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/registration/subscription" element={<TutorSubscribe />} />
         <Route path="/tutor-subscribe" element={<Navigate to="/registration/subscription" replace />} />
         <Route path="/book/:inviteCode" element={<StudentOnboarding />} />
+        <Route path="/parent-register" element={<ParentRegister />} />
         <Route path="/stripe-success" element={<StripeSuccess />} />
         <Route path="/package-success" element={<PackagePaymentSuccess />} />
         <Route path="/package-cancelled" element={<PackagePaymentCancelled />} />
@@ -134,6 +149,14 @@ export default function App({ basename }: { basename: string }) {
           <Route path="/student/waitlist" element={<StudentWaitlist />} />
           <Route path="/student/instructions" element={<StudentInstructions />} />
           <Route path="/student/settings" element={<StudentSettings />} />
+        </Route>
+
+        {/* Parent routes */}
+        <Route element={<ParentProtectedWithUser />}>
+          <Route path="/parent" element={<ParentDashboard />} />
+          <Route path="/parent/child/:studentId" element={<ParentSessions />} />
+          <Route path="/parent/invoices" element={<ParentInvoices />} />
+          <Route path="/parent/messages" element={<ParentMessages />} />
         </Route>
 
         {/* Platform owner admin */}

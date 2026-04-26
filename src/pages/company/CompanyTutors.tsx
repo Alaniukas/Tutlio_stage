@@ -30,6 +30,8 @@ interface Tutor {
   break_between_lessons: number;
   min_booking_hours: number;
   company_commission_percent?: number;
+  personal_meeting_link?: string | null;
+  has_active_license?: boolean;
 }
 
 interface Invite {
@@ -406,6 +408,7 @@ export default function CompanyTutors() {
   const [editBreakBetween, setEditBreakBetween] = useState(0);
   const [editMinBooking, setEditMinBooking] = useState(1);
   const [editCommissionPercent, setEditCommissionPercent] = useState(0);
+  const [editMeetingLink, setEditMeetingLink] = useState('');
 
   useEffect(() => { loadData({ silent: !!getCached(TUTORS_CACHE_KEY) }); }, []);
 
@@ -460,7 +463,7 @@ export default function CompanyTutors() {
 
     const { data: tutorData } = await supabase
       .from('profiles')
-      .select('id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent')
+      .select('id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, personal_meeting_link, has_active_license')
       .eq('organization_id', adminRow.organization_id);
 
     // Filter out organization admins so they are not counted as tutors
@@ -674,6 +677,7 @@ export default function CompanyTutors() {
     setEditBreakBetween(tutor.break_between_lessons ?? orgDefaults.break_between_lessons);
     setEditMinBooking(tutor.min_booking_hours ?? orgDefaults.min_booking_hours);
     setEditCommissionPercent(tutor.company_commission_percent ?? orgDefaults.company_commission_percent);
+    setEditMeetingLink(tutor.personal_meeting_link || '');
     setTutorModalOpen(true);
   };
 
@@ -690,6 +694,7 @@ export default function CompanyTutors() {
       break_between_lessons: editBreakBetween,
       min_booking_hours: editMinBooking,
       company_commission_percent: editCommissionPercent,
+      personal_meeting_link: editMeetingLink.trim() || null,
     }).eq('id', selectedTutor.id);
     await loadData();
     setTutorModalOpen(false);
@@ -829,7 +834,14 @@ export default function CompanyTutors() {
                     <span className="text-sm font-bold text-indigo-700">{tutor.full_name.charAt(0).toUpperCase()}</span>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-gray-900 truncate">{tutor.full_name}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{tutor.full_name}</p>
+                      {tutor.has_active_license ? (
+                        <span className="px-1.5 py-0.5 text-[10px] font-bold bg-green-100 text-green-700 rounded-full">{t('compTut.licensed')}</span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 text-[10px] font-bold bg-gray-100 text-gray-500 rounded-full">{t('compTut.unlicensed')}</span>
+                      )}
+                    </div>
                     <p className="text-xs text-gray-500 truncate">{tutor.email}</p>
                   </div>
                   <span className="flex items-center gap-1 text-xs text-green-600 bg-green-50 px-2 py-1 rounded-full font-medium">
@@ -1077,6 +1089,38 @@ export default function CompanyTutors() {
                     />
                     <span className="text-xs text-gray-500">{t('compTut.eurPerLesson')}</span>
                   </div>
+                </div>
+                <div className="pb-3 border-b border-gray-100">
+                  <Label className="text-xs font-medium text-gray-600">{t('compTut.personalMeetingLink')}</Label>
+                  <p className="text-[11px] text-gray-500 mb-1.5">{t('compTut.personalMeetingLinkDesc')}</p>
+                  <Input
+                    value={editMeetingLink}
+                    onChange={e => setEditMeetingLink(e.target.value)}
+                    placeholder="https://meet.google.com/..."
+                    className="rounded-xl"
+                  />
+                </div>
+                <div className="pb-3 border-b border-gray-100">
+                  <Label className="text-xs font-medium text-gray-600">{t('compTut.license')}</Label>
+                  <p className="text-[11px] text-gray-500 mb-1.5">{t('compTut.licenseDesc')}</p>
+                  <button
+                    type="button"
+                    className={cn(
+                      'rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors',
+                      selectedTutor?.has_active_license
+                        ? 'border-green-500 bg-green-50 text-green-700'
+                        : 'border-gray-200 bg-white text-gray-500 hover:bg-gray-50'
+                    )}
+                    onClick={async () => {
+                      if (!selectedTutor) return;
+                      const next = !selectedTutor.has_active_license;
+                      await supabase.from('profiles').update({ has_active_license: next }).eq('id', selectedTutor.id);
+                      setSelectedTutor({ ...selectedTutor, has_active_license: next });
+                      await loadData();
+                    }}
+                  >
+                    {selectedTutor?.has_active_license ? t('compTut.licensed') : t('compTut.unlicensed')}
+                  </button>
                 </div>
                 <div>
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">{t('compTut.lessonSettings')}</p>

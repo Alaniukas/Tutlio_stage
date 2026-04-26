@@ -7,7 +7,7 @@ import { getCached, setCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
 import { format } from 'date-fns';
 import { useTranslation } from '@/lib/i18n';
-import { CalendarDays, Search, ChevronDown, ListOrdered, UserX, XCircle, CheckCircle, Pencil, Ban, Loader2 } from 'lucide-react';
+import { CalendarDays, Search, ChevronDown, ListOrdered, UserX, XCircle, CheckCircle, Pencil, Ban, Loader2, MessageSquare } from 'lucide-react';
 import { defaultNoShowWhenForNow, buildNoShowSessionPatch } from '@/lib/noShowWhen';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -51,6 +51,8 @@ interface Session {
   subject_id?: string | null;
   meeting_link?: string | null;
   recurring_session_id?: string | null;
+  tutor_comment?: string | null;
+  show_comment_to_student?: boolean;
 }
 
 interface Subject {
@@ -83,6 +85,7 @@ export default function CompanySessions() {
   const [filterTutor, setFilterTutor] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [search, setSearch] = useState('');
+  const [sortNewest, setSortNewest] = useState(true);
   const [filterStartDate, setFilterStartDate] = useState<Date | null>(null);
   const [filterEndDate, setFilterEndDate] = useState<Date | null>(null);
   const [isFilterActive, setIsFilterActive] = useState(false);
@@ -162,7 +165,7 @@ export default function CompanySessions() {
 
     const { data: sessionsData } = await supabase
       .from('sessions')
-      .select('*, student:students(full_name), subjects(is_group)')
+      .select('*, student:students(full_name), subjects(is_group), tutor_comment, show_comment_to_student')
       .in('tutor_id', tutorIds)
       .gte('start_time', threeMonthsAgo.toISOString())
       .order('start_time', { ascending: false })
@@ -351,7 +354,7 @@ export default function CompanySessions() {
   }, [filterStudent, uniqueStudents]);
 
   const filtered = useMemo(() => {
-    return sessions.filter(s => {
+    const list = sessions.filter(s => {
       if (isFilterActive) {
         const when = new Date(s.start_time);
         if (filterStartDate) {
@@ -378,7 +381,10 @@ export default function CompanySessions() {
       }
       return true;
     });
-  }, [sessions, filterTutor, filterStatus, studentIdSetForFilter, search, isFilterActive, filterStartDate, filterEndDate]);
+    return sortNewest
+      ? list.sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())
+      : list.sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+  }, [sessions, filterTutor, filterStatus, studentIdSetForFilter, search, isFilterActive, filterStartDate, filterEndDate, sortNewest]);
 
   if (loading) {
     return (
@@ -432,6 +438,16 @@ export default function CompanySessions() {
               className="pl-9 rounded-xl"
             />
           </div>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="rounded-xl gap-1.5 flex-shrink-0"
+            onClick={() => setSortNewest(v => !v)}
+          >
+            <ListOrdered className="w-4 h-4" />
+            {sortNewest ? t('compSess.newestFirst') : t('compSess.oldestFirst')}
+          </Button>
 
           <div className="relative">
             <select
@@ -511,8 +527,9 @@ export default function CompanySessions() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 truncate">
+                      <p className="text-sm font-semibold text-gray-900 truncate flex items-center gap-1">
                         {session.student_name}
+                        {session.tutor_comment && <MessageSquare className="w-3 h-3 text-blue-500 flex-shrink-0" />}
                       </p>
                       <p className="text-xs text-gray-500 mt-0.5 truncate">
                         {session.tutor_name}
@@ -578,7 +595,12 @@ export default function CompanySessions() {
                     <td className="px-4 py-3">
                       <p className="font-medium text-gray-800">{session.tutor_name}</p>
                     </td>
-                    <td className="px-4 py-3 text-gray-700">{session.student_name}</td>
+                    <td className="px-4 py-3 text-gray-700">
+                      <span className="inline-flex items-center gap-1">
+                        {session.student_name}
+                        {session.tutor_comment && <MessageSquare className="w-3 h-3 text-blue-500" />}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-gray-600 max-w-[160px] truncate">
                       {session.topic || '–'}
                     </td>
@@ -815,6 +837,19 @@ export default function CompanySessions() {
                     <div>
                       <Label className="text-xs text-gray-500">{t('compSess.cancellationReason')}</Label>
                       <p className="text-sm mt-1 text-red-600">{selectedSession.cancellation_reason}</p>
+                    </div>
+                  )}
+
+                  {selectedSession.tutor_comment && (
+                    <div>
+                      <Label className="text-xs text-gray-500 flex items-center gap-1">
+                        <MessageSquare className="w-3 h-3" />
+                        {t('compSess.tutorComment')}
+                        <span className="text-[10px] font-normal ml-1">
+                          ({selectedSession.show_comment_to_student ? t('compSess.visibleToStudent') : t('compSess.visibleToAdminOnly')})
+                        </span>
+                      </Label>
+                      <p className="text-sm mt-1 bg-blue-50 border border-blue-100 rounded-lg p-2 whitespace-pre-wrap">{selectedSession.tutor_comment}</p>
                     </div>
                   )}
 

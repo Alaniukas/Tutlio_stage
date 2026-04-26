@@ -1468,6 +1468,53 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const data = sanitizeEmailData(rawData);
 
+    function tutorStudentAssigned(d: any, locale: Locale) {
+      return {
+        subject: locale === 'lt' ? `Naujas mokinys priskirtas jums` : `New student assigned to you`,
+        html: wrap(`
+          <div class="header" style="${headerInlineStyle('#6366f1', '#4f46e5')}">
+            <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">${locale === 'lt' ? 'Naujas mokinys' : 'New Student'}</h1>
+          </div>
+          <div class="body">
+            <p class="greeting">${locale === 'lt' ? 'Sveiki' : 'Hello'}, ${esc(d.tutorName || '')},</p>
+            <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+              ${locale === 'lt'
+                ? `Jums buvo priskirtas naujas mokinys: <strong>${esc(d.studentName || '')}</strong>.`
+                : `A new student has been assigned to you: <strong>${esc(d.studentName || '')}</strong>.`}
+            </p>
+            ${d.studentEmail ? `<div class="info-card"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${td(locale === 'lt' ? 'El. paštas' : 'Email', esc(d.studentEmail), false)}</table></div>` : ''}
+          </div>${footerFor(locale)}`, locale),
+      };
+    }
+
+    function parentInvite(d: any, locale: Locale) {
+      return {
+        subject: locale === 'lt' ? `Pakvietimas sukurti tėvų paskyrą – Tutlio` : `Invitation to create a parent account – Tutlio`,
+        html: wrap(`
+          <div class="header" style="${headerInlineStyle('#7c3aed', '#6d28d9')}">
+            <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">${locale === 'lt' ? 'Tėvų paskyra' : 'Parent Account'}</h1>
+          </div>
+          <div class="body">
+            <p class="greeting">${locale === 'lt' ? 'Sveiki' : 'Hello'}${d.parentName ? `, ${esc(d.parentName)}` : ''},</p>
+            <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+              ${locale === 'lt'
+                ? `Jūsų vaikas <strong>${esc(d.studentName || '')}</strong> sukūrė paskyrą Tutlio platformoje ir pakviečia jus sukurti tėvų paskyrą.`
+                : `Your child <strong>${esc(d.studentName || '')}</strong> has created an account on Tutlio and invites you to create a parent account.`}
+            </p>
+            <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+              ${locale === 'lt'
+                ? 'Su tėvų paskyra galėsite matyti pamokas, sąskaitas ir bendrauti su korepetitoriais.'
+                : 'With a parent account, you can view lessons, invoices, and communicate with tutors.'}
+            </p>
+            <div style="text-align:center; margin:24px 0;">
+              <a href="${esc(d.registerLink || '')}" style="display:inline-block; background:#7c3aed; color:#fff; font-weight:700; font-size:15px; padding:14px 36px; border-radius:12px; text-decoration:none;">
+                ${locale === 'lt' ? 'Sukurti paskyrą' : 'Create Account'}
+              </a>
+            </div>
+          </div>${footerFor(locale)}`, locale),
+      };
+    }
+
     const locale: Locale = 'lt';
 
     let emailContent: { subject: string; html: string };
@@ -1511,15 +1558,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'product_update_sf_chat': emailContent = productUpdateSfAndChat(data, locale); break;
       case 'school_contract': emailContent = schoolContract(data, locale); break;
       case 'school_installment_request': emailContent = schoolInstallmentRequest(data, locale); break;
+      case 'tutor_student_assigned': emailContent = tutorStudentAssigned(data, locale); break;
+      case 'parent_invite': emailContent = parentInvite(data, locale); break;
       default: return res.status(400).json({ error: `Unknown email type: ${type}` });
     }
 
-    const { data: result, error } = await resend.emails.send({
+    const emailPayload: Parameters<typeof resend.emails.send>[0] = {
       from: FROM_EMAIL,
       to: Array.isArray(to) ? to : [to],
       subject: unescapeHtml(emailContent.subject),
       html: emailContent.html,
-    });
+    };
+
+    if (Array.isArray(body.attachments) && body.attachments.length > 0) {
+      emailPayload.attachments = body.attachments.map((a: any) => ({
+        filename: a.filename || 'document.pdf',
+        content: Buffer.from(a.content, 'base64'),
+      }));
+    }
+
+    const { data: result, error } = await resend.emails.send(emailPayload);
 
     if (error) {
       console.error('[send-email] Resend error:', error);

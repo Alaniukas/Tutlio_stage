@@ -60,7 +60,7 @@ export default function Pricing() {
           </Link>
         </div>
 
-        <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto mb-16">
+        <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto mb-16">
           <div className="bg-white rounded-3xl p-8 shadow-2xl hover:scale-105 transition-transform">
             <div className="mb-6">
               <h3 className="text-2xl font-bold text-gray-900 mb-2">{t('pricing.monthly')}</h3>
@@ -101,6 +101,28 @@ export default function Pricing() {
             </ul>
             <Link to="/register" className="block">
               <Button className="w-full bg-white text-indigo-600 hover:bg-indigo-50 rounded-xl py-6 text-lg font-semibold">
+                {t('pricing.startNow')}<ArrowRight className="w-5 h-5 ml-2" />
+              </Button>
+            </Link>
+          </div>
+
+          <div className="bg-white rounded-3xl p-8 shadow-2xl hover:scale-105 transition-transform border-2 border-amber-200">
+            <div className="mb-6">
+              <h3 className="text-2xl font-bold text-gray-900 mb-2">{t('pricing.subscriptionOnly')}</h3>
+              <div className="flex items-baseline gap-2 mb-4">
+                <span className="text-5xl font-bold text-amber-600">€35</span>
+                <span className="text-gray-500">{t('common.perMonth')}</span>
+              </div>
+              <p className="text-gray-600 text-sm">{t('pricing.subscriptionOnlyDesc')}</p>
+            </div>
+            <ul className="space-y-3 mb-8">
+              <li className="flex items-center gap-2 text-gray-700"><CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />{t('pricing.allFeatures')}</li>
+              <li className="flex items-center gap-2 text-gray-700"><CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />{t('pricing.manualPayments')}</li>
+              <li className="flex items-center gap-2 text-gray-700"><CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />{t('pricing.noCommission')}</li>
+              <li className="flex items-center gap-2 text-gray-700"><CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />{t('pricing.cancelAnytime')}</li>
+            </ul>
+            <Link to="/register?plan=subscription_only" className="block">
+              <Button className="w-full bg-amber-600 hover:bg-amber-700 text-white rounded-xl py-6 text-lg font-semibold">
                 {t('pricing.startNow')}<ArrowRight className="w-5 h-5 ml-2" />
               </Button>
             </Link>

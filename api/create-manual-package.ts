@@ -1,7 +1,7 @@
-// ─── Vercel Serverless: Create Manual Lesson Package (Org Tutors) ─────────────
+// ─── Vercel Serverless: Create Manual Lesson Package (Individual Tutors) ──────
 // POST /api/create-manual-package
 // Body: { tutorId, studentId, subjectId, totalLessons, pricePerLesson? }
-// No Stripe — package starts as pending, org admin confirms payment later.
+// No Stripe — package starts as pending, tutor confirms payment later.
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
@@ -46,12 +46,13 @@ function resolveSendEmailUrl(req: VercelRequest): string {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
 
-    const { tutorId, studentId, subjectId, totalLessons, pricePerLesson: requestedPriceRaw } = req.body as {
+    const { tutorId, studentId, subjectId, totalLessons, pricePerLesson: requestedPriceRaw, expiresAt } = req.body as {
         tutorId: string;
         studentId: string;
         subjectId: string;
         totalLessons: number;
         pricePerLesson?: number;
+        expiresAt?: string;
     };
 
     if (!tutorId || !studentId || !subjectId || !totalLessons) {
@@ -85,9 +86,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (authErr || !user) {
             return json(res, 401, { error: 'Unauthorized' });
         }
-        const { data: adminRow } = await supabase.from('organization_admins').select('organization_id').eq('user_id', user.id).maybeSingle();
-        if (!adminRow) {
-            return json(res, 403, { error: 'Tik organizacijos administratorius gali kurti rankinius paketus' });
+        if (user.id !== tutorId) {
+            return json(res, 403, { error: 'Only the tutor can create manual packages' });
         }
 
         const { data: tutor, error: tutorErr } = await supabase
@@ -100,25 +100,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return json(res, 404, { error: 'Korepetitorius nerastas', details: tutorErr?.message });
         }
 
-        if (!tutor.organization_id) {
-            return json(res, 400, { error: 'This tutor does not belong to the organization' });
+        if (tutor.organization_id) {
+            return json(res, 403, { error: 'Manual payments are only available for individual tutors' });
         }
 
-        if (tutor.organization_id !== adminRow.organization_id) {
-            return json(res, 403, { error: 'You do not have permission to manage this tutor' });
-        }
-
-        const { data: org } = await supabase
-            .from('organizations')
-            .select('name, features')
-            .eq('id', tutor.organization_id)
-            .single();
-
-        if (!(org?.features as Record<string, unknown> | null)?.manual_payments) {
-            return json(res, 403, { error: 'Manual payments feature is not enabled for this organization' });
-        }
-
-        const orgName = org?.name || tutor.full_name || 'Organizacija';
+        const tutorName = tutor.full_name || 'Korepetitorius';
 
         const { data: student, error: studentErr } = await supabase
             .from('students')
@@ -169,9 +155,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 total_price: totalPrice,
                 paid: false,
                 payment_status: 'pending',
-                // Must be visible immediately so org_admin can confirm payment.
                 active: true,
                 payment_method: 'manual',
+                ...(expiresAt ? { expires_at: new Date(expiresAt).toISOString() } : {}),
             })
             .select()
             .single();
@@ -184,8 +170,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let emailSent = false;
         const toEmail = (student.payer_email || student.email || '').trim();
         if (toEmail) {
-            const features = (org?.features || {}) as Record<string, unknown>;
-            const paymentUrl = typeof features.manual_payment_url === 'string' ? features.manual_payment_url.trim() : '';
             try {
                 const emailRes = await postJsonWithTimeout(
                     resolveSendEmailUrl(req),
@@ -195,12 +179,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         data: {
                             recipientName: student.payer_name || student.full_name,
                             studentName: student.full_name,
-                            orgName,
+                            orgName: tutorName,
                             subjectName: subject.name,
                             totalLessons,
                             pricePerLesson: pricePerLesson.toFixed(2),
                             totalPrice: totalPrice.toFixed(2),
-                            paymentUrl: paymentUrl || undefined,
                         },
                     },
                     20000,

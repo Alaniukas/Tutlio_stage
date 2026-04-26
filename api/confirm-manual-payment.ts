@@ -1,7 +1,7 @@
 // ─── Vercel Serverless: Confirm Manual Package Payment ────────────────────────
 // POST /api/confirm-manual-payment
 // Body: { packageId: string }
-// Org admin confirms they received the payment — activates the package.
+// Individual tutor confirms they received the payment — activates the package.
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
@@ -56,10 +56,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return res.status(404).json({ error: 'Paketas nerastas', details: fetchErr?.message });
         }
 
-        const { data: tutorProfile } = await supabase.from('profiles').select('organization_id').eq('id', pkg.tutor_id).single();
-        const { data: adminRow } = await supabase.from('organization_admins').select('organization_id').eq('user_id', user.id).maybeSingle();
-        if (!adminRow || !tutorProfile?.organization_id || adminRow.organization_id !== tutorProfile.organization_id) {
-            return res.status(403).json({ error: 'You do not have permission to confirm this payment' });
+        if (user.id !== pkg.tutor_id) {
+            return res.status(403).json({ error: 'Only the tutor can confirm manual payments' });
         }
 
         if (pkg.payment_method !== 'manual') {

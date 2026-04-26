@@ -144,6 +144,10 @@ export default function Login() {
       .from('organization_admins').select('id').eq('user_id', user.id).maybeSingle();
     if (orgAdmin) { navigate('/company'); return true; }
 
+    const { data: parentProfile } = await supabase
+      .from('parent_profiles').select('id').eq('user_id', user.id).maybeSingle();
+    if (parentProfile) { navigate('/parent'); return true; }
+
     const { data: studentRows } = await supabase
       .rpc('get_student_by_user_id', { p_user_id: user.id });
     let student = studentRows?.[0] ?? null;

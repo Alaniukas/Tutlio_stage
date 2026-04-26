@@ -446,8 +446,8 @@ export default function LessonSettingsPage() {
         <SettingsSection
           icon={<BookOpen className="w-5 h-5 text-emerald-600" />}
           iconBg="bg-emerald-100"
-          title={t('lessonSet.subjectPrices')}
-          description={orgName ? t('lessonSet.subjectPricesDescOrg') : t('lessonSet.subjectPricesDesc')}
+          title={orgPolicy.isOrgTutor ? t('lessonSet.subjects') : t('lessonSet.subjectPrices')}
+          description={orgPolicy.isOrgTutor ? (orgPolicy.editPricing ? t('lessonSet.subjectPricesDesc') : t('lessonSet.subjectPricesDescOrg')) : (orgName ? t('lessonSet.subjectPricesDescOrg') : t('lessonSet.subjectPricesDesc'))}
           defaultOpen={true}
         >
           <div className="pt-4">

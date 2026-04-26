@@ -227,7 +227,7 @@ export default function DashboardPage() {
         setSessions(sessionsData || []);
 
         if (profileData?.organization_id) {
-            const [recentAvailRes, recentCreatedSessionsRes] = await Promise.all([
+            const [recentAvailRes, recentCreatedSessionsRes, orgFeatRes] = await Promise.all([
                 supabase
                     .from('availability')
                     .select('id, created_at')
@@ -244,11 +244,22 @@ export default function DashboardPage() {
                     .gte('created_at', subDays(new Date(), 7).toISOString())
                     .order('created_at', { ascending: false })
                     .limit(6),
+                supabase
+                    .from('organizations')
+                    .select('features')
+                    .eq('id', profileData.organization_id)
+                    .maybeSingle(),
             ]);
 
-            const missingTrialComments = (sessionsData || [])
-                .filter((s: any) => s.status === 'completed' && s.subjects?.is_trial === true && !String(s.tutor_comment || '').trim())
-                .slice(0, 5);
+            const orgFeat = orgFeatRes.data?.features;
+            const orgFeatObj = orgFeat && typeof orgFeat === 'object' && !Array.isArray(orgFeat) ? (orgFeat as Record<string, unknown>) : {};
+            const trialCommentRequired = orgFeatObj['trial_comment_required'] === true;
+
+            const missingTrialComments = trialCommentRequired
+                ? (sessionsData || [])
+                    .filter((s: any) => s.status === 'completed' && s.subjects?.is_trial === true && !String(s.tutor_comment || '').trim())
+                    .slice(0, 5)
+                : [];
 
             const updates: TutorUpdateItem[] = [
                 ...missingTrialComments.map((s: any) => ({
