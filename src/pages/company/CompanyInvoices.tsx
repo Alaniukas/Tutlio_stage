@@ -321,6 +321,11 @@ export default function CompanyInvoices() {
                             isOrgTutor: true,
                           }),
                         });
+                        if (!resp.ok) {
+                          const errText = await resp.text().catch(() => resp.statusText);
+                          console.error(`Invoice generation for tutor ${tutorId} failed (${resp.status}):`, errText);
+                          continue;
+                        }
                         const result = await resp.json();
                         if (result.invoiceIds) generatedIds.push(...result.invoiceIds);
                       } catch (err) {

@@ -63,7 +63,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
     // Fetch seller invoice profile
-    const sellerProfile = await getSellerProfile(userId, profile.organization_id, isOrgTutor);
+    // When isOrgTutor, the tutor is the seller (billing the org), so use tutorId
+    const sellerUserId = isOrgTutor ? tutorId : userId;
+    const sellerProfile = await getSellerProfile(sellerUserId, profile.organization_id, isOrgTutor);
     if (!sellerProfile) {
       return res.status(400).json({ error: 'Invoice settings not configured. Please set up your business details first.' });
     }

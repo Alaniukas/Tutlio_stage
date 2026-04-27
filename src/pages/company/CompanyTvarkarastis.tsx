@@ -76,6 +76,7 @@ import {
   Search,
   UserX,
   RotateCcw,
+  MessageSquare,
 } from 'lucide-react';
 import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
 import FindTutorModal from '@/components/FindTutorModal';
@@ -135,6 +136,7 @@ interface Session {
   recurring_session_id?: string | null;
   no_show_when?: string | null;
   tutor_comment?: string | null;
+  show_comment_to_student?: boolean;
   student?: {
     full_name: string;
     email?: string;
@@ -2222,6 +2224,19 @@ export default function CompanyTvarkarastis() {
                     className="text-sm text-indigo-600 hover:underline truncate block">
                     {(selectedEvent as any).meeting_link}
                   </a>
+                </div>
+              )}
+
+              {selectedEvent.tutor_comment && (
+                <div className="py-2 border-t border-gray-50">
+                  <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1 flex items-center gap-1">
+                    <MessageSquare className="w-3 h-3" />
+                    {t('compSess.tutorComment')}
+                    <span className="text-[10px] font-normal ml-1">
+                      ({selectedEvent.show_comment_to_student ? t('compSess.visibleToStudent') : t('compSess.visibleToAdminOnly')})
+                    </span>
+                  </p>
+                  <p className="text-sm bg-blue-50 border border-blue-100 rounded-lg p-2 whitespace-pre-wrap">{selectedEvent.tutor_comment}</p>
                 </div>
               )}
 

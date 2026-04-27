@@ -190,6 +190,8 @@ export default function CompanySessions() {
       subject_id: s.subject_id || null,
       meeting_link: s.meeting_link || null,
       recurring_session_id: s.recurring_session_id || null,
+      tutor_comment: s.tutor_comment || null,
+      show_comment_to_student: s.show_comment_to_student ?? false,
     }));
 
     setSessions(enriched);
