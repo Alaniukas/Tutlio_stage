@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'http://localhost:3000';
+const DEFAULT_SUBSCRIPTION_ONLY_PRODUCT_ID = 'prod_UOWf5Nqxf1wPIg';
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -45,11 +46,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    const priceId = plan === 'subscription_only'
+    let priceId = plan === 'subscription_only'
       ? process.env.STRIPE_SUBSCRIPTION_ONLY_PRICE_ID
       : plan === 'monthly'
         ? process.env.STRIPE_MONTHLY_PRICE_ID
         : process.env.STRIPE_YEARLY_PRICE_ID;
+
+    if (!priceId && plan === 'subscription_only') {
+      const productId = process.env.STRIPE_SUBSCRIPTION_ONLY_PRODUCT_ID || DEFAULT_SUBSCRIPTION_ONLY_PRODUCT_ID;
+      const prices = await stripe.prices.list({
+        product: productId,
+        active: true,
+        limit: 20,
+      });
+      const recurringMonthly = prices.data.find((p) => p.type === 'recurring' && p.recurring?.interval === 'month');
+      if (recurringMonthly?.id) {
+        priceId = recurringMonthly.id;
+      }
+    }
 
     if (!priceId) {
       console.error(`Missing price ID for plan: ${plan}`);

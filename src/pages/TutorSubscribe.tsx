@@ -50,6 +50,13 @@ export default function TutorSubscribe() {
   const navigate = useNavigate();
 
   useEffect(() => {
+    const requestedPlan = searchParams.get('plan');
+    if (requestedPlan === 'subscription_only' || requestedPlan === 'monthly' || requestedPlan === 'yearly') {
+      setSelectedPlan(requestedPlan);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
     if (!isRegistrationSubscription) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'i' || e.key === 'I')) {

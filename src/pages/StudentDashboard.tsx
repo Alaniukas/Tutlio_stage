@@ -7,7 +7,7 @@ import { getCached, setCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
 import { format, isAfter, isBefore } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
-import { CalendarDays, Clock, Zap, BookOpen, Settings, Play, XCircle, CheckCircle, RefreshCw, CreditCard, Loader2, Package, Users } from 'lucide-react';
+import { CalendarDays, Clock, Zap, BookOpen, Settings, Play, XCircle, CheckCircle, RefreshCw, CreditCard, Loader2, Package, Users, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn, normalizeUrl } from '@/lib/utils';
 import { useStudentPaymentBlock } from '@/hooks/useStudentPaymentBlock';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
@@ -30,6 +30,16 @@ interface LessonPackage {
     subjects?: any;
 }
 
+interface InstallmentPayment {
+    id: string;
+    installment_number: number;
+    amount: number;
+    due_date: string;
+    payment_status: 'pending' | 'paid' | 'overdue' | 'failed';
+    paid_at: string | null;
+    contract_id: string;
+}
+
 export default function StudentDashboard() {
     const navigate = useNavigate();
     const { t, dateFnsLocale } = useTranslation();
@@ -42,6 +52,8 @@ export default function StudentDashboard() {
     const [stripeLoading, setStripeLoading] = useState(false);
     const [paymentPayer, setPaymentPayer] = useState<string | null>(null);
     const [activePackages, setActivePackages] = useState<LessonPackage[]>([]);
+    const [installments, setInstallments] = useState<InstallmentPayment[]>([]);
+    const [paymentsExpanded, setPaymentsExpanded] = useState(false);
     const [activeStudentId, setActiveStudentId] = useState<string | null>(null);
     const { blocked: paymentBookingBlocked, loading: paymentBlockLoading } = useStudentPaymentBlock(activeStudentId);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
@@ -174,6 +186,22 @@ export default function StudentDashboard() {
                 .eq('paid', true)
                 .gt('available_lessons', 0);
             setActivePackages(packagesData || []);
+
+            const { data: installmentsData } = await supabase
+                .from('school_payment_installments')
+                .select('id, installment_number, amount, due_date, payment_status, paid_at, contract:school_contracts!inner(id, student_id)')
+                .eq('contract.student_id', studentRow.id)
+                .order('due_date', { ascending: true });
+
+            setInstallments((installmentsData || []).map((row: any) => ({
+                id: row.id,
+                installment_number: row.installment_number,
+                amount: Number(row.amount || 0),
+                due_date: row.due_date,
+                payment_status: row.payment_status,
+                paid_at: row.paid_at,
+                contract_id: row.contract?.id,
+            })));
         }
         setLoading(false);
     };
@@ -278,6 +306,51 @@ export default function StudentDashboard() {
                                         <span className="text-violet-600">{pkg.subjects?.name || t('studentDash.packageN', { n: idx + 1 })}</span>
                                         <span className="font-semibold text-violet-800">
                                             {pkg.available_lessons}/{pkg.total_lessons} {t('studentDash.lessonsSuffix')}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {installments.length > 0 && (
+                    <div className="bg-white border border-gray-200 rounded-3xl p-4">
+                        <button
+                            type="button"
+                            onClick={() => setPaymentsExpanded((v) => !v)}
+                            className="w-full flex items-center justify-between"
+                        >
+                            <div className="text-left">
+                                <p className="text-sm font-bold text-gray-900">Mokejimai</p>
+                                <p className="text-xs text-gray-500">
+                                    {installments.length > 1 ? `Dalimis (${installments.length})` : 'Vienas mokejimas'} ·
+                                    {' '}Apmoketa {installments.filter((i) => i.payment_status === 'paid').length}/{installments.length}
+                                </p>
+                            </div>
+                            {paymentsExpanded ? <ChevronUp className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
+                        </button>
+
+                        {paymentsExpanded && (
+                            <div className="mt-3 space-y-2">
+                                {installments.map((i) => (
+                                    <div key={i.id} className="rounded-xl border border-gray-100 p-3 flex items-center justify-between">
+                                        <div>
+                                            <p className="text-sm font-semibold text-gray-900">Imoka #{i.installment_number} · €{i.amount.toFixed(2)}</p>
+                                            <p className="text-xs text-gray-500">
+                                                Terminas: {new Date(i.due_date).toLocaleDateString('lt-LT')}
+                                                {i.paid_at ? ` · Apmoketa: ${new Date(i.paid_at).toLocaleDateString('lt-LT')}` : ''}
+                                            </p>
+                                        </div>
+                                        <span className={cn(
+                                            'text-xs px-2 py-1 rounded-full font-semibold',
+                                            i.payment_status === 'paid' ? 'bg-green-50 text-green-700' :
+                                                i.payment_status === 'overdue' ? 'bg-red-50 text-red-700' :
+                                                    i.payment_status === 'failed' ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'
+                                        )}>
+                                            {i.payment_status === 'paid' ? 'Apmoketa' :
+                                                i.payment_status === 'overdue' ? 'Pradelsta' :
+                                                    i.payment_status === 'failed' ? 'Nepavyko' : 'Laukia'}
                                         </span>
                                     </div>
                                 ))}

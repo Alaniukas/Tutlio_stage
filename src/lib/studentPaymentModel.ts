@@ -1,4 +1,25 @@
 export type PaymentModel = 'per_lesson' | 'monthly_billing' | 'prepaid_packages';
+const PAYMENT_MODEL_VALUES: PaymentModel[] = ['per_lesson', 'monthly_billing', 'prepaid_packages'];
+
+export function parseStudentPaymentModels(value: string | null | undefined): Set<PaymentModel> {
+  if (!value) return new Set();
+  return new Set(
+    value
+      .split(',')
+      .map((part) => part.trim())
+      .filter((part): part is PaymentModel => PAYMENT_MODEL_VALUES.includes(part as PaymentModel)),
+  );
+}
+
+export function serializeStudentPaymentModels(models: Iterable<PaymentModel>): string | null {
+  const selectedSet = new Set(models);
+  const normalized = PAYMENT_MODEL_VALUES.filter((m) => selectedSet.has(m));
+  return normalized.length ? normalized.join(',') : null;
+}
+
+export function hasStudentPaymentModel(value: string | null | undefined, model: PaymentModel): boolean {
+  return parseStudentPaymentModels(value).has(model);
+}
 
 export type LessonPaymentTiming = 'before_lesson' | 'after_lesson';
 
@@ -19,7 +40,7 @@ export function resolvePerLessonPaymentRules(
     payment_deadline_hours: Math.max(1, Number(tutorDefaults.payment_deadline_hours) || 24),
   } as const;
 
-  if (student.payment_model !== 'per_lesson') {
+  if (!hasStudentPaymentModel(student.payment_model, 'per_lesson')) {
     return { payment_timing: base.payment_timing, payment_deadline_hours: base.payment_deadline_hours };
   }
 
@@ -85,34 +106,17 @@ export function getEffectivePaymentActions(
   studentPaymentModel: string | null | undefined,
   overrideEnabled: boolean,
 ): { canSendInvoice: boolean; canSendPackage: boolean } {
-  if (!overrideEnabled || studentPaymentModel == null || studentPaymentModel === '') {
+  const selectedModels = parseStudentPaymentModels(studentPaymentModel);
+  if (!overrideEnabled || selectedModels.size === 0) {
     return {
       canSendInvoice: tutorFlags.enable_monthly_billing,
       canSendPackage: tutorFlags.enable_prepaid_packages,
     };
   }
-  switch (studentPaymentModel) {
-    case 'monthly_billing':
-      return {
-        canSendInvoice: true,
-        canSendPackage: false,
-      };
-    case 'prepaid_packages':
-      return {
-        canSendInvoice: false,
-        canSendPackage: true,
-      };
-    case 'per_lesson':
-      return {
-        canSendInvoice: false,
-        canSendPackage: false,
-      };
-    default:
-      return {
-        canSendInvoice: tutorFlags.enable_monthly_billing,
-        canSendPackage: tutorFlags.enable_prepaid_packages,
-      };
-  }
+  return {
+    canSendInvoice: selectedModels.has('monthly_billing'),
+    canSendPackage: selectedModels.has('prepaid_packages'),
+  };
 }
 
 /** Student booking: use package credit only when model allows prepaid path */
@@ -122,8 +126,7 @@ export function shouldUsePackageForBooking(
   paymentOverrideActive: boolean,
 ): boolean {
   if (!activePackage) return false;
-  if (!paymentOverrideActive || !studentPaymentModel) return true;
-  if (studentPaymentModel === 'prepaid_packages') return true;
-  if (studentPaymentModel === 'monthly_billing' || studentPaymentModel === 'per_lesson') return false;
-  return true;
+  const selectedModels = parseStudentPaymentModels(studentPaymentModel);
+  if (!paymentOverrideActive || selectedModels.size === 0) return true;
+  return selectedModels.has('prepaid_packages');
 }

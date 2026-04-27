@@ -14,6 +14,11 @@ interface StudentData {
     email: string;
     phone: string;
     tutor_id: string | null;
+    payer_name?: string | null;
+    payer_email?: string | null;
+    payer_phone?: string | null;
+    child_birth_date?: string | null;
+    organization_id?: string | null;
     tutor?: { full_name: string };
 }
 
@@ -100,6 +105,18 @@ export default function StudentOnboarding() {
 
     const [cancellationHours, setCancellationHours] = useState(24);
     const [cancellationFeePercent, setCancellationFeePercent] = useState(0);
+    const [isSchoolInvite, setIsSchoolInvite] = useState(false);
+
+    const calculateAgeFromDate = (dateValue?: string | null): string => {
+        if (!dateValue) return '';
+        const birth = new Date(dateValue);
+        if (Number.isNaN(birth.getTime())) return '';
+        const today = new Date();
+        let years = today.getFullYear() - birth.getFullYear();
+        const m = today.getMonth() - birth.getMonth();
+        if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) years -= 1;
+        return years > 0 ? String(years) : '';
+    };
 
     useEffect(() => {
         if (inviteCode) fetchStudent();
@@ -133,6 +150,13 @@ export default function StudentOnboarding() {
             setStudentData({ ...data, tutor: tutorProfile ?? undefined });
             setEmail(data.email || '');
             setPhone(data.phone || '');
+            setIsSchoolInvite(Boolean(data.organization_id));
+            setPayerType(Boolean(data.organization_id) ? 'parent' : 'self');
+            setPayerName(data.payer_name || '');
+            setPayerEmail(data.payer_email || '');
+            setPayerPhone(data.payer_phone || '');
+            setParentRegEmail(data.payer_email || '');
+            setAge(calculateAgeFromDate(data.child_birth_date));
 
             if (data.tutor_id) {
                 const { data: tutorSettings } = await supabase
@@ -169,7 +193,8 @@ export default function StudentOnboarding() {
 
     const handleProfile = () => {
         if (!grade) { setError(t('onboard.selectGrade')); return; }
-        if (payerType === 'parent') {
+        const effectivePayerType = isSchoolInvite ? 'parent' : payerType;
+        if (effectivePayerType === 'parent') {
             if (!payerName.trim()) { setError(t('onboard.parentNameReq')); return; }
             if (!payerEmail.trim()) { setError(t('onboard.parentEmailReq')); return; }
             if (!payerPhone.trim()) { setError(t('onboard.parentPhoneReq')); return; }
@@ -191,6 +216,7 @@ export default function StudentOnboarding() {
         setError(null);
 
         const acceptedAt = new Date().toISOString();
+        const effectivePayerType = isSchoolInvite ? 'parent' : payerType;
 
         const apiRes = await fetch('/api/register-student', {
             method: 'POST',
@@ -204,10 +230,10 @@ export default function StudentOnboarding() {
                 age,
                 grade,
                 subjectId,
-                payerType,
-                payerName: payerType === 'parent' ? payerName.trim() : null,
-                payerEmail: payerType === 'parent' ? payerEmail.trim() : null,
-                payerPhone: payerType === 'parent' ? payerPhone.trim() : null,
+                payerType: effectivePayerType,
+                payerName: effectivePayerType === 'parent' ? payerName.trim() : null,
+                payerEmail: effectivePayerType === 'parent' ? payerEmail.trim() : null,
+                payerPhone: effectivePayerType === 'parent' ? payerPhone.trim() : null,
                 acceptedAt,
             }),
         });
@@ -373,32 +399,38 @@ export default function StudentOnboarding() {
                             </div>
 
                             <div>
-                                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                                    {t('onboard.whoPays')} <span className="text-red-500">*</span>
-                                </label>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-                                    {(['self', 'parent'] as const).map((v) => (
-                                        <button
-                                            key={v}
-                                            type="button"
-                                            onClick={() => setPayerType(v)}
-                                            className={cn(
-                                                'flex flex-col items-center gap-2 p-4 rounded-2xl border-2 text-center transition-all',
-                                                payerType === v ? 'border-violet-500 bg-violet-50' : 'border-gray-200 bg-gray-50 hover:border-violet-300'
-                                            )}
-                                        >
-                                            {v === 'self'
-                                                ? <User className="w-5 h-5 text-gray-600" />
-                                                : <Users className="w-5 h-5 text-gray-600" />}
-                                            <span className="text-sm font-semibold text-gray-900">{v === 'self' ? t('onboard.self') : t('onboard.parent')}</span>
-                                            <span className="text-xs text-gray-500 leading-tight">{v === 'self' ? t('onboard.selfDesc') : t('onboard.parentDesc')}</span>
-                                        </button>
-                                    ))}
-                                </div>
+                                {!isSchoolInvite && (
+                                    <>
+                                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                                            {t('onboard.whoPays')} <span className="text-red-500">*</span>
+                                        </label>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                                            {(['self', 'parent'] as const).map((v) => (
+                                                <button
+                                                    key={v}
+                                                    type="button"
+                                                    onClick={() => setPayerType(v)}
+                                                    className={cn(
+                                                        'flex flex-col items-center gap-2 p-4 rounded-2xl border-2 text-center transition-all',
+                                                        payerType === v ? 'border-violet-500 bg-violet-50' : 'border-gray-200 bg-gray-50 hover:border-violet-300'
+                                                    )}
+                                                >
+                                                    {v === 'self'
+                                                        ? <User className="w-5 h-5 text-gray-600" />
+                                                        : <Users className="w-5 h-5 text-gray-600" />}
+                                                    <span className="text-sm font-semibold text-gray-900">{v === 'self' ? t('onboard.self') : t('onboard.parent')}</span>
+                                                    <span className="text-xs text-gray-500 leading-tight">{v === 'self' ? t('onboard.selfDesc') : t('onboard.parentDesc')}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </>
+                                )}
 
-                                {payerType === 'parent' && (
+                                {(isSchoolInvite || payerType === 'parent') && (
                                     <div className="space-y-3 pt-2 border-t border-gray-100">
-                                        <p className="text-xs text-gray-500 pt-2">{t('onboard.parentInfo')}</p>
+                                        <p className="text-xs text-gray-500 pt-2">
+                                            {isSchoolInvite ? 'Tėvų duomenys (užpildyta mokyklos)' : t('onboard.parentInfo')}
+                                        </p>
                                         <div>
                                             <label className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
                                                 <User className="w-3 h-3" /> {t('onboard.parentName')}
@@ -557,7 +589,7 @@ export default function StudentOnboarding() {
                                         type="button"
                                         onClick={() => {
                                             setWantsParentAccount(true);
-                                            if (payerType === 'parent' && payerEmail) setParentRegEmail(payerEmail);
+                                            if ((isSchoolInvite || payerType === 'parent') && payerEmail) setParentRegEmail(payerEmail);
                                         }}
                                         className="w-full py-2.5 rounded-xl bg-violet-50 text-violet-700 font-medium text-sm hover:bg-violet-100 transition-colors"
                                     >

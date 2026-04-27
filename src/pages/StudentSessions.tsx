@@ -110,6 +110,7 @@ export default function StudentSessions() {
         { kind: 'stripe' } | { kind: 'manual'; contact: 'tutor' | 'org_admin' } | null
     >(null);
     const [studentPaymentModel, setStudentPaymentModel] = useState<string | null>(null);
+    const [manualPaymentsOnly, setManualPaymentsOnly] = useState(false);
     const [creditBalance, setCreditBalance] = useState(0);
     const [activePackages, setActivePackages] = useState<PackageSummary[]>([]);
     const [showAllSessions, setShowAllSessions] = useState(false);
@@ -235,6 +236,10 @@ export default function StudentSessions() {
     }, [location.search]);
 
     const handleStripePayment = async (session: Session, penaltyAmount?: number) => {
+        if (manualPaymentsOnly) {
+            alert('Šiam korepetitoriui taikomi rankiniai mokėjimai. Dėl apmokėjimo susisiekite tiesiogiai.');
+            return;
+        }
         setStripeLoading(true);
         try {
             const body: any = { sessionId: session.id };
@@ -371,6 +376,18 @@ export default function StudentSessions() {
         }
         setStudentPaymentModel(st.payment_model || null);
         setCreditBalance(Number(st.credit_balance || 0));
+        if (st.tutor_id) {
+            const { data: tutorSub } = await supabase
+                .from('profiles')
+                .select('subscription_plan, manual_subscription_exempt')
+                .eq('id', st.tutor_id)
+                .maybeSingle();
+            setManualPaymentsOnly(
+                tutorSub?.subscription_plan === 'subscription_only' || tutorSub?.manual_subscription_exempt === true
+            );
+        } else {
+            setManualPaymentsOnly(false);
+        }
 
         // OPTIMIZED: Limit sessions to recent past + future (6 months range)
         const sixMonthsAgo = new Date();
@@ -1061,7 +1078,7 @@ export default function StudentSessions() {
                         )}
 
                         {/* Credit balance + Stripe payment button for unpaid sessions (only for self-payers) */}
-                        {selectedSession?.status === 'active' && !selectedSession.paid && paymentPayer !== 'parent' && (
+                        {selectedSession?.status === 'active' && !selectedSession.paid && paymentPayer !== 'parent' && !manualPaymentsOnly && (
                             <div className="space-y-2">
                                 {creditBalance > 0 && (
                                     <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-green-50 border border-green-200 text-sm">
@@ -1210,7 +1227,7 @@ export default function StudentSessions() {
                                         <RefreshCw className={cn("w-4 h-4 mr-2", rescheduleLoading && "animate-spin")} />
                                         Perkelti
                                     </Button>
-                                    {hasPenalty && paymentType === 'per_lesson' && !selectedSession.paid ? (
+                                    {hasPenalty && paymentType === 'per_lesson' && !selectedSession.paid && !manualPaymentsOnly ? (
                                         <Button
                                             variant="destructive"
                                             onClick={() => {

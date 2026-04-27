@@ -16,6 +16,7 @@ export default function Register() {
   const orgToken = searchParams.get('org_token');
   const subscriptionSuccess = searchParams.get('subscription_success');
   const checkoutSessionId = searchParams.get('session_id');
+  const requestedPlan = searchParams.get('plan');
 
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -200,7 +201,10 @@ export default function Register() {
       }
 
       const hasAccess = orgToken || profileData.subscription_status;
-      navigate(hasAccess ? '/dashboard' : '/registration/subscription');
+      const subPath = requestedPlan
+        ? `/registration/subscription?plan=${encodeURIComponent(requestedPlan)}`
+        : '/registration/subscription';
+      navigate(hasAccess ? '/dashboard' : subPath);
       return;
     }
 

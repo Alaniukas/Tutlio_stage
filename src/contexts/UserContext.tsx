@@ -13,6 +13,7 @@ interface UserProfile {
   break_between_lessons?: number;
   min_booking_hours?: number;
   subscription_status?: string;
+  subscription_plan?: string | null;
   /** Server-set exception — access without Stripe subscription */
   manual_subscription_exempt?: boolean;
   trial_ends_at?: string | null;
@@ -36,9 +37,9 @@ const UserContext = createContext<UserContextType>({
 
 export const useUser = () => useContext(UserContext);
 
-const PROFILE_SELECT_WITH_TRIAL = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, break_between_lessons, min_booking_hours, subscription_status, manual_subscription_exempt, trial_ends_at, phone, stripe_onboarding_complete, preferred_locale';
-const PROFILE_SELECT_LEGACY = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, break_between_lessons, min_booking_hours, subscription_status, manual_subscription_exempt, phone, stripe_onboarding_complete, preferred_locale';
-const PROFILE_SELECT_CORE = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, break_between_lessons, min_booking_hours, subscription_status, manual_subscription_exempt, phone';
+const PROFILE_SELECT_WITH_TRIAL = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, break_between_lessons, min_booking_hours, subscription_status, subscription_plan, manual_subscription_exempt, trial_ends_at, phone, stripe_onboarding_complete, preferred_locale';
+const PROFILE_SELECT_LEGACY = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, break_between_lessons, min_booking_hours, subscription_status, subscription_plan, manual_subscription_exempt, phone, stripe_onboarding_complete, preferred_locale';
+const PROFILE_SELECT_CORE = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, break_between_lessons, min_booking_hours, subscription_status, subscription_plan, manual_subscription_exempt, phone';
 
 export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);

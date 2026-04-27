@@ -24,3 +24,12 @@ export function tutorHasPlatformSubscriptionAccess(profile: {
     profile.manual_subscription_exempt === true
   );
 }
+
+/** "Subscription only" plan = manual payments workflow, no Stripe Connect required. */
+export function isManualSubscriptionOnlyPlan(profile: {
+  subscription_plan?: string | null;
+  manual_subscription_exempt?: boolean | null;
+} | null | undefined): boolean {
+  if (!profile) return false;
+  return profile.subscription_plan === 'subscription_only' || profile.manual_subscription_exempt === true;
+}

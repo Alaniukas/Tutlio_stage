@@ -29,7 +29,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  const results: { session?: number; deadline?: any; afterLesson?: any } = {};
+  const results: { session?: number; deadline?: any; afterLesson?: any; schoolInstallments?: any } = {};
   let totalSent = 0;
 
   try {
@@ -157,6 +157,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (e) {
       console.error('[send-reminders] payment-after-lesson-reminders error:', e);
     }
+    try {
+      const schoolRes = await fetch(`${API_URL}/api/school-installment-reminders`, { method: 'GET', headers: cronHeaders });
+      results.schoolInstallments = schoolRes.ok ? await schoolRes.json().catch(() => ({})) : null;
+    } catch (e) {
+      console.error('[send-reminders] school-installment-reminders error:', e);
+    }
 
     return res.status(200).json({
       message: 'Reminders run complete',
@@ -164,6 +170,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       sessionReminders: results.session,
       paymentDeadlineWarnings: results.deadline,
       paymentAfterLessonReminders: results.afterLesson,
+      schoolInstallmentReminders: results.schoolInstallments,
     });
   } catch (err: any) {
     console.error('[send-reminders] error:', err);

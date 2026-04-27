@@ -208,11 +208,14 @@ export default function DashboardPage() {
         // OPTIMIZED: Use UserContext profile to avoid duplicate fetch
         const { data: profileData } = await supabase
             .from('profiles')
-            .select('full_name, organization_id, stripe_account_id, payment_timing, payment_deadline_hours')
+            .select('full_name, organization_id, stripe_account_id, payment_timing, payment_deadline_hours, subscription_plan, manual_subscription_exempt')
             .eq('id', user.id)
             .single();
         setTutorName(profileData?.full_name || user.email?.split('@')[0] || 'Korepetitorius');
-        setIsStripeConnected(!!profileData?.stripe_account_id);
+        const isManualOnlyPlan =
+            !profileData?.organization_id &&
+            (profileData?.subscription_plan === 'subscription_only' || profileData?.manual_subscription_exempt === true);
+        setIsStripeConnected(!!profileData?.stripe_account_id || isManualOnlyPlan);
         setPaymentTiming((profileData?.payment_timing as 'before_lesson' | 'after_lesson') || 'before_lesson');
         setPaymentDeadlineHours(profileData?.payment_deadline_hours ?? null);
         setOrgTutorFallback(!!profileData?.organization_id);

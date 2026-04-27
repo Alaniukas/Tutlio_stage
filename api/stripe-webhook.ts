@@ -165,7 +165,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 const all = await stripe.subscriptions.list({ customer: customerId, status: 'all', limit: 10 });
                 const otherActive = all.data.find(s => s.id !== subscription.id && (s.status === 'active' || s.status === 'trialing'));
                 if (otherActive) {
-                    const plan = otherActive.items.data[0]?.price.recurring?.interval === 'year' ? 'yearly' : 'monthly';
+                    const subOnlyPriceId = process.env.STRIPE_SUBSCRIPTION_ONLY_PRICE_ID;
+                    const otherPriceId = otherActive.items.data[0]?.price?.id;
+                    const plan = otherPriceId === subOnlyPriceId
+                        ? 'subscription_only'
+                        : otherActive.items.data[0]?.price.recurring?.interval === 'year'
+                            ? 'yearly'
+                            : 'monthly';
                     const periodEnd = new Date((otherActive as Stripe.Subscription & { current_period_end: number }).current_period_end * 1000).toISOString();
                     const statusToSave = (otherActive as any).cancel_at_period_end ? 'canceled' : otherActive.status;
                     await supabase
@@ -275,7 +281,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         .maybeSingle();
 
                     if (profile) {
-                        const plan = subscription.items.data[0]?.price.recurring?.interval === 'year' ? 'yearly' : 'monthly';
+                        const subOnlyPriceId = process.env.STRIPE_SUBSCRIPTION_ONLY_PRICE_ID;
+                        const currentPriceId = subscription.items.data[0]?.price?.id;
+                        const plan = currentPriceId === subOnlyPriceId
+                            ? 'subscription_only'
+                            : subscription.items.data[0]?.price.recurring?.interval === 'year'
+                                ? 'yearly'
+                                : 'monthly';
                         const isTrialing = subscription.status === 'trialing';
 
                         await supabase
@@ -568,64 +580,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 if (updateErr) {
                     console.error('[stripe-webhook] Error updating school installment:', updateErr);
                 } else if (updatedInstallment) {
-                    // Check if this is the first installment being paid — auto-generate invite code
-                    const { data: allInstallments } = await supabase
-                        .from('school_payment_installments')
-                        .select('id, payment_status, installment_number')
-                        .eq('contract_id', updatedInstallment.contract_id)
-                        .order('installment_number');
-
-                    const paidCount = (allInstallments || []).filter(i => i.payment_status === 'paid').length;
-                    const isFirstPayment = paidCount === 1 && updatedInstallment.installment_number === (allInstallments || []).find(i => i.payment_status === 'paid')?.installment_number;
-
-                    if (isFirstPayment && studentId) {
-                        // Check if student already has an invite code
-                        const { data: student } = await supabase
-                            .from('students')
-                            .select('id, invite_code, full_name, email, payer_email, payer_name, organization_id')
-                            .eq('id', studentId)
-                            .maybeSingle();
-
-                        if (student && !student.invite_code) {
-                            const inviteCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-                            await supabase
-                                .from('students')
-                                .update({ invite_code: inviteCode })
-                                .eq('id', studentId);
-
-                            console.log(`[stripe-webhook] Generated invite code ${inviteCode} for school student ${studentId}`);
-
-                            const { data: contract } = await supabase
-                                .from('school_contracts')
-                                .select('organization_id, organizations:organizations(name)')
-                                .eq('id', updatedInstallment.contract_id)
-                                .maybeSingle();
-
-                            const schoolName = (contract?.organizations as any)?.name || 'School';
-                            const bookingUrl = `${APP_URL}/book/${inviteCode}`;
-                            const recipientEmail = student.email || student.payer_email;
-
-                            if (recipientEmail) {
-                                await fetch(`${APP_URL}/api/send-email`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
-                                    body: JSON.stringify({
-                                        type: 'invite_email',
-                                        to: recipientEmail,
-                                        data: {
-                                            studentName: student.full_name,
-                                            tutorName: schoolName,
-                                            inviteCode,
-                                            bookingUrl,
-                                        },
-                                    }),
-                                }).catch(e => console.error('[stripe-webhook] Error sending school invite email:', e));
-
-                                console.log(`[stripe-webhook] Invite code email sent to ${recipientEmail}`);
-                            }
-                        }
-                    }
-
+                    // School invite email is sent by confirm-school-installment-payment endpoint
+                    // to avoid duplicate emails when both webhook and success-page confirmation run.
                     console.log(`[stripe-webhook] School installment ${installmentId} marked as paid`);
                 } else {
                     console.log(`[stripe-webhook] School installment ${installmentId} was already paid, skipping`);

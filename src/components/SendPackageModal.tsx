@@ -59,6 +59,7 @@ export default function SendPackageModal({
   const [error, setError] = useState<string | null>(null);
   const [isManual, setIsManual] = useState(false);
   const [isIndividualTutor, setIsIndividualTutor] = useState(false);
+  const [isManualOnlyPlan, setIsManualOnlyPlan] = useState(false);
   const [expiresAt, setExpiresAt] = useState('');
 
   useEffect(() => { if (isOpen) fetchSubjects(); }, [isOpen]);
@@ -95,10 +96,17 @@ export default function SendPackageModal({
     const effectiveTutorId = propTutorId || user.id;
 
     {
-      const { data: profile } = await supabase.from('profiles').select('organization_id').eq('id', effectiveTutorId).single();
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('organization_id, subscription_plan, manual_subscription_exempt')
+        .eq('id', effectiveTutorId)
+        .single();
       const individual = !profile?.organization_id;
       setIsIndividualTutor(individual);
+      const manualOnly = !!individual && (profile?.subscription_plan === 'subscription_only' || profile?.manual_subscription_exempt === true);
+      setIsManualOnlyPlan(manualOnly);
       if (!individual) setIsManual(false);
+      if (manualOnly) setIsManual(true);
     }
 
     const [subjectsResult, pricingResult] = await Promise.all([
@@ -257,8 +265,9 @@ export default function SendPackageModal({
                   <div className="flex mt-1 rounded-lg border border-gray-200 overflow-hidden">
                     <button
                       type="button"
-                      className={`flex-1 py-2 text-sm font-medium transition-colors ${!isManual ? 'bg-violet-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                      className={`flex-1 py-2 text-sm font-medium transition-colors ${!isManual ? 'bg-violet-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'} ${isManualOnlyPlan ? 'opacity-50 cursor-not-allowed' : ''}`}
                       onClick={() => setIsManual(false)}
+                      disabled={isManualOnlyPlan}
                     >
                       Stripe
                     </button>
@@ -270,6 +279,11 @@ export default function SendPackageModal({
                       {t('package.manualPaymentLabel')}
                     </button>
                   </div>
+                  {isManualOnlyPlan && (
+                    <p className="text-xs text-amber-700 mt-2">
+                      {t('pricing.subscriptionOnlyDesc')}
+                    </p>
+                  )}
                 </div>
               )}
 

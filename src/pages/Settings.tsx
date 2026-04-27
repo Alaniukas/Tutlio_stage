@@ -296,11 +296,20 @@ export default function SettingsPage() {
 
   const getPlanLabel = () => {
     const price = formatPrice(profile.subscription_price_amount, profile.subscription_price_currency);
-    const interval = profile.subscription_price_interval || (profile.subscription_plan === 'yearly' ? 'year' : 'month');
+    const interval =
+      profile.subscription_price_interval ||
+      (profile.subscription_plan === 'yearly' ? 'year' : 'month');
     const suffix = interval === 'year' ? t('settings.perYear') : t('subscribe.perMonth');
-    const title = profile.subscription_plan === 'yearly' ? t('settings.yearlyPlan') : t('settings.monthlyPlan');
+    const title =
+      profile.subscription_plan === 'yearly'
+        ? t('settings.yearlyPlan')
+        : profile.subscription_plan === 'subscription_only'
+          ? t('subscribe.subscriptionOnlyTitle')
+          : t('settings.monthlyPlan');
     if (price) return `${title} (${price}${suffix})`;
-    return profile.subscription_plan === 'yearly' ? `${t('settings.yearlyPlan')} (€14.99${t('subscribe.perMonth')})` : `${t('settings.monthlyPlan')} (€19.99${t('subscribe.perMonth')})`;
+    if (profile.subscription_plan === 'yearly') return `${t('settings.yearlyPlan')} (€14.99${t('subscribe.perMonth')})`;
+    if (profile.subscription_plan === 'subscription_only') return `${t('subscribe.subscriptionOnlyTitle')} (€35${t('subscribe.perMonth')})`;
+    return `${t('settings.monthlyPlan')} (€19.99${t('subscribe.perMonth')})`;
   };
 
   const getTrialChargeText = () => {

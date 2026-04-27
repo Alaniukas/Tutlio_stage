@@ -36,7 +36,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const subscription = await stripe.subscriptions.retrieve(session.subscription as string);
-    const plan = subscription.items.data[0]?.price.recurring?.interval === 'year' ? 'yearly' : 'monthly';
+    const subOnlyPriceId = process.env.STRIPE_SUBSCRIPTION_ONLY_PRICE_ID;
+    const firstPriceId = subscription.items.data[0]?.price?.id;
+    const plan =
+      firstPriceId && subOnlyPriceId && firstPriceId === subOnlyPriceId
+        ? 'subscription_only'
+        : subscription.items.data[0]?.price.recurring?.interval === 'year'
+          ? 'yearly'
+          : 'monthly';
 
     res.status(200).json({
       customerId: session.customer,

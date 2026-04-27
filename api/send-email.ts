@@ -12,6 +12,36 @@ import { outlookEmailButton, headerInlineStyle } from './_lib/outlookEmail.js';
 const resend = new Resend(process.env.RESEND_API_KEY_STAGE || process.env.RESEND_API_KEY);
 const FROM_EMAIL = process.env.FROM_EMAIL || 'Tutlio <onboarding@tutlio.lt>';
 
+function randomToken() {
+  return `${crypto.randomUUID().replace(/-/g, '')}${crypto.randomUUID().replace(/-/g, '')}`;
+}
+
+async function createSchoolCompletionUrl(contractId: string, req: VercelRequest): Promise<string | null> {
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRoleKey || !contractId) return null;
+
+  const supabase = createClient(supabaseUrl, serviceRoleKey);
+  const token = randomToken();
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 14).toISOString();
+  const { error } = await supabase.from('school_contract_completion_tokens').insert({
+    contract_id: contractId,
+    token,
+    expires_at: expiresAt,
+  });
+  if (error) return null;
+
+  const host = typeof req.headers.host === 'string' ? req.headers.host : '';
+  const protoHeader = typeof req.headers['x-forwarded-proto'] === 'string'
+    ? req.headers['x-forwarded-proto']
+    : Array.isArray(req.headers['x-forwarded-proto'])
+      ? req.headers['x-forwarded-proto'][0]
+      : '';
+  const inferredAppUrl = host ? `${protoHeader || 'https'}://${host}` : '';
+  const appUrl = process.env.APP_URL || process.env.VITE_APP_URL || inferredAppUrl || 'https://tutlio.lt';
+  return `${appUrl}/api/school-contract-complete?token=${encodeURIComponent(token)}`;
+}
+
 function escapeHtml(unsafe: unknown): string {
   return String(unsafe ?? '')
     .replace(/&/g, '&amp;')
@@ -359,16 +389,31 @@ function tutorInvite(d: any, locale: Locale) {
 }
 
 function inviteEmail(d: any, locale: Locale) {
+  const isSchoolInvite = d?.context === 'school';
+  const inviteSubject = isSchoolInvite
+    ? (locale === 'lt' ? 'Jūsų registracijos nuoroda mokykloje' : 'Your school registration link')
+    : t(locale, 'em.studentInviteSub');
+  const inviteHeader = isSchoolInvite
+    ? (locale === 'lt' ? 'Kvietimas Prisijungti' : 'Invitation to join')
+    : t(locale, 'em.studentInviteHeader');
+  const inviteHeaderSub = isSchoolInvite
+    ? (locale === 'lt' ? 'Jūsų koordinatorius kviečia į platformą' : 'Your coordinator invited you to the platform')
+    : t(locale, 'em.studentInviteHeaderSub');
+  const inviteBody = isSchoolInvite
+    ? (locale === 'lt'
+      ? `Jūsų vaikas <strong>${esc(d.studentName || '')}</strong> užregistruotas mokykloje <strong>${esc(d.tutorName || 'Mokykla')}</strong>.`
+      : `Your child <strong>${esc(d.studentName || '')}</strong> is registered in <strong>${esc(d.tutorName || 'School')}</strong>.`)
+    : t(locale, 'em.studentInviteBody', { tutor: d.tutorName });
   return {
-    subject: t(locale, 'em.studentInviteSub'),
+    subject: inviteSubject,
     html: wrap(`
       <div class="header" style="${headerInlineStyle('#6366f1', '#8b5cf6')}">
-        <h2 style="color: #ffffff; font-size: 24px; margin: 0; font-weight: 700;">${t(locale, 'em.studentInviteHeader')}</h2>
-        <p>${t(locale, 'em.studentInviteHeaderSub')}</p>
+        <h2 style="color: #ffffff; font-size: 24px; margin: 0; font-weight: 700;">${inviteHeader}</h2>
+        <p>${inviteHeaderSub}</p>
       </div>
       <div class="body">
         <p class="greeting">${t(locale, 'em.hiName', { name: d.studentName })}</p>
-        <p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.studentInviteBody', { tutor: d.tutorName })}</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">${inviteBody}</p>
         <div style="background:#f8f7ff; border: 1px dashed #c7d2fe; border-radius:12px; padding:24px; margin:24px 0; text-align: center;">
           <p style="color:#6b7280; font-size:13px; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 8px 0; font-weight: 600;">${t(locale, 'em.studentInviteCodeLabel')}</p>
           <p style="color:#4f46e5; font-size:32px; font-weight:800; letter-spacing: 4px; margin: 0; font-family: monospace;">${d.inviteCode}</p>
@@ -1320,28 +1365,56 @@ function chatMessageDigest(d: any, locale: Locale) {
 }
 
 function schoolContract(d: any, locale: Locale) {
+  const appUrl = getAppUrl();
+  const missingFields: string[] = Array.isArray(d.missingFields)
+    ? d.missingFields.map((x: any) => String(x).trim()).filter(Boolean)
+    : [];
+  const completionLink = missingFields.length > 0
+    ? String(
+        d.completionUrl ||
+        (d.contractId ? `${appUrl}/api/school-contract-complete?contractId=${encodeURIComponent(String(d.contractId))}` : ''),
+      ).trim()
+    : '';
+  const missingFieldsHtml = missingFields.length
+    ? `<div style="background:#fff7ed; border:1px solid #fed7aa; border-radius:12px; padding:14px; margin:16px 0;">
+        <p style="color:#9a3412; font-size:13px; font-weight:700; margin:0 0 8px;">Prašome papildyti trūkstamus duomenis:</p>
+        <ul style="margin:0; padding-left:18px; color:#7c2d12; font-size:13px; line-height:1.5;">
+          ${missingFields.map((item) => `<li>${esc(item)}</li>`).join('')}
+        </ul>
+        <p style="margin:10px 0 0; color:#7c2d12; font-size:13px; line-height:1.55; font-weight:700;">
+          Svarbu: sutartį pasirašyti galėsite tik po to, kai užpildysite trūkstamus duomenis.
+          Po užpildymo mokykla atsiųs naują sutarties PDF su visais duomenimis.
+        </p>
+      </div>`
+    : '';
   return {
-    subject: `Contract from ${d.schoolName || 'School'} — ${d.studentName || 'Student'}`,
+    subject: `Metinio mokescio sutartis${d.contractNumber ? ` Nr. ${d.contractNumber}` : ''} — ${d.studentName || 'Mokinys'}`,
     html: wrap(`
       <div class="header" style="${headerInlineStyle('#059669', '#047857')}">
-        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Annual Fee Contract</h1>
-        <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'School')}</p>
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Metinio mokesčio sutartis</h1>
+        <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'Mokykla')}</p>
       </div>
       <div class="body">
-        <p class="greeting">Dear ${esc(d.recipientName || d.parentName || d.studentName)},</p>
+        <p class="greeting">Sveiki, ${esc(d.recipientName || d.parentName || d.studentName)},</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          Please review the annual fee contract for <strong>${esc(d.studentName)}</strong> at ${esc(d.schoolName)}.
+          Prašome peržiūrėti metinio mokesčio sutartį mokiniui <strong>${esc(d.studentName)}</strong> (${esc(d.schoolName)}).
         </p>
         <div class="info-card">
           <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-            ${td('Student', esc(d.studentName))}
-            ${td('Annual Fee', d.annualFee ? `€${d.annualFee}` : '—')}
-            ${td('Date', d.date || new Date().toLocaleDateString('lt-LT'), false)}
+            ${td('Sutarties Nr.', esc(d.contractNumber || '—'))}
+            ${td('Mokinys', esc(d.studentName))}
+            ${td('Metinis mokestis', d.annualFee ? `€${d.annualFee}` : '—')}
+            ${td('Tėvų telefonas', esc(d.parentPhone || '—'))}
+            ${td('Vaiko gimimo data', esc(d.childBirthDate || '—'))}
+            ${td('Adresas', esc(d.address || '—'))}
+            ${td('Data', d.date || new Date().toLocaleDateString('lt-LT'), false)}
           </table>
         </div>
-        ${d.contractBody ? `<div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:12px; padding:20px; margin:20px 0; white-space:pre-wrap; font-size:13px; color:#374151; line-height:1.6;">${d.contractBody}</div>` : ''}
-        ${d.pdfUrl ? `<div style="margin:16px 0 20px;">${outlookEmailButton(d.pdfUrl, 'Open PDF Contract', '#059669', { fontWeight: '600', fontSize: '14px', padding: '12px 24px' })}</div>` : ''}
-        <p style="color:#6b7280; font-size:13px;">If you have questions, please contact the school at ${esc(d.schoolEmail || '')}.</p>
+        ${d.contractBody ? '' : ''}
+        ${missingFieldsHtml}
+        ${d.pdfUrl ? `<div style="margin:16px 0 10px;">${outlookEmailButton(d.pdfUrl, 'Atidaryti PDF sutartį', '#059669', { fontWeight: '600', fontSize: '14px', padding: '12px 24px' })}</div>` : ''}
+        ${missingFields.length > 0 && completionLink ? `<div style="margin:0 0 20px;">${outlookEmailButton(completionLink, 'Papildyti trūkstamus duomenis', '#2563eb', { fontWeight: '600', fontSize: '14px', padding: '12px 24px' })}</div>` : ''}
+        <p style="color:#6b7280; font-size:13px;">Jei turite klausimų, susisiekite su mokykla: ${esc(d.schoolEmail || '')}.</p>
       </div>${footerFor(locale)}`, locale),
   };
 }
@@ -1349,27 +1422,27 @@ function schoolContract(d: any, locale: Locale) {
 function schoolInstallmentRequest(d: any, locale: Locale) {
   const appUrl = getAppUrl();
   return {
-    subject: `Payment request — Installment #${d.installmentNumber || ''}`,
+    subject: `Mokėjimo prašymas — įmoka #${d.installmentNumber || ''}`,
     html: wrap(`
       <div class="header" style="${headerInlineStyle('#059669', '#047857')}">
-        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Payment Request</h1>
-        <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'School')}</p>
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Mokėjimo prašymas</h1>
+        <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'Mokykla')}</p>
       </div>
       <div class="body">
-        <p class="greeting">Dear ${esc(d.recipientName || d.parentName || d.studentName)},</p>
+        <p class="greeting">Sveiki, ${esc(d.recipientName || d.parentName || d.studentName)},</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          A payment is due for <strong>${esc(d.studentName)}</strong>'s annual fee at ${esc(d.schoolName)}.
+          Atėjo laikas apmokėti <strong>${esc(d.studentName)}</strong> metinio mokesčio įmoką (${esc(d.schoolName)}).
         </p>
         <div class="info-card">
           <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-            ${td('Student', esc(d.studentName))}
-            ${td('Installment', `#${d.installmentNumber || '—'} of ${d.totalInstallments || '—'}`)}
-            ${td('Amount', d.amount ? `€${d.amount}` : '—')}
-            ${td('Due Date', d.dueDate || '—', false)}
+            ${td('Mokinys', esc(d.studentName))}
+            ${td('Įmoka', `#${d.installmentNumber || '—'} iš ${d.totalInstallments || '—'}`)}
+            ${td('Suma', d.amount ? `€${d.amount}` : '—')}
+            ${td('Terminas', d.dueDate || '—', false)}
           </table>
         </div>
-        ${d.paymentUrl ? `<div style="text-align:center; margin:24px 0;">${outlookEmailButton(d.paymentUrl, 'Pay Now', '#059669', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}</div>` : ''}
-        <p style="color:#6b7280; font-size:13px;">If you have questions, please contact the school at ${esc(d.schoolEmail || '')}.</p>
+        ${d.paymentUrl ? `<div style="text-align:center; margin:24px 0;">${outlookEmailButton(d.paymentUrl, 'Apmokėti dabar', '#059669', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}</div>` : ''}
+        <p style="color:#6b7280; font-size:13px;">Jei turite klausimų, susisiekite su mokykla: ${esc(d.schoolEmail || '')}.</p>
       </div>${footerFor(locale)}`, locale),
   };
 }
@@ -1464,6 +1537,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!apiKey) {
       console.error('[send-email] RESEND_API_KEY not set');
       return res.status(503).json({ error: 'Email service not configured' });
+    }
+
+    if (type === 'school_contract') {
+      const missingFields = Array.isArray(rawData?.missingFields)
+        ? rawData.missingFields.map((x: any) => String(x || '').trim()).filter(Boolean)
+        : [];
+      const hasCompletionUrl = typeof rawData?.completionUrl === 'string' && rawData.completionUrl.trim().length > 0;
+      const contractId = typeof rawData?.contractId === 'string' ? rawData.contractId : '';
+      if (!hasCompletionUrl && missingFields.length > 0 && contractId) {
+        const generated = await createSchoolCompletionUrl(contractId, req);
+        if (generated) rawData.completionUrl = generated;
+      }
     }
 
     const data = sanitizeEmailData(rawData);
@@ -1570,8 +1655,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       html: emailContent.html,
     };
 
-    if (Array.isArray(body.attachments) && body.attachments.length > 0) {
-      emailPayload.attachments = body.attachments.map((a: any) => ({
+    const rawAttachments = (req.body as any)?.attachments;
+    if (Array.isArray(rawAttachments) && rawAttachments.length > 0) {
+      emailPayload.attachments = rawAttachments.map((a: any) => ({
         filename: a.filename || 'document.pdf',
         content: Buffer.from(a.content, 'base64'),
       }));

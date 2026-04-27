@@ -397,11 +397,14 @@ export default function CalendarPage() {
     // Use UserContext profile instead of fetching again
     const { data: profileData } = await supabase
       .from('profiles')
-      .select('stripe_account_id, google_calendar_connected, organization_id, personal_meeting_link')
+      .select('stripe_account_id, google_calendar_connected, organization_id, personal_meeting_link, subscription_plan, manual_subscription_exempt')
       .eq('id', user.id)
       .single();
     setIsOrgTutor(!!profileData?.organization_id);
-    setStripeConnected(!!profileData?.stripe_account_id);
+    const isManualOnlyPlan =
+      !profileData?.organization_id &&
+      (profileData?.subscription_plan === 'subscription_only' || profileData?.manual_subscription_exempt === true);
+    setStripeConnected(!!profileData?.stripe_account_id || isManualOnlyPlan);
     setGoogleCalendarConnected(!!profileData?.google_calendar_connected);
     setTutorMeetingLink((profileData as any)?.personal_meeting_link || '');
 

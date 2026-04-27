@@ -43,7 +43,7 @@ function DateInput({ value, onChange, min, max, disabled, className, id }: DateI
   }
 
   const displayValue = selectedDate
-    ? format(selectedDate, "P", { locale: dateFnsLocale })
+    ? format(selectedDate, "dd/MM/yyyy", { locale: dateFnsLocale })
     : undefined
 
   return (
@@ -62,7 +62,7 @@ function DateInput({ value, onChange, min, max, disabled, className, id }: DateI
           )}
         >
           <span className={displayValue ? "text-foreground" : "text-muted-foreground"}>
-            {displayValue || "yyyy-mm-dd"}
+            {displayValue || "dd/mm/yyyy"}
           </span>
           <CalendarDays className="ml-auto h-4 w-4 text-muted-foreground" />
         </button>

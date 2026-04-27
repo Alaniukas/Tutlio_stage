@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, CreditCard, Send, CheckCircle, Clock, AlertCircle, Trash2, Loader2 } from 'lucide-react';
+import { Plus, CreditCard, Send, CheckCircle, Clock, AlertCircle, Trash2, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import Toast from '@/components/Toast';
 import { authHeaders } from '@/lib/apiHelpers';
 import { sendEmail } from '@/lib/email';
@@ -71,8 +71,15 @@ export default function CompanyPayments() {
   const [rows, setRows] = useState<NewInstallmentRow[]>([{ amount: '', due_date: '' }]);
   const [saving, setSaving] = useState(false);
   const [sendingId, setSendingId] = useState<string | null>(null);
+  const [collapsedContracts, setCollapsedContracts] = useState<Record<string, boolean>>({});
 
-  useEffect(() => { if (!getCached(PAYMENTS_CACHE_KEY)) load(); }, []);
+  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('success') === '1' || params.get('cancelled') === '1' || params.get('installment')) {
+      reload();
+    }
+  }, [location.search]);
 
   const load = async () => {
     if (!getCached(PAYMENTS_CACHE_KEY)) setLoading(true);
@@ -95,18 +102,19 @@ export default function CompanyPayments() {
     const [cRes, iRes] = await Promise.all([
       supabase
         .from('school_contracts')
-        .select('id, student_id, annual_fee, signing_status, student:students(full_name, email, payer_email, payer_name)')
+        .select('id, student_id, annual_fee, signing_status, archived_at, student:students(full_name, email, payer_email, payer_name)')
         .eq('organization_id', admin.organization_id)
+        .is('archived_at', null)
         .eq('signing_status', 'signed')
         .order('created_at', { ascending: false }),
       supabase
         .from('school_payment_installments')
-        .select('*, contract:school_contracts(id, student_id, annual_fee, signing_status, organization_id, student:students(full_name, email, payer_email, payer_name))')
+        .select('*, contract:school_contracts(id, student_id, annual_fee, signing_status, organization_id, archived_at, student:students(full_name, email, payer_email, payer_name))')
         .order('due_date', { ascending: true }),
     ]);
 
     const cData = cRes.data || [];
-    const filtered = (iRes.data || []).filter((i: any) => i.contract?.organization_id === admin.organization_id);
+    const filtered = (iRes.data || []).filter((i: any) => i.contract?.organization_id === admin.organization_id && !i.contract?.archived_at);
     setContracts(cData);
     setInstallments(filtered);
     setCache(PAYMENTS_CACHE_KEY, { orgId: admin.organization_id, orgName: name, orgEmail: email, contracts: cData, installments: filtered });
@@ -229,6 +237,10 @@ export default function CompanyPayments() {
     return acc;
   }, {});
 
+  const toggleContractCollapse = (contractId: string) => {
+    setCollapsedContracts((prev) => ({ ...prev, [contractId]: !prev[contractId] }));
+  };
+
   return (
     <>
       <div className="max-w-5xl mx-auto space-y-6">
@@ -261,11 +273,12 @@ export default function CompanyPayments() {
             const student = contract?.student;
             const totalPaid = items.filter((i) => i.payment_status === 'paid').reduce((s, i) => s + Number(i.amount), 0);
             const totalDue = items.reduce((s, i) => s + Number(i.amount), 0);
+            const isCollapsed = collapsedContracts[contractId] !== false;
 
             return (
               <div key={contractId} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                 <div className="px-5 py-4 border-b border-gray-100 bg-gray-50/50">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-4">
                     <div>
                       <p className="font-semibold text-gray-900">{student?.full_name || '—'}</p>
                       <p className="text-sm text-gray-500">
@@ -273,11 +286,22 @@ export default function CompanyPayments() {
                         {t('school.paidProgress')} &euro;{totalPaid.toFixed(2)} / &euro;{totalDue.toFixed(2)}
                       </p>
                     </div>
-                    <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
-                      <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${totalDue > 0 ? (totalPaid / totalDue) * 100 : 0}%` }} />
+                    <div className="flex items-center gap-3">
+                      <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
+                        <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${totalDue > 0 ? (totalPaid / totalDue) * 100 : 0}%` }} />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => toggleContractCollapse(contractId)}
+                        className="inline-flex items-center gap-1 text-xs text-gray-600 hover:text-gray-900 px-2 py-1 rounded-lg hover:bg-gray-100 transition-colors"
+                      >
+                        {isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+                        {isCollapsed ? 'Išskleisti' : 'Suskleisti'}
+                      </button>
                     </div>
                   </div>
                 </div>
+                {!isCollapsed && (
                 <div className="divide-y divide-gray-100">
                   {items.map((inst) => (
                     <div key={inst.id} className="px-5 py-3 flex items-center justify-between gap-4">
@@ -291,7 +315,7 @@ export default function CompanyPayments() {
                         {inst.paid_at && <span className="text-xs text-gray-400">{t('school.paidLabel')} {new Date(inst.paid_at).toLocaleDateString('lt-LT')}</span>}
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        {inst.payment_status === 'pending' && (
+                        {inst.payment_status !== 'paid' && (
                           <Button size="sm" variant="outline" onClick={() => sendPaymentLink(inst)} disabled={sendingId === inst.id}>
                             {sendingId === inst.id ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <Send className="w-3.5 h-3.5 mr-1.5" />}
                             {t('school.sendLink')}
@@ -306,6 +330,7 @@ export default function CompanyPayments() {
                     </div>
                   ))}
                 </div>
+                )}
               </div>
             );
           })

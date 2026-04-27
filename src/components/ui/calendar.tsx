@@ -1,6 +1,7 @@
 import * as React from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { DayPicker } from "react-day-picker"
+import { format } from "date-fns"
 
 import { cn } from "@/lib/utils"
 import { buttonVariants } from "@/components/ui/button"
@@ -16,28 +17,37 @@ function Calendar({
   ...props
 }: CalendarProps) {
   const { dateFnsLocale } = useTranslation();
+  const now = new Date();
+  const defaultStartMonth = new Date(1950, 0);
+  const defaultEndMonth = new Date(now.getFullYear() + 5, 11);
 
   return (
     <DayPicker
       showOutsideDays={showOutsideDays}
       weekStartsOn={weekStartsOn}
       locale={dateFnsLocale}
+      captionLayout={props.captionLayout ?? "dropdown"}
+      startMonth={props.startMonth ?? defaultStartMonth}
+      endMonth={props.endMonth ?? defaultEndMonth}
       className={cn("p-3", className)}
       classNames={{
-        months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
-        month: "space-y-4",
-        // Keep caption/nav above the day grid so month arrows are always clickable.
-        month_caption: "flex justify-center pt-1 relative items-center z-10",
-        caption: "flex justify-center pt-1 relative items-center z-10",
-        caption_label: "text-sm font-medium",
-        nav: "space-x-1 flex items-center z-20",
+        months: "flex flex-col",
+        month: "space-y-3",
+        month_caption: "relative flex h-10 items-center justify-center",
+        caption: "relative flex h-10 items-center justify-center",
+        caption_label: "sr-only",
+        dropdowns: "inline-flex items-center gap-2 rounded-md border border-border bg-muted/30 px-2 py-1",
+        dropdown_root: "relative",
+        months_dropdown: "h-8 rounded-md border border-border bg-background px-2.5 text-sm font-medium text-foreground outline-none focus:ring-2 focus:ring-ring",
+        years_dropdown: "h-8 rounded-md border border-border bg-background px-2.5 text-sm font-medium text-foreground outline-none focus:ring-2 focus:ring-ring",
+        nav: "pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 items-center justify-between",
         button_previous: cn(
-          buttonVariants({ variant: "outline" }),
-          "h-7 w-7 bg-background p-0 opacity-70 hover:opacity-100 absolute left-1 z-20 shadow-sm"
+          buttonVariants({ variant: "ghost" }),
+          "pointer-events-auto h-8 w-8 rounded-full border border-border bg-background p-0 text-muted-foreground hover:bg-accent hover:text-foreground"
         ),
         button_next: cn(
-          buttonVariants({ variant: "outline" }),
-          "h-7 w-7 bg-background p-0 opacity-70 hover:opacity-100 absolute -right-1 z-20 shadow-sm"
+          buttonVariants({ variant: "ghost" }),
+          "pointer-events-auto h-8 w-8 rounded-full border border-border bg-background p-0 text-muted-foreground hover:bg-accent hover:text-foreground"
         ),
         month_grid: "w-full border-collapse space-y-1",
         weekdays: "flex",
@@ -68,6 +78,10 @@ function Calendar({
           ) : (
             <ChevronRight className="h-4 w-4" />
           ),
+      }}
+      formatters={{
+        formatCaption: (month, options) => format(month, "yyyy MMMM", { locale: options?.locale }),
+        ...props.formatters,
       }}
       {...props}
     />

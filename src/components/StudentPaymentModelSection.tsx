@@ -2,18 +2,15 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Wallet, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { resolvePerLessonPaymentRules, type LessonPaymentTiming } from '@/lib/studentPaymentModel';
-
-const DEFAULT_VALUE = '__default__';
+import {
+  resolvePerLessonPaymentRules,
+  parseStudentPaymentModels,
+  serializeStudentPaymentModels,
+  type LessonPaymentTiming,
+  type PaymentModel,
+} from '@/lib/studentPaymentModel';
 
 export type StudentPaymentModelPatch = {
   payment_model?: string | null;
@@ -47,7 +44,8 @@ export default function StudentPaymentModelSection({
 }: Props) {
   const [saving, setSaving] = useState(false);
   const normalizedValue = value === '' ? null : value;
-  const selectValue = normalizedValue ?? DEFAULT_VALUE;
+  const selectedModels = parseStudentPaymentModels(normalizedValue);
+  const hasPerLesson = selectedModels.has('per_lesson');
 
   const effectiveWhenPerLesson = resolvePerLessonPaymentRules(
     {
@@ -62,11 +60,11 @@ export default function StudentPaymentModelSection({
   const [draftHours, setDraftHours] = useState<number>(effectiveWhenPerLesson.payment_deadline_hours);
 
   useEffect(() => {
-    if (normalizedValue !== 'per_lesson') return;
+    if (!hasPerLesson) return;
     setDraftTiming(effectiveWhenPerLesson.payment_timing);
     setDraftHours(effectiveWhenPerLesson.payment_deadline_hours);
   }, [
-    normalizedValue,
+    hasPerLesson,
     perLessonTiming,
     perLessonDeadlineHours,
     inheritedLessonPayment.payment_timing,
@@ -82,30 +80,40 @@ export default function StudentPaymentModelSection({
     return !error;
   };
 
-  const handleModelChange = async (v: string) => {
-    const next = v === DEFAULT_VALUE ? null : v;
-    const current = normalizedValue ?? null;
+  const saveModelSelection = async (models: Set<PaymentModel>) => {
+    const next = serializeStudentPaymentModels(models);
+    const current = serializeStudentPaymentModels(selectedModels);
     if (next === current) return;
 
     setSaving(true);
     const payload: Record<string, unknown> = { payment_model: next };
-    if (next !== 'per_lesson') {
+    if (!models.has('per_lesson')) {
       payload.per_lesson_payment_timing = null;
       payload.per_lesson_payment_deadline_hours = null;
     }
     const { error } = await supabase.from('students').update(payload).eq('id', studentId);
     setSaving(false);
     if (!error) {
-      if (next !== 'per_lesson') {
-        onSaved({
-          payment_model: next,
-          per_lesson_payment_timing: null,
-          per_lesson_payment_deadline_hours: null,
-        });
-      } else {
-        onSaved({ payment_model: next });
-      }
+      onSaved({
+        payment_model: next,
+        ...(models.has('per_lesson')
+          ? {}
+          : { per_lesson_payment_timing: null, per_lesson_payment_deadline_hours: null }),
+      });
     }
+  };
+
+  const toggleModel = async (model: PaymentModel) => {
+    if (disabled || saving) return;
+    const next = new Set<PaymentModel>(selectedModels);
+    if (next.has(model)) next.delete(model);
+    else next.add(model);
+    await saveModelSelection(next);
+  };
+
+  const resetToDefault = async () => {
+    if (disabled || saving) return;
+    await saveModelSelection(new Set());
   };
 
   const inheritedLabel =
@@ -117,14 +125,14 @@ export default function StudentPaymentModelSection({
 
   const hours = Math.max(1, Number(draftHours) || 24);
   const sameAsInherited =
-    normalizedValue === 'per_lesson' &&
+    hasPerLesson &&
     draftTiming === inheritedLessonPayment.payment_timing &&
     hours === inheritedLessonPayment.payment_deadline_hours;
 
   const hasStoredOverride = perLessonTiming != null || perLessonDeadlineHours != null;
 
   const savePerLessonTiming = async () => {
-    if (normalizedValue !== 'per_lesson') return;
+    if (!hasPerLesson) return;
     if (beforeExceedsMin) return;
 
     if (sameAsInherited) {
@@ -164,26 +172,67 @@ export default function StudentPaymentModelSection({
         <strong>Numatytasis</strong> — joks atskiras modelis; taikomos <span className="whitespace-nowrap">„Finansai“</span> taisyklės.
         Pasirinkus variantą žemiau, jis įrašomas tik šiam mokiniui.
       </p>
-      <div className="space-y-1.5">
-        <Label className="text-xs text-gray-600">Mokėjimo modelis</Label>
-        <Select
-          value={selectValue}
-          onValueChange={(v) => void handleModelChange(v)}
-          disabled={disabled || saving}
-        >
-          <SelectTrigger className="rounded-xl bg-white text-sm">
-            <SelectValue placeholder="Pasirinkite..." />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={DEFAULT_VALUE}>Bendros finansų taisyklės (numatytasis)</SelectItem>
-            {allowPerLesson && <SelectItem value="per_lesson">Apmokėjimas už pamoką</SelectItem>}
-            <SelectItem value="monthly_billing">Mėnesinės sąskaitos</SelectItem>
-            <SelectItem value="prepaid_packages">Pamokų paketai</SelectItem>
-          </SelectContent>
-        </Select>
+      <div className="space-y-2">
+        <Label className="text-xs text-gray-600">Mokėjimo modeliai (galima pasirinkti kelis)</Label>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={disabled || saving}
+            onClick={() => void resetToDefault()}
+            className={cn(
+              'rounded-lg border px-3 py-2 text-xs font-medium transition-colors',
+              selectedModels.size === 0
+                ? 'border-violet-500 bg-violet-50 text-violet-900'
+                : 'border-slate-200 bg-white text-gray-700 hover:bg-slate-50',
+            )}
+          >
+            Bendros finansų taisyklės (numatytasis)
+          </button>
+          {allowPerLesson && (
+            <button
+              type="button"
+              disabled={disabled || saving}
+              onClick={() => void toggleModel('per_lesson')}
+              className={cn(
+                'rounded-lg border px-3 py-2 text-xs font-medium transition-colors',
+                selectedModels.has('per_lesson')
+                  ? 'border-violet-500 bg-violet-50 text-violet-900'
+                  : 'border-slate-200 bg-white text-gray-700 hover:bg-slate-50',
+              )}
+            >
+              Apmokėjimas už pamoką
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={disabled || saving}
+            onClick={() => void toggleModel('monthly_billing')}
+            className={cn(
+              'rounded-lg border px-3 py-2 text-xs font-medium transition-colors',
+              selectedModels.has('monthly_billing')
+                ? 'border-violet-500 bg-violet-50 text-violet-900'
+                : 'border-slate-200 bg-white text-gray-700 hover:bg-slate-50',
+            )}
+          >
+            Mėnesinės sąskaitos
+          </button>
+          <button
+            type="button"
+            disabled={disabled || saving}
+            onClick={() => void toggleModel('prepaid_packages')}
+            className={cn(
+              'rounded-lg border px-3 py-2 text-xs font-medium transition-colors',
+              selectedModels.has('prepaid_packages')
+                ? 'border-violet-500 bg-violet-50 text-violet-900'
+                : 'border-slate-200 bg-white text-gray-700 hover:bg-slate-50',
+            )}
+          >
+            Pamokų paketai
+          </button>
+        </div>
       </div>
 
-      {normalizedValue === 'per_lesson' && (
+      {hasPerLesson && (
         <div className="rounded-lg border border-amber-200 bg-amber-50/40 p-3 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-xs text-gray-700">
