@@ -25,9 +25,7 @@ export default function ParentRegister() {
 
     (async () => {
       const { data, error: fetchErr } = await supabase
-        .from('parent_invites')
-        .select('parent_email, parent_name, student_id, used, students(full_name)')
-        .eq('token', token)
+        .rpc('get_parent_invite_preview', { p_token: token })
         .maybeSingle();
 
       if (fetchErr || !data) {
@@ -38,7 +36,7 @@ export default function ParentRegister() {
         setInvite({
           parent_email: data.parent_email,
           parent_name: data.parent_name || '',
-          student_name: (data.students as any)?.full_name || '',
+          student_name: data.student_full_name || '',
         });
         setFullName(data.parent_name || '');
       }

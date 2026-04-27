@@ -19,6 +19,9 @@ interface StudentData {
     payer_phone?: string | null;
     child_birth_date?: string | null;
     organization_id?: string | null;
+    tutor_full_name?: string | null;
+    tutor_cancellation_hours?: number | null;
+    tutor_cancellation_fee_percent?: number | null;
     tutor?: { full_name: string };
 }
 
@@ -137,15 +140,9 @@ export default function StudentOnboarding() {
                 return;
             }
 
-            let tutorProfile: { full_name: string } | null = null;
-            if (data.tutor_id) {
-                const { data: tp } = await supabase
-                    .from('profiles')
-                    .select('full_name')
-                    .eq('id', data.tutor_id)
-                    .single();
-                tutorProfile = tp;
-            }
+            const tutorProfile = data.tutor_full_name
+                ? { full_name: data.tutor_full_name }
+                : null;
 
             setStudentData({ ...data, tutor: tutorProfile ?? undefined });
             setEmail(data.email || '');
@@ -159,15 +156,8 @@ export default function StudentOnboarding() {
             setAge(calculateAgeFromDate(data.child_birth_date));
 
             if (data.tutor_id) {
-                const { data: tutorSettings } = await supabase
-                    .from('profiles')
-                    .select('cancellation_hours, cancellation_fee_percent')
-                    .eq('id', data.tutor_id)
-                    .single();
-                if (tutorSettings) {
-                    setCancellationHours(tutorSettings.cancellation_hours ?? 24);
-                    setCancellationFeePercent(tutorSettings.cancellation_fee_percent ?? 0);
-                }
+                setCancellationHours(data.tutor_cancellation_hours ?? 24);
+                setCancellationFeePercent(data.tutor_cancellation_fee_percent ?? 0);
 
                 const { data: subs } = await supabase
                     .from('subjects')

@@ -46,9 +46,7 @@ export default function Register() {
     if (!orgToken) return;
     const validateToken = async () => {
       const { data } = await supabase
-        .from('tutor_invites')
-        .select('id, used, organization_id, organizations(name)')
-        .eq('token', orgToken)
+        .rpc('validate_tutor_invite_token', { p_token: orgToken })
         .maybeSingle();
 
       if (!data || data.used) {
@@ -57,7 +55,7 @@ export default function Register() {
         setOrgTokenValid(true);
         setOrgInviteId(data.id);
         setOrgId(data.organization_id);
-        setOrgName((data.organizations as any)?.name || null);
+        setOrgName(data.organization_name || null);
       }
     };
     validateToken();

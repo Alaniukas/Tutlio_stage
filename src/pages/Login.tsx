@@ -505,11 +505,8 @@ export default function Login() {
     const code = tutorOrgCode.trim().toUpperCase();
     if (!code) return;
     setTutorOrgCodeError(null);
-    // Validate code exists in tutor_invites
     const { data, error } = await supabase
-      .from('tutor_invites')
-      .select('id, used')
-      .eq('token', code)
+      .rpc('validate_tutor_invite_token', { p_token: code })
       .maybeSingle();
     if (error || !data) {
       setTutorOrgCodeError(t('login.codeNotFound'));
