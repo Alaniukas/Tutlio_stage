@@ -140,6 +140,26 @@ export default function CreateInvoiceModal({
         const tutorId = tutorIdsForQuery[0];
         if (!tutorId) throw new Error(t('invoiceCreate.noSessions'));
 
+        const periodInvoiceResp = await fetch(
+          `/api/org-tutor-invoices?periodStart=${encodeURIComponent(periodStart)}&periodEnd=${encodeURIComponent(periodEnd)}`,
+          {
+            method: 'GET',
+            headers: await authHeaders(),
+          },
+        );
+        const periodInvoiceJson = await periodInvoiceResp.json().catch(() => ({}));
+        if (periodInvoiceResp.ok) {
+          const periodInvoices = (periodInvoiceJson.periodInvoices || []) as Array<{ invoice_number?: string; total_amount?: number }>;
+          if (periodInvoices.length > 0) {
+            const totalIssued = periodInvoices.reduce((sum, inv) => sum + Number(inv.total_amount || 0), 0);
+            const nums = periodInvoices.map((inv) => inv.invoice_number).filter(Boolean).join(', ');
+            setError(`Už laikotarpį ${periodStart} – ${periodEnd} sąskaita jau išrašyta (${nums || 'be numerio'}), suma: €${totalIssued.toFixed(2)}.`);
+            setSessions([]);
+            setPreviewMode(false);
+            return;
+          }
+        }
+
         const [{ data: prof }, { data: sessRows, error: sessErr }] = await Promise.all([
           supabase.from('profiles').select('company_commission_percent').eq('id', tutorId).maybeSingle(),
           supabase

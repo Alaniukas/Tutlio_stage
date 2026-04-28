@@ -61,8 +61,18 @@ export default function CompanyStats() {
       .select('user_id')
       .eq('organization_id', adminRow.organization_id);
     const adminIds = new Set((adminUsers || []).map((a: any) => a.user_id));
+    const { data: linkedStudents } = await supabase
+      .from('students')
+      .select('linked_user_id')
+      .eq('organization_id', adminRow.organization_id)
+      .not('linked_user_id', 'is', null);
+    const linkedStudentUserIds = new Set(
+      (linkedStudents || [])
+        .map((s: any) => s.linked_user_id)
+        .filter((id: string | null | undefined): id is string => Boolean(id)),
+    );
 
-    const tutorList = (tutorData || []).filter(t => !adminIds.has(t.id));
+    const tutorList = (tutorData || []).filter((t) => !adminIds.has(t.id) && !linkedStudentUserIds.has(t.id));
 
     if (tutorList.length === 0) { setLoading(false); return; }
 
@@ -96,52 +106,20 @@ export default function CompanyStats() {
     const { data: sessions } = await query.limit(10000);
     const allSessions = sessions || [];
 
-    // Include paid lesson packages (including trial packages) so manual confirmations
-    // are reflected in stats immediately, not only after lessons are conducted.
-    let packagesQuery = supabase
-      .from('lesson_packages')
-      .select('tutor_id, total_price, total_lessons, paid_at')
-      .in('tutor_id', tutorIds)
-      .eq('paid', true)
-      .not('paid_at', 'is', null);
-
-    if (isFilterActive) {
-      if (filterStartDate) {
-        const start = new Date(filterStartDate);
-        start.setHours(0, 0, 0, 0);
-        packagesQuery = packagesQuery.gte('paid_at', start.toISOString());
-      }
-      if (filterEndDate) {
-        const end = new Date(filterEndDate);
-        end.setHours(23, 59, 59, 999);
-        packagesQuery = packagesQuery.lte('paid_at', end.toISOString());
-      }
-    } else {
-      const oneYearAgo = new Date();
-      oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-      packagesQuery = packagesQuery.gte('paid_at', oneYearAgo.toISOString());
-    }
-
-    const { data: paidPackages } = await packagesQuery.limit(10000);
-    const allPaidPackages = paidPackages || [];
-
     const stats: TutorStat[] = tutorList.map(tutor => {
       const tutorSessions = allSessions.filter(s => s.tutor_id === tutor.id);
       // Count paid: Stripe paid, confirmed, or status=completed
       const paid = tutorSessions.filter(s =>
         s.status === 'completed' || ['paid', 'confirmed'].includes((s as any).payment_status)
       );
-      const tutorPaidPackages = allPaidPackages.filter((p: any) => p.tutor_id === tutor.id);
       const cancelledByTutor = tutorSessions.filter(s => s.status === 'cancelled' && (s as any).cancelled_by === 'tutor');
       const cancelledByStudent = tutorSessions.filter(s => s.status === 'cancelled' && (s as any).cancelled_by === 'student');
       const totalCancelledCount = tutorSessions.filter(s => s.status === 'cancelled').length;
       const sessionsEarnings = paid.reduce((sum, s) => sum + (s.price || 0), 0);
-      const packagesEarnings = tutorPaidPackages.reduce((sum: number, p: any) => sum + Number(p.total_price || 0), 0);
-      const earnings = sessionsEarnings + packagesEarnings;
+      const earnings = sessionsEarnings;
       // company_commission_percent now stores fixed tutor pay amount (€), not a percentage
       const tutorPayPerSession = (tutor as any).company_commission_percent || 0;
-      const packageLessons = tutorPaidPackages.reduce((sum: number, p: any) => sum + Number(p.total_lessons || 0), 0);
-      const netEarnings = tutorPayPerSession * (paid.length + packageLessons);
+      const netEarnings = tutorPayPerSession * paid.length;
       const companyCommission = earnings - netEarnings;
 
       return {

@@ -26,6 +26,7 @@ interface LessonPackage {
     id: string;
     total_lessons: number;
     available_lessons: number;
+    expires_at?: string | null;
     subject_id: string;
     subjects?: any;
 }
@@ -180,12 +181,18 @@ export default function StudentDashboard() {
 
             const { data: packagesData } = await supabase
                 .from('lesson_packages')
-                .select('id, total_lessons, available_lessons, subject_id, subjects(name)')
+                .select('id, total_lessons, available_lessons, expires_at, subject_id, subjects(name)')
                 .eq('student_id', studentRow.id)
                 .eq('active', true)
                 .eq('paid', true)
                 .gt('available_lessons', 0);
-            setActivePackages(packagesData || []);
+            const nowTs = Date.now();
+            const visiblePackages = ((packagesData || []) as LessonPackage[]).filter((pkg) => {
+                if (!pkg.expires_at) return true;
+                const ts = new Date(pkg.expires_at).getTime();
+                return !Number.isNaN(ts) && ts > nowTs;
+            });
+            setActivePackages(visiblePackages);
 
             const { data: installmentsData } = await supabase
                 .from('school_payment_installments')
@@ -299,11 +306,23 @@ export default function StudentDashboard() {
                                 {t('studentDash.totalRemaining', { available: activePackages.reduce((sum, p) => sum + p.available_lessons, 0), total: activePackages.reduce((sum, p) => sum + p.total_lessons, 0) })}
                             </strong>
                         </p>
+                        {activePackages.length === 1 && activePackages[0].expires_at && (
+                            <p className="text-xs text-violet-700 mb-2">
+                                {t('package.expiresAt', {
+                                    date: format(new Date(activePackages[0].expires_at), "yyyy 'm.' MMMM d 'd.'", { locale: dateFnsLocale }),
+                                })}
+                            </p>
+                        )}
                         {activePackages.length > 1 && (
                             <div className="space-y-2 mt-3 pt-3 border-t border-violet-200">
                                 {activePackages.map((pkg, idx) => (
                                     <div key={pkg.id} className="flex items-center justify-between text-xs">
-                                        <span className="text-violet-600">{pkg.subjects?.name || t('studentDash.packageN', { n: idx + 1 })}</span>
+                                        <span className="text-violet-600">
+                                            {pkg.subjects?.name || t('studentDash.packageN', { n: idx + 1 })}
+                                            {pkg.expires_at
+                                                ? ` · ${t('package.expiresAt', { date: format(new Date(pkg.expires_at), "yyyy 'm.' MMMM d 'd.'", { locale: dateFnsLocale }) })}`
+                                                : ''}
+                                        </span>
                                         <span className="font-semibold text-violet-800">
                                             {pkg.available_lessons}/{pkg.total_lessons} {t('studentDash.lessonsSuffix')}
                                         </span>

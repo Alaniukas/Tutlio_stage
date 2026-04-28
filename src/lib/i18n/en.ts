@@ -854,6 +854,7 @@ export const en: Record<string, string> = {
   'compSess.allStatuses': 'All statuses',
   'compSess.allStudents': 'All students',
   'compSess.allTutors': 'All tutors',
+  'compSess.cancelledBy': 'Cancelled by',
   'compSess.cancelledLabel': 'Cancelled',
   'compSess.cancellationReason': 'Cancellation reason',
   'compSess.close': 'Close',
@@ -1042,7 +1043,7 @@ export const en: Record<string, string> = {
   'compStu.confirmFailed': 'Confirmation failed',
   'compStu.confirmPayment': 'Confirm payment',
   'compStu.confirmRemoveTutor': 'Confirm remove tutor',
-  'compStu.connected': 'Connected',
+  'compStu.connected': 'Account created',
   'compStu.deleteBtn': 'Delete',
   'compStu.deleteStudentLabel': 'Delete student',
   'compStu.durationMin': 'Duration (min)',
@@ -2992,6 +2993,7 @@ export const en: Record<string, string> = {
   'stu.recentCompleted': 'Recent lessons',
   'stu.noRecentCompleted': 'No completed lessons',
   'stu.connected': 'Connected',
+  'stu.adminCommentTitle': 'Admin comment',
   'stu.copyLink': 'Copy link',
   'stu.deleteConfirm': 'Are you sure you want to delete this student?',
   'stu.deletePriceConfirm': 'Are you sure you want to delete this individual price?',
@@ -3518,7 +3520,7 @@ export const en: Record<string, string> = {
   'invoiceCreate.selectPeriodInfo': 'Select a period and grouping type to generate invoices.',
   'invoiceCreate.orgTutorInfo': 'Select a period – the invoice will be issued to your company with your earnings data.',
   'invoiceCreate.orgAdminInfo':
-    'Select a period. Data is loaded for all organization tutors (not your admin account).',
+    'Sales invoices will be issued to clients for completed payments.',
   'invoiceCreate.stripeSfHintFull':
     'Shows lessons already paid (including via Stripe) and paid prepaid packages that are not yet on a sales invoice. Lesson rows use the lesson date; package rows use the Stripe payment date — both must fall in the selected period. For organization tutors or when issuing from the company page, data includes all relevant tutors.',
   'invoiceCreate.noPaidStripePeriod':
@@ -3569,6 +3571,8 @@ export const en: Record<string, string> = {
   'invoices.lessons': 'lessons',
   'invoices.generating': 'Generating...',
   'invoices.generateForTutors': 'Generate invoices ({count} tutors)',
+  'invoices.alreadyIssuedForPeriod': 'Invoices are already issued for these tutors in period {from} – {to}:',
+  'invoices.checkingIssuedStatus': 'Checking if invoices are already issued for this period...',
   'invoices.downloadAll': 'Download all ({count})',
   'invoices.downloadPdf': 'Download PDF',
   'invoices.markPaid': 'Mark as paid',

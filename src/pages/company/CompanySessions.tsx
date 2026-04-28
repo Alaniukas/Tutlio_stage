@@ -138,7 +138,19 @@ export default function CompanySessions() {
       .from('profiles')
       .select('id, full_name')
       .eq('organization_id', adminRow.organization_id);
-    const tutorList = (tutorData || []).filter((t: any) => !adminIds.has(t.id));
+    const { data: linkedStudents } = await supabase
+      .from('students')
+      .select('linked_user_id')
+      .eq('organization_id', adminRow.organization_id)
+      .not('linked_user_id', 'is', null);
+    const linkedStudentUserIds = new Set(
+      (linkedStudents || [])
+        .map((s: any) => s.linked_user_id)
+        .filter((id: string | null | undefined): id is string => Boolean(id)),
+    );
+    const tutorList = (tutorData || []).filter(
+      (t: any) => !adminIds.has(t.id) && !linkedStudentUserIds.has(t.id),
+    );
     setTutors(tutorList);
 
     const [studentsResult, subjectsResult] = await Promise.all([
@@ -839,6 +851,19 @@ export default function CompanySessions() {
                     <div>
                       <Label className="text-xs text-gray-500">{t('compSess.cancellationReason')}</Label>
                       <p className="text-sm mt-1 text-red-600">{selectedSession.cancellation_reason}</p>
+                    </div>
+                  )}
+
+                  {selectedSession.status === 'cancelled' && (
+                    <div>
+                      <Label className="text-xs text-gray-500">{t('compSess.cancelledBy')}</Label>
+                      <p className="text-sm mt-1 text-red-600">
+                        {selectedSession.cancelled_by === 'student'
+                          ? t('sessions.cancelledByStudent')
+                          : selectedSession.cancelled_by === 'tutor'
+                            ? t('sessions.cancelledByTutor')
+                            : '—'}
+                      </p>
                     </div>
                   )}
 

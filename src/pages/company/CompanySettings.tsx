@@ -124,7 +124,6 @@ export default function CompanySettings() {
   );
   const [trialCommentRequired, setTrialCommentRequired] = useState(sc?.trialCommentRequired ?? false);
   const [notifyTutorsOnAssign, setNotifyTutorsOnAssign] = useState(sc?.notifyTutorsOnAssign ?? false);
-  const [tutorLicenseCount, setTutorLicenseCount] = useState(sc?.tutorLicenseCount ?? 0);
 
   useEffect(() => { if (!getCached('company_settings')) fetchSettings(); }, []);
 
@@ -167,6 +166,7 @@ export default function CompanySettings() {
     let nextTrialDurationMinutes = 60;
     let nextTrialPriceEur = 0;
     let nextTrialCommentMode: TrialCommentMode = 'internal_only';
+    let nextTrialCommentRequired = false;
 
     if (orgData) {
       const rawFeat = (orgData as { features?: unknown }).features;
@@ -186,6 +186,7 @@ export default function CompanySettings() {
       const fcm = featObj['trial_lesson_comment_mode'];
       if (fcm === 'student_and_parent' || fcm === 'internal_only') nextTrialCommentMode = fcm;
       const fcr = featObj['trial_comment_required'];
+      nextTrialCommentRequired = fcr === true;
       nextSettings = {
         cancellation_hours: orgData.default_cancellation_hours || 24,
         cancellation_fee_percent: orgData.default_cancellation_fee_percent || 50,
@@ -208,9 +209,8 @@ export default function CompanySettings() {
       setTrialDurationMinutes(nextTrialDurationMinutes);
       setTrialPriceEur(nextTrialPriceEur);
       setTrialCommentMode(nextTrialCommentMode);
-      setTrialCommentRequired(fcr === true);
+      setTrialCommentRequired(nextTrialCommentRequired);
       setNotifyTutorsOnAssign(featObj['notify_tutors_on_student_assign'] === true);
-      setTutorLicenseCount((orgData as any).tutor_license_count ?? 0);
       setSettings(nextSettings);
       setLessonEditScope(nextLessonEditScope);
     }
@@ -226,7 +226,19 @@ export default function CompanySettings() {
       .from('profiles')
       .select('id, full_name')
       .eq('organization_id', adminRow.organization_id);
-    const tutorList = (tutorData || []).filter((t: any) => !adminIds.has(t.id));
+    const { data: linkedStudents } = await supabase
+      .from('students')
+      .select('linked_user_id')
+      .eq('organization_id', adminRow.organization_id)
+      .not('linked_user_id', 'is', null);
+    const linkedStudentUserIds = new Set(
+      (linkedStudents || [])
+        .map((s: any) => s.linked_user_id)
+        .filter((id: string | null | undefined): id is string => Boolean(id)),
+    );
+    const tutorList = (tutorData || []).filter(
+      (t: any) => !adminIds.has(t.id) && !linkedStudentUserIds.has(t.id),
+    );
     setOrgTutors(tutorList);
 
     const rawTemplates = (orgData as { org_subject_templates?: unknown } | null)?.org_subject_templates;
@@ -309,7 +321,7 @@ export default function CompanySettings() {
         trialDurationMinutes: nextTrialDurationMinutes,
         trialPriceEur: nextTrialPriceEur,
         trialCommentMode: nextTrialCommentMode,
-        trialCommentRequired: fcr === true,
+        trialCommentRequired: nextTrialCommentRequired,
         orgTutors: tutorList,
         subjects: merged,
       });
@@ -531,10 +543,13 @@ export default function CompanySettings() {
 
   const handleSave = async () => {
     if (!orgId) return;
-    setSaving(true);
-
-    const anyLessonEdit = anyOrgLessonEdit(lessonEditScope);
     const overwriteExistingTutors = confirm(t('compSet.confirmOverwrite'));
+    if (!overwriteExistingTutors) {
+      return;
+    }
+
+    setSaving(true);
+    const anyLessonEdit = anyOrgLessonEdit(lessonEditScope);
 
     const mergedFeatures: Record<string, unknown> = {
       ...orgFeaturesSnapshot,
@@ -563,7 +578,6 @@ export default function CompanySettings() {
         org_tutor_lesson_edit: lessonEditScope,
         org_tutors_can_edit_lesson_settings: anyLessonEdit,
         features: mergedFeatures,
-        tutor_license_count: Math.max(0, Number(tutorLicenseCount) || 0),
       })
       .eq('id', orgId);
 
@@ -577,55 +591,87 @@ export default function CompanySettings() {
       return;
     }
 
-    if (overwriteExistingTutors) {
-      const { data: adminUsers } = await supabase
-        .from('organization_admins')
-        .select('user_id')
-        .eq('organization_id', orgId);
-      const adminIds = new Set((adminUsers || []).map((a: { user_id: string }) => a.user_id));
+    const { data: adminUsers } = await supabase
+      .from('organization_admins')
+      .select('user_id')
+      .eq('organization_id', orgId);
+    const adminIds = new Set((adminUsers || []).map((a: { user_id: string }) => a.user_id));
 
-      const { data: orgProfiles } = await supabase
+    const { data: orgProfiles } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('organization_id', orgId);
+    const { data: linkedStudentsForSave } = await supabase
+      .from('students')
+      .select('linked_user_id')
+      .eq('organization_id', orgId)
+      .not('linked_user_id', 'is', null);
+    const linkedStudentUserIdsForSave = new Set(
+      (linkedStudentsForSave || [])
+        .map((s: any) => s.linked_user_id)
+        .filter((id: string | null | undefined): id is string => Boolean(id)),
+    );
+    const tutorIds = (orgProfiles || [])
+      .map((p: { id: string }) => p.id)
+      .filter((id: string) => !adminIds.has(id) && !linkedStudentUserIdsForSave.has(id));
+
+    if (tutorIds.length > 0) {
+      const { error: tutorsUpdateError } = await supabase
         .from('profiles')
-        .select('id')
-        .eq('organization_id', orgId);
-      const tutorIds = (orgProfiles || [])
-        .map((p: { id: string }) => p.id)
-        .filter((id: string) => !adminIds.has(id));
+        .update({
+          cancellation_hours: settings.cancellation_hours,
+          cancellation_fee_percent: settings.cancellation_fee_percent,
+          reminder_student_hours: settings.reminder_student_hours,
+          reminder_tutor_hours: settings.reminder_tutor_hours,
+          break_between_lessons: settings.break_between_lessons,
+          min_booking_hours: settings.min_booking_hours,
+          company_commission_percent: settings.company_commission_percent,
+        })
+        .in('id', tutorIds);
 
-      if (tutorIds.length > 0) {
-        const { error: tutorsUpdateError } = await supabase
-          .from('profiles')
-          .update({
-            cancellation_hours: settings.cancellation_hours,
-            cancellation_fee_percent: settings.cancellation_fee_percent,
-            reminder_student_hours: settings.reminder_student_hours,
-            reminder_tutor_hours: settings.reminder_tutor_hours,
-            break_between_lessons: settings.break_between_lessons,
-            min_booking_hours: settings.min_booking_hours,
-            company_commission_percent: settings.company_commission_percent,
-          })
-          .in('id', tutorIds);
-
-        if (tutorsUpdateError) {
-          setToastMessage({
-            message: t('compSet.savedButTutorsFailed'),
-            type: 'error',
-          });
-          setSaving(false);
-          return;
-        }
+      if (tutorsUpdateError) {
+        setToastMessage({
+          message: t('compSet.savedButTutorsFailed'),
+          type: 'error',
+        });
+        setSaving(false);
+        return;
       }
-
-      setToastMessage({
-        message: t('compSet.savedAndApplied', { count: String(tutorIds.length) }),
-        type: 'success',
-      });
-    } else {
-      setToastMessage({
-        message: t('compSet.savedDefaultsOnly'),
-        type: 'success',
-      });
     }
+
+    setToastMessage({
+      message: t('compSet.savedAndApplied', { count: String(tutorIds.length) }),
+      type: 'success',
+    });
+
+    const prevCache = getCached<any>('company_settings');
+    setCache('company_settings', {
+      ...(prevCache || {}),
+      orgId,
+      settings: {
+        cancellation_hours: settings.cancellation_hours,
+        cancellation_fee_percent: settings.cancellation_fee_percent,
+        reminder_student_hours: settings.reminder_student_hours,
+        reminder_tutor_hours: settings.reminder_tutor_hours,
+        break_between_lessons: settings.break_between_lessons,
+        min_booking_hours: settings.min_booking_hours,
+        company_commission_percent: settings.company_commission_percent,
+      },
+      lessonEditScope,
+      orgFeaturesSnapshot: mergedFeatures,
+      contactTutorStudentEmail,
+      contactTutorStudentPhone,
+      contactStudentTutorEmail,
+      contactStudentTutorPhone,
+      trialTopic,
+      trialDurationMinutes,
+      trialPriceEur,
+      trialCommentMode,
+      trialCommentRequired,
+      notifyTutorsOnAssign,
+      orgTutors,
+      subjects,
+    });
 
     setSaving(false);
   };
@@ -686,17 +732,6 @@ export default function CompanySettings() {
               <span className="text-sm text-gray-700">{t('compSet.notifyTutorsOnAssign')}</span>
             </label>
             <p className="text-xs text-gray-400 ml-8">{t('compSet.notifyTutorsOnAssignDesc')}</p>
-            <div className="pt-4 border-t border-gray-100">
-              <Label className="text-sm font-medium text-gray-700">{t('compSet.tutorLicenseCount')}</Label>
-              <p className="text-xs text-gray-400 mb-2">{t('compSet.tutorLicenseCountDesc')}</p>
-              <Input
-                type="number"
-                min={0}
-                value={tutorLicenseCount}
-                onChange={e => setTutorLicenseCount(Math.max(0, Number(e.target.value) || 0))}
-                className="rounded-xl w-32"
-              />
-            </div>
           </div>
 
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">

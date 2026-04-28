@@ -42,9 +42,21 @@ export default function FindTutorModal({ isOpen, onClose, orgId }: FindTutorModa
       const { data: adminUsers } = await supabase.from('organization_admins').select('user_id').eq('organization_id', orgId);
       const adminIds = new Set((adminUsers || []).map((a: any) => a.user_id));
       const { data: profiles } = await supabase.from('profiles').select('id, full_name, has_active_license').eq('organization_id', orgId);
+      const { data: linkedStudents } = await supabase
+        .from('students')
+        .select('linked_user_id')
+        .eq('organization_id', orgId)
+        .not('linked_user_id', 'is', null);
+      const linkedStudentUserIds = new Set(
+        (linkedStudents || [])
+          .map((s: any) => s.linked_user_id)
+          .filter((id: string | null | undefined): id is string => Boolean(id)),
+      );
       const { data: orgRow } = await supabase.from('organizations').select('tutor_license_count').eq('id', orgId).single();
       const orgUsesLicenses = (Number(orgRow?.tutor_license_count) || 0) > 0;
-      const tutorList = (profiles || []).filter((p: any) => !adminIds.has(p.id) && (!orgUsesLicenses || p.has_active_license !== false));
+      const tutorList = (profiles || []).filter(
+        (p: any) => !adminIds.has(p.id) && !linkedStudentUserIds.has(p.id) && (!orgUsesLicenses || p.has_active_license !== false),
+      );
       const map: Record<string, string> = {};
       tutorList.forEach((t: any) => { map[t.id] = t.full_name; });
       setTutors(map);

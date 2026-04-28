@@ -51,10 +51,20 @@ export default function CompanyMessages() {
       .from('profiles')
       .select('id, full_name, email')
       .eq('organization_id', adminRow.organization_id);
+    const { data: linkedStudents } = await supabase
+      .from('students')
+      .select('linked_user_id')
+      .eq('organization_id', adminRow.organization_id)
+      .not('linked_user_id', 'is', null);
+    const linkedStudentUserIds = new Set(
+      (linkedStudents || [])
+        .map((s: any) => s.linked_user_id)
+        .filter((id: string | null | undefined): id is string => Boolean(id)),
+    );
 
     if (!tutors || tutors.length === 0) { setOrgLoading(false); return; }
 
-    const tutorList = tutors.filter((p) => !adminIds.has(p.id));
+    const tutorList = tutors.filter((p) => !adminIds.has(p.id) && !linkedStudentUserIds.has(p.id));
     setOrgTutors(tutorList.map((t) => ({ id: t.id, full_name: t.full_name ?? '' })));
     const tutorIdSet = new Set(tutorList.map((t) => t.id));
     const tutorIds = tutorList.map((t) => t.id);

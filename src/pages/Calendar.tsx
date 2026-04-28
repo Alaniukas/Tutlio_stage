@@ -433,7 +433,7 @@ export default function CalendarPage() {
     // Note: Use .not() instead of .eq(false) to include NULL values (for backwards compatibility)
     const { data: sessionsData } = await supabase
       .from('sessions')
-      .select('*, student:students(full_name, email, phone, payer_email, payer_phone, grade, admin_comment)')
+      .select('*, student:students(full_name, email, phone, payer_email, payer_phone, grade, admin_comment, admin_comment_visible_to_tutor)')
       .eq('tutor_id', user.id)
       .not('hidden_from_calendar', 'eq', true)
       .limit(1000);
@@ -877,6 +877,24 @@ export default function CalendarPage() {
         return;
       }
     }
+    if (opts?.forceCreate) {
+      setPendingSlot({ start, end });
+      setSelectedSlot({ start, end });
+      setStartTime(format(start, "yyyy-MM-dd'T'HH:mm"));
+      setEndTime(format(end, "yyyy-MM-dd'T'HH:mm"));
+      setSelectedStudentId('');
+      setSelectedSubjectId('');
+      setMeetingLink('');
+      setTopic('');
+      setPrice(25);
+      setNewTutorComment('');
+      setNewShowCommentToStudent(false);
+      setIsRecurring(false);
+      setRecurringEndDate('');
+      setIsCreateModalOpen(true);
+      return;
+    }
+
     setPendingSlot({ start, end });
     setSlotChoiceOpen(true);
   }, [isAvailabilityModalOpen, isEventModalOpen, isCreateModalOpen, isUpcomingListModalOpen, backgroundEvents, stripeConnected, subjects.length, isOrgTutor]);
@@ -3539,7 +3557,6 @@ export default function CalendarPage() {
                 if (event.isBackground) return t('cal.freeSlot');
 
                 const name = event.student?.full_name || t('cal.unknown');
-                const commentIndicator = event.student?.admin_comment ? ' ❓' : '';
                 const topic = event.topic ? ` · ${event.topic}` : '';
 
                 let statusText = '';
@@ -3555,7 +3572,7 @@ export default function CalendarPage() {
                   statusText = t('cal.statusPending');
                 }
 
-                return `${name}${commentIndicator}${topic}${statusText}`;
+                return `${name}${topic}${statusText}`;
               }}
             />
           )}
@@ -4204,6 +4221,23 @@ export default function CalendarPage() {
                   </div>
                 </div>
               )}
+
+              {(() => {
+                const adminComment = String((selectedEvent as any)?.student?.admin_comment || '').trim();
+                const visibleToTutor = (selectedEvent as any)?.student?.admin_comment_visible_to_tutor === true;
+                if (!adminComment) return null;
+                if (orgPolicy.isOrgTutor && !visibleToTutor) return null;
+                return (
+                  <div className="mt-3 p-3 rounded-xl border border-amber-100 bg-amber-50">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-amber-700 mb-1">
+                      {t('compStu.adminComment')}
+                    </p>
+                    <p className="text-sm text-amber-900 whitespace-pre-wrap">
+                      {adminComment}
+                    </p>
+                  </div>
+                );
+              })()}
 
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="bg-gray-50 rounded-xl p-3">

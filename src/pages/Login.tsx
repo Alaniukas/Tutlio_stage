@@ -88,6 +88,12 @@ function fallbackNameFromEmail(email?: string | null): string {
   return cleaned ? cleaned.slice(0, 1).toUpperCase() + cleaned.slice(1) : 'Tutor';
 }
 
+function isStudentAuthUser(user: { user_metadata?: any } | null | undefined): boolean {
+  const role = String(user?.user_metadata?.role || '').trim().toLowerCase();
+  const studentId = String(user?.user_metadata?.student_id || '').trim();
+  return role === 'student' || studentId.length > 0;
+}
+
 function messageForAuthHashError(code: string, detailEnc: string | null): string {
   const c = (code || '').toLowerCase();
   if (c === 'otp_expired') {
@@ -279,6 +285,10 @@ export default function Login() {
     }
 
     if (!profile) {
+      if (isStudentAuthUser(user)) {
+        console.warn('[Login] Student auth user has no linked student row yet; skip tutor profile creation');
+        return false;
+      }
       // Legacy users may exist in auth without a profile row.
       profile = await ensureTutorProfile(user);
     }
@@ -391,6 +401,20 @@ export default function Login() {
       }
 
       if (role === 'tutor') {
+        if (isStudentAuthUser(data.user)) {
+          const { data: studentRows } = await supabase
+            .rpc('get_student_by_user_id', { p_user_id: data.user.id });
+          if (studentRows?.[0]) {
+            setLoading(false);
+            navigate('/student');
+            return;
+          }
+          await supabase.auth.signOut();
+          setError(t('login.noStudentFound'));
+          setLoading(false);
+          return;
+        }
+
         let { data: tutorData, error: tutorError } = await supabase
           .from('profiles')
           .select('id')

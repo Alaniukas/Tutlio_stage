@@ -135,11 +135,14 @@ interface Session {
   subject_name?: string;
   recurring_session_id?: string | null;
   no_show_when?: string | null;
+  cancelled_by?: 'tutor' | 'student' | null;
   tutor_comment?: string | null;
   show_comment_to_student?: boolean;
   student?: {
     full_name: string;
     email?: string;
+    admin_comment?: string | null;
+    admin_comment_visible_to_tutor?: boolean | null;
   };
   tutor?: {
     full_name: string;
@@ -364,7 +367,7 @@ export default function CompanyTvarkarastis() {
   const [findLessonOpen, setFindLessonOpen] = useState(false);
 
   useEffect(() => {
-    if (!featuresLoading && organizationId && !getCached('company_tvarkarastis')) {
+    if (!featuresLoading && organizationId) {
       fetchData();
     }
   }, [featuresLoading, organizationId]);
@@ -387,7 +390,22 @@ export default function CompanyTvarkarastis() {
         .select('id, full_name, email')
         .eq('organization_id', organizationId)
         .order('full_name');
-      const filteredTutors = (tutorsData || []).filter((t: any) => !adminIds.has(t.id));
+
+      // Exclude student accounts that also have profile rows.
+      const { data: linkedStudents } = await supabase
+        .from('students')
+        .select('linked_user_id')
+        .eq('organization_id', organizationId)
+        .not('linked_user_id', 'is', null);
+      const linkedStudentUserIds = new Set(
+        (linkedStudents || [])
+          .map((s: any) => s.linked_user_id)
+          .filter((id: string | null | undefined): id is string => !!id),
+      );
+
+      const filteredTutors = (tutorsData || []).filter(
+        (t: any) => !adminIds.has(t.id) && !linkedStudentUserIds.has(t.id),
+      );
       const tutorIds = filteredTutors.map((t: any) => t.id);
       setOrgTutors(filteredTutors);
 
@@ -401,7 +419,7 @@ export default function CompanyTvarkarastis() {
         .from('sessions')
         .select(`
           *,
-          student:students(full_name, email, admin_comment),
+          student:students(full_name, email, admin_comment, admin_comment_visible_to_tutor),
           tutor:profiles!sessions_tutor_id_fkey(full_name)
         `)
         .in('tutor_id', tutorIds)
@@ -572,7 +590,7 @@ export default function CompanyTvarkarastis() {
     if (!showOnlyAvailability) {
       events.push(...filteredSessions.map(session => ({
         id: session.id,
-        title: `${session.student?.full_name || 'Mokinys'}${session.student?.admin_comment ? ' ❓' : ''} - ${session.tutor?.full_name || 'Tutorius'}`,
+        title: `${session.student?.full_name || 'Mokinys'} - ${session.tutor?.full_name || 'Tutorius'}`,
         start: session.start_time,
         end: session.end_time,
         resource: {
@@ -1862,7 +1880,7 @@ export default function CompanyTvarkarastis() {
               if (isGrp) {
                 return (
                   <div className="space-y-2">
-                    <Label>{t('compSch.studentsMax', { max: String(maxSt) })}</Label>
+                    <Label>{t('compSch.studentsMax', { maxSt: String(maxSt) })}</Label>
                     <div className="border border-gray-200 rounded-xl p-3 space-y-2 max-h-52 overflow-y-auto">
                       {list.length === 0 ? (
                         <p className="text-sm text-gray-400 text-center py-2">{t('compSch.noStudents')}</p>
@@ -2183,6 +2201,16 @@ export default function CompanyTvarkarastis() {
                   {(selectedEvent as any).cancellation_reason}
                 </div>
               )}
+              {selectedEvent.status === 'cancelled' && (
+                <div className="p-3 rounded-xl bg-red-50 text-red-800 text-sm border border-red-100 mb-2">
+                  <span className="font-semibold block mb-1">{t('compSess.cancelledBy')}</span>
+                  {selectedEvent.cancelled_by === 'student'
+                    ? t('sessions.cancelledByStudent')
+                    : selectedEvent.cancelled_by === 'tutor'
+                      ? t('sessions.cancelledByTutor')
+                      : '—'}
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4 py-2">
                 <div className="space-y-1">
@@ -2237,6 +2265,21 @@ export default function CompanyTvarkarastis() {
                     </span>
                   </p>
                   <p className="text-sm bg-blue-50 border border-blue-100 rounded-lg p-2 whitespace-pre-wrap">{selectedEvent.tutor_comment}</p>
+                </div>
+              )}
+
+              {String(selectedEvent.student?.admin_comment || '').trim().length > 0 && (
+                <div className="py-2 border-t border-gray-50">
+                  <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1 flex items-center gap-1">
+                    <MessageSquare className="w-3 h-3" />
+                    {t('compStu.adminComment')}
+                    <span className="text-[10px] font-normal ml-1">
+                      ({selectedEvent.student?.admin_comment_visible_to_tutor ? t('compStu.commentVisibleBoth') : t('compStu.commentVisibleAdmin')})
+                    </span>
+                  </p>
+                  <p className="text-sm bg-amber-50 border border-amber-100 rounded-lg p-2 whitespace-pre-wrap">
+                    {selectedEvent.student?.admin_comment}
+                  </p>
                 </div>
               )}
 

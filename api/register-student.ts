@@ -1,6 +1,6 @@
-// ─── Vercel Serverless Function: Register Student (no confirmation email) ────
+// ─── Vercel Serverless Function: Register Student (with confirmation email) ───
 // POST /api/register-student
-// Creates a Supabase auth user with email_confirm: true so no verification
+// Creates a Supabase auth user with email_confirm: false so verification
 // email is sent. Then updates the students table with onboarding data.
 
 import type { VercelRequest, VercelResponse } from './types';
@@ -14,8 +14,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+    const appUrl = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
-    if (!supabaseUrl || !serviceKey) {
+    if (!supabaseUrl || !serviceKey || !anonKey) {
       return res.status(500).json({ error: 'Missing Supabase env vars' });
     }
 
@@ -42,10 +44,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const supabase = createClient(supabaseUrl, serviceKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+    const publicSupabase = createClient(supabaseUrl, anonKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
 
     const { data: student, error: studentErr } = await supabase
       .from('students')
-      .select('id, tutor_id, email')
+      .select('id, tutor_id, email, linked_user_id')
       .eq('id', studentId)
       .maybeSingle();
 
@@ -53,29 +58,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(404).json({ error: 'Student record not found' });
     }
 
-    if (student.email?.toLowerCase() !== email.toLowerCase()) {
-      return res.status(400).json({ error: 'Email does not match student record' });
+    if (student.linked_user_id) {
+      return res.status(409).json({ error: 'Student account already linked' });
     }
 
-    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+    const normalizedDbEmail = (student.email || '').trim().toLowerCase();
+    const normalizedInputEmail = String(email).trim().toLowerCase();
+    const emailChanged = normalizedDbEmail.length > 0 && normalizedDbEmail !== normalizedInputEmail;
+
+    if (emailChanged) {
+      console.warn('[register-student] Student email changed during onboarding', {
+        studentId,
+        previousEmail: student.email,
+        nextEmail: email,
+      });
+    }
+
+    const signupPayload = {
+      full_name: fullName,
+      role: 'student',
+      student_id: studentId,
+      email,
+      phone: phone || null,
+      age: age || null,
+      grade: grade || null,
+      subject_id: subjectId || null,
+      payment_payer: payerType || null,
+      payer_name: payerType === 'parent' ? payerName : null,
+      payer_email: payerType === 'parent' ? payerEmail : null,
+      payer_phone: payerType === 'parent' ? payerPhone : null,
+      accepted_privacy_policy_at: acceptedAt || null,
+      accepted_terms_at: acceptedAt || null,
+    };
+
+    const { data: authData, error: authError } = await publicSupabase.auth.signUp({
       email,
       password,
-      email_confirm: true,
-      user_metadata: {
-        full_name: fullName,
-        role: 'student',
-        student_id: studentId,
-        email,
-        phone: phone || null,
-        age: age || null,
-        grade: grade || null,
-        subject_id: subjectId || null,
-        payment_payer: payerType || null,
-        payer_name: payerType === 'parent' ? payerName : null,
-        payer_email: payerType === 'parent' ? payerEmail : null,
-        payer_phone: payerType === 'parent' ? payerPhone : null,
-        accepted_privacy_policy_at: acceptedAt || null,
-        accepted_terms_at: acceptedAt || null,
+      options: {
+        emailRedirectTo: `${appUrl}/login`,
+        data: signupPayload,
       },
     });
 
@@ -84,6 +105,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     await supabase.from('students').update({
+      email,
+      linked_user_id: authData.user.id,
       payment_payer: payerType || null,
       payer_name: payerType === 'parent' ? payerName : null,
       payer_email: payerType === 'parent' ? payerEmail : null,

@@ -21,6 +21,8 @@ interface GenerateInvoiceBody {
   sessionIds?: string[];
   /** Manual org payment: prepaid packages invoiced as one line (paid_at), not per session */
   packageIds?: string[];
+  /** Validate only, do not create invoice */
+  precheckOnly?: boolean;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -33,7 +35,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!userId) return res.status(400).json({ error: 'User context required' });
 
   const body = req.body as GenerateInvoiceBody;
-  const { periodStart, periodEnd, groupingType, studentId, isOrgTutor, onlyPaid } = body;
+  const { periodStart, periodEnd, groupingType, studentId, isOrgTutor, onlyPaid, precheckOnly } = body;
 
   if (!periodStart || !periodEnd || !groupingType) {
     return res.status(400).json({ error: 'Missing required fields: periodStart, periodEnd, groupingType' });
@@ -167,7 +169,69 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (sessErr) return res.status(500).json({ error: sessErr.message });
     if (!sessions.length) {
+      if (precheckOnly) {
+        return res.status(200).json({ canGenerate: false, reason: 'no_sessions' });
+      }
       return res.status(400).json({ error: 'No sessions found in the selected period' });
+    }
+
+    // Server-side duplicate protection for org-tutor/company invoices:
+    // if any session in this candidate set is already included in a non-cancelled
+    // invoice for the same period/org, do not allow issuing again.
+    if (isOrgTutor && profile.organization_id) {
+      const candidateSessionIds = new Set(
+        sessions
+          .filter((s: any) => !s.__fromPackage)
+          .map((s: any) => s.id)
+          .filter(Boolean),
+      );
+      if (candidateSessionIds.size > 0) {
+        const { data: existingInvoices } = await supabase
+          .from('invoices')
+          .select('id, invoice_number, total_amount')
+          .eq('organization_id', profile.organization_id)
+          .eq('period_start', periodStart)
+          .eq('period_end', periodEnd)
+          .neq('status', 'cancelled');
+
+        const existingInvoiceIds = (existingInvoices || []).map((inv: any) => inv.id);
+        if (existingInvoiceIds.length > 0) {
+          const { data: lineItems } = await supabase
+            .from('invoice_line_items')
+            .select('invoice_id, session_ids')
+            .in('invoice_id', existingInvoiceIds);
+
+          const duplicateInvoiceIds = new Set<string>();
+          for (const li of lineItems || []) {
+            const sessionIds = Array.isArray((li as any).session_ids) ? (li as any).session_ids : [];
+            if (sessionIds.some((sid: string) => candidateSessionIds.has(sid))) {
+              duplicateInvoiceIds.add((li as any).invoice_id);
+            }
+          }
+
+          if (duplicateInvoiceIds.size > 0) {
+            const dupInvoices = (existingInvoices || []).filter((inv: any) => duplicateInvoiceIds.has(inv.id));
+            const nums = dupInvoices.map((inv: any) => inv.invoice_number).filter(Boolean).join(', ');
+            const total = dupInvoices.reduce((sum: number, inv: any) => sum + Number(inv.total_amount || 0), 0);
+            if (precheckOnly) {
+              return res.status(200).json({
+                canGenerate: false,
+                reason: 'duplicate',
+                invoiceNumbers: dupInvoices.map((inv: any) => inv.invoice_number).filter(Boolean),
+                totalAmount: total,
+                error: `Invoice already issued for this tutor/period (${nums || 'existing invoice'}), total €${total.toFixed(2)}`,
+              });
+            }
+            return res.status(409).json({
+              error: `Invoice already issued for this tutor/period (${nums || 'existing invoice'}), total €${total.toFixed(2)}`,
+            });
+          }
+        }
+      }
+    }
+
+    if (precheckOnly) {
+      return res.status(200).json({ canGenerate: true, reason: 'ok', candidateCount: sessions.length });
     }
 
     // Two org flows (see getSellerProfile):

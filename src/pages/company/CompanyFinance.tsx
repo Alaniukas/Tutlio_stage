@@ -128,7 +128,19 @@ export default function CompanyFinance() {
     const { data: adminUsers2 } = await supabase.from('organization_admins').select('user_id').eq('organization_id', adminRow.organization_id);
     const adminIds2 = new Set((adminUsers2 || []).map((a: any) => a.user_id));
     const { data: tutorData2 } = await supabase.from('profiles').select('id, full_name').eq('organization_id', adminRow.organization_id);
-    const orgTutorsLocal = (tutorData2 || []).filter((tu: any) => !adminIds2.has(tu.id));
+    const { data: linkedStudents } = await supabase
+      .from('students')
+      .select('linked_user_id')
+      .eq('organization_id', adminRow.organization_id)
+      .not('linked_user_id', 'is', null);
+    const linkedStudentUserIds = new Set(
+      (linkedStudents || [])
+        .map((s: any) => s.linked_user_id)
+        .filter((id: string | null | undefined): id is string => Boolean(id)),
+    );
+    const orgTutorsLocal = (tutorData2 || []).filter(
+      (tu: any) => !adminIds2.has(tu.id) && !linkedStudentUserIds.has(tu.id),
+    );
 
     setOrgId(organizationId);
     setStripeComplete(stripeCompleteLocal);

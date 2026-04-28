@@ -466,8 +466,19 @@ export default function CompanyTutors() {
       .select('id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, personal_meeting_link, has_active_license')
       .eq('organization_id', adminRow.organization_id);
 
+    const { data: linkedStudents } = await supabase
+      .from('students')
+      .select('linked_user_id')
+      .eq('organization_id', adminRow.organization_id)
+      .not('linked_user_id', 'is', null);
+    const linkedStudentUserIds = new Set(
+      (linkedStudents || [])
+        .map((s: any) => s.linked_user_id)
+        .filter((id: string | null | undefined): id is string => !!id)
+    );
+
     // Filter out organization admins so they are not counted as tutors
-    const visibleTutors = (tutorData || []).filter((t: any) => !adminIds.has(t.id));
+    const visibleTutors = (tutorData || []).filter((t: any) => !adminIds.has(t.id) && !linkedStudentUserIds.has(t.id));
     setTutors(visibleTutors);
 
     const { data: inviteData } = await supabase
@@ -836,11 +847,6 @@ export default function CompanyTutors() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       <p className="text-sm font-semibold text-gray-900 truncate">{tutor.full_name}</p>
-                      {tutor.has_active_license ? (
-                        <span className="px-1.5 py-0.5 text-[10px] font-bold bg-green-100 text-green-700 rounded-full">{t('compTut.licensed')}</span>
-                      ) : (
-                        <span className="px-1.5 py-0.5 text-[10px] font-bold bg-gray-100 text-gray-500 rounded-full">{t('compTut.unlicensed')}</span>
-                      )}
                     </div>
                     <p className="text-xs text-gray-500 truncate">{tutor.email}</p>
                   </div>
@@ -1099,28 +1105,6 @@ export default function CompanyTutors() {
                     placeholder="https://meet.google.com/..."
                     className="rounded-xl"
                   />
-                </div>
-                <div className="pb-3 border-b border-gray-100">
-                  <Label className="text-xs font-medium text-gray-600">{t('compTut.license')}</Label>
-                  <p className="text-[11px] text-gray-500 mb-1.5">{t('compTut.licenseDesc')}</p>
-                  <button
-                    type="button"
-                    className={cn(
-                      'rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors',
-                      selectedTutor?.has_active_license
-                        ? 'border-green-500 bg-green-50 text-green-700'
-                        : 'border-gray-200 bg-white text-gray-500 hover:bg-gray-50'
-                    )}
-                    onClick={async () => {
-                      if (!selectedTutor) return;
-                      const next = !selectedTutor.has_active_license;
-                      await supabase.from('profiles').update({ has_active_license: next }).eq('id', selectedTutor.id);
-                      setSelectedTutor({ ...selectedTutor, has_active_license: next });
-                      await loadData();
-                    }}
-                  >
-                    {selectedTutor?.has_active_license ? t('compTut.licensed') : t('compTut.unlicensed')}
-                  </button>
                 </div>
                 <div>
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">{t('compTut.lessonSettings')}</p>

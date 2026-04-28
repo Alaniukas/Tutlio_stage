@@ -66,6 +66,8 @@ interface Student {
   payment_model?: string | null;
   grade?: string;
   linked_user_id?: string | null;
+  admin_comment?: string | null;
+  admin_comment_visible_to_tutor?: boolean | null;
   remaining_lessons?: number;
   used_lessons?: number;
   total_lessons?: number;
@@ -1837,6 +1839,17 @@ export default function StudentsPage() {
                   )}
                 </div>
               </div>
+
+              {orgPolicy.isOrgTutor && selectedStudent.admin_comment_visible_to_tutor && String(selectedStudent.admin_comment || '').trim().length > 0 && (
+                <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700 mb-1.5">
+                    {t('stu.adminCommentTitle')}
+                  </p>
+                  <p className="text-sm text-indigo-900 whitespace-pre-wrap">
+                    {selectedStudent.admin_comment}
+                  </p>
+                </div>
+              )}
 
               {loadingSessions ? (
                 <p className="text-sm text-gray-500 text-center py-8">Kraunama istorija...</p>

@@ -607,6 +607,7 @@ export const lt: Record<string, string> = {
   'compSess.allStatuses': 'Visi statusai',
   'compSess.allStudents': 'Visi mokiniai',
   'compSess.allTutors': 'Visi korepetitoriai',
+  'compSess.cancelledBy': 'Atšaukė',
   'compSess.cancellationReason': 'Atšaukimo priežastis',
   'compSess.cancelledLabel': 'Atšauktos',
   'compSess.close': 'Uždaryti',
@@ -1042,7 +1043,7 @@ export const lt: Record<string, string> = {
   'compStu.confirmFailed': 'Nepavyko patvirtinti',
   'compStu.confirmPayment': 'Patvirtinti mokėjimą',
   'compStu.confirmRemoveTutor': 'Pašalinti šį korepetitorių iš mokinio?',
-  'compStu.connected': 'Prisijungęs',
+  'compStu.connected': 'Paskyra sukurta',
   'compStu.deleteBtn': 'Ištrinti',
   'compStu.deleteStudentLabel': 'Ištrinti mokinį',
   'compStu.durationMin': 'Trukmė (min)',
@@ -2992,6 +2993,7 @@ export const lt: Record<string, string> = {
   'stu.recentCompleted': 'Naujausios pamokos',
   'stu.noRecentCompleted': 'Nėra įvykusių pamokų',
   'stu.connected': 'Prisijungęs',
+  'stu.adminCommentTitle': 'Administratoriaus komentaras',
   'stu.copyLink': 'Kopijuoti nuorodą',
   'stu.deleteConfirm': 'Ar tikrai norite ištrinti šį mokinį?',
   'stu.deletePriceConfirm': 'Ar tikrai norite ištrinti šią individualią kainą?',
@@ -3518,7 +3520,7 @@ export const lt: Record<string, string> = {
   'invoiceCreate.selectPeriodInfo': 'Pasirinkite laikotarpį ir grupavimo būdą sąskaitoms faktūroms generuoti.',
   'invoiceCreate.orgTutorInfo': 'Pasirinkite laikotarpį – S.F. bus išrašyta jūsų įmonei su jūsų uždarbio duomenimis.',
   'invoiceCreate.orgAdminInfo':
-    'Pasirinkite laikotarpį. Duomenys imami visiems organizacijos korepetitoriams (ne iš administratoriaus paskyros).',
+    'Bus išrašytos S.F. klientams už įvykdytus mokėjimus.',
   'invoiceCreate.stripeSfHintFull':
     'Rodomos jau apmokėtos pamokos (įsk. per Stripe) ir apmokėti išankstiniai paketai, kuriems dar nėra pardavimo S.F. Pamokoms naudojama pamokos data, paketams — Stripe apmokėjimo data; abi turi patekti į pasirinktą laikotarpį. Įmonės korepetitoriams arba iš įmonės puslapio įtraukiami visi atitinkami korepetitoriai.',
   'invoiceCreate.noPaidStripePeriod':
@@ -3569,6 +3571,8 @@ export const lt: Record<string, string> = {
   'invoices.lessons': 'pamokos',
   'invoices.generating': 'Generuojama...',
   'invoices.generateForTutors': 'Generuoti S.F. ({count} korepetitorių)',
+  'invoices.alreadyIssuedForPeriod': 'Šiems korepetitoriams už laikotarpį {from} – {to} S.F. jau išrašyta:',
+  'invoices.checkingIssuedStatus': 'Tikrinama, ar už šį laikotarpį jau išrašyta S.F...',
   'invoices.downloadAll': 'Atsisiųsti visas ({count})',
   'invoices.downloadPdf': 'Atsisiųsti PDF',
   'invoices.markPaid': 'Pažymėti kaip apmokėtą',

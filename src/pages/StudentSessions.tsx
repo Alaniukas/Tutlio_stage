@@ -47,6 +47,7 @@ interface PackageSummary {
     id: string;
     available_lessons: number;
     total_lessons: number;
+    expires_at?: string | null;
     subjects?: { name: string } | null;
 }
 
@@ -402,7 +403,7 @@ export default function StudentSessions() {
                 .order('start_time', { ascending: true }),
             supabase
                 .from('lesson_packages')
-                .select('id, available_lessons, total_lessons, subjects(name)')
+                .select('id, available_lessons, total_lessons, expires_at, subjects(name)')
                 .eq('student_id', st.id)
                 .eq('active', true)
                 .eq('paid', true)
@@ -417,7 +418,13 @@ export default function StudentSessions() {
         const fetchedSessions = sessionsRes.data || [];
         const fetchedWaitlist = (waitlistRes.data || []) as unknown as WaitlistEntry[];
         setSessions(fetchedSessions);
-        setActivePackages((packageRes.data || []) as unknown as PackageSummary[]);
+        const nowTs = Date.now();
+        const visiblePackages = ((packageRes.data || []) as unknown as PackageSummary[]).filter((pkg) => {
+            if (!pkg.expires_at) return true;
+            const ts = new Date(pkg.expires_at).getTime();
+            return !Number.isNaN(ts) && ts > nowTs;
+        });
+        setActivePackages(visiblePackages);
         setWaitlistEntries(fetchedWaitlist);
 
         setCache('student_sessions', { sessions: fetchedSessions, waitlist: fetchedWaitlist });
@@ -849,6 +856,13 @@ export default function StudentSessions() {
                                     {t('stuSess.packageCount', { available: availableDisplay, total: String(totalLessons) })}
                                 </strong>
                             </p>
+                            {activePackages.length === 1 && activePackages[0].expires_at && (
+                                <p className="text-xs text-violet-700 mt-1">
+                                    {t('package.expiresAt', {
+                                        date: format(new Date(activePackages[0].expires_at), "yyyy 'm.' MMMM d 'd.'", { locale: dateFnsLocale }),
+                                    })}
+                                </p>
+                            )}
                         </div>
                     );
                 })()}

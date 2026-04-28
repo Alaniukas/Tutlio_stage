@@ -48,6 +48,10 @@ interface Invoice {
   status: 'issued' | 'paid' | 'cancelled';
   grouping_type: string;
   pdf_storage_path: string | null;
+  issued_by_user_id: string;
+  issued_by_name?: string;
+  issued_by_is_admin?: boolean;
+  billing_batch_id?: string | null;
   created_at: string;
 }
 
@@ -69,6 +73,7 @@ export default function OrgTutorFinanceSummary() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const rangeLabel = useMemo(() => {
     if (periodMode === 'month') {
@@ -89,6 +94,7 @@ export default function OrgTutorFinanceSummary() {
     const load = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+      setCurrentUserId(user.id);
 
       setLoading(true);
 
@@ -126,7 +132,9 @@ export default function OrgTutorFinanceSummary() {
         .from('sessions')
         .select('*', { count: 'exact', head: true })
         .eq('tutor_id', user.id)
-        .eq('status', 'completed')
+        .neq('status', 'cancelled')
+        .neq('status', 'no_show')
+        .lte('end_time', new Date().toISOString())
         .gte('start_time', startIso)
         .lte('start_time', endIso);
 
@@ -150,18 +158,24 @@ export default function OrgTutorFinanceSummary() {
   const fetchInvoices = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
+    setCurrentUserId(user.id);
 
     setInvoicesLoading(true);
-
-    const { data, error } = await supabase
-      .from('invoices')
-      .select('*')
-      .eq('issued_by_user_id', user.id)
-      .order('created_at', { ascending: false });
-    if (error) {
-      console.error('[OrgTutorFinanceSummary] invoices fetch:', error);
-    } else {
-      setInvoices((data || []) as Invoice[]);
+    try {
+      const response = await fetch('/api/org-tutor-invoices', {
+        method: 'GET',
+        headers: await authHeaders(),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        console.error('[OrgTutorFinanceSummary] invoices fetch:', json);
+        setInvoices([]);
+      } else {
+        setInvoices((json.invoices || []) as Invoice[]);
+      }
+    } catch (error) {
+      console.error('[OrgTutorFinanceSummary] invoices fetch error:', error);
+      setInvoices([]);
     }
     setInvoicesLoading(false);
   }, []);
@@ -384,6 +398,11 @@ export default function OrgTutorFinanceSummary() {
                           {format(new Date(inv.issue_date), 'yyyy-MM-dd')} {' \u00B7 '}
                           {'\u20AC'}{Number(inv.total_amount).toFixed(2)}
                         </p>
+                        {currentUserId && inv.issued_by_user_id !== currentUserId && (
+                          <p className="text-[11px] text-indigo-600 truncate">
+                            Išrašė administratorius: {inv.issued_by_name || '—'}
+                          </p>
+                        )}
                       </div>
                     </div>
 

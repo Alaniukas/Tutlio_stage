@@ -54,9 +54,12 @@ export default function CompanyInvoices() {
   const [generatingForTutors, setGeneratingForTutors] = useState(false);
   const [lastGeneratedInvoiceIds, setLastGeneratedInvoiceIds] = useState<string[]>([]);
   const [downloadingBundle, setDownloadingBundle] = useState(false);
+  const [tutorGenerationError, setTutorGenerationError] = useState<string | null>(null);
+  const [alreadyIssuedTutors, setAlreadyIssuedTutors] = useState<string[]>([]);
   const [tutorSessions, setTutorSessions] = useState<Record<string, { count: number; total: number }>>({});
   const [loadingTutorSessions, setLoadingTutorSessions] = useState(false);
   const [invoiceIssuerMode, setInvoiceIssuerMode] = useState<string>('both');
+  const [checkingAlreadyIssued, setCheckingAlreadyIssued] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!getCached('company_invoices')) setLoading(true);
@@ -93,7 +96,19 @@ export default function CompanyInvoices() {
       .from('profiles')
       .select('id, full_name')
       .eq('organization_id', orgIdVal);
-    const tutorsList = (tutorData || []).filter((tu: { id: string }) => !adminSet.has(tu.id));
+    const { data: linkedStudents } = await supabase
+      .from('students')
+      .select('linked_user_id')
+      .eq('organization_id', orgIdVal)
+      .not('linked_user_id', 'is', null);
+    const linkedStudentUserIds = new Set(
+      (linkedStudents || [])
+        .map((s: any) => s.linked_user_id)
+        .filter((id: string | null | undefined): id is string => Boolean(id)),
+    );
+    const tutorsList = (tutorData || []).filter(
+      (tu: { id: string }) => !adminSet.has(tu.id) && !linkedStudentUserIds.has(tu.id),
+    );
 
     const { data: orgRow } = await supabase.from('organizations').select('invoice_issuer_mode').eq('id', orgIdVal).single();
     if (orgRow?.invoice_issuer_mode) setInvoiceIssuerMode(orgRow.invoice_issuer_mode);
@@ -123,7 +138,8 @@ export default function CompanyInvoices() {
   }, [statusFilter]);
 
   useEffect(() => {
-    if (!getCached('company_invoices')) void loadData();
+    // Always refresh in background; cache is only for quick initial paint.
+    void loadData();
   }, [loadData]);
 
   const loadTutorSessions = useCallback(async () => {
@@ -132,13 +148,15 @@ export default function CompanyInvoices() {
     const tutorIds = tutors.map(t => t.id);
     const { data: sessions } = await supabase
       .from('sessions')
-      .select('tutor_id, price, status')
+      .select('tutor_id, price, status, paid, payment_status')
       .in('tutor_id', tutorIds)
       .gte('start_time', tutorPeriodStart)
       .lte('start_time', tutorPeriodEnd + 'T23:59:59')
-      .eq('status', 'completed');
+      .neq('status', 'cancelled');
     const map: Record<string, { count: number; total: number }> = {};
     for (const s of sessions || []) {
+      const isCountedAsPaid = s.status === 'completed' || s.paid === true || ['paid', 'confirmed'].includes(String(s.payment_status || ''));
+      if (!isCountedAsPaid) continue;
       if (!map[s.tutor_id]) map[s.tutor_id] = { count: 0, total: 0 };
       map[s.tutor_id].count++;
       map[s.tutor_id].total += Number(s.price) || 0;
@@ -150,6 +168,54 @@ export default function CompanyInvoices() {
   useEffect(() => {
     if (activeTab === 'tutors') void loadTutorSessions();
   }, [activeTab, loadTutorSessions]);
+
+  useEffect(() => {
+    if (activeTab !== 'tutors') return;
+    const selectedIds = Array.from(selectedTutorIds);
+    if (selectedIds.length === 0) {
+      setAlreadyIssuedTutors([]);
+      return;
+    }
+
+    let cancelled = false;
+    const run = async () => {
+      setCheckingAlreadyIssued(true);
+      const duplicateTutorIds: string[] = [];
+
+      for (const tutorId of selectedIds) {
+        try {
+          const precheckResp = await fetch('/api/generate-invoice', {
+            method: 'POST',
+            headers: await authHeaders(),
+            body: JSON.stringify({
+              tutorId,
+              periodStart: tutorPeriodStart,
+              periodEnd: tutorPeriodEnd,
+              groupingType: 'single',
+              isOrgTutor: true,
+              precheckOnly: true,
+            }),
+          });
+          const precheckJson = await precheckResp.json().catch(() => ({}));
+          if (precheckResp.ok && precheckJson?.reason === 'duplicate') {
+            duplicateTutorIds.push(tutorId);
+          }
+        } catch {
+          // Ignore precheck network errors here; generation call still has hard backend protection.
+        }
+      }
+
+      if (!cancelled) {
+        setAlreadyIssuedTutors(duplicateTutorIds);
+        setCheckingAlreadyIssued(false);
+      }
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, selectedTutorIds, tutorPeriodStart, tutorPeriodEnd]);
 
   const handleDownloadPdf = async (invoiceId: string) => {
     setDownloadingId(invoiceId);
@@ -307,8 +373,42 @@ export default function CompanyInvoices() {
                   disabled={generatingForTutors}
                   onClick={async () => {
                     setGeneratingForTutors(true);
+                    setTutorGenerationError(null);
+                    setAlreadyIssuedTutors([]);
                     const generatedIds: string[] = [];
-                    for (const tutorId of selectedTutorIds) {
+                    const failedMsgs: string[] = [];
+                    const selectedIds = Array.from(selectedTutorIds);
+                    const eligibleTutorIds: string[] = [];
+
+                    // Pre-check duplicates for selected tutor set before generation.
+                    for (const tutorId of selectedIds) {
+                      try {
+                        const precheckResp = await fetch('/api/generate-invoice', {
+                          method: 'POST',
+                          headers: await authHeaders(),
+                          body: JSON.stringify({
+                            tutorId,
+                            periodStart: tutorPeriodStart,
+                            periodEnd: tutorPeriodEnd,
+                            groupingType: 'single',
+                            isOrgTutor: true,
+                            precheckOnly: true,
+                          }),
+                        });
+                        const precheckJson = await precheckResp.json().catch(() => ({}));
+                        if (!precheckResp.ok) {
+                          failedMsgs.push(precheckJson?.error || `${precheckResp.status} ${precheckResp.statusText}`);
+                          continue;
+                        }
+                        if (precheckJson?.canGenerate) {
+                          eligibleTutorIds.push(tutorId);
+                        }
+                      } catch (err) {
+                        failedMsgs.push(err instanceof Error ? err.message : 'Unknown error');
+                      }
+                    }
+
+                    for (const tutorId of eligibleTutorIds) {
                       try {
                         const resp = await fetch('/api/generate-invoice', {
                           method: 'POST',
@@ -322,18 +422,22 @@ export default function CompanyInvoices() {
                           }),
                         });
                         if (!resp.ok) {
-                          const errText = await resp.text().catch(() => resp.statusText);
-                          console.error(`Invoice generation for tutor ${tutorId} failed (${resp.status}):`, errText);
+                          const errJson = await resp.json().catch(() => ({}));
+                          const errMsg = errJson?.error || `${resp.status} ${resp.statusText}`;
+                          console.error(`Invoice generation for tutor ${tutorId} failed (${resp.status}):`, errMsg);
+                          failedMsgs.push(errMsg);
                           continue;
                         }
                         const result = await resp.json();
                         if (result.invoiceIds) generatedIds.push(...result.invoiceIds);
                       } catch (err) {
                         console.error(`Invoice generation for tutor ${tutorId} failed:`, err);
+                        failedMsgs.push(err instanceof Error ? err.message : 'Unknown error');
                       }
                     }
                     setGeneratingForTutors(false);
                     setLastGeneratedInvoiceIds(generatedIds);
+                    if (failedMsgs.length > 0) setTutorGenerationError(failedMsgs[0]);
                     void loadData();
                   }}
                 >
@@ -344,6 +448,26 @@ export default function CompanyInvoices() {
                   )}
                 </Button>
               </div>
+            )}
+            {tutorGenerationError && (
+              <div className="bg-red-50 border border-red-200 rounded-xl p-3 mt-2">
+                <p className="text-sm text-red-700">{tutorGenerationError}</p>
+              </div>
+            )}
+            {alreadyIssuedTutors.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mt-2">
+                <p className="text-sm text-amber-800 font-medium">
+                  {t('invoices.alreadyIssuedForPeriod', { from: tutorPeriodStart, to: tutorPeriodEnd })}
+                </p>
+                <p className="text-xs text-amber-700 mt-1">
+                  {alreadyIssuedTutors
+                    .map((id) => tutors.find((tutor) => tutor.id === id)?.full_name || id)
+                    .join(', ')}
+                </p>
+              </div>
+            )}
+            {checkingAlreadyIssued && selectedTutorIds.size > 0 && (
+              <p className="text-xs text-gray-500">{t('invoices.checkingIssuedStatus')}</p>
             )}
             {lastGeneratedInvoiceIds.length > 0 && (
               <Button

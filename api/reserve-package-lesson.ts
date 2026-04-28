@@ -28,7 +28,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: pkg, error: pkgErr } = await supabase
     .from('lesson_packages')
-    .select('id, available_lessons, reserved_lessons, total_lessons, tutor_id, student_id, subject_id')
+    .select('id, available_lessons, reserved_lessons, total_lessons, tutor_id, student_id, subject_id, expires_at')
     .eq('id', packageId)
     .eq('paid', true)
     .eq('active', true)
@@ -39,6 +39,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const available = Number(pkg.available_lessons || 0);
+  const nowMs = Date.now();
+  const expiresAtMs = pkg.expires_at ? new Date(pkg.expires_at).getTime() : null;
+  if (expiresAtMs !== null && !Number.isNaN(expiresAtMs) && expiresAtMs <= nowMs) {
+    await supabase
+      .from('lesson_packages')
+      .update({ active: false, payment_status: 'expired' })
+      .eq('id', packageId)
+      .catch(() => {});
+    return json(res, 409, { error: 'Package expired' });
+  }
   if (available <= 0) {
     return json(res, 409, { error: 'No available lessons in package' });
   }

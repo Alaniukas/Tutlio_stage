@@ -217,6 +217,7 @@ export default function CompanyStudents() {
   const [pkgSubjectId, setPkgSubjectId] = useState('');
   const [pkgLessons, setPkgLessons] = useState(5);
   const [pkgPrice, setPkgPrice] = useState(0);
+  const [pkgExpiresAt, setPkgExpiresAt] = useState('');
   const [pkgSending, setPkgSending] = useState(false);
   const [deactivatingPackageId, setDeactivatingPackageId] = useState<string | null>(null);
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
@@ -651,6 +652,7 @@ export default function CompanyStudents() {
           subjectId: pkgSubjectId,
           totalLessons: pkgLessons,
           pricePerLesson: pkgPrice,
+          ...(pkgExpiresAt ? { expiresAt: pkgExpiresAt } : {}),
         }),
       });
       if (!response.ok) {
@@ -659,6 +661,7 @@ export default function CompanyStudents() {
       }
       setToastMessage({ message: t('compStu.packageSent', { name: selectedStudent.full_name }), type: 'success' });
       setSendPackageOpen(false);
+      setPkgExpiresAt('');
       const { data } = await supabase
         .from('lesson_packages')
         .select('*, subject:subjects(name, color)')
@@ -813,7 +816,7 @@ export default function CompanyStudents() {
       !!newStudent.parent_secondary_name.trim() ||
       !!newStudent.parent_secondary_email.trim() ||
       !!newStudent.parent_secondary_phone.trim();
-    if (hasSecondParentAny) {
+    if (isSchoolView && hasSecondParentAny) {
       if (!newStudent.parent_secondary_name.trim() || !newStudent.parent_secondary_email.trim() || !newStudent.parent_secondary_phone.trim()) {
         setToastMessage({ message: 'Jei pildomas antras tėvas, reikia užpildyti vardą, el. paštą ir telefoną.', type: 'error' });
         return;
@@ -823,7 +826,7 @@ export default function CompanyStudents() {
         return;
       }
     }
-    if (newStudent.contact_parent === 'secondary' && !hasSecondParentAny) {
+    if (isSchoolView && newStudent.contact_parent === 'secondary' && !hasSecondParentAny) {
       setToastMessage({ message: 'Pasirinktas kontaktinis antras tėvas, bet jo duomenys neužpildyti.', type: 'error' });
       return;
     }
@@ -855,7 +858,7 @@ export default function CompanyStudents() {
     const resolvedParent2Address = newStudent.parent2_address_same_as_primary
       ? primaryAddrLine
       : newStudent.parent_secondary_address.trim();
-    const contactParent = newStudent.contact_parent === 'secondary' ? secondaryParent : primaryParent;
+    const contactParent = isSchoolView && newStudent.contact_parent === 'secondary' ? secondaryParent : primaryParent;
     const tutorIdsToInsert = newStudent.tutor_ids.length > 0 ? newStudent.tutor_ids : [null];
     for (const tutorId of tutorIdsToInsert) {
       const inviteCode = generateInviteCode();
@@ -870,12 +873,12 @@ export default function CompanyStudents() {
           payer_email: contactParent.email || null,
           payer_phone: contactParent.phone || null,
           payer_personal_code: contactParent.personalCode || null,
-          parent_secondary_name: secondaryParent.name || null,
-          parent_secondary_email: secondaryParent.email || null,
-          parent_secondary_phone: secondaryParent.phone || null,
-          parent_secondary_personal_code: secondaryParent.personalCode || null,
-          parent_secondary_address: resolvedParent2Address || null,
-          contact_parent: newStudent.contact_parent,
+          parent_secondary_name: isSchoolView ? (secondaryParent.name || null) : null,
+          parent_secondary_email: isSchoolView ? (secondaryParent.email || null) : null,
+          parent_secondary_phone: isSchoolView ? (secondaryParent.phone || null) : null,
+          parent_secondary_personal_code: isSchoolView ? (secondaryParent.personalCode || null) : null,
+          parent_secondary_address: isSchoolView ? (resolvedParent2Address || null) : null,
+          contact_parent: isSchoolView ? newStudent.contact_parent : 'primary',
           student_address: newStudent.student_address?.trim() || null,
           student_city: newStudent.student_city?.trim() || null,
           child_birth_date: newStudent.child_birth_date?.trim() || null,
@@ -1032,7 +1035,7 @@ export default function CompanyStudents() {
       !!studentEditDraft.parent_secondary_name.trim() ||
       !!studentEditDraft.parent_secondary_email.trim() ||
       !!studentEditDraft.parent_secondary_phone.trim();
-    if (hasSecondParentAny) {
+    if (isSchoolView && hasSecondParentAny) {
       if (!studentEditDraft.parent_secondary_name.trim() || !studentEditDraft.parent_secondary_email.trim() || !studentEditDraft.parent_secondary_phone.trim()) {
         setToastMessage({ message: 'Jei pildomas antras tėvas, reikia užpildyti vardą, el. paštą ir telefoną.', type: 'error' });
         return;
@@ -1042,7 +1045,7 @@ export default function CompanyStudents() {
         return;
       }
     }
-    if (studentEditDraft.contact_parent === 'secondary' && !hasSecondParentAny) {
+    if (isSchoolView && studentEditDraft.contact_parent === 'secondary' && !hasSecondParentAny) {
       setToastMessage({ message: 'Pasirinktas kontaktinis antras tėvas, bet jo duomenys neužpildyti.', type: 'error' });
       return;
     }
@@ -1059,7 +1062,7 @@ export default function CompanyStudents() {
       phone: studentEditDraft.parent_secondary_phone.trim(),
       personalCode: studentEditDraft.parent_secondary_personal_code.trim(),
     };
-    const contactParent = studentEditDraft.contact_parent === 'secondary' ? secondaryParent : primaryParent;
+    const contactParent = isSchoolView && studentEditDraft.contact_parent === 'secondary' ? secondaryParent : primaryParent;
     const primaryAddrLineEdit = joinStudentAddressLine(studentEditDraft.student_address, studentEditDraft.student_city).trim();
     const resolvedParent2AddressEdit = studentEditDraft.parent2_address_same_as_primary
       ? primaryAddrLineEdit
@@ -1074,12 +1077,12 @@ export default function CompanyStudents() {
       payer_email: contactParent.email || null,
       payer_phone: contactParent.phone || null,
       payer_personal_code: contactParent.personalCode || null,
-      parent_secondary_name: secondaryParent.name || null,
-      parent_secondary_email: secondaryParent.email || null,
-      parent_secondary_phone: secondaryParent.phone || null,
-      parent_secondary_personal_code: secondaryParent.personalCode || null,
-      parent_secondary_address: resolvedParent2AddressEdit || null,
-      contact_parent: studentEditDraft.contact_parent,
+      parent_secondary_name: isSchoolView ? (secondaryParent.name || null) : null,
+      parent_secondary_email: isSchoolView ? (secondaryParent.email || null) : null,
+      parent_secondary_phone: isSchoolView ? (secondaryParent.phone || null) : null,
+      parent_secondary_personal_code: isSchoolView ? (secondaryParent.personalCode || null) : null,
+      parent_secondary_address: isSchoolView ? (resolvedParent2AddressEdit || null) : null,
+      contact_parent: isSchoolView ? studentEditDraft.contact_parent : 'primary',
       student_address: studentEditDraft.student_address.trim() || null,
       student_city: studentEditDraft.student_city.trim() || null,
       child_birth_date: studentEditDraft.child_birth_date || null,
@@ -1338,38 +1341,40 @@ export default function CompanyStudents() {
                   </div>
                   </div>
 
-                  <div className="grid sm:grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <Label>Vaiko gimimo data</Label>
-                    <DateInput
-                      value={newStudent.child_birth_date}
-                      onChange={(e) => setNewStudent({ ...newStudent, child_birth_date: e.target.value })}
-                    />
-                    {newStudent.child_birth_date && (
-                      <p className="text-xs text-gray-500">
-                        Amžius: {calculateAgeFromDate(newStudent.child_birth_date) ?? '—'} m.
-                      </p>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Adresas</Label>
-                    <Input
-                      value={newStudent.student_address}
-                      onChange={(e) => setNewStudent({ ...newStudent, student_address: e.target.value })}
-                      placeholder="Gatvė, namo nr."
-                      className="rounded-xl"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Miestas</Label>
-                    <Input
-                      value={newStudent.student_city}
-                      onChange={(e) => setNewStudent({ ...newStudent, student_city: e.target.value })}
-                      placeholder="Vilnius"
-                      className="rounded-xl"
-                    />
-                  </div>
-                  </div>
+                  {isSchoolView && (
+                    <div className="grid sm:grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <Label>Vaiko gimimo data</Label>
+                        <DateInput
+                          value={newStudent.child_birth_date}
+                          onChange={(e) => setNewStudent({ ...newStudent, child_birth_date: e.target.value })}
+                        />
+                        {newStudent.child_birth_date && (
+                          <p className="text-xs text-gray-500">
+                            Amžius: {calculateAgeFromDate(newStudent.child_birth_date) ?? '—'} m.
+                          </p>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Adresas</Label>
+                        <Input
+                          value={newStudent.student_address}
+                          onChange={(e) => setNewStudent({ ...newStudent, student_address: e.target.value })}
+                          placeholder="Gatvė, namo nr."
+                          className="rounded-xl"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Miestas</Label>
+                        <Input
+                          value={newStudent.student_city}
+                          onChange={(e) => setNewStudent({ ...newStudent, student_city: e.target.value })}
+                          placeholder="Vilnius"
+                          className="rounded-xl"
+                        />
+                      </div>
+                    </div>
+                  )}
 
                   {isSchoolView && (
                     <>
@@ -1952,16 +1957,17 @@ export default function CompanyStudents() {
                     <p className="text-gray-600 text-sm">
                       {t('compStu.codeInline')} <code className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">{selectedStudent.invite_code}</code>
                     </p>
-                    <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Redaguoti mokinio duomenis</p>
-                        <Button type="button" variant="outline" size="sm" onClick={() => setStudentEditOpen((v) => !v)}>
-                          {studentEditOpen ? 'Slėpti' : 'Atidaryti'}
-                        </Button>
-                      </div>
+                    {isSchoolView && (
+                      <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Redaguoti mokinio duomenis</p>
+                          <Button type="button" variant="outline" size="sm" onClick={() => setStudentEditOpen((v) => !v)}>
+                            {studentEditOpen ? 'Slėpti' : 'Atidaryti'}
+                          </Button>
+                        </div>
 
-                      {studentEditOpen ? (
-                        <>
+                        {studentEditOpen ? (
+                          <>
                           <div className="grid sm:grid-cols-2 gap-2">
                             <Input value={studentEditDraft.full_name} onChange={(e) => setStudentEditDraft((p) => ({ ...p, full_name: e.target.value }))} placeholder={t('compStu.fullNameRequired')} className="rounded-xl bg-white" />
                             <Input type="email" value={studentEditDraft.email} onChange={(e) => setStudentEditDraft((p) => ({ ...p, email: e.target.value }))} placeholder={t('compStu.emailLabel')} className="rounded-xl bg-white" />
@@ -1974,90 +1980,104 @@ export default function CompanyStudents() {
                             )}
                           </div>
                           <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
-                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Kontaktinis tėvas</p>
+                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                              {isSchoolView ? 'Kontaktinis tėvas' : t('compStu.payerLabel')}
+                            </p>
                             <div className="grid sm:grid-cols-2 gap-2">
                               <Input value={studentEditDraft.payer_name} onChange={(e) => setStudentEditDraft((p) => ({ ...p, payer_name: e.target.value }))} placeholder={t('compStu.parentFullNameRequired')} className="rounded-xl bg-white" />
                               <Input type="email" value={studentEditDraft.payer_email} onChange={(e) => setStudentEditDraft((p) => ({ ...p, payer_email: e.target.value }))} placeholder={t('compStu.parentEmailRequired')} className="rounded-xl bg-white" />
                               <Input value={studentEditDraft.payer_phone} onChange={(e) => setStudentEditDraft((p) => ({ ...p, payer_phone: formatLithuanianPhone(e.target.value) }))} placeholder={t('compStu.parentPhoneRequired')} className="rounded-xl bg-white" />
-                              <Input value={studentEditDraft.payer_personal_code} onChange={(e) => setStudentEditDraft((p) => ({ ...p, payer_personal_code: e.target.value }))} placeholder="Kontaktinio tėvo asmens kodas" className="rounded-xl bg-white" />
+                              <Input
+                                value={studentEditDraft.payer_personal_code}
+                                onChange={(e) => setStudentEditDraft((p) => ({ ...p, payer_personal_code: e.target.value }))}
+                                placeholder={isSchoolView ? 'Kontaktinio tėvo asmens kodas' : 'Mokėtojo asmens kodas'}
+                                className="rounded-xl bg-white"
+                              />
                             </div>
                           </div>
-                          <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Antras tėvas (pasirinktinai)</p>
-                              <Button type="button" variant="outline" size="sm" onClick={() => setStudentEditSecondParentOpen((v) => !v)}>
-                                {studentEditSecondParentOpen ? 'Slėpti' : 'Rodyti'}
+                          {isSchoolView && (
+                            <>
+                              <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Antras tėvas (pasirinktinai)</p>
+                                  <Button type="button" variant="outline" size="sm" onClick={() => setStudentEditSecondParentOpen((v) => !v)}>
+                                    {studentEditSecondParentOpen ? 'Slėpti' : 'Rodyti'}
+                                  </Button>
+                                </div>
+                                {studentEditSecondParentOpen && (
+                                  <div className="grid sm:grid-cols-2 gap-2">
+                                    <Input value={studentEditDraft.parent_secondary_name} onChange={(e) => setStudentEditDraft((p) => ({ ...p, parent_secondary_name: e.target.value }))} placeholder="2 tėvas: vardas pavardė" className="rounded-xl bg-white" />
+                                    <Input type="email" value={studentEditDraft.parent_secondary_email} onChange={(e) => setStudentEditDraft((p) => ({ ...p, parent_secondary_email: e.target.value }))} placeholder="2 tėvas: el. paštas" className="rounded-xl bg-white" />
+                                    <Input value={studentEditDraft.parent_secondary_phone} onChange={(e) => setStudentEditDraft((p) => ({ ...p, parent_secondary_phone: formatLithuanianPhone(e.target.value) }))} placeholder="2 tėvas: tel." className="rounded-xl bg-white" />
+                                    <Input value={studentEditDraft.parent_secondary_personal_code} onChange={(e) => setStudentEditDraft((p) => ({ ...p, parent_secondary_personal_code: e.target.value }))} placeholder="2 tėvas: asmens kodas" className="rounded-xl bg-white" />
+                                    <label className="sm:col-span-2 flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={studentEditDraft.parent2_address_same_as_primary}
+                                        onChange={(e) => setStudentEditDraft((p) => ({ ...p, parent2_address_same_as_primary: e.target.checked }))}
+                                        className="rounded border-gray-300"
+                                      />
+                                      Antro tėvo adresas toks pats kaip gyvenamoji vieta (1 tėvo / mokinio adresas)
+                                    </label>
+                                    <div className="sm:col-span-2 space-y-1">
+                                      <Label className="text-xs text-gray-500">Antro tėvo adresas</Label>
+                                      <Input
+                                        value={
+                                          studentEditDraft.parent2_address_same_as_primary
+                                            ? joinStudentAddressLine(studentEditDraft.student_address, studentEditDraft.student_city)
+                                            : studentEditDraft.parent_secondary_address
+                                        }
+                                        onChange={(e) =>
+                                          setStudentEditDraft((p) => ({
+                                            ...p,
+                                            parent_secondary_address: e.target.value,
+                                            parent2_address_same_as_primary: false,
+                                          }))
+                                        }
+                                        disabled={studentEditDraft.parent2_address_same_as_primary}
+                                        placeholder="Gatvė, miestas"
+                                        className="rounded-xl bg-white"
+                                      />
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                              <div className="sm:col-span-2">
+                                <Label className="text-xs text-gray-500">Kontaktinis tėvas sistemoje</Label>
+                                <Select value={studentEditDraft.contact_parent} onValueChange={(v: 'primary' | 'secondary') => setStudentEditDraft((p) => ({ ...p, contact_parent: v }))}>
+                                  <SelectTrigger className="rounded-xl bg-white mt-1"><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="primary">1 tėvas (kontaktinis)</SelectItem>
+                                    <SelectItem value="secondary">2 tėvas (kontaktinis)</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </>
+                          )}
+                            <div className="flex justify-end">
+                              <Button type="button" size="sm" onClick={() => void handleSaveStudentInfo()} disabled={savingStudentInfo}>
+                                {savingStudentInfo ? t('common.loading') : 'Išsaugoti mokinio duomenis'}
                               </Button>
                             </div>
-                            {studentEditSecondParentOpen && (
-                              <div className="grid sm:grid-cols-2 gap-2">
-                                <Input value={studentEditDraft.parent_secondary_name} onChange={(e) => setStudentEditDraft((p) => ({ ...p, parent_secondary_name: e.target.value }))} placeholder="2 tėvas: vardas pavardė" className="rounded-xl bg-white" />
-                                <Input type="email" value={studentEditDraft.parent_secondary_email} onChange={(e) => setStudentEditDraft((p) => ({ ...p, parent_secondary_email: e.target.value }))} placeholder="2 tėvas: el. paštas" className="rounded-xl bg-white" />
-                                <Input value={studentEditDraft.parent_secondary_phone} onChange={(e) => setStudentEditDraft((p) => ({ ...p, parent_secondary_phone: formatLithuanianPhone(e.target.value) }))} placeholder="2 tėvas: tel." className="rounded-xl bg-white" />
-                                <Input value={studentEditDraft.parent_secondary_personal_code} onChange={(e) => setStudentEditDraft((p) => ({ ...p, parent_secondary_personal_code: e.target.value }))} placeholder="2 tėvas: asmens kodas" className="rounded-xl bg-white" />
-                                <label className="sm:col-span-2 flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
-                                  <input
-                                    type="checkbox"
-                                    checked={studentEditDraft.parent2_address_same_as_primary}
-                                    onChange={(e) => setStudentEditDraft((p) => ({ ...p, parent2_address_same_as_primary: e.target.checked }))}
-                                    className="rounded border-gray-300"
-                                  />
-                                  Antro tėvo adresas toks pats kaip gyvenamoji vieta (1 tėvo / mokinio adresas)
-                                </label>
-                                <div className="sm:col-span-2 space-y-1">
-                                  <Label className="text-xs text-gray-500">Antro tėvo adresas</Label>
-                                  <Input
-                                    value={
-                                      studentEditDraft.parent2_address_same_as_primary
-                                        ? joinStudentAddressLine(studentEditDraft.student_address, studentEditDraft.student_city)
-                                        : studentEditDraft.parent_secondary_address
-                                    }
-                                    onChange={(e) =>
-                                      setStudentEditDraft((p) => ({
-                                        ...p,
-                                        parent_secondary_address: e.target.value,
-                                        parent2_address_same_as_primary: false,
-                                      }))
-                                    }
-                                    disabled={studentEditDraft.parent2_address_same_as_primary}
-                                    placeholder="Gatvė, miestas"
-                                    className="rounded-xl bg-white"
-                                  />
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                          <div className="sm:col-span-2">
-                            <Label className="text-xs text-gray-500">Kontaktinis tėvas sistemoje</Label>
-                            <Select value={studentEditDraft.contact_parent} onValueChange={(v: 'primary' | 'secondary') => setStudentEditDraft((p) => ({ ...p, contact_parent: v }))}>
-                              <SelectTrigger className="rounded-xl bg-white mt-1"><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="primary">1 tėvas (kontaktinis)</SelectItem>
-                                <SelectItem value="secondary">2 tėvas (kontaktinis)</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="flex justify-end">
-                            <Button type="button" size="sm" onClick={() => void handleSaveStudentInfo()} disabled={savingStudentInfo}>
-                              {savingStudentInfo ? t('common.loading') : 'Išsaugoti mokinio duomenis'}
-                            </Button>
-                          </div>
-                        </>
-                      ) : (
-                        <p className="text-xs text-gray-500">Spausk „Atidaryti“, kad redaguotum duomenis.</p>
-                      )}
-                    </div>
+                          </>
+                        ) : (
+                          <p className="text-xs text-gray-500">Spausk „Atidaryti“, kad redaguotum duomenis.</p>
+                        )}
+                      </div>
+                    )}
                     <div className="pt-1 flex items-center gap-2 flex-wrap">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="h-7 px-2.5 text-[11px]"
-                        disabled={sendingInviteNow}
-                        onClick={() => void handleSendInviteNow()}
-                      >
-                        {sendingInviteNow ? t('compStu.sendingNow') : t('compStu.sendInviteNow')}
-                      </Button>
+                      {isSchoolView && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2.5 text-[11px]"
+                          disabled={sendingInviteNow}
+                          onClick={() => void handleSendInviteNow()}
+                        >
+                          {sendingInviteNow ? t('compStu.sendingNow') : t('compStu.sendInviteNow')}
+                        </Button>
+                      )}
                       {selectedStudent.linked_user_id ? (
                         <span className="inline-flex items-center gap-1 text-green-700 bg-green-50 border border-green-200 rounded-md px-2 py-1 text-xs">
                           <CheckCircle className="w-3.5 h-3.5" /> {t('compStu.connected')}
@@ -2106,12 +2126,27 @@ export default function CompanyStudents() {
                               onClick={async () => {
                                 if (!confirm(t('compStu.confirmRemoveTutor'))) return;
                                 setTutorsSaving(true);
-                                const { error } = await supabase.from('students').delete().eq('id', row.id);
+                                const shouldDetachOnly = selectedStudentGroup.length <= 1;
+                                const { error } = shouldDetachOnly
+                                  ? await supabase
+                                      .from('students')
+                                      .update({ tutor_id: null })
+                                      .eq('id', row.id)
+                                  : await supabase
+                                      .from('students')
+                                      .delete()
+                                      .eq('id', row.id);
                                 if (error) {
                                   setToastMessage({ message: t('compStu.tutorRemoveFailed'), type: 'error' });
                                 } else {
                                   setToastMessage({ message: t('compStu.tutorRemoved'), type: 'success' });
-                                  const nextGroup = selectedStudentGroup.filter((r) => r.id !== row.id);
+                                  const nextGroup = shouldDetachOnly
+                                    ? selectedStudentGroup.map((r) =>
+                                        r.id === row.id
+                                          ? { ...r, tutor_id: null, tutor: null }
+                                          : r
+                                      )
+                                    : selectedStudentGroup.filter((r) => r.id !== row.id);
                                   setSelectedStudentGroup(nextGroup);
                                   if (nextGroup.length === 0) {
                                     setSelectedStudent(null);
@@ -2676,6 +2711,15 @@ export default function CompanyStudents() {
                             onChange={(e) => setPkgPrice(parseFloat(e.target.value) || 0)}
                             className="h-8 text-xs rounded-lg" />
                         </div>
+                        <div className="space-y-1 col-span-3 sm:col-span-1">
+                          <Label className="text-xs">{t('package.validUntil')}</Label>
+                          <DateInput
+                            value={pkgExpiresAt}
+                            min={new Date().toISOString().split('T')[0]}
+                            onChange={(e) => setPkgExpiresAt(e.target.value)}
+                            className="h-8 text-xs rounded-lg"
+                          />
+                        </div>
                         <div className="flex items-end">
                           <Button size="sm" className="h-8 w-full text-xs rounded-lg bg-violet-600 hover:bg-violet-700"
                             onClick={handleSendPackage} disabled={pkgSending || !pkgSubjectId}>
@@ -2683,6 +2727,7 @@ export default function CompanyStudents() {
                           </Button>
                         </div>
                       </div>
+                      <p className="text-[11px] text-violet-500">{t('package.validUntilHint')}</p>
                       <p className="text-xs text-violet-600">
                         {t('compStu.stripePaymentHint')}
                       </p>

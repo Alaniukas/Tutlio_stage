@@ -144,15 +144,25 @@ export default function StudentOnboarding() {
                 ? { full_name: data.tutor_full_name }
                 : null;
 
+            let isSchoolOrg = false;
+            if (data.organization_id) {
+                const { data: orgRow } = await supabase
+                    .from('organizations')
+                    .select('entity_type')
+                    .eq('id', data.organization_id)
+                    .maybeSingle();
+                isSchoolOrg = orgRow?.entity_type === 'school';
+            }
+
             setStudentData({ ...data, tutor: tutorProfile ?? undefined });
             setEmail(data.email || '');
             setPhone(data.phone || '');
-            setIsSchoolInvite(Boolean(data.organization_id));
-            setPayerType(Boolean(data.organization_id) ? 'parent' : 'self');
-            setPayerName(data.payer_name || '');
-            setPayerEmail(data.payer_email || '');
-            setPayerPhone(data.payer_phone || '');
-            setParentRegEmail(data.payer_email || '');
+            setIsSchoolInvite(isSchoolOrg);
+            setPayerType(isSchoolOrg ? 'parent' : 'self');
+            setPayerName(isSchoolOrg ? (data.payer_name || '') : '');
+            setPayerEmail(isSchoolOrg ? (data.payer_email || '') : '');
+            setPayerPhone(isSchoolOrg ? (data.payer_phone || '') : '');
+            setParentRegEmail(isSchoolOrg ? (data.payer_email || '') : '');
             setAge(calculateAgeFromDate(data.child_birth_date));
 
             if (data.tutor_id) {
@@ -231,17 +241,6 @@ export default function StudentOnboarding() {
         if (!apiRes.ok) {
             const body = await apiRes.json().catch(() => ({}));
             setError(body?.error || t('onboard.createError'));
-            setSubmitting(false);
-            return;
-        }
-
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-            email: studentData.email,
-            password,
-        });
-
-        if (signInError) {
-            setError(signInError.message);
             setSubmitting(false);
             return;
         }

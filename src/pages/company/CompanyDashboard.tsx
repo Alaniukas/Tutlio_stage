@@ -85,62 +85,79 @@ export default function CompanyDashboard() {
   const [selectedSession, setSelectedSession] = useState<OrgSessionRow | null>(null);
 
   useEffect(() => {
-    if (!getCached(DASH_CACHE_KEY)) loadData();
+    // Always refresh in background; cache is only for fast initial paint.
+    void loadData();
   }, []);
 
   const loadData = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setLoading(false);
+        return;
+      }
 
-    const { data: adminRow } = await supabase
-      .from('organization_admins')
-      .select('organization_id, organizations(name, tutor_limit)')
-      .eq('user_id', user.id)
-      .maybeSingle();
+      const { data: adminRow } = await supabase
+        .from('organization_admins')
+        .select('organization_id, organizations(name, tutor_limit)')
+        .eq('user_id', user.id)
+        .maybeSingle();
 
-    if (!adminRow) return;
-    const org = adminRow.organizations as any;
-    const organizationId = adminRow.organization_id;
-    setOrgName(org?.name || '');
-    setTutorLimit(org?.tutor_limit || 0);
+      if (!adminRow) {
+        setLoading(false);
+        return;
+      }
+      const org = adminRow.organizations as any;
+      const organizationId = adminRow.organization_id;
+      setOrgName(org?.name || '');
+      setTutorLimit(org?.tutor_limit || 0);
 
-    const { data: adminUsers } = await supabase
-      .from('organization_admins')
-      .select('user_id')
-      .eq('organization_id', organizationId);
-    const adminIds = new Set((adminUsers || []).map((a: any) => a.user_id));
+      const { data: adminUsers } = await supabase
+        .from('organization_admins')
+        .select('user_id')
+        .eq('organization_id', organizationId);
+      const adminIds = new Set((adminUsers || []).map((a: any) => a.user_id));
 
-    const { data: tutors } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('organization_id', organizationId);
-    const tutorIds = (tutors || [])
-      .map((tu: any) => tu.id)
-      .filter((id: string) => !adminIds.has(id));
-    setActiveTutors(tutorIds.length);
+      const { data: tutors } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('organization_id', organizationId);
+      const { data: linkedStudents } = await supabase
+        .from('students')
+        .select('linked_user_id')
+        .eq('organization_id', organizationId)
+        .not('linked_user_id', 'is', null);
+      const linkedStudentUserIds = new Set(
+        (linkedStudents || [])
+          .map((s: any) => s.linked_user_id)
+          .filter((id: string | null | undefined): id is string => Boolean(id)),
+      );
+      const tutorIds = (tutors || [])
+        .map((tu: any) => tu.id)
+        .filter((id: string) => !adminIds.has(id) && !linkedStudentUserIds.has(id));
+      setActiveTutors(tutorIds.length);
 
-    const { count: pendingCount } = await supabase
-      .from('tutor_invites')
-      .select('*', { count: 'exact', head: true })
-      .eq('organization_id', adminRow.organization_id)
-      .eq('used', false);
-    setPendingInvites(pendingCount || 0);
+      const { count: pendingCount } = await supabase
+        .from('tutor_invites')
+        .select('*', { count: 'exact', head: true })
+        .eq('organization_id', adminRow.organization_id)
+        .eq('used', false);
+      setPendingInvites(pendingCount || 0);
 
-    if (tutorIds.length === 0) {
-      setUpcomingList([]);
-      setAttentionList([]);
-      setCancelledList([]);
-      setRecentPayments([]);
-      setLoading(false);
-      return;
-    }
+      if (tutorIds.length === 0) {
+        setUpcomingList([]);
+        setAttentionList([]);
+        setCancelledList([]);
+        setRecentPayments([]);
+        return;
+      }
 
-    const { data: tutorProfiles } = await supabase
+      const { data: tutorProfiles } = await supabase
       .from('profiles')
       .select('id, full_name, payment_timing, payment_deadline_hours')
       .in('id', tutorIds);
 
-    const tutorMap = new Map<string, TutorPay>(
+      const tutorMap = new Map<string, TutorPay>(
       (tutorProfiles || []).map((p: any) => [
         p.id,
         {
@@ -150,12 +167,12 @@ export default function CompanyDashboard() {
         },
       ])
     );
-    setTutorPayMap(tutorMap);
+      setTutorPayMap(tutorMap);
 
-    const monthStart = startOfMonth(new Date()).toISOString();
-    const monthEnd = endOfMonth(new Date()).toISOString();
+      const monthStart = startOfMonth(new Date()).toISOString();
+      const monthEnd = endOfMonth(new Date()).toISOString();
 
-    const { data: monthSessions } = await supabase
+      const { data: monthSessions } = await supabase
       .from('sessions')
       .select('price, status, payment_status, start_time, end_time')
       .in('tutor_id', tutorIds)
@@ -164,49 +181,49 @@ export default function CompanyDashboard() {
       .neq('status', 'cancelled')
       .limit(1000);
 
-    const now = new Date();
-    const next7days = addDays(now, 7);
+      const now = new Date();
+      const next7days = addDays(now, 7);
 
-    const isPaid = (s: any) => s.paid || ['paid', 'confirmed'].includes(s.payment_status);
-    const completed = (monthSessions || []).filter((s) => s.status === 'completed' || isPaid(s));
-    const upcoming = (monthSessions || []).filter(
+      const isPaid = (s: any) => s.paid || ['paid', 'confirmed'].includes(s.payment_status);
+      const completed = (monthSessions || []).filter((s) => s.status === 'completed' || isPaid(s));
+      const upcoming = (monthSessions || []).filter(
       (s) =>
         s.status === 'active' &&
         isAfter(new Date(s.end_time), now) &&
         isBefore(new Date(s.start_time), next7days)
     );
-    setSessionsThisMonth(completed.length);
-    setUpcomingSessions(upcoming.length);
-    setEarningsThisMonth(completed.reduce((sum, s) => sum + (s.price || 0), 0));
+      setSessionsThisMonth(completed.length);
+      setUpcomingSessions(upcoming.length);
+      setEarningsThisMonth(completed.reduce((sum, s) => sum + (s.price || 0), 0));
 
-    const { data: allSessions } = await supabase
+      const { data: allSessions } = await supabase
       .from('sessions')
       .select('price, status, payment_status')
       .in('tutor_id', tutorIds)
       .neq('status', 'cancelled')
       .limit(5000);
-    const totalPaid = (allSessions || []).filter(
+      const totalPaid = (allSessions || []).filter(
       (s: any) => s.status === 'completed' || ['paid', 'confirmed'].includes(s.payment_status)
-    );
-    setEarningsTotal(totalPaid.reduce((sum: number, s: any) => sum + (s.price || 0), 0));
+      );
+      setEarningsTotal(totalPaid.reduce((sum: number, s: any) => sum + (s.price || 0), 0));
 
-    const { data: sessionsData } = await supabase
+      const { data: sessionsData } = await supabase
       .from('sessions')
       .select('id, tutor_id, student_id, start_time, end_time, status, paid, price, topic, payment_status, student:students(full_name)')
       .in('tutor_id', tutorIds)
       .order('start_time', { ascending: true })
       .limit(800);
 
-    const rows: OrgSessionRow[] = (sessionsData || []).map((r: any) => ({
+      const rows: OrgSessionRow[] = (sessionsData || []).map((r: any) => ({
       ...r,
       tutor_name: tutorMap.get(r.tutor_id)?.full_name || t('common.tutor'),
       student: Array.isArray(r.student) ? r.student[0] ?? null : r.student ?? null,
     }));
-    const past30 = subDays(now, 30);
-    const nowMs = now.getTime();
-    const attentionWindowMs = 6 * 3600000;
+      const past30 = subDays(now, 30);
+      const nowMs = now.getTime();
+      const attentionWindowMs = 6 * 3600000;
 
-    const upcomingFiltered = rows
+      const upcomingFiltered = rows
       .filter(
         (s) =>
           s.status === 'active' &&
@@ -217,7 +234,7 @@ export default function CompanyDashboard() {
       .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
       .slice(0, 5);
 
-    const attentionFiltered = rows
+      const attentionFiltered = rows
       .filter((s) => {
         if (s.paid || s.status === 'cancelled') return false;
         const tp = tutorMap.get(s.tutor_id);
@@ -243,16 +260,16 @@ export default function CompanyDashboard() {
       })
       .slice(0, 8);
 
-    const cancelledFiltered = rows
+      const cancelledFiltered = rows
       .filter((s) => s.status === 'cancelled' && s.paid)
       .sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())
       .slice(0, 5);
 
-    setUpcomingList(upcomingFiltered);
-    setAttentionList(attentionFiltered);
-    setCancelledList(cancelledFiltered);
+      setUpcomingList(upcomingFiltered);
+      setAttentionList(attentionFiltered);
+      setCancelledList(cancelledFiltered);
 
-    const [paidLessonsRes, paidPackagesRes, paidInvoicesRes] = await Promise.all([
+      const [paidLessonsRes, paidPackagesRes, paidInvoicesRes] = await Promise.all([
       supabase
         .from('sessions')
         .select('id, start_time, price, topic, tutor_id, subject_id, student:students(full_name), subjects(name, is_trial)')
@@ -281,9 +298,9 @@ export default function CompanyDashboard() {
         .limit(20),
     ]);
 
-    const packageStudentIds = [...new Set((paidPackagesRes.data || []).map((p: any) => p.student_id).filter(Boolean))];
-    const packageSubjectIds = [...new Set((paidPackagesRes.data || []).map((p: any) => p.subject_id).filter(Boolean))];
-    const [packageStudentsRes, packageSubjectsRes] = await Promise.all([
+      const packageStudentIds = [...new Set((paidPackagesRes.data || []).map((p: any) => p.student_id).filter(Boolean))];
+      const packageSubjectIds = [...new Set((paidPackagesRes.data || []).map((p: any) => p.subject_id).filter(Boolean))];
+      const [packageStudentsRes, packageSubjectsRes] = await Promise.all([
       packageStudentIds.length
         ? supabase.from('students').select('id, full_name').in('id', packageStudentIds)
         : Promise.resolve({ data: [] as any[] } as any),
@@ -291,12 +308,12 @@ export default function CompanyDashboard() {
         ? supabase.from('subjects').select('id, name, is_trial').in('id', packageSubjectIds)
         : Promise.resolve({ data: [] as any[] } as any),
     ]);
-    const packageStudentMap = new Map<string, string>((packageStudentsRes.data || []).map((s: any) => [s.id, s.full_name || t('common.student')]));
-    const packageSubjectMap = new Map<string, { name: string; is_trial: boolean }>(
+      const packageStudentMap = new Map<string, string>((packageStudentsRes.data || []).map((s: any) => [s.id, s.full_name || t('common.student')]));
+      const packageSubjectMap = new Map<string, { name: string; is_trial: boolean }>(
       (packageSubjectsRes.data || []).map((s: any) => [s.id, { name: s.name || t('common.lesson'), is_trial: s.is_trial === true }])
     );
 
-    const lessonPayments: RecentOrgPayment[] = (paidLessonsRes.data || []).map((s: any) => ({
+      const lessonPayments: RecentOrgPayment[] = (paidLessonsRes.data || []).map((s: any) => ({
       id: `lesson_${s.id}`,
       type: 'lesson',
       title: `${s.student?.full_name || t('common.student')} · ${tutorMap.get(s.tutor_id)?.full_name || ''}`.trim(),
@@ -305,7 +322,7 @@ export default function CompanyDashboard() {
       paidAt: s.start_time,
     }));
 
-    const packagePayments: RecentOrgPayment[] = (paidPackagesRes.data || []).map((p: any) => {
+      const packagePayments: RecentOrgPayment[] = (paidPackagesRes.data || []).map((p: any) => {
       const subj = packageSubjectMap.get(p.subject_id);
       const payoutAmount = Number(p.price_per_lesson || 0) > 0 && Number(p.total_lessons || 0) > 0
         ? Number(p.price_per_lesson) * Number(p.total_lessons)
@@ -320,7 +337,7 @@ export default function CompanyDashboard() {
       };
     });
 
-    const invoicePayments: RecentOrgPayment[] = (paidInvoicesRes.data || []).map((b: any) => ({
+      const invoicePayments: RecentOrgPayment[] = (paidInvoicesRes.data || []).map((b: any) => ({
       id: `invoice_${b.id}`,
       type: 'invoice',
       title: b.payer_name || t('common.student'),
@@ -329,22 +346,24 @@ export default function CompanyDashboard() {
       paidAt: b.paid_at,
     }));
 
-    const merged = [...lessonPayments, ...packagePayments, ...invoicePayments]
+      const merged = [...lessonPayments, ...packagePayments, ...invoicePayments]
       .sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime())
       .slice(0, 5);
-    setRecentPayments(merged);
+      setRecentPayments(merged);
 
-    setCache(DASH_CACHE_KEY, {
-      orgName: org?.name || '', tutorLimit: org?.tutor_limit || 0,
-      activeTutors: tutorIds.length, pendingInvites: pendingCount || 0,
-      sessionsThisMonth: completed.length, upcomingSessions: upcoming.length,
-      earningsThisMonth: completed.reduce((sum: number, s: any) => sum + (s.price || 0), 0),
-      earningsTotal: totalPaid.reduce((sum: number, s: any) => sum + (s.price || 0), 0),
-      upcomingList: upcomingFiltered, attentionList: attentionFiltered,
-      cancelledList: cancelledFiltered, recentPayments: merged,
-      tutorPayEntries: Array.from(tutorMap.entries()),
-    });
-    setLoading(false);
+      setCache(DASH_CACHE_KEY, {
+        orgName: org?.name || '', tutorLimit: org?.tutor_limit || 0,
+        activeTutors: tutorIds.length, pendingInvites: pendingCount || 0,
+        sessionsThisMonth: completed.length, upcomingSessions: upcoming.length,
+        earningsThisMonth: completed.reduce((sum: number, s: any) => sum + (s.price || 0), 0),
+        earningsTotal: totalPaid.reduce((sum: number, s: any) => sum + (s.price || 0), 0),
+        upcomingList: upcomingFiltered, attentionList: attentionFiltered,
+        cancelledList: cancelledFiltered, recentPayments: merged,
+        tutorPayEntries: Array.from(tutorMap.entries()),
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const stats: StatCard[] = [
