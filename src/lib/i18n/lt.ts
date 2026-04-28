@@ -2105,7 +2105,7 @@ export const lt: Record<string, string> = {
   'em.totalLabel': 'Viso:',
   'em.tutorComment': '📝 Korepetitoriaus komentaras:',
   'em.tutorContacts': '📞 Korepetitoriaus kontaktai',
-  'em.tutorInviteBody': 'Jus į platformą pakvietė <strong>{org}</strong>. Norėdami pradėti naudoti kalendorių ir priimti mokinius, užbaikite registraciją per nuorodą žemiau.',
+  'em.tutorInviteBody': 'Į platformą Jus pakvietė <strong>{org}</strong> administratorius. Užbaikite registraciją, kad galėtumėte naudotis platforma.',
   'em.tutorInviteDefault': 'Korepetitoriau',
   'em.tutorInviteHeader': '👋 Kvietimas prisijungti',
   'em.tutorInviteHeaderSub': 'Įmonė kviečia Jus kaip korepetitorių',
