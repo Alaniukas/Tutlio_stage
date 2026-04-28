@@ -1,3 +1,127 @@
+-- PROD sync block 01: 20260415120000..20260421000001
+
+
+-- =============================
+-- FILE: 20260415120000_allow_student_without_tutor.sql
+-- =============================
+
+-- Allow creating students without a tutor (org_admin creates code, assigns tutor later).
+-- tutor_id becomes nullable; organization_id is used for RLS when tutor_id is NULL.
+--
+-- Safety notes:
+--   • ALTER … DROP NOT NULL is non-destructive – existing rows with tutor_id are unaffected.
+--   • RLS policies are replaced inside a single transaction (no exposure window).
+--   • The original tutor_id-based condition is preserved verbatim; only an OR branch is added.
+--   • write_blocked_by_org_suspension() is kept in every write policy.
+
+ALTER TABLE public.students ALTER COLUMN tutor_id DROP NOT NULL;
+
+-- ── SELECT ────────────────────────────────────────────────────────────────────
+DROP POLICY IF EXISTS "Org admin can view org students" ON public.students;
+CREATE POLICY "Org admin can view org students" ON public.students FOR SELECT
+  USING (
+    tutor_id IN (
+      SELECT id FROM public.profiles
+      WHERE organization_id IN (
+        SELECT organization_id FROM public.organization_admins WHERE user_id = auth.uid()
+      )
+    )
+    OR (
+      tutor_id IS NULL
+      AND organization_id IN (
+        SELECT organization_id FROM public.organization_admins WHERE user_id = auth.uid()
+      )
+    )
+  );
+
+-- ── INSERT ────────────────────────────────────────────────────────────────────
+DROP POLICY IF EXISTS "Org admin can insert org students" ON public.students;
+CREATE POLICY "Org admin can insert org students" ON public.students FOR INSERT
+  WITH CHECK (
+    (
+      tutor_id IN (
+        SELECT id FROM public.profiles
+        WHERE organization_id IN (
+          SELECT organization_id FROM public.organization_admins WHERE user_id = auth.uid()
+        )
+      )
+      AND NOT public.write_blocked_by_org_suspension()
+    )
+    OR (
+      tutor_id IS NULL
+      AND organization_id IN (
+        SELECT organization_id FROM public.organization_admins WHERE user_id = auth.uid()
+      )
+      AND NOT public.write_blocked_by_org_suspension()
+    )
+  );
+
+-- ── UPDATE ────────────────────────────────────────────────────────────────────
+DROP POLICY IF EXISTS "Org admin can update org students" ON public.students;
+CREATE POLICY "Org admin can update org students" ON public.students FOR UPDATE
+  USING (
+    (
+      tutor_id IN (
+        SELECT id FROM public.profiles
+        WHERE organization_id IN (
+          SELECT organization_id FROM public.organization_admins WHERE user_id = auth.uid()
+        )
+      )
+      AND NOT public.write_blocked_by_org_suspension()
+    )
+    OR (
+      tutor_id IS NULL
+      AND organization_id IN (
+        SELECT organization_id FROM public.organization_admins WHERE user_id = auth.uid()
+      )
+      AND NOT public.write_blocked_by_org_suspension()
+    )
+  )
+  WITH CHECK (
+    (
+      tutor_id IN (
+        SELECT id FROM public.profiles
+        WHERE organization_id IN (
+          SELECT organization_id FROM public.organization_admins WHERE user_id = auth.uid()
+        )
+      )
+      AND NOT public.write_blocked_by_org_suspension()
+    )
+    OR (
+      tutor_id IS NULL
+      AND organization_id IN (
+        SELECT organization_id FROM public.organization_admins WHERE user_id = auth.uid()
+      )
+      AND NOT public.write_blocked_by_org_suspension()
+    )
+  );
+
+-- ── DELETE ────────────────────────────────────────────────────────────────────
+DROP POLICY IF EXISTS "Org admin can delete org students" ON public.students;
+CREATE POLICY "Org admin can delete org students" ON public.students FOR DELETE
+  USING (
+    (
+      tutor_id IN (
+        SELECT id FROM public.profiles
+        WHERE organization_id IN (
+          SELECT organization_id FROM public.organization_admins WHERE user_id = auth.uid()
+        )
+      )
+      AND NOT public.write_blocked_by_org_suspension()
+    )
+    OR (
+      tutor_id IS NULL
+      AND organization_id IN (
+        SELECT organization_id FROM public.organization_admins WHERE user_id = auth.uid()
+      )
+      AND NOT public.write_blocked_by_org_suspension()
+    )
+  );
+
+-- =============================
+-- FILE: 20260420000001_unify_schools_into_orgs.sql
+-- =============================
+
 -- ============================================================
 -- School Module (unified with organizations)
 -- Schools are organizations with entity_type = 'school'.
@@ -91,24 +215,9 @@ DROP POLICY IF EXISTS "school_admin_insert_students" ON public.students;
 DROP POLICY IF EXISTS "school_admin_update_students" ON public.students;
 DROP POLICY IF EXISTS "school_admin_delete_students" ON public.students;
 
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM information_schema.tables
-    WHERE table_schema = 'public' AND table_name = 'schools'
-  ) THEN
-    DROP POLICY IF EXISTS "school_admin_select" ON public.schools;
-    DROP POLICY IF EXISTS "school_admin_update" ON public.schools;
-  END IF;
-
-  IF EXISTS (
-    SELECT 1 FROM information_schema.tables
-    WHERE table_schema = 'public' AND table_name = 'school_admins'
-  ) THEN
-    DROP POLICY IF EXISTS "school_admin_self_select" ON public.school_admins;
-  END IF;
-END;
-$$;
+DROP POLICY IF EXISTS "school_admin_select" ON public.schools;
+DROP POLICY IF EXISTS "school_admin_update" ON public.schools;
+DROP POLICY IF EXISTS "school_admin_self_select" ON public.school_admins;
 
 -- ─── 4. MIGRATE school_contract_templates.school_id → organization_id ───────
 

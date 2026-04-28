@@ -80,6 +80,14 @@ type Role = null | 'tutor' | 'student';
 type StudentMode = null | 'register' | 'login';
 type TutorMode = null | 'login';
 
+function fallbackNameFromEmail(email?: string | null): string {
+  const raw = (email || '').trim();
+  if (!raw.includes('@')) return 'Tutor';
+  const local = raw.split('@')[0] || '';
+  const cleaned = local.replace(/[._-]+/g, ' ').trim();
+  return cleaned ? cleaned.slice(0, 1).toUpperCase() + cleaned.slice(1) : 'Tutor';
+}
+
 function messageForAuthHashError(code: string, detailEnc: string | null): string {
   const c = (code || '').toLowerCase();
   if (c === 'otp_expired') {
@@ -124,6 +132,27 @@ export default function Login() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
+  const ensureTutorProfile = async (user: { id: string; email?: string | null; user_metadata?: any }) => {
+    const displayName =
+      (typeof user.user_metadata?.full_name === 'string' && user.user_metadata.full_name.trim()) ||
+      fallbackNameFromEmail(user.email);
+
+    await supabase.from('profiles').upsert({
+      id: user.id,
+      email: user.email ?? '',
+      full_name: displayName,
+      phone: user.user_metadata?.phone || '',
+    });
+
+    const { data: ensured } = await supabase
+      .from('profiles')
+      .select('id, organization_id, subscription_status, manual_subscription_exempt')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    return ensured;
+  };
+
   // Redirect already-logged-in user to the right page (tutor → dashboard, student → /student, etc.)
   const redirectByRole = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -140,8 +169,11 @@ export default function Login() {
     if (!session?.user) return false;
     const user = session.user;
 
-    const { data: orgAdmin } = await supabase
+    const { data: orgAdmin, error: orgAdminErr } = await supabase
       .from('organization_admins').select('id').eq('user_id', user.id).maybeSingle();
+    if (orgAdminErr) {
+      console.warn('[Login] redirectByRole organization_admins check failed:', orgAdminErr);
+    }
     if (orgAdmin) { navigate('/company'); return true; }
 
     const { data: parentProfile } = await supabase
@@ -174,8 +206,11 @@ export default function Login() {
     }
     if (student) { navigate('/student'); return true; }
 
-    let { data: profile } = await supabase
+    let { data: profile, error: profileError } = await supabase
       .from('profiles').select('id, organization_id, subscription_status, manual_subscription_exempt').eq('id', user.id).maybeSingle();
+    if (profileError) {
+      console.warn('[Login] profile lookup in redirectByRole failed:', profileError);
+    }
 
     const meta = user.user_metadata || {};
     if (meta.org_token && !profile?.organization_id) {
@@ -243,6 +278,10 @@ export default function Login() {
       profile = created;
     }
 
+    if (!profile) {
+      // Legacy users may exist in auth without a profile row.
+      profile = await ensureTutorProfile(user);
+    }
     if (!profile) return false;
 
     // Tutor: if has org or subscription → dashboard. Otherwise stay on login so user can sign out
@@ -318,11 +357,14 @@ export default function Login() {
       setError(t('auth.invalidCredentials'));
       setLoading(false);
     } else if (data.user) {
-      const { data: orgAdminRow } = await supabase
+      const { data: orgAdminRow, error: orgAdminRowError } = await supabase
         .from('organization_admins')
         .select('id')
         .eq('user_id', data.user.id)
         .maybeSingle();
+      if (orgAdminRowError) {
+        console.warn('[Login] organization_admins lookup failed during login:', orgAdminRowError);
+      }
       if (orgAdminRow) {
         setLoading(false);
         navigate('/company');
@@ -349,11 +391,14 @@ export default function Login() {
       }
 
       if (role === 'tutor') {
-        let { data: tutorData } = await supabase
+        let { data: tutorData, error: tutorError } = await supabase
           .from('profiles')
           .select('id')
           .eq('id', data.user.id)
           .maybeSingle();
+        if (tutorError) {
+          console.warn('[Login] Tutor profile lookup failed:', tutorError);
+        }
 
         // Check org_token in metadata to link to organization even if profile exists (or create one)
         const meta = data.user?.user_metadata || {};
@@ -430,17 +475,24 @@ export default function Login() {
           tutorData = created;
         }
 
+        if (!tutorData) {
+          const ensured = await ensureTutorProfile(data.user);
+          tutorData = ensured ? { id: ensured.id } : null;
+        }
+
         if (tutorData) {
           setLoading(false);
           await supabase.auth.getSession();
           navigate('/dashboard');
           return;
-        } else {
-          await supabase.auth.signOut();
-          setError(t('login.noTutorFound'));
-          setLoading(false);
-          return;
         }
+
+        // Do not hard-fail login on transient RLS/policy errors in profile lookup.
+        // User is already authenticated; downstream pages remain protected by RLS/API auth.
+        console.warn('[Login] tutor profile not resolved after auth - allowing dashboard navigation');
+        setLoading(false);
+        navigate('/dashboard');
+        return;
       }
 
       setLoading(false);

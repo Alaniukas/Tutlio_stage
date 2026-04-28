@@ -54,6 +54,7 @@ export default function FinancePage() {
   const [minBookingHours, setMinBookingHours] = useState(24);
 
   const [isSendInvoiceModalOpen, setIsSendInvoiceModalOpen] = useState(false);
+  const isOrgTutorEffective = orgPolicy.isOrgTutor || !isSoloTutor;
 
   const verifyStripeOnboarding = useCallback(
     async (opts?: { silent?: boolean; cleanUrl?: boolean }) => {
@@ -204,7 +205,7 @@ export default function FinancePage() {
     );
   }
 
-  if (orgPolicy.isOrgTutor) {
+  if (isOrgTutorEffective) {
     return (
       <Layout>
         <div className="max-w-4xl mx-auto space-y-6 animate-fade-in px-4">
@@ -518,7 +519,7 @@ export default function FinancePage() {
                 </div>
               </label>
 
-              {isSoloTutor && !orgPolicy.isOrgTutor && (
+              {isSoloTutor && !isOrgTutorEffective && (
                 <label className="flex items-start gap-3 p-4 rounded-xl border-2 border-amber-200 bg-amber-50/50 hover:border-amber-300 cursor-pointer transition-all">
                   <input
                     type="checkbox"

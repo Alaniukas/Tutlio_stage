@@ -20,7 +20,8 @@
     "supabase:link": "npx supabase link",
     "supabase:push": "npx supabase db push",
     "supabase:db": "npx supabase login && npx supabase db push",
-    "email:product-update": "tsx scripts/email-product-update.ts"
+    "email:product-update": "tsx scripts/email-product-update.ts",
+    "security:pencheck": "npx --yes tsx scripts/security-pencheck.ts"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",

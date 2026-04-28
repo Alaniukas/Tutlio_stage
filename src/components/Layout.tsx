@@ -36,7 +36,8 @@ export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const { t } = useTranslation();
   const { profile } = useUser();
-  const isOrgTutor = !!profile?.organization_id;
+  const [profileOrgId, setProfileOrgId] = useState<string | null>(profile?.organization_id ?? null);
+  const isOrgTutor = !!(profile?.organization_id || profileOrgId);
   const chatUnreadTotal = useTotalChatUnread();
   const [tutorName, setTutorName] = useState('');
   const [tutorEmail, setTutorEmail] = useState('');
@@ -68,8 +69,13 @@ export default function Layout({ children }: LayoutProps) {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         setTutorEmail(user.email || '');
-        const { data } = await supabase.from('profiles').select('full_name').eq('id', user.id).single();
+        const { data } = await supabase
+          .from('profiles')
+          .select('full_name, organization_id')
+          .eq('id', user.id)
+          .maybeSingle();
         setTutorName(data?.full_name || user.email?.split('@')[0] || t('common.tutor'));
+        setProfileOrgId(data?.organization_id ?? null);
       }
     };
     getUser();
