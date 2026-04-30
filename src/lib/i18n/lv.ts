@@ -20,6 +20,11 @@ export const lv: Record<string, string> = {
   'about.valuesDesc': 'Kāpēc tūkstošiem privātskolotāju mums uzticas katru dienu.',
   'about.valuesTitle': 'Mūsu vērtības',
 
+  'blog.backToAll': 'Visi raksti',
+  'blog.empty': 'Vēl nav rakstu. Atgriezieties drīz!',
+  'blog.notFound': 'Raksts nav atrasts',
+  'blog.readMore': 'Lasīt vairāk',
+  'blog.subtitle': 'Padomi, gadījumu pētījumi un ieskati, lai palīdzētu jums efektīvāk vadīt repetīciju biznesu.',
   'auth.agreeWith': 'Piekrītu',
   'auth.backToLogin': 'Atpakaļ uz pieteikšanos',
   'auth.backToTutorStudentLogin': 'Atpakaļ uz skolotāja / skolēna pieteikšanos',

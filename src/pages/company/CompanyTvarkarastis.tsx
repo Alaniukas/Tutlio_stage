@@ -1476,7 +1476,7 @@ export default function CompanyTvarkarastis() {
     <>
       <div className="space-y-4">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">{t('compSch.title')}</h1>
             <p className="text-sm text-gray-600 mt-1">
@@ -1484,21 +1484,21 @@ export default function CompanyTvarkarastis() {
               {canFullControl && <span className="ml-2 px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded">{t('compSch.fullControl')}</span>}
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <Button variant="outline" onClick={() => setFindLessonOpen(true)}>
-              <Search className="w-4 h-4 mr-2" />
-              {t('compSch.findLesson')}
+              <Search className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">{t('compSch.findLesson')}</span>
             </Button>
             {canFullControl && (
               <Button variant="outline" onClick={() => setIsCreateAvailabilityOpen(true)}>
-                <Plus className="w-4 h-4 mr-2" />
-                {t('compSch.freeTime')}
+                <Plus className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">{t('compSch.freeTime')}</span>
               </Button>
             )}
             {canView && (
               <Button onClick={() => { resetCreateForm(); setIsCreateSessionOpen(true); }}>
-                <Plus className="w-4 h-4 mr-2" />
-                {t('compSch.newLesson')}
+                <Plus className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">{t('compSch.newLesson')}</span>
               </Button>
             )}
           </div>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import Layout from '@/components/Layout';
 import { supabase } from '@/lib/supabase';
+import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
 import { Button } from '@/components/ui/button';
 import {
@@ -55,10 +56,11 @@ interface Session {
 
 export default function WaitlistPage() {
   const { t, dateFnsLocale } = useTranslation();
-  const [waitlist, setWaitlist] = useState<WaitlistEntry[]>([]);
-  const [students, setStudents] = useState<Student[]>([]);
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [loading, setLoading] = useState(true);
+  const wc = getCached<any>('tutor_waitlist');
+  const [waitlist, setWaitlist] = useState<WaitlistEntry[]>(wc?.waitlist ?? []);
+  const [students, setStudents] = useState<Student[]>(wc?.students ?? []);
+  const [sessions, setSessions] = useState<Session[]>(wc?.sessions ?? []);
+  const [loading, setLoading] = useState(!wc);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [newEntry, setNewEntry] = useState({ student_id: '', session_id: '', notes: '' });
   const [saving, setSaving] = useState(false);
@@ -75,10 +77,14 @@ export default function WaitlistPage() {
     if (typeof window !== 'undefined') localStorage.setItem(WAITLIST_TIP_KEY, '1');
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { if (!getCached('tutor_waitlist')) fetchData(); }, []);
+
+  useEffect(() => {
+    if (!loading) setCache('tutor_waitlist', { waitlist, students, sessions });
+  }, [loading, waitlist, students, sessions]);
 
   const fetchData = async () => {
-    setLoading(true);
+    if (!getCached('tutor_waitlist')) setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
@@ -109,6 +115,7 @@ export default function WaitlistPage() {
       .gte('start_time', new Date().toISOString())
       .order('start_time', { ascending: true });
     setSessions(sessionsData || []);
+    invalidateCache('tutor_calendar');
     setLoading(false);
   };
 
@@ -274,14 +281,14 @@ export default function WaitlistPage() {
             {isCancelledExpanded && (
               <div className="px-4 pb-4 space-y-2">
                 {sessions.map((s) => (
-                  <div key={s.id} className="flex items-center justify-between bg-white rounded-xl px-4 py-2.5 border border-blue-100">
-                    <div className="flex items-center gap-3 text-sm">
-                      <Clock className="w-3.5 h-3.5 text-blue-600" />
-                      <span className="text-gray-700 font-medium">{format(new Date(s.start_time), 'EEE, d MMMM HH:mm', { locale: dateFnsLocale })}</span>
-                      {s.topic && <span className="text-gray-400">· {s.topic}</span>}
-                      {s.student?.full_name && <span className="text-gray-400">· {s.student.full_name}</span>}
+                  <div key={s.id} className="flex items-center justify-between gap-2 bg-white rounded-xl px-3 sm:px-4 py-2.5 border border-blue-100">
+                    <div className="flex items-center gap-2 sm:gap-3 text-sm min-w-0">
+                      <Clock className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
+                      <span className="text-gray-700 font-medium truncate">{format(new Date(s.start_time), 'EEE, d MMMM HH:mm', { locale: dateFnsLocale })}</span>
+                      {s.topic && <span className="text-gray-400 hidden sm:inline">· {s.topic}</span>}
+                      {s.student?.full_name && <span className="text-gray-400 hidden sm:inline">· {s.student.full_name}</span>}
                     </div>
-                    <span className="text-xs text-blue-600 font-medium">{t('waitlist.reserved')}</span>
+                    <span className="text-xs text-blue-600 font-medium flex-shrink-0">{t('waitlist.reserved')}</span>
                   </div>
                 ))}
               </div>

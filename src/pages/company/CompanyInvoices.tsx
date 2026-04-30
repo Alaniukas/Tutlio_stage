@@ -254,7 +254,7 @@ export default function CompanyInvoices() {
   return (
     <>
       <div className="max-w-5xl mx-auto space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
               <FileText className="w-6 h-6 text-indigo-600" />
@@ -504,15 +504,15 @@ export default function CompanyInvoices() {
 
         {activeTab === 'invoices' && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
             <h2 className="text-lg font-semibold text-gray-900">{t('invoices.list')}</h2>
-            <div className="flex gap-2">
+            <div className="flex gap-1.5 sm:gap-2 overflow-x-auto pb-1 sm:pb-0">
               {['all', 'issued', 'paid', 'cancelled'].map((status) => (
                 <button
                   key={status}
                   onClick={() => setStatusFilter(status)}
                   className={cn(
-                    'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                    'px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0',
                     statusFilter === status
                       ? 'bg-indigo-100 text-indigo-700'
                       : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
@@ -540,14 +540,14 @@ export default function CompanyInvoices() {
                 return (
                   <div
                     key={inv.id}
-                    className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:border-gray-300 transition-colors"
+                    className="flex items-center justify-between gap-2 p-3 sm:p-4 border border-gray-200 rounded-xl hover:border-gray-300 transition-colors"
                   >
-                    <div className="flex items-center gap-4 min-w-0">
-                      <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center flex-shrink-0">
-                        <FileText className="w-5 h-5 text-indigo-600" />
+                    <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+                      <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-indigo-50 flex items-center justify-center flex-shrink-0">
+                        <FileText className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-600" />
                       </div>
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-semibold text-gray-900 text-sm">{inv.invoice_number}</span>
                           {statusBadge(inv.status)}
                         </div>

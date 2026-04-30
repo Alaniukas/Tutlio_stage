@@ -27,6 +27,7 @@ import OrgSuspendedBanner from '@/components/OrgSuspendedBanner';
 import { useTranslation } from '@/lib/i18n';
 import { useUser } from '@/contexts/UserContext';
 import { useTotalChatUnread } from '@/hooks/useChat';
+import { usePushSubscription } from '@/hooks/usePushSubscription';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -39,11 +40,14 @@ export default function Layout({ children }: LayoutProps) {
   const [profileOrgId, setProfileOrgId] = useState<string | null>(profile?.organization_id ?? null);
   const isOrgTutor = !!(profile?.organization_id || profileOrgId);
   const chatUnreadTotal = useTotalChatUnread();
+  usePushSubscription();
   const [tutorName, setTutorName] = useState('');
   const [tutorEmail, setTutorEmail] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [sidebarExpanded, setSidebarExpanded] = useState(true);
+  const [sidebarExpanded, setSidebarExpanded] = useState(() => {
+    try { const v = localStorage.getItem('tutlio_sidebar_expanded'); return v !== null ? v === 'true' : true; } catch { return true; }
+  });
   const menuRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLElement>(null);
 
@@ -83,6 +87,10 @@ export default function Layout({ children }: LayoutProps) {
   }, []);
 
   useEffect(() => {
+    try { localStorage.setItem('tutlio_sidebar_expanded', String(sidebarExpanded)); } catch {}
+  }, [sidebarExpanded]);
+
+  useEffect(() => {
     mainRef.current?.scrollTo(0, 0);
     const raf = requestAnimationFrame(() => mainRef.current?.scrollTo(0, 0));
     return () => cancelAnimationFrame(raf);
@@ -105,18 +113,21 @@ export default function Layout({ children }: LayoutProps) {
   const initials = tutorName.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?';
   const isCalendarRoute = location.pathname === '/calendar';
   return (
-    <div className="h-dvh max-h-dvh bg-[#fffefc] flex overflow-hidden relative">
+    <div className="h-dvh max-h-dvh bg-white flex overflow-hidden relative">
       <OrgSuspendedBanner />
-      <div className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] bg-orange-100/40 rounded-full blur-[80px] pointer-events-none z-0" />
-      <div className="absolute bottom-[-10%] left-[-10%] w-[600px] h-[600px] bg-rose-50/40 rounded-full blur-[100px] pointer-events-none z-0" />
+      <div className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] bg-indigo-50/40 rounded-full blur-[80px] pointer-events-none z-0" />
+      <div className="absolute bottom-[-10%] left-[-10%] w-[600px] h-[600px] bg-slate-50/40 rounded-full blur-[100px] pointer-events-none z-0" />
 
       <aside
         className={cn(
-          'hidden lg:flex relative z-20 flex-col border-r border-orange-100/60 bg-white/90 backdrop-blur-md shadow-sm transition-all duration-200',
+          'hidden lg:flex relative z-20 flex-col border-r border-gray-100 bg-white/90 backdrop-blur-md shadow-sm transition-all duration-200',
           sidebarExpanded ? 'w-72' : 'w-20'
         )}
       >
-        <div className="flex items-center justify-between border-b border-orange-100/60 p-4">
+        <div className={cn(
+          'flex border-b border-gray-100',
+          sidebarExpanded ? 'items-center justify-between p-4' : 'flex-col items-center gap-2 py-3 px-2'
+        )}>
           <Link to="/" className="flex items-center gap-2 min-w-0">
             <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center flex-shrink-0">
               <GraduationCap className="w-5 h-5 text-white" />
@@ -130,7 +141,10 @@ export default function Layout({ children }: LayoutProps) {
               setSidebarExpanded((prev) => !prev);
               setMenuOpen(false);
             }}
-            className="min-h-[40px] min-w-[40px] rounded-xl text-gray-500 hover:bg-gray-100 hover:text-gray-900 transition-colors flex items-center justify-center"
+            className={cn(
+              'rounded-xl text-gray-500 hover:bg-gray-100 hover:text-gray-900 transition-colors flex items-center justify-center',
+              sidebarExpanded ? 'min-h-[40px] min-w-[40px]' : 'h-8 w-8'
+            )}
           >
             {sidebarExpanded ? <ChevronsLeft className="w-4 h-4" /> : <ChevronsRight className="w-4 h-4" />}
           </button>
@@ -176,7 +190,7 @@ export default function Layout({ children }: LayoutProps) {
           })}
         </nav>
 
-        <div className="relative border-t border-orange-100/60 p-3" ref={menuRef}>
+        <div className="relative border-t border-gray-100 p-3" ref={menuRef}>
           <button
             onClick={() => setMenuOpen((prev) => !prev)}
             className={cn(
@@ -231,8 +245,8 @@ export default function Layout({ children }: LayoutProps) {
       {mobileOpen && (
         <div className="lg:hidden fixed inset-0 z-40 flex">
           <div className="fixed inset-0 bg-black/50" onClick={() => setMobileOpen(false)} />
-          <aside className="relative z-50 flex h-full w-72 max-w-[85vw] flex-col border-r border-orange-100/60 bg-white">
-            <div className="flex items-center justify-between border-b border-orange-100/60 p-4">
+          <aside className="relative z-50 flex h-full w-72 max-w-[85vw] flex-col border-r border-gray-100 bg-white">
+            <div className="flex items-center justify-between border-b border-gray-100 p-4">
               <Link to="/" className="flex items-center gap-2" onClick={() => setMobileOpen(false)}>
                 <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center">
                   <GraduationCap className="w-5 h-5 text-white" />
@@ -286,7 +300,7 @@ export default function Layout({ children }: LayoutProps) {
               })}
             </nav>
 
-            <div className="border-t border-orange-100/60 p-3 space-y-2">
+            <div className="border-t border-gray-100 p-3 space-y-2">
               <div className="flex items-center gap-2 px-2 py-1">
                 <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
                   {initials}
@@ -317,7 +331,7 @@ export default function Layout({ children }: LayoutProps) {
       )}
 
       <div className="relative z-10 flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden">
-        <header className="lg:hidden bg-white/90 backdrop-blur-md border-b border-orange-100/50 sticky top-0 z-30 shadow-sm px-4 py-3 flex items-center justify-between">
+        <header className="lg:hidden bg-white/90 backdrop-blur-md border-b border-gray-100 sticky top-0 z-30 shadow-sm px-4 py-3 flex items-center justify-between">
           <button
             onClick={() => setMobileOpen(true)}
             className="text-gray-500 hover:text-gray-900 p-2.5 -ml-2 min-h-[44px] min-w-[44px] flex items-center justify-center touch-manipulation rounded-xl"

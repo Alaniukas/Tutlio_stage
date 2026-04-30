@@ -44,6 +44,8 @@ import PackagePaymentCancelled from '@/pages/PackagePaymentCancelled';
 import SchoolPaymentSuccess from '@/pages/SchoolPaymentSuccess';
 import TutorSubscribe from '@/pages/TutorSubscribe';
 import Pricing from '@/pages/Pricing';
+import Blog from '@/pages/Blog';
+import BlogPost from '@/pages/BlogPost';
 import PrivacyPolicy from '@/pages/PrivacyPolicy';
 import TermsOfService from '@/pages/TermsOfService';
 import DataProcessingAgreement from '@/pages/DataProcessingAgreement';
@@ -107,6 +109,10 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/:locale/kontaktai" element={<Contact />} />
         <Route path="/pricing" element={<Pricing />} />
         <Route path="/:locale/pricing" element={<Pricing />} />
+        <Route path="/blog" element={<Blog />} />
+        <Route path="/:locale/blog" element={<Blog />} />
+        <Route path="/blog/:slug" element={<BlogPost />} />
+        <Route path="/:locale/blog/:slug" element={<BlogPost />} />
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         <Route path="/:locale/privacy-policy" element={<PrivacyPolicy />} />
         <Route path="/terms" element={<TermsOfService />} />

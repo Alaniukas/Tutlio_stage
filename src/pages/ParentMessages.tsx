@@ -32,15 +32,15 @@ export default function ParentMessages() {
 
   return (
     <div className="min-h-screen bg-[#f7f7fb]">
-      <header className="bg-white border-b px-6 py-4 flex items-center gap-3">
+      <header className="bg-white border-b px-4 sm:px-6 py-3 sm:py-4 flex items-center gap-3">
         <Button variant="ghost" size="sm" onClick={() => navigate('/parent')}>
           <ArrowLeft className="w-4 h-4 mr-1" /> {t('common.back')}
         </Button>
-        <h1 className="text-xl font-bold text-gray-900">{t('chat.title')}</h1>
+        <h1 className="text-lg sm:text-xl font-bold text-gray-900">{t('chat.title')}</h1>
       </header>
 
-      <main className="max-w-screen-xl mx-auto px-4 py-6">
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm flex isolate" style={{ height: 'calc(100vh - 180px)' }}>
+      <main className="max-w-screen-xl mx-auto px-2 sm:px-4 py-2 sm:py-6">
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm flex isolate" style={{ height: 'calc(100dvh - 160px)' }}>
           <div className={`w-full lg:w-80 xl:w-96 border-r border-gray-100 flex-shrink-0 ${mobileShowChat ? 'hidden lg:flex lg:flex-col' : 'flex flex-col'}`}>
             <ConversationList
               conversations={conversations}

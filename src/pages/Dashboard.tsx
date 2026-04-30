@@ -4,7 +4,7 @@ import Layout from '@/components/Layout';
 import TutorOnboarding from '@/components/TutorOnboarding';
 import SessionFiles from '@/components/SessionFiles';
 import { supabase } from '@/lib/supabase';
-import { getCached, setCache } from '@/lib/dataCache';
+import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
 import { useUser } from '@/contexts/UserContext';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -112,24 +112,23 @@ export default function DashboardPage() {
     const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
     const [noShowPickerOpen, setNoShowPickerOpen] = useState(false);
     const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
-    const [currentUserId, setCurrentUserId] = useState('');
-    const [isStripeConnected, setIsStripeConnected] = useState(false);
-    const [hasSubjects, setHasSubjects] = useState(false);
-    const [orgTutorFallback, setOrgTutorFallback] = useState<boolean | null>(null);
+    const [currentUserId, setCurrentUserId] = useState(dc?.currentUserId ?? '');
+    const [isStripeConnected, setIsStripeConnected] = useState(dc?.isStripeConnected ?? false);
+    const [hasSubjects, setHasSubjects] = useState(dc?.hasSubjects ?? false);
+    const [orgTutorFallback, setOrgTutorFallback] = useState<boolean | null>(dc?.orgTutorFallback ?? null);
     const isOrgTutor: boolean | null = profile ? !!profile.organization_id : orgTutorFallback;
     const [isEditingTime, setIsEditingTime] = useState(false);
     const [editNewStartTime, setEditNewStartTime] = useState('');
 
-    // View comment (same as Calendar – add/edit without full edit)
     const [viewCommentText, setViewCommentText] = useState('');
     const [viewShowToStudent, setViewShowToStudent] = useState(false);
     const [forceTrialCommentVisibility, setForceTrialCommentVisibility] = useState(false);
     const [viewCommentSaving, setViewCommentSaving] = useState(false);
-    const [paymentTiming, setPaymentTiming] = useState<'before_lesson' | 'after_lesson'>('before_lesson');
-    const [paymentDeadlineHours, setPaymentDeadlineHours] = useState<number | null>(null);
-    const [recentPayments, setRecentPayments] = useState<RecentPayment[]>([]);
+    const [paymentTiming, setPaymentTiming] = useState<'before_lesson' | 'after_lesson'>(dc?.paymentTiming ?? 'before_lesson');
+    const [paymentDeadlineHours, setPaymentDeadlineHours] = useState<number | null>(dc?.paymentDeadlineHours ?? null);
+    const [recentPayments, setRecentPayments] = useState<RecentPayment[]>(dc?.recentPayments ?? []);
     const [showAllRecentPayments, setShowAllRecentPayments] = useState(false);
-    const [tutorUpdates, setTutorUpdates] = useState<TutorUpdateItem[]>([]);
+    const [tutorUpdates, setTutorUpdates] = useState<TutorUpdateItem[]>(dc?.tutorUpdates ?? []);
 
     // After successful Stripe payment redirect - update subscription, show success; clean URL after 300ms
     useEffect(() => {
@@ -154,14 +153,19 @@ export default function DashboardPage() {
     }, [searchParams, setSearchParams]);
 
     useEffect(() => {
-        fetchData();
+        if (!getCached('tutor_dashboard')) fetchData();
     }, []);
 
     useEffect(() => {
         if (!loading && tutorName) {
-            setCache('tutor_dashboard', { sessions, studentCount, tutorName });
+            setCache('tutor_dashboard', {
+                sessions, studentCount, tutorName,
+                isStripeConnected, hasSubjects, orgTutorFallback,
+                paymentTiming, paymentDeadlineHours,
+                recentPayments, tutorUpdates, currentUserId,
+            });
         }
-    }, [loading, sessions, studentCount, tutorName]);
+    }, [loading, sessions, studentCount, tutorName, isStripeConnected, hasSubjects, recentPayments, tutorUpdates]);
 
     useEffect(() => {
         let cancelled = false;
@@ -402,6 +406,7 @@ export default function DashboardPage() {
             }
         }
 
+        invalidateCache('tutor_calendar');
         setLoading(false);
     };
 
@@ -1466,12 +1471,12 @@ export default function DashboardPage() {
                         ) : (
                             <div className="space-y-2">
                                 {displayedRecentPayments.map((p) => (
-                                    <div key={p.id} className="flex items-center justify-between p-3 rounded-xl bg-green-50 border border-green-100">
-                                        <div className="flex items-center gap-3">
+                                    <div key={p.id} className="flex items-center justify-between gap-2 p-3 rounded-xl bg-green-50 border border-green-100">
+                                        <div className="flex items-center gap-3 min-w-0">
                                             <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
-                                            <div>
-                                                <p className="text-sm font-semibold text-gray-900">{p.title}</p>
-                                                <p className="text-xs text-gray-500">
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-semibold text-gray-900 truncate">{p.title}</p>
+                                                <p className="text-xs text-gray-500 truncate">
                                                     {p.subtitle}
                                                     <span className="ml-1 text-[10px] uppercase text-green-700 font-semibold">
                                                         · {p.type === 'lesson' ? t('dash.lesson') : p.type === 'package' ? t('dash.package') : t('dash.invoice')}
@@ -1479,7 +1484,7 @@ export default function DashboardPage() {
                                                 </p>
                                             </div>
                                         </div>
-                                        <span className="text-sm font-bold text-green-700">+€{p.amount.toFixed(2)}</span>
+                                        <span className="text-sm font-bold text-green-700 flex-shrink-0">+€{p.amount.toFixed(2)}</span>
                                     </div>
                                 ))}
                                 {recentPayments.length > 5 && (

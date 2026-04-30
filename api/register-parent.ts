@@ -37,15 +37,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (authErr) {
     if (authErr.message?.includes('already registered') || authErr.message?.includes('already been registered')) {
-      // User exists — look up their ID and link
-      const { data: { users } } = await supabase.auth.admin.listUsers();
-      const existing = users?.find((u: any) => u.email === invite.parent_email);
+      let existing: { id: string; email?: string } | undefined;
+      for (let page = 1; page <= 20 && !existing; page++) {
+        const { data: { users }, error: listErr } = await supabase.auth.admin.listUsers({ page, perPage: 100 });
+        if (listErr || !users?.length) break;
+        existing = users.find((u: any) => u.email === invite.parent_email);
+        if (users.length < 100) break;
+      }
       if (existing) {
         await linkParent(existing.id, fullName, invite.student_id, invite.id);
         return res.status(200).json({ success: true });
       }
     }
-    return res.status(400).json({ error: authErr.message });
+    return res.status(400).json({ error: 'Registration failed' });
   }
 
   if (!authData.user) return res.status(500).json({ error: 'User creation failed' });

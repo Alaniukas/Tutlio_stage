@@ -28,7 +28,27 @@
     ],
     "rewrites": [
         {
-            "source": "/((?!api/|@|src/|assets/|node_modules/|\\.vite/|favicon\\.ico|robots\\.txt|manifest\\.webmanifest).*)",
+            "source": "/blog/:slug",
+            "destination": "/api/blog-render?slug=:slug&locale=lt"
+        },
+        {
+            "source": "/blog",
+            "destination": "/api/blog-render?locale=lt"
+        },
+        {
+            "source": "/:locale/blog/:slug",
+            "destination": "/api/blog-render?slug=:slug&locale=:locale"
+        },
+        {
+            "source": "/:locale/blog",
+            "destination": "/api/blog-render?locale=:locale"
+        },
+        {
+            "source": "/sitemap.xml",
+            "destination": "/api/sitemap"
+        },
+        {
+            "source": "/((?!api/|@|src/|assets/|node_modules/|\\.vite/|favicon\\.ico|favicon\\.svg|robots\\.txt|sitemap\\.xml|manifest\\.webmanifest).*)",
             "destination": "/index.html"
         }
     ],

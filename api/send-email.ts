@@ -8,6 +8,7 @@ import { t, type Locale } from './_lib/i18n.js';
 import { Resend } from 'resend';
 import { createClient } from '@supabase/supabase-js';
 import { outlookEmailButton, headerInlineStyle } from './_lib/outlookEmail.js';
+import { sendPushForEmail } from './_lib/sendPush.js';
 
 const resend = new Resend(process.env.RESEND_API_KEY_STAGE || process.env.RESEND_API_KEY);
 const FROM_EMAIL = process.env.FROM_EMAIL || 'Tutlio <onboarding@tutlio.lt>';
@@ -1369,11 +1370,8 @@ function schoolContract(d: any, locale: Locale) {
   const missingFields: string[] = Array.isArray(d.missingFields)
     ? d.missingFields.map((x: any) => String(x).trim()).filter(Boolean)
     : [];
-  const completionLink = missingFields.length > 0
-    ? String(
-        d.completionUrl ||
-        (d.contractId ? `${appUrl}/api/school-contract-complete?contractId=${encodeURIComponent(String(d.contractId))}` : ''),
-      ).trim()
+  const completionLink = missingFields.length > 0 && d.completionUrl
+    ? String(d.completionUrl).trim()
     : '';
   const missingFieldsHtml = missingFields.length
     ? `<div style="background:#fff7ed; border:1px solid #fed7aa; border-radius:12px; padding:14px; margin:16px 0;">
@@ -1670,6 +1668,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const msg = error && typeof error === 'object' && 'message' in error ? String((error as any).message) : 'Failed to send email';
       return res.status(500).json({ error: msg });
     }
+
+    // Fire-and-forget push notification for eligible types
+    sendPushForEmail(Array.isArray(to) ? to : [to], type, rawData).catch((e) =>
+      console.error('[send-email] push error:', e?.message || e),
+    );
 
     return res.status(200).json({ success: true, id: result?.id });
   } catch (err: any) {

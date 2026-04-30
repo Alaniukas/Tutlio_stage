@@ -1,7 +1,8 @@
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
+import { uploadContractFile, getContractSignedUrl } from '@/lib/contractStorage';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { DateInput } from '@/components/ui/date-input';
@@ -234,19 +235,18 @@ export default function CompanyContracts() {
 
     if (templatePdfFile) {
       const fileExt = templatePdfFile.name.split('.').pop()?.toLowerCase() || 'pdf';
-      const path = `${orgId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
-      const { error: uploadErr } = await supabase.storage.from('school-contracts').upload(path, templatePdfFile, {
-        cacheControl: '3600',
-        upsert: false,
-        contentType: templatePdfFile.type || 'application/pdf',
-      });
-      if (uploadErr) {
-        setToast({ message: uploadErr.message, type: 'error' });
+      const storagePath = `${orgId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
+      const upload = await uploadContractFile(
+        storagePath,
+        templatePdfFile,
+        templatePdfFile.type || 'application/pdf',
+      );
+      if (upload.error) {
+        setToast({ message: upload.error, type: 'error' });
         setSaving(false);
         return;
       }
-      const { data } = supabase.storage.from('school-contracts').getPublicUrl(path);
-      payload.pdf_url = data.publicUrl;
+      payload.pdf_url = storagePath;
 
       // If admin uploads DOCX template, extract text once and keep as editable body placeholders source.
       // This allows populating contract fields from the exact template wording and still sending PDF output.
@@ -558,15 +558,14 @@ export default function CompanyContracts() {
 
     const bytes = await pdfDoc.save();
     const safeStudent = (params.studentName || 'student').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-    const path = `${orgId}/contracts/${params.contractId}-${safeStudent}-${Date.now()}.pdf`;
-    const { error: uploadErr } = await supabase.storage.from('school-contracts').upload(path, new Blob([bytes], { type: 'application/pdf' }), {
-      cacheControl: '3600',
-      upsert: false,
-      contentType: 'application/pdf',
-    });
-    if (uploadErr) return null;
-    const { data } = supabase.storage.from('school-contracts').getPublicUrl(path);
-    return data.publicUrl;
+    const storagePath = `${orgId}/contracts/${params.contractId}-${safeStudent}-${Date.now()}.pdf`;
+    const upload = await uploadContractFile(
+      storagePath,
+      new Blob([bytes], { type: 'application/pdf' }),
+      'application/pdf',
+    );
+    if (upload.error) return null;
+    return storagePath;
   };
 
   const uploadConvertedPdfBytes = async (params: {
@@ -576,15 +575,14 @@ export default function CompanyContracts() {
   }) => {
     if (!orgId) return null;
     const safeStudent = (params.studentName || 'student').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-    const path = `${orgId}/contracts/${params.contractId}-${safeStudent}-${Date.now()}.pdf`;
-    const { error: uploadErr } = await supabase.storage.from('school-contracts').upload(path, new Blob([params.pdfBytes], { type: 'application/pdf' }), {
-      cacheControl: '3600',
-      upsert: false,
-      contentType: 'application/pdf',
-    });
-    if (uploadErr) return null;
-    const { data } = supabase.storage.from('school-contracts').getPublicUrl(path);
-    return data.publicUrl;
+    const storagePath = `${orgId}/contracts/${params.contractId}-${safeStudent}-${Date.now()}.pdf`;
+    const upload = await uploadContractFile(
+      storagePath,
+      new Blob([params.pdfBytes], { type: 'application/pdf' }),
+      'application/pdf',
+    );
+    if (upload.error) return null;
+    return storagePath;
   };
 
   const buildTemplatePayload = (params: {
@@ -702,7 +700,9 @@ export default function CompanyContracts() {
     const lowerUrl = (params.templateUrl || '').toLowerCase();
     if (lowerUrl.endsWith('.docx')) {
       try {
-        const response = await fetch(params.templateUrl!);
+        const fetchUrl = await getContractSignedUrl(params.templateUrl);
+        if (!fetchUrl) throw new Error('Failed to get signed URL for template');
+        const response = await fetch(fetchUrl);
         if (response.ok) {
           const arr = await response.arrayBuffer();
           const zip = new PizZip(arr);
@@ -713,15 +713,15 @@ export default function CompanyContracts() {
           });
           doc.render(templatePayload as any);
           const out = doc.getZip().generate({ type: 'uint8array' });
-          const path = `${orgId}/contracts/${params.contractId}-${Date.now()}.docx`;
-          const { error: upErr } = await supabase.storage.from('school-contracts').upload(
-            path,
+          const docxPath = `${orgId}/contracts/${params.contractId}-${Date.now()}.docx`;
+          const docxUpload = await uploadContractFile(
+            docxPath,
             new Blob([out], {
               type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             }),
-            { cacheControl: '3600', upsert: false },
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
           );
-          if (!upErr) {
+          if (!docxUpload.error) {
             // Preserve DOCX layout: convert rendered DOCX to PDF server-side.
             const convertResp = await fetch('/api/convert-docx-to-pdf', {
               method: 'POST',
@@ -989,6 +989,7 @@ export default function CompanyContracts() {
           const completionUrl = parentsWillFillMissing && missingFields.length > 0
             ? await createCompletionUrl(created.id)
             : null;
+          const emailPdfUrl = await getContractSignedUrl(created.pdf_url, 7 * 24 * 3600);
           const ok = await sendEmail({
             type: 'school_contract',
             to: recipient,
@@ -1008,7 +1009,7 @@ export default function CompanyContracts() {
               contractNumber: created.contract_number || effectiveContractNumber,
               annualFee: created.annual_fee,
               contractBody: created.filled_body,
-              pdfUrl: created.pdf_url || undefined,
+              pdfUrl: emailPdfUrl || undefined,
               date: new Date().toLocaleDateString('lt-LT'),
             },
           });
@@ -1099,6 +1100,7 @@ export default function CompanyContracts() {
       !(student?.payer_personal_code || '').trim() ? 'Tėvų asmens kodas' : '',
     ].filter(Boolean);
       const completionUrl = missingFields.length > 0 ? await createCompletionUrl(contract.id) : null;
+      const emailPdfUrl = await getContractSignedUrl(ensuredPdfUrl, 7 * 24 * 3600);
       const ok = await sendEmail({
       type: 'school_contract',
       to: recipient,
@@ -1117,7 +1119,7 @@ export default function CompanyContracts() {
         contractNumber: contract.contract_number || undefined,
         annualFee: contract.annual_fee,
         contractBody: contract.filled_body,
-        pdfUrl: ensuredPdfUrl || undefined,
+        pdfUrl: emailPdfUrl || undefined,
         date: new Date().toLocaleDateString('lt-LT'),
       },
     });
@@ -1207,21 +1209,20 @@ export default function CompanyContracts() {
     const path = `${orgId}/signed/${contract.id}-${safeStudent}-${Date.now()}.${fileExt}`;
 
     setSaving(true);
-    const { error: uploadErr } = await supabase.storage.from('school-contracts').upload(path, file, {
-      cacheControl: '3600',
-      upsert: false,
-      contentType: file.type || 'application/pdf',
-    });
-    if (uploadErr) {
+    const upload = await uploadContractFile(
+      path,
+      file,
+      file.type || 'application/pdf',
+    );
+    if (upload.error) {
       setSaving(false);
-      setToast({ message: uploadErr.message, type: 'error' });
+      setToast({ message: upload.error, type: 'error' });
       return;
     }
-    const { data } = supabase.storage.from('school-contracts').getPublicUrl(path);
     const { error: updateErr } = await supabase
       .from('school_contracts')
       .update({
-        signed_contract_url: data.publicUrl,
+        signed_contract_url: path,
         signed_uploaded_at: new Date().toISOString(),
         signing_status: 'signed',
         signed_at: new Date().toISOString(),
@@ -1247,6 +1248,15 @@ export default function CompanyContracts() {
     };
     input.click();
   };
+
+  const openSignedUrl = useCallback(async (urlOrPath: string) => {
+    const signed = await getContractSignedUrl(urlOrPath);
+    if (signed) {
+      window.open(signed, '_blank', 'noopener');
+    } else {
+      setToast({ message: 'Nepavyko atidaryti failo.', type: 'error' });
+    }
+  }, []);
 
   const statusBadge = (s: Contract['signing_status']) => {
     const map = {
@@ -1297,8 +1307,8 @@ export default function CompanyContracts() {
           ) : (
             <div className="grid gap-3">
               {contracts.map((c) => (
-                <div key={c.id} className="bg-white rounded-xl border border-gray-200 p-4">
-                  <div className="flex items-start justify-between gap-3">
+                <div key={c.id} className="bg-white rounded-xl border border-gray-200 p-3 sm:p-4">
+                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="font-semibold text-gray-900">{c.student?.full_name || '—'}</p>
@@ -1307,19 +1317,19 @@ export default function CompanyContracts() {
       <p className="text-sm text-gray-500 mt-1">
                         {c.contract_number && <span className="mr-3">Sutarties Nr. {c.contract_number}</span>}
                         {tr('school.annualFee')} <span className="font-medium text-gray-700">&euro;{Number(c.annual_fee).toFixed(2)}</span>
-                        {c.sent_at && <span className="ml-3">{tr('school.sent')} {new Date(c.sent_at).toLocaleDateString('lt-LT')}</span>}
-                        {c.signed_at && <span className="ml-3">{tr('school.signed')} {new Date(c.signed_at).toLocaleDateString('lt-LT')}</span>}
+                        {c.sent_at && <span className="ml-3 hidden sm:inline">{tr('school.sent')} {new Date(c.sent_at).toLocaleDateString('lt-LT')}</span>}
+                        {c.signed_at && <span className="ml-3 hidden sm:inline">{tr('school.signed')} {new Date(c.signed_at).toLocaleDateString('lt-LT')}</span>}
                       </p>
                       {c.signed_contract_url && (
                         <p className="text-xs text-emerald-700 mt-1">
                           Pasirašyta sutartis ({c.student?.full_name || 'mokinys'}):{' '}
-                          <a className="underline" href={c.signed_contract_url} target="_blank" rel="noreferrer">
+                          <button className="underline" onClick={() => openSignedUrl(c.signed_contract_url!)}>
                             Atidaryti failą
-                          </a>
+                          </button>
                         </p>
                       )}
                     </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
                       {c.signing_status === 'draft' && (
                         <Button size="sm" variant="outline" onClick={() => sendContract(c)}>
                           <Send className="w-3.5 h-3.5 mr-1.5" /> {tr('school.send')}
@@ -1351,19 +1361,19 @@ export default function CompanyContracts() {
           ) : (
             <div className="grid gap-3">
               {templates.map((tpl) => (
-                <div key={tpl.id} className="bg-white rounded-xl border border-gray-200 p-4 flex items-center justify-between gap-3">
-                  <div>
-                    <p className="font-semibold text-gray-900">{tpl.name}</p>
+                <div key={tpl.id} className="bg-white rounded-xl border border-gray-200 p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-gray-900 truncate">{tpl.name}</p>
                     <p className="text-sm text-gray-500 mt-0.5">
                       {tr('school.defaultFee')} {tpl.annual_fee_default ? `€${tpl.annual_fee_default}` : tr('school.defaultFeeNotSet')}
                     </p>
                     {tpl.pdf_url && (
-                      <a className="text-xs text-emerald-700 hover:underline" href={tpl.pdf_url} target="_blank" rel="noreferrer">
+                      <button className="text-xs text-emerald-700 hover:underline" onClick={() => openSignedUrl(tpl.pdf_url!)}>
                         {tr('school.openPdfTemplate')}
-                      </a>
+                      </button>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-shrink-0">
                     <Button size="sm" variant="outline" onClick={() => openEditTemplate(tpl)}>
                       <Edit2 className="w-3.5 h-3.5 mr-1.5" /> {tr('school.edit')}
                     </Button>
@@ -1379,7 +1389,7 @@ export default function CompanyContracts() {
       </div>
 
       <Dialog open={templateOpen} onOpenChange={setTemplateOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editTemplate ? tr('school.editTemplate') : tr('school.newTemplateDialog')}</DialogTitle>
           </DialogHeader>
@@ -1460,9 +1470,9 @@ export default function CompanyContracts() {
                 Pasirinkti faila
               </Button>
               {tForm.pdf_url && (
-                <a className="text-xs text-emerald-700 hover:underline" href={tForm.pdf_url} target="_blank" rel="noreferrer">
+                <button className="text-xs text-emerald-700 hover:underline" onClick={() => openSignedUrl(tForm.pdf_url)}>
                   {tr('school.openPdfTemplate')}
-                </a>
+                </button>
               )}
             </div>
           </div>
@@ -1480,7 +1490,7 @@ export default function CompanyContracts() {
       </Dialog>
 
       <Dialog open={contractOpen} onOpenChange={setContractOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{tr('school.newContractDialog')}</DialogTitle>
           </DialogHeader>

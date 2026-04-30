@@ -26,6 +26,7 @@ import 'react-big-calendar/lib/css/react-big-calendar.css';
 import Layout from '@/components/Layout';
 import { useTranslation } from '@/lib/i18n';
 import { supabase } from '@/lib/supabase';
+import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { useUser } from '@/contexts/UserContext';
 import { sendEmail } from '@/lib/email';
 import { authHeaders } from '@/lib/apiHelpers';
@@ -181,22 +182,22 @@ export default function CalendarPage() {
   const orgPolicy = useOrgTutorPolicy();
   const licenseFrozen = orgPolicy.isOrgTutor && orgPolicy.orgUsesLicenses && !orgPolicy.hasActiveLicense;
   const { contactVisibility } = useOrgFeatures();
+  const cc = getCached<any>('tutor_calendar');
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [students, setStudents] = useState<Student[]>([]);
-  const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [individualPricing, setIndividualPricing] = useState<any[]>([]);
-  const [tutorSubjectPrices, setTutorSubjectPrices] = useState<any[]>([]);
-  const [calOrgSubjectTemplates, setCalOrgSubjectTemplates] = useState<{ id: string; name: string }[]>([]);
-  const [availability, setAvailability] = useState<Availability[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [stripeConnected, setStripeConnected] = useState(false);
-  const [isOrgTutor, setIsOrgTutor] = useState(false);
+  const [sessions, setSessions] = useState<Session[]>(cc?.sessions ?? []);
+  const [students, setStudents] = useState<Student[]>(cc?.students ?? []);
+  const [subjects, setSubjects] = useState<Subject[]>(cc?.subjects ?? []);
+  const [individualPricing, setIndividualPricing] = useState<any[]>(cc?.individualPricing ?? []);
+  const [tutorSubjectPrices, setTutorSubjectPrices] = useState<any[]>(cc?.tutorSubjectPrices ?? []);
+  const [calOrgSubjectTemplates, setCalOrgSubjectTemplates] = useState<{ id: string; name: string }[]>(cc?.calOrgSubjectTemplates ?? []);
+  const [availability, setAvailability] = useState<Availability[]>(cc?.availability ?? []);
+  const [loading, setLoading] = useState(!cc);
+  const [stripeConnected, setStripeConnected] = useState(cc?.stripeConnected ?? false);
+  const [isOrgTutor, setIsOrgTutor] = useState(cc?.isOrgTutor ?? false);
 
-  // Google Calendar state
-  const [googleCalendarConnected, setGoogleCalendarConnected] = useState(false);
+  const [googleCalendarConnected, setGoogleCalendarConnected] = useState(cc?.googleCalendarConnected ?? false);
   const [googleCalendarSyncing, setGoogleCalendarSyncing] = useState(false);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(cc?.currentUserId ?? null);
 
   // Calendar view & date state – default to day view on mobile
   const [currentView, setCurrentView] = useState<View>(
@@ -316,8 +317,18 @@ export default function CalendarPage() {
   const [groupCancelChoice, setGroupCancelChoice] = useState<'single' | 'all_future' | null>(null);
 
   useEffect(() => {
-    fetchData();
+    if (!getCached('tutor_calendar')) fetchData();
   }, []);
+
+  useEffect(() => {
+    if (!loading && sessions.length > 0) {
+      setCache('tutor_calendar', {
+        sessions, students, subjects, individualPricing,
+        tutorSubjectPrices, calOrgSubjectTemplates, availability,
+        stripeConnected, isOrgTutor, googleCalendarConnected, currentUserId,
+      });
+    }
+  }, [loading, sessions, students, subjects, availability]);
 
   // Set default dates when mass cancel modal opens
   useEffect(() => {
@@ -389,7 +400,7 @@ export default function CalendarPage() {
   }, [selectedEvent?.id]);
 
   const fetchData = async () => {
-    setLoading(true);
+    if (!getCached('tutor_calendar')) setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); return; }
     setCurrentUserId(user.id);
@@ -484,6 +495,7 @@ export default function CalendarPage() {
       .eq('tutor_id', user.id);
     setAvailability(av || []);
 
+    invalidateCache('tutor_dashboard');
     setLoading(false);
   };
 

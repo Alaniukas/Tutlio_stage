@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import Layout from '@/components/Layout';
 import { supabase } from '@/lib/supabase';
-import { getCached, setCache } from '@/lib/dataCache';
+import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { useUser } from '@/contexts/UserContext';
 import { authHeaders } from '@/lib/apiHelpers';
 import { Button } from '@/components/ui/button';
@@ -291,12 +291,13 @@ export default function StudentsPage() {
     checkIfOrgTutor();
   }, []);
 
-  // Refetch when tutor is available and when opening /students so cards are not stuck on stale tutor_students cache.
   useEffect(() => {
     if (!user?.id) return;
     if (location.pathname !== '/students') return;
-    void fetchStudents();
-    void fetchAllSessions();
+    if (!getCached('tutor_students')) {
+      void fetchStudents();
+      void fetchAllSessions();
+    }
   }, [user?.id, location.pathname]);
 
   useEffect(() => {
@@ -582,6 +583,8 @@ export default function StudentsPage() {
       setStudents(withInvoiceBalance);
       setCache('tutor_students', { students: withInvoiceBalance });
     }
+    invalidateCache('tutor_dashboard');
+    invalidateCache('tutor_calendar');
     setLoading(false);
   };
 

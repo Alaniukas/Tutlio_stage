@@ -20,6 +20,11 @@ export const pl: Record<string, string> = {
   'about.valuesDesc': 'Dlaczego tysiące korepetytorów ufa nam każdego dnia.',
   'about.valuesTitle': 'Nasze wartości',
 
+  'blog.backToAll': 'Wszystkie artykuły',
+  'blog.empty': 'Jeszcze nie ma artykułów. Wróć wkrótce!',
+  'blog.notFound': 'Artykuł nie znaleziony',
+  'blog.readMore': 'Czytaj więcej',
+  'blog.subtitle': 'Wskazówki, studia przypadków i spostrzeżenia, które pomogą Ci prowadzić korepetycje efektywniej.',
   'auth.agreeWith': 'Zgadzam się z',
   'auth.backToLogin': 'Powrót do logowania',
   'auth.backToTutorStudentLogin': 'Powrót do logowania korepetytora / ucznia',

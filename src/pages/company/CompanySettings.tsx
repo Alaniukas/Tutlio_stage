@@ -865,7 +865,7 @@ export default function CompanySettings() {
 
           {/* Subject Management Section */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
                   <BookOpen className="w-5 h-5 text-emerald-600" /> {t('compSet.subjectManagement')}
@@ -874,7 +874,7 @@ export default function CompanySettings() {
                   {t('compSet.subjectManagementDesc')}
                 </p>
               </div>
-              <Button onClick={openAddSubjectDialog} size="sm" className="gap-2 rounded-xl">
+              <Button onClick={openAddSubjectDialog} size="sm" className="gap-2 rounded-xl flex-shrink-0">
                 <Plus className="w-4 h-4" /> {t('compSet.addSubject')}
               </Button>
             </div>

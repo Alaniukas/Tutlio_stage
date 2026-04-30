@@ -250,9 +250,9 @@ export async function preloadTutorData() {
     const user = await getAuthUser();
     if (!user) return;
 
-    const [profileRes, studentsRes, sessionsRes, countRes] = await Promise.all([
+    const [profileRes, studentsRes, sessionsRes, countRes, subjectsCountRes] = await Promise.all([
       supabase.from('profiles')
-        .select('full_name, organization_id, stripe_account_id, payment_timing, payment_deadline_hours')
+        .select('full_name, organization_id, stripe_account_id, payment_timing, payment_deadline_hours, subscription_plan, manual_subscription_exempt')
         .eq('id', user.id)
         .maybeSingle(),
       supabase.from('students')
@@ -267,13 +267,27 @@ export async function preloadTutorData() {
       supabase.from('students')
         .select('id', { count: 'exact', head: true })
         .eq('tutor_id', user.id),
+      supabase.from('subjects')
+        .select('id', { count: 'exact', head: true })
+        .eq('tutor_id', user.id),
     ]);
 
     if (!getCached('tutor_dashboard')) {
+      const p = profileRes.data;
+      const isManualOnly = !p?.organization_id &&
+        (p?.subscription_plan === 'subscription_only' || p?.manual_subscription_exempt === true);
       setCache('tutor_dashboard', {
         sessions: sessionsRes.data || [],
         studentCount: countRes.count || 0,
-        tutorName: profileRes.data?.full_name || user.email?.split('@')[0] || '',
+        tutorName: p?.full_name || user.email?.split('@')[0] || '',
+        isStripeConnected: !!p?.stripe_account_id || isManualOnly,
+        hasSubjects: (subjectsCountRes.count || 0) > 0,
+        orgTutorFallback: !!p?.organization_id,
+        paymentTiming: p?.payment_timing || 'before_lesson',
+        paymentDeadlineHours: p?.payment_deadline_hours ?? null,
+        currentUserId: user.id,
+        recentPayments: [],
+        tutorUpdates: [],
       });
     }
 
@@ -327,6 +341,10 @@ export async function preloadStudentData() {
       setCache('student_dashboard', {
         student: { full_name: st.full_name, grade: st.grade, tutor: null },
         sessions,
+        activeStudentId: st.id,
+        paymentPayer: st.payment_payer || null,
+        activePackages: [],
+        installments: [],
       });
     }
 

@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import OrgSuspendedBanner from '@/components/OrgSuspendedBanner';
 import { useTranslation } from '@/lib/i18n';
 import { useTotalChatUnread } from '@/hooks/useChat';
+import { usePushSubscription } from '@/hooks/usePushSubscription';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
 
 interface StudentLayoutProps {
@@ -16,6 +17,7 @@ interface StudentLayoutProps {
 export default function StudentLayout({ children }: StudentLayoutProps) {
     const { t } = useTranslation();
     const chatUnreadTotal = useTotalChatUnread();
+    usePushSubscription();
     const location = useLocation();
     const navigate = useNavigate();
     const [studentName, setStudentName] = useState('');
@@ -129,12 +131,12 @@ export default function StudentLayout({ children }: StudentLayoutProps) {
     const initials = studentName.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
 
     return (
-        <div className="min-h-screen bg-[#fffefc] flex flex-col relative overflow-x-hidden">
+        <div className="min-h-screen bg-white flex flex-col relative overflow-x-hidden">
             <OrgSuspendedBanner />
-            <div className="absolute top-0 right-0 w-96 h-96 bg-orange-100/40 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none" />
-            <div className="absolute bottom-0 left-0 w-96 h-96 bg-rose-100/30 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 pointer-events-none" />
+            <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-50/40 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none" />
+            <div className="absolute bottom-0 left-0 w-96 h-96 bg-slate-50/30 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 pointer-events-none" />
 
-            <header className="bg-white/80 backdrop-blur-md border-b border-orange-100 px-4 py-3 flex items-center justify-between sticky top-0 z-40">
+            <header className="bg-white/80 backdrop-blur-md border-b border-gray-100 px-4 py-3 flex items-center justify-between sticky top-0 z-40">
                 <div className="flex items-center gap-4">
                     <Link to="/" className="flex items-center gap-2 flex-shrink-0">
                         <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center">
@@ -143,18 +145,18 @@ export default function StudentLayout({ children }: StudentLayoutProps) {
                         <span className="font-black text-gray-900 text-base tracking-tight hidden sm:block">Tutlio</span>
                     </Link>
 
-                    <div className="cursor-pointer hover:bg-orange-50/50 p-1.5 rounded-xl transition-colors shrink-0">
+                    <div className="cursor-pointer hover:bg-indigo-50/50 p-1.5 rounded-xl transition-colors shrink-0">
                         <div className="flex items-center gap-2">
                             <div onClick={() => setIsTutorModalOpen(true)}>
-                                <p className="text-xs text-orange-400 font-medium tracking-wide uppercase">{t('studentLayout.tutor')}</p>
+                                <p className="text-xs text-indigo-400 font-medium tracking-wide uppercase">{t('studentLayout.tutor')}</p>
                                 <p className="text-sm font-bold text-gray-900">{tutor?.full_name || '—'}</p>
                             </div>
-                            <Info className="w-4 h-4 text-orange-300" onClick={() => setIsTutorModalOpen(true)} />
+                            <Info className="w-4 h-4 text-indigo-300" onClick={() => setIsTutorModalOpen(true)} />
                             {studentProfiles.length > 1 && (
                                 <select
                                     value={activeStudentProfileId || studentProfiles[0]?.id || ''}
                                     onChange={(e) => handleProfileSwitch(e.target.value)}
-                                    className="text-xs border border-orange-200 rounded-md px-2 py-1 bg-white text-gray-700"
+                                    className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white text-gray-700"
                                 >
                                     {studentProfiles.map((sp) => (
                                         <option key={sp.id} value={sp.id}>
@@ -170,7 +172,7 @@ export default function StudentLayout({ children }: StudentLayoutProps) {
                     <span className="hidden sm:inline-flex text-xs font-semibold text-violet-700 bg-violet-50 border border-violet-200 px-2.5 py-1 rounded-lg">
                         {packageCountText}
                     </span>
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-400 to-rose-500 flex items-center justify-center text-white font-bold text-sm shadow-sm ring-2 ring-white">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-sm shadow-sm ring-2 ring-white">
                         {initials || '?'}
                     </div>
                 </div>
@@ -186,7 +188,7 @@ export default function StudentLayout({ children }: StudentLayoutProps) {
                     </DialogHeader>
                     <div className="py-4 space-y-4">
                         <div className="flex items-center gap-4">
-                            <div className="w-14 h-14 rounded-full bg-gradient-to-br from-orange-400 to-rose-500 flex items-center justify-center text-white font-bold text-xl shadow-sm">
+                            <div className="w-14 h-14 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-xl shadow-sm">
                                 {tutor?.full_name?.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2) || '?'}
                             </div>
                             <div>
@@ -224,10 +226,10 @@ export default function StudentLayout({ children }: StudentLayoutProps) {
                             <Link
                                 key={item.href}
                                 to={item.href}
-                                className={`relative flex flex-col items-center gap-0.5 px-3 py-2 rounded-2xl transition-all ${active ? 'text-violet-700' : highlight ? 'text-amber-600' : 'text-gray-400 hover:text-gray-700'
+                                className={`relative flex flex-col items-center gap-0.5 px-3 py-2 rounded-2xl transition-all ${active ? 'text-indigo-700' : highlight ? 'text-indigo-500' : 'text-gray-400 hover:text-gray-700'
                                     }`}
                             >
-                                <div className={`relative p-1.5 rounded-xl transition-all ${active ? 'bg-violet-100' : highlight ? 'bg-amber-50' : ''}`}>
+                                <div className={`relative p-1.5 rounded-xl transition-all ${active ? 'bg-indigo-100' : highlight ? 'bg-indigo-50' : ''}`}>
                                     <Icon className="w-5 h-5" />
                                     {showChatBadge && (
                                         <span className="absolute -top-0.5 -right-0.5 min-w-[15px] h-[15px] px-0.5 rounded-full bg-rose-500 text-[8px] font-bold text-white flex items-center justify-center border-2 border-white">
@@ -235,7 +237,7 @@ export default function StudentLayout({ children }: StudentLayoutProps) {
                                         </span>
                                     )}
                                 </div>
-                                <span className={`text-[10px] font-medium leading-none ${active ? 'text-violet-700' : highlight ? 'text-amber-600' : ''}`}>
+                                <span className={`text-[10px] font-medium leading-none ${active ? 'text-indigo-700' : highlight ? 'text-indigo-500' : ''}`}>
                                     {item.label}
                                 </span>
                             </Link>

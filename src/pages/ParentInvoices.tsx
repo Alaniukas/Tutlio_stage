@@ -86,29 +86,29 @@ export default function ParentInvoices() {
 
   return (
     <div className="min-h-screen bg-[#f7f7fb]">
-      <header className="bg-white border-b px-6 py-4 flex items-center gap-4">
+      <header className="bg-white border-b px-4 sm:px-6 py-3 sm:py-4 flex items-center gap-3">
         <Button variant="ghost" size="sm" onClick={() => navigate('/parent')}>
           <ArrowLeft className="w-4 h-4 mr-1" /> {t('parent.back')}
         </Button>
         <h1 className="text-lg font-bold text-gray-900">{t('parent.invoices')}</h1>
       </header>
 
-      <main className="max-w-3xl mx-auto px-4 py-8 space-y-3">
+      <main className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-3">
         {invoices.length === 0 ? (
           <p className="text-gray-500 text-center py-12">{t('parent.noInvoices')}</p>
         ) : (
           invoices.map((inv) => (
-            <div key={inv.id} className="bg-white rounded-xl border p-4 flex items-center justify-between">
-              <div>
+            <div key={inv.id} className="bg-white rounded-xl border p-3 sm:p-4 flex items-center justify-between gap-2">
+              <div className="min-w-0">
                 <p className="font-medium text-gray-900 flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-gray-400" />
-                  {inv.invoice_number}
+                  <FileText className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                  <span className="truncate">{inv.invoice_number}</span>
                 </p>
                 <p className="text-sm text-gray-500">{format(new Date(inv.issue_date), 'yyyy-MM-dd')}</p>
               </div>
-              <div className="flex items-center gap-3">
-                <span className="font-medium text-gray-800">{Number(inv.total_amount).toFixed(2)} €</span>
-                <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium', statusColor[inv.status] || statusColor.issued)}>
+              <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+                <span className="font-medium text-gray-800 text-sm">{Number(inv.total_amount).toFixed(2)} €</span>
+                <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap', statusColor[inv.status] || statusColor.issued)}>
                   {inv.status}
                 </span>
                 {inv.pdf_storage_path && (

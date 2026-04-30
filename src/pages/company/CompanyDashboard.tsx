@@ -85,8 +85,7 @@ export default function CompanyDashboard() {
   const [selectedSession, setSelectedSession] = useState<OrgSessionRow | null>(null);
 
   useEffect(() => {
-    // Always refresh in background; cache is only for fast initial paint.
-    void loadData();
+    if (!getCached(DASH_CACHE_KEY)) void loadData();
   }, []);
 
   const loadData = async () => {
@@ -624,7 +623,7 @@ export default function CompanyDashboard() {
 
           return (
             <Dialog open onOpenChange={() => setSelectedSession(null)}>
-              <DialogContent className="max-w-md">
+              <DialogContent className="w-[95vw] sm:max-w-md max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>{t('cal.lessonInfo')}</DialogTitle>
                 </DialogHeader>

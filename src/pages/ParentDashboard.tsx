@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { getCached, setCache } from '@/lib/dataCache';
 import { useUser } from '@/contexts/UserContext';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from '@/lib/i18n';
@@ -19,16 +20,19 @@ interface ChildInfo {
   cancelledByStudentCount: number;
 }
 
+const PARENT_CACHE_KEY = 'parent_dashboard';
+
 export default function ParentDashboard() {
   const { user } = useUser();
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [parentName, setParentName] = useState('');
-  const [children, setChildren] = useState<ChildInfo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cached = getCached<{ parentName: string; children: ChildInfo[] }>(PARENT_CACHE_KEY);
+  const [parentName, setParentName] = useState(cached?.parentName ?? '');
+  const [children, setChildren] = useState<ChildInfo[]>(cached?.children ?? []);
+  const [loading, setLoading] = useState(!cached);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || getCached(PARENT_CACHE_KEY)) return;
     (async () => {
       setLoading(true);
 
@@ -95,6 +99,7 @@ export default function ParentDashboard() {
       }
 
       setChildren(kids);
+      setCache(PARENT_CACHE_KEY, { parentName: parent?.full_name ?? '', children: kids });
       setLoading(false);
     })();
   }, [user?.id]);
@@ -114,20 +119,20 @@ export default function ParentDashboard() {
 
   return (
     <div className="min-h-screen bg-[#f7f7fb]">
-      <header className="bg-white border-b px-6 py-4 flex items-center justify-between">
+      <header className="bg-white border-b px-4 sm:px-6 py-3 sm:py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">{t('parent.dashboard')}</h1>
+          <h1 className="text-lg sm:text-xl font-bold text-gray-900">{t('parent.dashboard')}</h1>
           <p className="text-sm text-gray-500">{parentName}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
           <Button variant="ghost" size="sm" onClick={() => navigate('/parent/invoices')}>
-            <FileText className="w-4 h-4 mr-1" /> {t('parent.invoices')}
+            <FileText className="w-4 h-4 mr-1" /> <span className="hidden sm:inline">{t('parent.invoices')}</span>
           </Button>
           <Button variant="ghost" size="sm" onClick={() => navigate('/parent/messages')}>
-            <MessageSquare className="w-4 h-4 mr-1" /> {t('parent.messages')}
+            <MessageSquare className="w-4 h-4 mr-1" /> <span className="hidden sm:inline">{t('parent.messages')}</span>
           </Button>
           <Button variant="ghost" size="sm" onClick={handleLogout}>
-            <LogOut className="w-4 h-4 mr-1" /> {t('parent.logout')}
+            <LogOut className="w-4 h-4 mr-1" /> <span className="hidden sm:inline">{t('parent.logout')}</span>
           </Button>
         </div>
       </header>

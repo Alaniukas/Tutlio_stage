@@ -80,24 +80,24 @@ export default function ParentSessions() {
 
   return (
     <div className="min-h-screen bg-[#f7f7fb]">
-      <header className="bg-white border-b px-6 py-4 flex items-center gap-4">
+      <header className="bg-white border-b px-4 sm:px-6 py-3 sm:py-4 flex items-center gap-3">
         <Button variant="ghost" size="sm" onClick={() => navigate('/parent')}>
           <ArrowLeft className="w-4 h-4 mr-1" /> {t('parent.back')}
         </Button>
-        <div>
-          <h1 className="text-lg font-bold text-gray-900">{studentName}</h1>
+        <div className="min-w-0">
+          <h1 className="text-lg font-bold text-gray-900 truncate">{studentName}</h1>
           <p className="text-sm text-gray-500">{t('parent.sessionsTitle')}</p>
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-4 py-8 space-y-3">
+      <main className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-3">
         {sessions.length === 0 ? (
           <p className="text-gray-500 text-center py-12">{t('parent.noSessions')}</p>
         ) : (
           sessions.map((s) => (
-            <div key={s.id} className="bg-white rounded-xl border p-4 flex items-center justify-between">
-              <div>
-                <p className="font-medium text-gray-900">
+            <div key={s.id} className="bg-white rounded-xl border p-3 sm:p-4 flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="font-medium text-gray-900 truncate">
                   {(s.subjects as any)?.name ?? t('parent.lesson')}
                   {s.topic ? ` — ${s.topic}` : ''}
                 </p>
@@ -107,7 +107,7 @@ export default function ParentSessions() {
                   {format(new Date(s.end_time), 'HH:mm', { locale: dateFnsLocale })}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-shrink-0">
                 {s.price != null && (
                   <span className="text-sm font-medium text-gray-700">{s.price.toFixed(2)} €</span>
                 )}

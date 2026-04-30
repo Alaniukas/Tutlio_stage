@@ -120,7 +120,7 @@ export default function StudentSessions() {
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
     const now = new Date();
 
-    useEffect(() => { fetchSessions(); }, []);
+    useEffect(() => { if (!getCached('student_sessions')) fetchSessions(); }, []);
     useEffect(() => { setShowAllSessions(false); }, [filter]);
 
     useEffect(() => {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import StudentLayout from '@/components/StudentLayout';
 import { supabase } from '@/lib/supabase';
+import { getCached, setCache } from '@/lib/dataCache';
 import { format } from 'date-fns';
 import { Clock, X, Info, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -32,8 +33,9 @@ function parseNotes(notes: string | null): ParsedNotes | null {
 
 export default function StudentWaitlist() {
     const { t, dateFnsLocale } = useTranslation();
-    const [entries, setEntries] = useState<WaitlistEntry[]>([]);
-    const [loading, setLoading] = useState(true);
+    const swc = getCached<any>('student_waitlist');
+    const [entries, setEntries] = useState<WaitlistEntry[]>(swc?.entries ?? []);
+    const [loading, setLoading] = useState(!swc);
     const [selectedEntry, setSelectedEntry] = useState<WaitlistEntry | null>(null);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
 
@@ -46,10 +48,10 @@ export default function StudentWaitlist() {
         if (typeof window !== 'undefined') localStorage.setItem(WAITLIST_TIP_KEY, '1');
     };
 
-    useEffect(() => { fetchData(); }, []);
+    useEffect(() => { if (!getCached('student_waitlist')) fetchData(); }, []);
 
     const fetchData = async () => {
-        setLoading(true);
+        if (!getCached('student_waitlist')) setLoading(true);
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) { setLoading(false); return; }
 
@@ -81,6 +83,7 @@ export default function StudentWaitlist() {
             .eq('student_id', st.id)
             .order('created_at', { ascending: false });
         setEntries(data || []);
+        setCache('student_waitlist', { entries: data || [] });
         setLoading(false);
     };
 

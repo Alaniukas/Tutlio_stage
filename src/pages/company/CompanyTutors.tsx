@@ -1049,7 +1049,7 @@ export default function CompanyTutors() {
 
       {/* ── Tutor detail modal ─────────────────────────────────────────────── */}
       <Dialog open={tutorModalOpen} onOpenChange={setTutorModalOpen}>
-        <DialogContent className="max-w-3xl w-[calc(100%-2rem)] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[95vw] sm:max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{t('compTut.tutorInfo')}</DialogTitle></DialogHeader>
 
           {selectedTutor && (

@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { AlertCircle, CheckCircle2, Building2, Lock, Plus, Eye, EyeOff, ArrowLeft, List, Pencil } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Building2, Lock, Plus, Eye, EyeOff, ArrowLeft, List, Pencil, FileText } from 'lucide-react';
 import { FEATURE_REGISTRY, FEATURE_CATEGORIES, getFeaturesByCategory } from '@/lib/featureRegistry';
 import { useTranslation } from '@/lib/i18n';
+import AdminBlogPanel from '@/components/admin/AdminBlogPanel';
 type Step = 'lock' | 'panel';
 
 interface FormState {
@@ -63,7 +64,7 @@ interface AuditRow {
   details: Record<string, unknown>;
 }
 
-type PanelView = 'list' | 'create' | 'createSchool' | 'detail';
+type PanelView = 'list' | 'create' | 'createSchool' | 'detail' | 'blog';
 
 export default function AdminPanel() {
   const { t, locale } = useTranslation();
@@ -386,6 +387,14 @@ export default function AdminPanel() {
           >
             <Plus className="w-4 h-4" />
             {t('admin.newSchool')}
+          </button>
+          <button
+            type="button"
+            onClick={() => { setPanelView('blog'); setDetailId(null); }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${panelView === 'blog' ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+          >
+            <FileText className="w-4 h-4" />
+            Blog
           </button>
         </div>
 
@@ -789,6 +798,10 @@ export default function AdminPanel() {
               )}
             </button>
           </form>
+        )}
+
+        {panelView === 'blog' && (
+          <AdminBlogPanel adminSecret={platformAdminSecret} />
         )}
 
         {panelView === 'createSchool' && (

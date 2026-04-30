@@ -51,11 +51,11 @@ export default function StudentDashboard() {
     const [selectedSession, setSelectedSession] = useState<Session | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [stripeLoading, setStripeLoading] = useState(false);
-    const [paymentPayer, setPaymentPayer] = useState<string | null>(null);
-    const [activePackages, setActivePackages] = useState<LessonPackage[]>([]);
-    const [installments, setInstallments] = useState<InstallmentPayment[]>([]);
+    const [paymentPayer, setPaymentPayer] = useState<string | null>(sdc?.paymentPayer ?? null);
+    const [activePackages, setActivePackages] = useState<LessonPackage[]>(sdc?.activePackages ?? []);
+    const [installments, setInstallments] = useState<InstallmentPayment[]>(sdc?.installments ?? []);
     const [paymentsExpanded, setPaymentsExpanded] = useState(false);
-    const [activeStudentId, setActiveStudentId] = useState<string | null>(null);
+    const [activeStudentId, setActiveStudentId] = useState<string | null>(sdc?.activeStudentId ?? null);
     const { blocked: paymentBookingBlocked, loading: paymentBlockLoading } = useStudentPaymentBlock(activeStudentId);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
     const now = new Date();
@@ -85,17 +85,18 @@ export default function StudentDashboard() {
         setStripeLoading(false);
     };
 
-    // Visada perkrauti iš DB: student_dashboard cache gali būti pasenęs, o StudentSessions
-    // atnaujina tik student_sessions — kitaip „Artimiausia pamoka“ rodytų klaidingą paid.
     useEffect(() => {
-        void fetchData();
+        if (!getCached('student_dashboard')) void fetchData();
     }, []);
 
     useEffect(() => {
         if (!loading && student) {
-            setCache('student_dashboard', { student, sessions });
+            setCache('student_dashboard', {
+                student, sessions, paymentPayer,
+                activePackages, installments, activeStudentId,
+            });
         }
-    }, [loading, student, sessions]);
+    }, [loading, student, sessions, activePackages, installments]);
 
     const fetchData = async () => {
         if (!getCached('student_dashboard')) setLoading(true);
