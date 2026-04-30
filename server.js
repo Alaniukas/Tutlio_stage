@@ -62,6 +62,10 @@ app.get('/health', (_req, res) => {
   res.status(200).json({ ok: true });
 });
 
+app.get('/', (_req, res) => {
+  res.status(200).json({ ok: true, service: 'tutlio-docx-converter' });
+});
+
 app.post('/convert-docx-to-pdf', async (req, res) => {
   if (!isAuthorized(req)) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -84,6 +88,7 @@ app.post('/convert-docx-to-pdf', async (req, res) => {
 });
 
 const port = Number(process.env.PORT || 3001);
-app.listen(port, () => {
-  console.log(`tutlio-docx-converter listening on :${port}`);
+const host = '0.0.0.0';
+app.listen(port, host, () => {
+  console.log(`tutlio-docx-converter listening on ${host}:${port}`);
 });
