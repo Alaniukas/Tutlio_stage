@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import express from 'express';
 import { promises as fs } from 'fs';
 import os from 'os';
@@ -24,11 +25,38 @@ function sofficeCandidates() {
   ];
 }
 
-function isAuthorized(req) {
+function timingSafeEqualStr(a, b) {
+  const ba = Buffer.from(a, 'utf8');
+  const bb = Buffer.from(b, 'utf8');
+  if (ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+}
+
+function getProvidedApiKey(req) {
+  const x = req.headers['x-api-key'];
+  if (typeof x === 'string' && x.trim()) return x.trim();
+  const auth = req.headers['authorization'];
+  if (typeof auth === 'string' && /^Bearer\s+/i.test(auth)) {
+    return auth.replace(/^Bearer\s+/i, '').trim();
+  }
+  return '';
+}
+
+/** Requires DOCX_CONVERTER_API_KEY to be set; rejects when missing or mismatch. */
+function checkConvertApiKey(req) {
   const expected = (process.env.DOCX_CONVERTER_API_KEY || '').trim();
-  if (!expected) return true;
-  const provided = typeof req.headers['x-api-key'] === 'string' ? req.headers['x-api-key'] : '';
-  return provided === expected;
+  if (!expected) {
+    return {
+      allowed: false,
+      status: 503,
+      error: 'DOCX_CONVERTER_API_KEY is not configured on the server'
+    };
+  }
+  const provided = getProvidedApiKey(req);
+  if (!provided || !timingSafeEqualStr(provided, expected)) {
+    return { allowed: false, status: 401, error: 'Unauthorized' };
+  }
+  return { allowed: true };
 }
 
 async function convertWithLibreOffice(docxBuffer) {
@@ -67,8 +95,9 @@ app.get('/', (_req, res) => {
 });
 
 app.post('/convert-docx-to-pdf', async (req, res) => {
-  if (!isAuthorized(req)) {
-    return res.status(401).json({ error: 'Unauthorized' });
+  const auth = checkConvertApiKey(req);
+  if (!auth.allowed) {
+    return res.status(auth.status).json({ error: auth.error });
   }
 
   const fileBase64 = typeof req.body?.fileBase64 === 'string' ? req.body.fileBase64 : '';

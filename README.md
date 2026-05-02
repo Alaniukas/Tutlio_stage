@@ -7,7 +7,7 @@ Standalone microservice for converting `DOCX -> PDF` with LibreOffice.
 - `GET /health` -> `{ ok: true }`
 - `POST /convert-docx-to-pdf`
   - body: `{ "fileBase64": "<docx_base64>" }`
-  - optional header: `x-api-key: <DOCX_CONVERTER_API_KEY>`
+  - required header: `X-API-Key: <DOCX_CONVERTER_API_KEY>` or `Authorization: Bearer <DOCX_CONVERTER_API_KEY>`
   - response: `{ "pdfBase64": "<pdf_base64>" }`
 
 ## Local run
@@ -21,7 +21,7 @@ Standalone microservice for converting `DOCX -> PDF` with LibreOffice.
 1. Create new Git repo from this folder.
 2. Push to GitHub.
 3. In Railway: **New Project -> Deploy from GitHub Repo**.
-4. Set environment variable `DOCX_CONVERTER_API_KEY` (recommended).
+4. Set environment variable `DOCX_CONVERTER_API_KEY` (required; requests are rejected without it or without a matching header).
 5. Deploy.
 
 ## Connect from main app
