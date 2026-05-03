@@ -5,7 +5,7 @@ import { getPasswordResetRedirectTo } from '@/lib/auth-redirects';
 import { hasActiveSubscription, tutorHasPlatformSubscriptionAccess } from '@/lib/subscription';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { AlertCircle, ArrowLeft, ArrowRight, GraduationCap, BookOpen, ChevronRight, Sparkles, Building2, Users } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, BookOpen, ChevronRight, Sparkles, Building2, Users } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 
 // ─── SVG Illustrations ────────────────────────────────────────────────────────
@@ -658,9 +658,7 @@ export default function Login() {
         <div className="relative w-full max-w-md z-10">
           {/* Logo */}
           <div className="text-center mb-8">
-            <div className="w-14 h-14 rounded-2xl bg-white/10 backdrop-blur border border-white/20 flex items-center justify-center mx-auto mb-3 shadow-xl">
-              <GraduationCap className="w-7 h-7 text-white" />
-            </div>
+            <img src="/logo-icon.png" alt="Tutlio" className="w-14 h-14 rounded-2xl mx-auto mb-3 shadow-xl" />
             <h1 className="text-2xl font-bold text-white tracking-tight">Tutlio</h1>
             <p className="text-indigo-300 text-sm mt-1">{t('login.welcomeBack')}</p>
           </div>

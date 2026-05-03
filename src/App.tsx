@@ -64,6 +64,7 @@ import ParentMessages from '@/pages/ParentMessages';
 import ParentRegister from '@/pages/ParentRegister';
 import SchoolContractComplete from '@/pages/SchoolContractComplete';
 import SupabaseAuthHashErrors from '@/components/SupabaseAuthHashErrors';
+import ThemeColorManager from '@/hooks/useThemeColor';
 
 function ProtectedWithUser() {
   return (
@@ -128,6 +129,7 @@ export default function App({ basename }: { basename: string }) {
   return (
     <Router basename={basename || undefined}>
       <SupabaseAuthHashErrors />
+      <ThemeColorManager />
       <Routes>
         {/* Public Landing Pages - NO UserProvider wrapper */}
         <Route path="/" element={<Landing />} />

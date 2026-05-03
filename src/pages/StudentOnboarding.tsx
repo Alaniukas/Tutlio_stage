@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
-import { Check, ArrowRight, GraduationCap, AlertCircle, Eye, EyeOff, ChevronLeft, User, Users, Mail, Phone } from 'lucide-react';
+import { Check, ArrowRight, AlertCircle, Eye, EyeOff, ChevronLeft, User, Users, Mail, Phone } from 'lucide-react';
 import { formatLithuanianPhone, validateLithuanianPhone } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/lib/i18n';
@@ -350,9 +350,7 @@ export default function StudentOnboarding() {
 
             <div className="relative w-full max-w-md">
                 <div className="text-center mb-6">
-                    <div className="w-14 h-14 rounded-2xl bg-white/10 backdrop-blur border border-white/20 flex items-center justify-center mx-auto mb-3">
-                        <GraduationCap className="w-7 h-7 text-white" />
-                    </div>
+                    <img src="/logo-icon.png" alt="Tutlio" className="w-14 h-14 rounded-2xl mx-auto mb-3" />
                     <div className="text-center mb-8">
                         <h1 className="text-2xl font-bold text-white">Tutlio</h1>
                         <p className="text-indigo-200 mt-2">{t('onboard.joinTutor')}</p>

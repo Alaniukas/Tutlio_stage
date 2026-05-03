@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import Layout from '@/components/Layout';
 import { supabase } from '@/lib/supabase';
+import { useUser } from '@/contexts/UserContext';
 import { authHeaders } from '@/lib/apiHelpers';
 import { Button } from '@/components/ui/button';
 import {
@@ -55,6 +56,7 @@ interface Session {
 
 export default function WaitlistPage() {
   const { t, dateFnsLocale } = useTranslation();
+  const { user: ctxUser } = useUser();
   const [waitlist, setWaitlist] = useState<WaitlistEntry[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -75,12 +77,16 @@ export default function WaitlistPage() {
     if (typeof window !== 'undefined') localStorage.setItem(WAITLIST_TIP_KEY, '1');
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    if (!ctxUser) return;
+    fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctxUser?.id]);
 
   const fetchData = async () => {
+    if (!ctxUser) return;
     setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    const user = ctxUser;
 
     const { data: waitlistData } = await supabase
       .from('waitlists')
@@ -113,11 +119,9 @@ export default function WaitlistPage() {
   };
 
   const handleAddToWaitlist = async () => {
-    if (!newEntry.student_id) return;
+    if (!newEntry.student_id || !ctxUser) return;
     setSaving(true);
-
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    const user = ctxUser;
 
     const sessionId = newEntry.session_id && newEntry.session_id !== 'any' ? newEntry.session_id : null;
     const { error } = await supabase.from('waitlists').insert([

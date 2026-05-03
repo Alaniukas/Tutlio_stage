@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useMatch } from 'react-router-dom';
 import StudentLayout from '@/components/StudentLayout';
 import { supabase } from '@/lib/supabase';
+import { useUser } from '@/contexts/UserContext';
 import { format } from 'date-fns';
 import { Clock, X, Info, Sparkles, ChevronDown, ChevronUp, ChevronLeft } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -33,6 +34,7 @@ function parseNotes(notes: string | null): ParsedNotes | null {
 
 export default function StudentWaitlist() {
     const { t, dateFnsLocale } = useTranslation();
+    const { user: ctxUser } = useUser();
     const navigate = useNavigate();
     const parentWaitlistStudentId = useMatch('/parent/child/:studentId/waitlist')?.params.studentId ?? '';
     const parentSessionsPath = parentWaitlistStudentId ? `/parent/child/${parentWaitlistStudentId}` : '/student';
@@ -50,12 +52,16 @@ export default function StudentWaitlist() {
         if (typeof window !== 'undefined') localStorage.setItem(WAITLIST_TIP_KEY, '1');
     };
 
-    useEffect(() => { void fetchData(); }, [parentWaitlistStudentId]);
+    useEffect(() => {
+        if (!ctxUser) return;
+        void fetchData();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [ctxUser?.id, parentWaitlistStudentId]);
 
     const fetchData = async () => {
+        if (!ctxUser) return;
         setLoading(true);
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) { setLoading(false); return; }
+        const user = ctxUser;
 
         let studentIdForWaitlists: string | null = null;
 
@@ -120,7 +126,7 @@ export default function StudentWaitlist() {
     return (
         <StudentLayout embed={!!parentWaitlistStudentId}>
             {parentWaitlistStudentId ? (
-                <div className="bg-white border-b border-orange-100 px-4 py-3 flex items-center gap-3 sticky top-0 z-30">
+                <div className="bg-white border-b border-indigo-100 px-4 py-3 flex items-center gap-3 sticky top-0 z-30">
                     <Button type="button" variant="ghost" size="sm" className="rounded-xl -ml-2" onClick={() => navigate(parentSessionsPath)}>
                         <ChevronLeft className="w-4 h-4 mr-1" />
                         {t('parent.back')}
@@ -129,7 +135,7 @@ export default function StudentWaitlist() {
                 </div>
             ) : null}
             <div className="px-4 pt-6 pb-6">
-                <div className="rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 overflow-hidden text-white shadow-lg mb-6">
+                <div className="rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 overflow-hidden text-white shadow-lg mb-6">
                     <button
                         type="button"
                         onClick={() => {
@@ -144,11 +150,11 @@ export default function StudentWaitlist() {
                             <Sparkles className="w-5 h-5 flex-shrink-0" />
                             <h2 className="text-base font-bold">{t('studentWait.whatIsWaitlist')}</h2>
                         </div>
-                        {waitlistTipExpanded ? <ChevronUp className="w-5 h-5 flex-shrink-0 text-amber-100" /> : <ChevronDown className="w-5 h-5 flex-shrink-0 text-amber-100" />}
+                        {waitlistTipExpanded ? <ChevronUp className="w-5 h-5 flex-shrink-0 text-indigo-200" /> : <ChevronDown className="w-5 h-5 flex-shrink-0 text-indigo-200" />}
                     </button>
                     {waitlistTipExpanded && (
                         <div className="px-4 pb-4 pt-0 border-t border-white/20">
-                            <p className="text-sm text-amber-50 leading-relaxed">{t('studentWait.waitlistExplain')}</p>
+                            <p className="text-sm text-indigo-100 leading-relaxed">{t('studentWait.waitlistExplain')}</p>
                         </div>
                     )}
                 </div>
@@ -194,10 +200,10 @@ export default function StudentWaitlist() {
                                     onClick={() => setSelectedEntry(e)}
                                     className="bg-white rounded-3xl p-4 shadow-sm flex items-center gap-4 transition-all cursor-pointer hover:shadow-md hover:border-indigo-100 border border-transparent"
                                 >
-                                    <div className="w-12 h-12 rounded-2xl bg-amber-50 flex items-center justify-center flex-shrink-0 relative">
-                                        <Clock className="w-6 h-6 text-amber-500" />
+                                    <div className="w-12 h-12 rounded-2xl bg-indigo-50 flex items-center justify-center flex-shrink-0 relative">
+                                        <Clock className="w-6 h-6 text-indigo-500" />
                                         {queuePos && (
-                                            <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-amber-500 text-white text-xs font-black rounded-full flex items-center justify-center">
+                                            <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-indigo-500 text-white text-xs font-black rounded-full flex items-center justify-center">
                                                 {queuePos}
                                             </span>
                                         )}
@@ -234,7 +240,7 @@ export default function StudentWaitlist() {
                 <DialogContent className="w-[95vw] sm:max-w-[400px] max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
-                            <Clock className="w-5 h-5 text-amber-600" />
+                            <Clock className="w-5 h-5 text-indigo-600" />
                             {t('studentWait.waitlistInfo')}
                         </DialogTitle>
                     </DialogHeader>
@@ -251,7 +257,7 @@ export default function StudentWaitlist() {
                         return (
                             <div className="space-y-4 py-3">
                                 {ds ? (
-                                    <div className="bg-amber-50 rounded-xl p-4 border border-amber-100">
+                                    <div className="bg-indigo-50 rounded-xl p-4 border border-indigo-100">
                                         <h3 className="font-bold text-gray-900 text-lg mb-2">{ds.topic || t('common.lesson')}</h3>
                                         <div className="space-y-2 text-sm text-gray-600">
                                             <div className="flex justify-between">
@@ -272,7 +278,7 @@ export default function StudentWaitlist() {
                                             {queuePos && (
                                                 <div className="flex justify-between">
                                                     <span>{t('studentWait.queuePosition')}</span>
-                                                    <span className="font-bold text-amber-600">#{queuePos}</span>
+                                                    <span className="font-bold text-indigo-600">#{queuePos}</span>
                                                 </div>
                                             )}
                                         </div>

@@ -21,6 +21,9 @@ interface UserProfile {
   trial_ends_at?: string | null;
   phone?: string | null;
   preferred_locale?: string | null;
+  stripe_onboarding_complete?: boolean;
+  payment_timing?: string | null;
+  payment_deadline_hours?: number | null;
 }
 
 interface UserContextType {
@@ -39,8 +42,8 @@ const UserContext = createContext<UserContextType>({
 
 export const useUser = () => useContext(UserContext);
 
-const PROFILE_SELECT_WITH_TRIAL = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, personal_meeting_link, break_between_lessons, min_booking_hours, subscription_status, subscription_plan, manual_subscription_exempt, trial_ends_at, phone, stripe_onboarding_complete, preferred_locale';
-const PROFILE_SELECT_LEGACY = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, personal_meeting_link, break_between_lessons, min_booking_hours, subscription_status, subscription_plan, manual_subscription_exempt, phone, stripe_onboarding_complete, preferred_locale';
+const PROFILE_SELECT_WITH_TRIAL = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, personal_meeting_link, break_between_lessons, min_booking_hours, subscription_status, subscription_plan, manual_subscription_exempt, trial_ends_at, phone, stripe_onboarding_complete, preferred_locale, payment_timing, payment_deadline_hours';
+const PROFILE_SELECT_LEGACY = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, personal_meeting_link, break_between_lessons, min_booking_hours, subscription_status, subscription_plan, manual_subscription_exempt, phone, stripe_onboarding_complete, preferred_locale, payment_timing, payment_deadline_hours';
 const PROFILE_SELECT_CORE = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, personal_meeting_link, break_between_lessons, min_booking_hours, subscription_status, subscription_plan, manual_subscription_exempt, phone';
 
 export const UserProvider = ({ children }: { children: ReactNode }) => {

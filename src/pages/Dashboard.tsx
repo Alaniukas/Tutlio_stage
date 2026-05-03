@@ -128,13 +128,13 @@ export default function DashboardPage() {
     const { t, dateFnsLocale } = useTranslation();
     const navigate = useNavigate();
     const location = useLocation();
-    const { profile } = useUser();
+    const { user: ctxUser, profile: ctxProfile } = useUser();
     const updateRowsKey =
-        profile?.id && profile.organization_id ? `tutlio:v1:dash_org_update_rows:${profile.id}` : undefined;
+        ctxProfile?.id && ctxProfile.organization_id ? `tutlio:v1:dash_org_update_rows:${ctxProfile.id}` : undefined;
     const attentionRowsKey =
-        profile?.id && !profile.organization_id ? `tutlio:v1:dash_attention_rows:${profile.id}` : undefined;
+        ctxProfile?.id && !ctxProfile.organization_id ? `tutlio:v1:dash_attention_rows:${ctxProfile.id}` : undefined;
     const recentPaymentRowsKey =
-        profile?.id && !profile.organization_id ? `tutlio:v1:dash_recent_payment_rows:${profile.id}` : undefined;
+        ctxProfile?.id && !ctxProfile.organization_id ? `tutlio:v1:dash_recent_payment_rows:${ctxProfile.id}` : undefined;
     const {
         dismissedIds: dismissedUpdateRowIds,
         dismiss: dismissUpdateRow,
@@ -176,7 +176,7 @@ export default function DashboardPage() {
     const [isStripeConnected, setIsStripeConnected] = useState(false);
     const [hasSubjects, setHasSubjects] = useState(false);
     const [orgTutorFallback, setOrgTutorFallback] = useState<boolean | null>(null);
-    const isOrgTutor: boolean | null = profile ? !!profile.organization_id : orgTutorFallback;
+    const isOrgTutor: boolean | null = ctxProfile ? !!ctxProfile.organization_id : orgTutorFallback;
     const [isEditingTime, setIsEditingTime] = useState(false);
     const [editNewStartTime, setEditNewStartTime] = useState('');
 
@@ -215,8 +215,10 @@ export default function DashboardPage() {
 
     useEffect(() => {
         if (location.pathname !== '/dashboard') return;
+        if (!ctxUser) return;
         void fetchData();
-    }, [location.pathname]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [location.pathname, ctxUser?.id]);
 
     useEffect(() => {
         if (!loading && tutorName) {
@@ -262,17 +264,12 @@ export default function DashboardPage() {
     }, [selectedSession?.id]);
 
     const fetchData = async () => {
+        if (!ctxUser) return;
         if (!getCached('tutor_dashboard')) setLoading(true);
         try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+        const user = ctxUser;
 
-        // OPTIMIZED: Use UserContext profile to avoid duplicate fetch
-        const profileRes = await tutorPreloadProfileDeduped(user.id);
-        const profileData = profileRes.data;
-        if (profileRes.error) {
-            console.error('[Dashboard] profile load:', profileRes.error.message);
-        }
+        const profileData = ctxProfile ?? (await tutorPreloadProfileDeduped(user.id)).data;
         if (!profileData) {
             return;
         }
@@ -284,15 +281,39 @@ export default function DashboardPage() {
         setPaymentTiming((profileData?.payment_timing as 'before_lesson' | 'after_lesson') || 'before_lesson');
         setPaymentDeadlineHours(profileData?.payment_deadline_hours ?? null);
         setOrgTutorFallback(!!profileData?.organization_id);
+        setCurrentUserId(user.id);
 
         const organizationId = profileData?.organization_id;
-        const sessionsPromise = tutorDashboardSessionsDeduped(user.id);
+        const isOrgTutorProfile = !!organizationId;
 
-        const orgPackPromise = organizationId
-            ? tutorDashboardOrgPackDeduped(user.id, organizationId)
-            : Promise.resolve(null);
+        const parallelPromises: PromiseLike<any>[] = [
+            tutorDashboardSessionsDeduped(user.id),
+            organizationId
+                ? tutorDashboardOrgPackDeduped(user.id, organizationId)
+                : Promise.resolve(null),
+            tutorRecentPaidLessonsDeduped(user.id),
+            isOrgTutorProfile
+                ? Promise.resolve({ data: [], error: null })
+                : tutorRecentPaidPackagesDeduped(user.id),
+            isOrgTutorProfile
+                ? Promise.resolve({ data: [], error: null })
+                : tutorRecentPaidInvoicesDeduped(user.id),
+            tutorStudentCountEstimatedDeduped(user.id),
+            !isOrgTutorProfile
+                ? supabase.from('subjects').select('*', { count: 'estimated', head: true }).eq('tutor_id', user.id)
+                : Promise.resolve({ count: 0 }),
+        ];
 
-        const [sessionsRes, orgPack] = await Promise.all([sessionsPromise, orgPackPromise]);
+        const [
+            sessionsRes,
+            orgPack,
+            paidLessonsRes,
+            paidPackagesRes,
+            paidInvoicesRes,
+            studentCountRes,
+            subjectsCountRes,
+        ] = await Promise.all(parallelPromises);
+
         if (sessionsRes.error) {
             console.error('[Dashboard] sessions load:', sessionsRes.error.code, sessionsRes.error.message);
         }
@@ -370,25 +391,11 @@ export default function DashboardPage() {
                 .slice(0, 8);
 
             setTutorUpdates(updates);
-            setLoading(false);
         } else {
             setTutorUpdates([]);
         }
 
-        // Aggregate latest payments from lesson payments + package payments + monthly invoice payments.
-        // For org tutors we skip package/invoice queries entirely to avoid RLS 403 noise.
         try {
-            const paidLessonsRes = await tutorRecentPaidLessonsDeduped(user.id);
-
-            const isOrgTutorProfile = !!profileData?.organization_id;
-            const [paidPackagesRes, paidInvoicesRes] = isOrgTutorProfile
-                ? [{ data: [], error: null } as any, { data: [], error: null } as any]
-                : await Promise.all([
-                    tutorRecentPaidPackagesDeduped(user.id),
-                    tutorRecentPaidInvoicesDeduped(user.id),
-                ]);
-
-            // Log any errors but don't block the page
             if (paidLessonsRes.error) console.error('[Dashboard] Error fetching paid lessons:', paidLessonsRes.error);
             if (paidPackagesRes.error) console.error('[Dashboard] Error fetching paid packages:', paidPackagesRes.error);
             if (paidInvoicesRes.error) console.error('[Dashboard] Error fetching billing batches:', paidInvoicesRes.error);
@@ -429,27 +436,12 @@ export default function DashboardPage() {
             setRecentPayments([]);
         }
 
-        // OPTIMIZED: Use 'estimated' count for better performance
-        const studentCountRes = await tutorStudentCountEstimatedDeduped(user.id);
         setStudentCount(studentCountRes.count ?? 0);
 
-        setCurrentUserId(user.id);
-
-        // Skip onboarding for org tutors — they are managed by the company
-        if (!profileData?.organization_id) {
-            // Check if Stripe connected
+        if (!isOrgTutorProfile) {
             const isStripeSetup = !!profileData?.stripe_account_id;
-
-            // OPTIMIZED: Check if has subjects using 'estimated' count
-            const { count: subjectsCount } = await supabase
-                .from('subjects')
-                .select('*', { count: 'estimated', head: true })
-                .eq('tutor_id', user.id);
-            const hasSubjectsSetup = (subjectsCount || 0) > 0;
-
+            const hasSubjectsSetup = ((subjectsCountRes as any).count || 0) > 0;
             setHasSubjects(hasSubjectsSetup);
-
-            // Show onboarding only until Stripe is connected; after that, no more step modal
             if (!isStripeSetup) {
                 setIsOnboardingOpen(true);
             } else {

@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react';
 import StudentLayout from '@/components/StudentLayout';
 import { supabase } from '@/lib/supabase';
+import { useUser } from '@/contexts/UserContext';
 import { Eye, EyeOff, Trash2, AlertTriangle, Check, LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { formatLithuanianPhone, validateLithuanianPhone } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useTranslation } from '@/lib/i18n';
 import { buildPlatformPath } from '@/lib/platform';
+import PwaInstallGuide from '@/components/PwaInstallGuide';
 
 export default function StudentSettings() {
     const { t, locale } = useTranslation();
+    const { user: ctxUser } = useUser();
     const navigate = useNavigate();
     const [studentName, setStudentName] = useState('');
     const [email, setEmail] = useState('');
@@ -30,11 +33,15 @@ export default function StudentSettings() {
     const [deleteConfirm, setDeleteConfirm] = useState(false);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
 
-    useEffect(() => { fetchData(); }, []);
+    useEffect(() => {
+        if (!ctxUser) return;
+        fetchData();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [ctxUser?.id]);
 
     const fetchData = async () => {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+        if (!ctxUser) return;
+        const user = ctxUser;
         setEmail(user.email || '');
 
         const selectedStudentId = typeof window !== 'undefined'
@@ -215,6 +222,8 @@ export default function StudentSettings() {
                         </div>
                     )}
                 </div>
+
+                <PwaInstallGuide />
 
                 <button onClick={handleLogout} className="w-full py-4 mt-6 rounded-3xl bg-gray-100 text-gray-700 font-bold text-sm hover:bg-gray-200 transition-colors flex items-center justify-center gap-2">
                     <LogOut className="w-5 h-5" /> {t('common.logout')}

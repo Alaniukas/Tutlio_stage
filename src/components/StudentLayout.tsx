@@ -6,9 +6,10 @@ import {
     fetchStudentActiveLessonPackagesDeduped,
     fetchSubjectNamesByIds,
 } from '@/lib/studentLessonPackagesLight';
-import { LayoutDashboard, BookOpen, CalendarDays, Clock, Settings, Info, Mail, GraduationCap, HelpCircle, MessageSquare } from 'lucide-react';
+import { LayoutDashboard, BookOpen, CalendarDays, Clock, Settings, Info, Mail, HelpCircle, MessageSquare } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import OrgSuspendedBanner from '@/components/OrgSuspendedBanner';
+import PwaInstallPrompt from '@/components/PwaInstallPrompt';
 import { useTranslation } from '@/lib/i18n';
 import { useTotalChatUnread } from '@/hooks/useChat';
 import { usePushSubscription } from '@/hooks/usePushSubscription';
@@ -20,17 +21,34 @@ interface StudentLayoutProps {
     embed?: boolean;
 }
 
+const STUDENT_LAYOUT_CACHE_KEY = 'tutlio_student_layout_cache';
+
+function getCachedLayoutData(): { studentName: string; tutor: any; studentProfiles: Array<{ id: string; tutor_id: string | null; tutor_full_name: string | null; tutor_email: string | null }> } | null {
+    try {
+        const raw = sessionStorage.getItem(STUDENT_LAYOUT_CACHE_KEY);
+        if (!raw) return null;
+        return JSON.parse(raw);
+    } catch { return null; }
+}
+
+function setCachedLayoutData(studentName: string, tutor: any, studentProfiles: Array<{ id: string; tutor_id: string | null; tutor_full_name: string | null; tutor_email: string | null }>) {
+    try {
+        sessionStorage.setItem(STUDENT_LAYOUT_CACHE_KEY, JSON.stringify({ studentName, tutor, studentProfiles }));
+    } catch { /* ignore */ }
+}
+
 export default function StudentLayout({ children, embed }: StudentLayoutProps) {
     const { t } = useTranslation();
     const chatUnreadTotal = useTotalChatUnread();
     usePushSubscription();
     const location = useLocation();
     const navigate = useNavigate();
-    const [studentName, setStudentName] = useState('');
-    const [tutor, setTutor] = useState<any>(null);
+    const cached = useMemo(() => getCachedLayoutData(), []);
+    const [studentName, setStudentName] = useState(cached?.studentName || '');
+    const [tutor, setTutor] = useState<any>(cached?.tutor || null);
     const [isTutorModalOpen, setIsTutorModalOpen] = useState(false);
     const [packageCountText, setPackageCountText] = useState(t('studentLayout.lessonCount', { remaining: 0, total: 0 }));
-    const [studentProfiles, setStudentProfiles] = useState<Array<{ id: string; tutor_id: string | null; tutor_full_name: string | null; tutor_email: string | null }>>([]);
+    const [studentProfiles, setStudentProfiles] = useState<Array<{ id: string; tutor_id: string | null; tutor_full_name: string | null; tutor_email: string | null }>>(cached?.studentProfiles || []);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
     const activeStudentProfileId = useMemo(
         () => (typeof window !== 'undefined' ? localStorage.getItem(ACTIVE_STUDENT_PROFILE_KEY) : null),
@@ -42,7 +60,7 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
         { href: '/student/sessions', label: t('studentNav.sessions'), icon: BookOpen },
         { href: '/student/schedule', label: t('studentNav.book'), icon: CalendarDays },
         { href: '/student/messages', label: t('studentNav.messages'), icon: MessageSquare },
-        { href: '/student/waitlist', label: t('studentNav.queue'), icon: Clock, highlight: true },
+        { href: '/student/waitlist', label: t('studentNav.queue'), icon: Clock },
         { href: '/student/settings', label: t('studentNav.settings'), icon: Settings },
     ];
 
@@ -75,22 +93,33 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                 }
 
                 if (selectedStudentData) {
-                    setStudentName(selectedStudentData.full_name || '');
+                    const name = selectedStudentData.full_name || '';
+                    setStudentName(name);
 
+                    let tutorData: any = null;
                     if (selectedStudentData.tutor_id) {
                         const { data: vis } = await supabase.rpc(
                             'get_tutor_contact_visibility_for_student',
                             { p_tutor_id: selectedStudentData.tutor_id }
                         );
                         const cv = parseOrgContactVisibility((vis as Record<string, unknown>) || null);
-                        setTutor({
+                        tutorData = {
                             id: selectedStudentData.tutor_id,
                             full_name: selectedStudentData.tutor_full_name,
                             email: maskTutorContact(selectedStudentData.tutor_email, cv.studentSeesTutorEmail),
-                        });
+                        };
+                        setTutor(tutorData);
                     } else {
                         setTutor(null);
                     }
+
+                    const profiles = rows.map((row: any) => ({
+                        id: row.id,
+                        tutor_id: row.tutor_id,
+                        tutor_full_name: row.tutor_full_name,
+                        tutor_email: row.tutor_email,
+                    }));
+                    setCachedLayoutData(name, tutorData, profiles);
                 }
             } catch (err) {
                 console.error('[StudentLayout] Error in load:', err);
@@ -169,15 +198,14 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
     return (
         <div className="min-h-screen bg-white flex flex-col relative overflow-x-hidden">
             <OrgSuspendedBanner />
+            <PwaInstallPrompt settingsPath="/student/settings" />
             <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-50/40 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none" />
             <div className="absolute bottom-0 left-0 w-96 h-96 bg-slate-50/30 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 pointer-events-none" />
 
             <header className="bg-white/80 backdrop-blur-md border-b border-gray-100 px-4 py-3 flex items-center justify-between sticky top-0 z-40">
                 <div className="flex items-center gap-4">
                     <Link to="/" className="flex items-center gap-2 flex-shrink-0">
-                        <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center">
-                            <GraduationCap className="w-4.5 h-4.5 text-white" />
-                        </div>
+                        <img src="/logo-icon.png" alt="Tutlio" className="w-8 h-8 rounded-xl" />
                         <span className="font-black text-gray-900 text-base tracking-tight hidden sm:block">Tutlio</span>
                     </Link>
 

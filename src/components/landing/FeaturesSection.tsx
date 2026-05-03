@@ -1,12 +1,31 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
-import { CalendarDays, Users, Users2, CreditCard, BellRing, LineChart, CheckCircle } from 'lucide-react';
+import {
+  CalendarDays, Users, Users2, CreditCard, BellRing, LineChart, CheckCircle,
+  Bell, MessageSquare, Package, Banknote, FileText, FolderOpen, BarChart3,
+  Clock, Palette, PenTool,
+} from 'lucide-react';
 import Reveal from './Reveal';
 import type { LandingVariant } from './HeroSection';
 
 const TUTOR_ICONS = [CalendarDays, Users, CreditCard, BellRing];
 const SCHOOLS_ICONS = [CalendarDays, Users2, CreditCard, LineChart];
+
+const HL_FEATURES = [
+  { key: 'calendar', icon: CalendarDays },
+  { key: 'reminders', icon: Bell },
+  { key: 'messaging', icon: MessageSquare },
+  { key: 'plans', icon: Package },
+  { key: 'autoPayments', icon: Banknote },
+  { key: 'invoices', icon: FileText },
+  { key: 'parents', icon: Users },
+  { key: 'files', icon: FolderOpen },
+  { key: 'stats', icon: BarChart3 },
+  { key: 'waitlist', icon: Clock },
+  { key: 'whiteLabel', icon: Palette },
+  { key: 'whiteboard', icon: PenTool, comingSoon: true },
+];
 
 const TAB_STYLES = [
   { normal: 'bg-indigo-50 text-[#4f46e5]', active: 'bg-[#4f46e5] text-white shadow-md shadow-indigo-200/50', bar: 'bg-[#4f46e5]' },
@@ -158,6 +177,48 @@ export default function FeaturesSection({ variant = 'tutor' }: { variant?: Landi
               {t(`${p}.learnMore`)}
             </Link>
           </div>
+        </div>
+
+        {/* All features grid */}
+        <Reveal delay={200}>
+          <div className="text-center mt-20 sm:mt-28 mb-10 sm:mb-14">
+            <span className="inline-block px-4 py-1 rounded-full border border-gray-200 text-[12px] font-semibold text-gray-500 mb-5 tracking-wide uppercase">
+              {t(`${p}.highlightsBadge`)}
+            </span>
+            <h2 className="font-display text-3xl md:text-[2.5rem] lg:text-[3rem] text-gray-900 leading-tight mb-4 max-w-2xl mx-auto font-bold tracking-tight">
+              {t(`${p}.highlightsTitle`)}
+              <span className="text-[#4f46e5]">{t(`${p}.highlightsHighlight`)}</span>
+            </h2>
+            <p className="text-gray-500 max-w-xl mx-auto text-[15px] leading-relaxed">
+              {t(`${p}.highlightsSubtitle`)}
+            </p>
+          </div>
+        </Reveal>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+          {HL_FEATURES.map((feat, i) => {
+            const Icon = feat.icon;
+            return (
+              <Reveal key={feat.key} delay={220 + i * 40}>
+                <div className="relative p-5 sm:p-6 rounded-2xl border border-gray-100 bg-white/80 transition-all duration-300 hover:shadow-lg hover:border-gray-200/80 hover:-translate-y-1.5 hover:rotate-[0.5deg]">
+                  {feat.comingSoon && (
+                    <span className="absolute top-3 right-3 px-2 py-0.5 rounded-full bg-indigo-50 text-[10px] font-semibold text-indigo-500">
+                      {t(`${p}.hl.comingSoon`)}
+                    </span>
+                  )}
+                  <div className="w-10 h-10 rounded-xl bg-[#4f46e5]/10 flex items-center justify-center mb-4">
+                    <Icon className="w-5 h-5 text-[#4f46e5]" />
+                  </div>
+                  <h3 className="font-semibold text-gray-900 text-[14px] mb-1.5">
+                    {t(`${p}.hl.${feat.key}`)}
+                  </h3>
+                  <p className="text-[12px] sm:text-[13px] text-gray-500 leading-relaxed">
+                    {t(`${p}.hl.${feat.key}Desc`)}
+                  </p>
+                </div>
+              </Reveal>
+            );
+          })}
         </div>
       </div>
     </section>

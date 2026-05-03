@@ -11,12 +11,12 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'apple-touch-icon-180x180.png'],
+      includeAssets: ['favicon-32.png', 'apple-touch-icon-180x180.png'],
       manifest: {
         name: 'Tutlio',
         short_name: 'Tutlio',
         description: 'Korepetitoriams ir mokiniams valdyti laiką',
-        theme_color: '#F97316',
+        theme_color: '#4f46e5',
         background_color: '#ffffff',
         display: 'standalone',
         scope: '/',

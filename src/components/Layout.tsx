@@ -11,7 +11,6 @@ import {
   ListOrdered,
   DollarSign,
   Settings,
-  GraduationCap,
   LogOut,
   ChevronDown,
   BookOpen,
@@ -24,6 +23,7 @@ import {
   ChevronsRight,
 } from 'lucide-react';
 import OrgSuspendedBanner from '@/components/OrgSuspendedBanner';
+import PwaInstallPrompt from '@/components/PwaInstallPrompt';
 import { useTranslation } from '@/lib/i18n';
 import { useUser } from '@/contexts/UserContext';
 import { useTotalChatUnread } from '@/hooks/useChat';
@@ -119,6 +119,7 @@ export default function Layout({ children }: LayoutProps) {
   return (
     <div className="h-dvh max-h-dvh bg-white flex overflow-hidden relative">
       <OrgSuspendedBanner />
+      <PwaInstallPrompt settingsPath="/settings" />
       <div className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] bg-indigo-50/40 rounded-full blur-[80px] pointer-events-none z-0" />
       <div className="absolute bottom-[-10%] left-[-10%] w-[600px] h-[600px] bg-slate-50/40 rounded-full blur-[100px] pointer-events-none z-0" />
 
@@ -133,9 +134,7 @@ export default function Layout({ children }: LayoutProps) {
           sidebarExpanded ? 'items-center justify-between p-4' : 'flex-col items-center gap-2 py-3 px-2'
         )}>
           <Link to="/" className="flex items-center gap-2 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center flex-shrink-0">
-              <GraduationCap className="w-5 h-5 text-white" />
-            </div>
+            <img src="/logo-icon.png" alt="Tutlio" className="w-9 h-9 rounded-xl flex-shrink-0" />
             {sidebarExpanded && (
               <span className="font-black text-gray-900 text-base tracking-tight truncate">Tutlio</span>
             )}
@@ -252,9 +251,7 @@ export default function Layout({ children }: LayoutProps) {
           <aside className="relative z-50 flex h-full w-72 max-w-[85vw] flex-col border-r border-gray-100 bg-white">
             <div className="flex items-center justify-between border-b border-gray-100 p-4">
               <Link to="/" className="flex items-center gap-2" onClick={() => setMobileOpen(false)}>
-                <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center">
-                  <GraduationCap className="w-5 h-5 text-white" />
-                </div>
+                <img src="/logo-icon.png" alt="Tutlio" className="w-9 h-9 rounded-xl" />
                 <span className="font-black text-gray-900 text-base tracking-tight">Tutlio</span>
               </Link>
               <button
@@ -343,9 +340,7 @@ export default function Layout({ children }: LayoutProps) {
             <Menu className="w-5 h-5" />
           </button>
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center">
-              <GraduationCap className="w-4.5 h-4.5 text-white" />
-            </div>
+            <img src="/logo-icon.png" alt="Tutlio" className="w-8 h-8 rounded-xl" />
             <span className="font-black text-gray-900 text-base tracking-tight">Tutlio</span>
           </div>
           <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">

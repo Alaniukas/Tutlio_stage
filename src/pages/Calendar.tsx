@@ -213,7 +213,7 @@ export default function CalendarPage() {
   const orgPolicy = useOrgTutorPolicy();
   const licenseFrozen = orgPolicy.isOrgTutor && orgPolicy.orgUsesLicenses && !orgPolicy.hasActiveLicense;
   const { contactVisibility } = useOrgFeatures();
-  const { profile: ctxProfile } = useUser();
+  const { user: ctxUser, profile: ctxProfile } = useUser();
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -360,8 +360,10 @@ export default function CalendarPage() {
   const [groupCancelChoice, setGroupCancelChoice] = useState<'single' | 'all_future' | null>(null);
 
   useEffect(() => {
+    if (!ctxUser) return;
     fetchData();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctxUser?.id]);
 
   // Set default dates when mass cancel modal opens
   useEffect(() => {
@@ -429,8 +431,8 @@ export default function CalendarPage() {
   }, [selectedEvent?.id]);
 
   const fetchData = async () => {
-    const user = await dedupeAuthGetUser();
-    if (!user) { setLoading(false); return; }
+    if (!ctxUser) { setLoading(false); return; }
+    const user = ctxUser;
 
     await dedupeAsync(`cal:${user.id}`, async () => {
     setLoading(true);

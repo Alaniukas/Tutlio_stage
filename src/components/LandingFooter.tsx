@@ -1,4 +1,5 @@
-import { GraduationCap } from 'lucide-react';
+
+
 import { Link } from 'react-router-dom';
 import { useTranslation, buildLocalizedPath } from '@/lib/i18n';
 
@@ -11,9 +12,7 @@ export default function LandingFooter() {
         <div className="grid grid-cols-2 md:grid-cols-5 gap-8">
           <div className="col-span-2">
             <Link to={buildLocalizedPath('/', locale)} className="flex items-center gap-2 mb-4">
-              <div className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center">
-                <GraduationCap className="w-4 h-4 text-white" />
-              </div>
+              <img src="/logo-icon.png" alt="Tutlio" className="w-7 h-7 rounded-lg" />
               <span className="font-bold text-[15px] text-white tracking-tight">Tutlio</span>
             </Link>
             <h4 className="text-[13px] font-semibold text-white mb-1.5">{t('landing.footerTitle')}</h4>

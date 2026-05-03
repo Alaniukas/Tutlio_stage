@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { getCached, setCache } from '@/lib/dataCache';
+import { parentProfileDeduped, parentStudentLinksDeduped } from '@/lib/preload';
 import { useUser } from '@/contexts/UserContext';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from '@/lib/i18n';
@@ -16,6 +18,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import PwaInstallGuide from '@/components/PwaInstallGuide';
 import {
   ParentLessonDetailModal,
   type ParentTutorContactPolicy,
@@ -65,9 +68,10 @@ export default function ParentDashboard() {
   const { user } = useUser();
   const { t, locale, dateFnsLocale } = useTranslation();
   const navigate = useNavigate();
-  const [parentName, setParentName] = useState<string | null>(null);
-  const [children, setChildren] = useState<ChildInfo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const pdc = getCached<any>('parent_dashboard');
+  const [parentName, setParentName] = useState<string | null>(pdc?.parentName ?? null);
+  const [children, setChildren] = useState<ChildInfo[]>(pdc?.children ?? []);
+  const [loading, setLoading] = useState(!pdc);
   const [selected, setSelected] = useState<ChildSession | null>(null);
   const [selectedChildName, setSelectedChildName] = useState<string>('');
   const [selectedChildId, setSelectedChildId] = useState<string>('');
@@ -80,27 +84,21 @@ export default function ParentDashboard() {
     if (!user) return;
     let cancelled = false;
     (async () => {
-      setLoading(true);
+      if (!getCached('parent_dashboard')) setLoading(true);
 
-      // 1) Parent profile (for name greeting)
-      try {
-        const { data: parentProfile } = await supabase.rpc(
-          'get_parent_profile_by_user_id',
-          { p_user_id: user.id },
-        );
-        const row = Array.isArray(parentProfile) ? parentProfile[0] : parentProfile;
-        if (!cancelled && row?.full_name) setParentName(row.full_name);
-      } catch (err) {
-        console.warn('[ParentDashboard] parent profile lookup failed:', err);
+      const [parentProfileRes, linksRes] = await Promise.all([
+        parentProfileDeduped(user.id),
+        parentStudentLinksDeduped(user.id),
+      ]);
+
+      const parentRow = Array.isArray(parentProfileRes.data)
+        ? parentProfileRes.data[0]
+        : parentProfileRes.data;
+      if (!cancelled && (parentRow as any)?.full_name) {
+        setParentName((parentRow as any).full_name);
       }
 
-      // 2) Linked children
-      const { data: links, error: linksErr } = await supabase
-        .from('parent_students')
-        .select(
-          'student_id, students(id, full_name, tutor_id, linked_user_id, profiles:tutor_id(full_name))',
-        );
-
+      const linksErr = linksRes.error;
       if (linksErr) {
         console.warn('[ParentDashboard] parent_students load failed:', linksErr);
         if (!cancelled) {
@@ -110,7 +108,7 @@ export default function ParentDashboard() {
         return;
       }
 
-      const studentsRaw = (links ?? [])
+      const studentsRaw = (linksRes.data ?? [])
         .map((l: any) => l.students)
         .filter((s: any) => s?.id);
 
@@ -123,7 +121,6 @@ export default function ParentDashboard() {
         return;
       }
 
-      // 3) Sessions for all children in a wide window
       const past = new Date(now);
       past.setMonth(past.getMonth() - 6);
       const future = new Date(now);
@@ -248,8 +245,13 @@ export default function ParentDashboard() {
       });
 
       if (!cancelled) {
+        setParentName((prev) => (parentRow as any)?.full_name || prev);
         setChildren(kids);
         setLoading(false);
+        setCache('parent_dashboard', {
+          parentName: (parentRow as any)?.full_name || null,
+          children: kids,
+        });
       }
     })();
 
@@ -428,6 +430,8 @@ export default function ParentDashboard() {
                 formatCountdown={formatCountdown}
               />
             ))}
+
+            <PwaInstallGuide />
           </>
         )}
       </div>

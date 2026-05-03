@@ -20,7 +20,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
 import { formatLessonStripeChargeEur } from '@/lib/stripeLessonPricing';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
-import { dedupeAuthGetUser } from '@/lib/preload';
+import { useUser } from '@/contexts/UserContext';
 import { fetchStudentActiveLessonPackagesDeduped, fetchSubjectNamesByIds } from '@/lib/studentLessonPackagesLight';
 
 interface Session {
@@ -73,6 +73,7 @@ type ModalStep = 'cancel-confirm' | 'cancel-reason' | 'penalty-choice' | 'pickin
 
 export default function StudentSessions() {
     const { t, dateFnsLocale } = useTranslation();
+    const { user: ctxUser } = useUser();
     const location = useLocation();
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
@@ -163,9 +164,10 @@ export default function StudentSessions() {
     const parentLessonsFetchKey = isParentLessonsRoute ? (urlParentStudentId ?? '') : '';
     const studentSessionsSearchKey = !isParentLessonsRoute ? searchParams.toString() : '';
     useEffect(() => {
+        if (!ctxUser) return;
         void fetchSessions();
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- stable keys derived above
-    }, [location.pathname, parentLessonsFetchKey, studentSessionsSearchKey]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [ctxUser?.id, location.pathname, parentLessonsFetchKey, studentSessionsSearchKey]);
     useEffect(() => { setShowAllSessions(false); }, [filter, lessonsSubjectFilter, lessonsDateFrom, lessonsDateTo]);
 
     const lessonSubjectOptions = useMemo(() => {
@@ -445,11 +447,8 @@ export default function StudentSessions() {
             !sessionsCacheKey ||
             !getCached(sessionsCacheKey);
         if (cacheMiss) setLoading(true);
-        const user = await dedupeAuthGetUser();
-        if (!user) {
-            setLoading(false);
-            return;
-        }
+        if (!ctxUser) { setLoading(false); return; }
+        const user = ctxUser;
 
         const parentStudentFromUrl = isParentLessonsRoute
             ? (urlParentStudentId ??

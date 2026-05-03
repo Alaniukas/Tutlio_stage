@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import {
   LayoutDashboard,
   CalendarDays,
@@ -7,11 +7,12 @@ import {
   FileText,
   LogOut,
   BookOpen,
-  GraduationCap,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useTranslation } from '@/lib/i18n';
 import { useTotalChatUnread } from '@/hooks/useChat';
+import { preloadParentData } from '@/lib/preload';
+import PwaInstallPrompt from '@/components/PwaInstallPrompt';
 
 interface ParentLayoutProps {
   children: React.ReactNode;
@@ -22,6 +23,10 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const chatUnreadTotal = useTotalChatUnread();
+
+  useEffect(() => {
+    void preloadParentData();
+  }, []);
 
   const navItems = useMemo(
     () => [
@@ -56,14 +61,13 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
 
   return (
     <div className="min-h-screen bg-[#fffefc] flex flex-col relative overflow-x-hidden">
+      <PwaInstallPrompt settingsPath="/parent" />
       <div className="absolute top-0 right-0 w-96 h-96 bg-orange-100/40 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none z-0" />
       <div className="absolute bottom-32 left-0 w-96 h-96 bg-rose-100/30 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 pointer-events-none z-0" />
 
       <header className="sticky top-0 z-40 bg-white/85 backdrop-blur-md border-b border-orange-100/80 px-4 py-2.5 flex items-center justify-between">
         <Link to="/parent" className="flex items-center gap-2 min-w-0">
-          <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center shrink-0">
-            <GraduationCap className="w-[18px] h-[18px] text-white" />
-          </div>
+          <img src="/logo-icon.png" alt="Tutlio" className="w-8 h-8 rounded-xl shrink-0" />
           <span className="font-black text-gray-900 text-sm sm:text-base tracking-tight truncate">Tutlio</span>
         </Link>
         <span className="hidden sm:inline text-[11px] font-semibold tracking-wide text-orange-500 shrink-0">

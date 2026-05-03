@@ -11,6 +11,10 @@ import {
   CheckCircle2,
   ArrowRight,
   Building2,
+  Package,
+  Banknote,
+  FileText,
+  UserCheck,
 } from 'lucide-react';
 import { useTranslation, buildLocalizedPath } from '@/lib/i18n';
 import LandingNavbar from '@/components/LandingNavbar';
@@ -28,6 +32,11 @@ export default function Pricing() {
     { icon: MessageSquare, text: t('pricing.feature.comments'), included: true },
     { icon: Users, text: t('pricing.feature.waitlist'), included: true },
     { icon: TrendingUp, text: t('pricing.feature.finance'), included: true },
+    { icon: MessageSquare, text: t('pricing.feature.messaging'), included: true },
+    { icon: Package, text: t('pricing.feature.plans'), included: true },
+    { icon: Banknote, text: t('pricing.feature.autoPayments'), included: true },
+    { icon: FileText, text: t('pricing.feature.invoices'), included: true },
+    { icon: UserCheck, text: t('pricing.feature.parents'), included: true },
   ];
 
   return (
@@ -149,6 +158,9 @@ export default function Pricing() {
               <ul className="space-y-2.5 mb-7 flex-1">
                 <li className="flex items-center gap-2 text-gray-300 text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />{t('pricing.allFeatures')}</li>
                 <li className="flex items-center gap-2 text-gray-300 text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />{t('pricing.enterpriseMultiTutor')}</li>
+                <li className="flex items-center gap-2 text-gray-300 text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />{t('pricing.enterpriseStats')}</li>
+                <li className="flex items-center gap-2 text-gray-300 text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />{t('pricing.enterpriseAutoInvoices')}</li>
+                <li className="flex items-center gap-2 text-gray-300 text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />{t('pricing.enterpriseCancelStats')}</li>
                 <li className="flex items-center gap-2 text-gray-300 text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />{t('pricing.enterpriseCustom')}</li>
                 <li className="flex items-center gap-2 text-gray-300 text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />{t('pricing.enterpriseSupport')}</li>
               </ul>

@@ -118,7 +118,8 @@ export default function TutorFinanceReport({ userId }: Props) {
 
     void load();
     return () => { cancelled = true; };
-  }, [userId, month, periodMode, rangeStart, rangeEnd, t]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, month, periodMode, rangeStart, rangeEnd]);
 
   const stats = useMemo(() => {
     let completed = 0;

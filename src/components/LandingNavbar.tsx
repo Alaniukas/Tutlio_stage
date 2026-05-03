@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { GraduationCap, ChevronDown, Menu, X } from 'lucide-react';
+import { ChevronDown, Menu, X } from 'lucide-react';
 import { useTranslation, buildLocalizedPath } from '@/lib/i18n';
 import LanguageSelector from '@/components/LanguageSelector';
 import { usePlatform } from '@/contexts/PlatformContext';
@@ -65,7 +65,7 @@ export default function LandingNavbar() {
 
   return (
     <>
-      <nav className={`fixed top-0 left-0 right-0 z-50 ${showPill ? '' : 'bg-[#f5f5f3]'}`}>
+      <nav className={`fixed top-0 left-0 right-0 z-50 ${showPill ? '' : isMobile ? '' : 'bg-[#f5f5f3]'}`}>
         <div
           className="mx-auto flex items-center"
           style={{
@@ -73,19 +73,17 @@ export default function LandingNavbar() {
             height: showPill ? 52 : (isMobile ? 60 : 72),
             padding: showPill ? '0 20px' : '0 20px',
             margin: showPill ? '10px auto' : '0 auto',
-            backgroundColor: showPill ? 'rgba(255,255,255,0.82)' : (scrolled && isMobile) ? 'rgba(255,255,255,0.95)' : 'transparent',
-            backdropFilter: showPill ? 'blur(20px) saturate(1.4)' : (scrolled && isMobile) ? 'blur(12px)' : 'none',
-            WebkitBackdropFilter: showPill ? 'blur(20px) saturate(1.4)' : (scrolled && isMobile) ? 'blur(12px)' : 'none',
+            backgroundColor: showPill ? 'rgba(255,255,255,0.82)' : isMobile ? '#f5f5f3' : 'transparent',
+            backdropFilter: showPill ? 'blur(20px) saturate(1.4)' : 'none',
+            WebkitBackdropFilter: showPill ? 'blur(20px) saturate(1.4)' : 'none',
             borderRadius: showPill ? 9999 : 0,
-            boxShadow: showPill ? '0 4px 24px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04)' : (scrolled && isMobile) ? '0 1px 8px rgba(0,0,0,0.06)' : 'none',
+            boxShadow: showPill ? '0 4px 24px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04)' : 'none',
             border: showPill ? '1px solid rgba(255,255,255,0.7)' : '1px solid transparent',
             transition: 'max-width 0.6s cubic-bezier(0.22,1,0.36,1), height 0.5s cubic-bezier(0.22,1,0.36,1), padding 0.5s cubic-bezier(0.22,1,0.36,1), margin 0.5s cubic-bezier(0.22,1,0.36,1), background-color 0.4s ease, backdrop-filter 0.4s ease, border-radius 0.6s cubic-bezier(0.22,1,0.36,1), box-shadow 0.4s ease, border-color 0.4s ease',
           }}
         >
           <Link to={buildLocalizedPath('/', locale)} className="flex items-center gap-2 shrink-0" onClick={() => setMobileOpen(false)}>
-            <div className="w-7 h-7 rounded-lg bg-gray-900 flex items-center justify-center">
-              <GraduationCap className="w-4 h-4 text-white" />
-            </div>
+            <img src="/logo-icon.png" alt="Tutlio" className="w-7 h-7 rounded-lg" />
             <span className="font-bold text-gray-900 tracking-tight text-[15px]">{brandName}</span>
           </Link>
 
@@ -122,7 +120,7 @@ export default function LandingNavbar() {
             <div className="hidden md:block">
               <LanguageSelector />
             </div>
-            <Link to={isSchools ? '/school/login' : '/login'} className="hidden md:block text-[13px] text-gray-500 hover:text-gray-900 transition-colors font-medium">
+            <Link to="/login" className="hidden md:block text-[13px] text-gray-500 hover:text-gray-900 transition-colors font-medium">
               {t('common.login')}
             </Link>
             <Link
@@ -205,7 +203,7 @@ export default function LandingNavbar() {
 
         <div className="px-5 py-5 border-t border-gray-100 space-y-3">
           <Link
-            to={isSchools ? '/school/login' : '/login'}
+            to="/login"
             onClick={() => setMobileOpen(false)}
             className="block w-full text-center py-2.5 text-[14px] font-medium text-gray-700 rounded-full border border-gray-200 hover:bg-gray-50 transition-colors"
           >

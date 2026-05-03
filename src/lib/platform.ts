@@ -21,7 +21,8 @@ export function getPlatformBasename(platform: Platform): string {
   if (platform === DEFAULT_PLATFORM) return '';
   // Keep legacy "/school/*" alias working for school deployments.
   // In this mode routes are defined with explicit "/school/*" paths, so basename must stay empty.
-  if (platform === 'schools' && typeof window !== 'undefined' && window.location.pathname.startsWith('/school')) {
+  if (platform === 'schools' && typeof window !== 'undefined' &&
+      (window.location.pathname === '/school' || window.location.pathname.startsWith('/school/'))) {
     return '';
   }
   return `/${platform}`;

@@ -1,4 +1,4 @@
-import { createContext, useContext } from 'react';
+import { createContext, useCallback, useContext } from 'react';
 import { lt as dateFnsLt, pl as dateFnsPl, lv as dateFnsLv, et as dateFnsEe } from 'date-fns/locale';
 import type { Locale as DateFnsLocale } from 'date-fns';
 
@@ -103,12 +103,14 @@ export const I18nContext = createContext<I18nContextValue>({
 export function useTranslation() {
   const ctx = useContext(I18nContext);
 
-  // Defensive fallback: if provider is temporarily missing/broken, still translate from dictionaries.
-  const safeT = (key: string, params?: Record<string, string | number>) => {
-    const translated = ctx.t(key, params);
-    if (translated !== key) return translated;
-    return coreTranslate(ctx.locale, key, params);
-  };
+  const safeT = useCallback(
+    (key: string, params?: Record<string, string | number>) => {
+      const translated = ctx.t(key, params);
+      if (translated !== key) return translated;
+      return coreTranslate(ctx.locale, key, params);
+    },
+    [ctx.t, ctx.locale],
+  );
 
   return {
     ...ctx,

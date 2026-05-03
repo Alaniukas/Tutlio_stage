@@ -7,7 +7,8 @@ import { authHeaders } from '@/lib/apiHelpers';
 import { CreditCard, CheckCircle2, ExternalLink, Loader2, Clock, Euro, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import SendInvoiceModal from '@/components/SendInvoiceModal';
-import { tutorFinancePageProfileDeduped, dedupeAuthGetUser } from '@/lib/preload';
+import { tutorFinancePageProfileDeduped } from '@/lib/preload';
+import { useUser } from '@/contexts/UserContext';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import OrgTutorFinanceSummary from '@/components/OrgTutorFinanceSummary';
 import TutorFinanceReport from '@/components/TutorFinanceReport';
@@ -29,6 +30,7 @@ export default function FinancePage() {
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
+  const { user: ctxUser } = useUser();
   const orgPolicy = useOrgTutorPolicy();
   const stripeAutoVerifyRan = useRef(false);
   const [userId, setUserId] = useState<string | null>(null);
@@ -114,16 +116,15 @@ export default function FinancePage() {
   ]);
 
   useEffect(() => {
+    if (!ctxUser) return;
     fetchData();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctxUser?.id]);
 
   const fetchData = async () => {
+    if (!ctxUser) return;
     setLoading(true);
-    const user = await dedupeAuthGetUser();
-    if (!user) {
-      setLoading(false);
-      return;
-    }
+    const user = ctxUser;
     setUserId(user.id);
 
     const { data: tutorData } = await tutorFinancePageProfileDeduped(user.id);

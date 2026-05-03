@@ -9,7 +9,8 @@ import {
     fetchSubjectNamesByIds,
 } from '@/lib/studentLessonPackagesLight';
 import { authHeaders } from '@/lib/apiHelpers';
-import { dedupeAuthGetUser, rpcGetStudentProfilesDeduped } from '@/lib/preload';
+import { rpcGetStudentProfilesDeduped } from '@/lib/preload';
+import { useUser } from '@/contexts/UserContext';
 import { format, isAfter, isBefore } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 import { CalendarDays, Clock, Zap, BookOpen, Settings, Play, XCircle, CheckCircle, RefreshCw, CreditCard, Loader2, Package, Users, ChevronDown, ChevronUp } from 'lucide-react';
@@ -49,6 +50,7 @@ interface InstallmentPayment {
 export default function StudentDashboard() {
     const navigate = useNavigate();
     const { t, dateFnsLocale } = useTranslation();
+    const { user: ctxUser } = useUser();
     const sdc = getCached<any>('student_dashboard');
     const [student, setStudent] = useState<StudentInfo | null>(sdc?.student ?? null);
     const [sessions, setSessions] = useState<Session[]>(sdc?.sessions ?? []);
@@ -95,8 +97,10 @@ export default function StudentDashboard() {
     // Visada perkrauti iš DB: student_dashboard cache gali būti pasenęs, o StudentSessions
     // atnaujina tik student_sessions — kitaip „Artimiausia pamoka“ rodytų klaidingą paid.
     useEffect(() => {
+        if (!ctxUser) return;
         void fetchData();
-    }, []);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [ctxUser?.id]);
 
     useEffect(() => {
         if (!loading && student) {
@@ -108,12 +112,9 @@ export default function StudentDashboard() {
         'id,start_time,end_time,status,paid,price,topic,meeting_link,payment_status,tutor_comment,show_comment_to_student,subject_id';
 
     const fetchData = async () => {
+        if (!ctxUser) return;
         if (!getCached('student_dashboard')) setLoading(true);
-        const user = await dedupeAuthGetUser();
-        if (!user) {
-            setLoading(false);
-            return;
-        }
+        const user = ctxUser;
 
         const selectedStudentId = typeof window !== 'undefined'
             ? localStorage.getItem(ACTIVE_STUDENT_PROFILE_KEY)
@@ -159,33 +160,53 @@ export default function StudentDashboard() {
             const ent = String((studentRow as { organization_entity_type?: string }).organization_entity_type ?? '').trim();
             setIsSchoolOrgStudent(ent === 'school');
 
+            const threeMonthsAgo = new Date();
+            threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+
+            const [tutorResult, sessionsResult, pkgsRows, installmentsResult] = await Promise.all([
+                studentRow.tutor_id
+                    ? Promise.all([
+                        supabase.from('profiles').select('email, phone, organization_id').eq('id', studentRow.tutor_id).single(),
+                        supabase.rpc('get_tutor_contact_visibility_for_student', { p_tutor_id: studentRow.tutor_id }),
+                    ])
+                    : Promise.resolve(null),
+                supabase
+                    .from('sessions')
+                    .select(STUDENT_DASH_SESSION_COLS)
+                    .eq('student_id', studentRow.id)
+                    .gte('start_time', threeMonthsAgo.toISOString())
+                    .order('start_time', { ascending: true })
+                    .limit(400),
+                fetchStudentActiveLessonPackagesDeduped(supabase, studentRow.id),
+                supabase
+                    .from('school_payment_installments')
+                    .select('id, installment_number, amount, due_date, payment_status, paid_at, contract:school_contracts!inner(id, student_id)')
+                    .eq('contract.student_id', studentRow.id)
+                    .order('due_date', { ascending: true }),
+            ]);
+
             let tutorInfo: StudentInfo['tutor'] = null;
-            if (studentRow.tutor_id) {
-                const [{ data: tutorProf }, { data: vis }] = await Promise.all([
-                    supabase.from('profiles').select('email, phone, organization_id').eq('id', studentRow.tutor_id).single(),
-                    supabase.rpc('get_tutor_contact_visibility_for_student', { p_tutor_id: studentRow.tutor_id }),
-                ]);
+            if (tutorResult) {
+                const [{ data: tutorProf }, { data: vis }] = tutorResult;
                 const cv = parseOrgContactVisibility((vis as Record<string, unknown>) || null);
                 tutorInfo = {
                     full_name: studentRow.tutor_full_name,
                     email: maskTutorContact(tutorProf?.email ?? null, cv.studentSeesTutorEmail),
                     phone: maskTutorContact(tutorProf?.phone ?? null, cv.studentSeesTutorPhone),
                 };
-                {
-                    let tutorOrgSchoolResolved =
-                        String((studentRow as { tutor_organization_entity_type?: string }).tutor_organization_entity_type ?? '')
-                            .trim() === 'school';
-                    const oid = (tutorProf as { organization_id?: string | null } | null)?.organization_id;
-                    if (!tutorOrgSchoolResolved && oid) {
-                        const { data: oe } = await supabase
-                            .from('organizations')
-                            .select('entity_type')
-                            .eq('id', oid)
-                            .maybeSingle();
-                        tutorOrgSchoolResolved = oe?.entity_type === 'school';
-                    }
-                    setTutorOrgIsSchool(tutorOrgSchoolResolved);
+                let tutorOrgSchoolResolved =
+                    String((studentRow as { tutor_organization_entity_type?: string }).tutor_organization_entity_type ?? '')
+                        .trim() === 'school';
+                const oid = (tutorProf as { organization_id?: string | null } | null)?.organization_id;
+                if (!tutorOrgSchoolResolved && oid) {
+                    const { data: oe } = await supabase
+                        .from('organizations')
+                        .select('entity_type')
+                        .eq('id', oid)
+                        .maybeSingle();
+                    tutorOrgSchoolResolved = oe?.entity_type === 'school';
                 }
+                setTutorOrgIsSchool(tutorOrgSchoolResolved);
             } else {
                 setTutorOrgIsSchool(false);
             }
@@ -196,23 +217,9 @@ export default function StudentDashboard() {
                 tutor: tutorInfo,
             });
 
-            const threeMonthsAgo = new Date();
-            threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-
-            const { data: sessionRowsRaw, error: sessionsErr } = await supabase
-                .from('sessions')
-                .select(STUDENT_DASH_SESSION_COLS)
-                .eq('student_id', studentRow.id)
-                .gte('start_time', threeMonthsAgo.toISOString())
-                .order('start_time', { ascending: true })
-                .limit(400);
-
+            const { data: sessionRowsRaw, error: sessionsErr } = sessionsResult;
             if (sessionsErr) {
-                console.warn(
-                    '[StudentDashboard] sessions',
-                    sessionsErr.code,
-                    sessionsErr.message,
-                );
+                console.warn('[StudentDashboard] sessions', sessionsErr.code, sessionsErr.message);
                 const fb =
                     getCached<{ sessions?: Session[] }>('student_dashboard')?.sessions ||
                     getCached<{ sessions?: Session[] }>('student_sessions')?.sessions;
@@ -250,10 +257,6 @@ export default function StudentDashboard() {
                 setSessions(merged);
             }
 
-            const pkgsRows = await fetchStudentActiveLessonPackagesDeduped(
-                supabase,
-                studentRow.id,
-            );
             const nameMap = await fetchSubjectNamesByIds(
                 supabase,
                 pkgsRows.map((p) => p.subject_id).filter(Boolean) as string[],
@@ -278,13 +281,7 @@ export default function StudentDashboard() {
                 }));
             setActivePackages(visiblePackages);
 
-            const { data: installmentsData } = await supabase
-                .from('school_payment_installments')
-                .select('id, installment_number, amount, due_date, payment_status, paid_at, contract:school_contracts!inner(id, student_id)')
-                .eq('contract.student_id', studentRow.id)
-                .order('due_date', { ascending: true });
-
-            setInstallments((installmentsData || []).map((row: any) => ({
+            setInstallments((installmentsResult.data || []).map((row: any) => ({
                 id: row.id,
                 installment_number: row.installment_number,
                 amount: Number(row.amount || 0),

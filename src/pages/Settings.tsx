@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import Layout from '@/components/Layout';
 import { supabase } from '@/lib/supabase';
+import { useUser } from '@/contexts/UserContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -9,6 +10,7 @@ import { User, Mail, Phone, Save, Lock, Building2, Eye, EyeOff, CreditCard, Cale
 import { formatLithuanianPhone, validateLithuanianPhone } from '@/lib/utils';
 import { hasActiveSubscription } from '@/lib/subscription';
 import { useTranslation } from '@/lib/i18n';
+import PwaInstallGuide from '@/components/PwaInstallGuide';
 
 interface TutorProfile {
   full_name: string;
@@ -26,6 +28,7 @@ interface TutorProfile {
 
 export default function SettingsPage() {
   const { t, dateFnsLocale } = useTranslation();
+  const { user: ctxUser } = useUser();
   const [orgName, setOrgName] = useState<string | null>(null);
   const [profile, setProfile] = useState<TutorProfile>({
     full_name: '',
@@ -61,8 +64,10 @@ export default function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
+    if (!ctxUser) return;
     fetchData();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctxUser?.id]);
 
   useEffect(() => {
     if (searchParams.get('from') === 'stripe_portal') {
@@ -71,9 +76,10 @@ export default function SettingsPage() {
   }, [searchParams, setSearchParams]);
 
   const fetchData = async (skipRefresh = false) => {
+    if (!ctxUser) return;
     setLoading(true);
     setSubscriptionError(null);
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = ctxUser;
     if (!user) {
       setLoading(false);
       return;
@@ -134,9 +140,9 @@ export default function SettingsPage() {
   };
 
   const handleSaveProfile = async () => {
+    if (!ctxUser) return;
     setSaving(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setSaving(false); return; }
+    const user = ctxUser;
 
     if (profile.phone && !validateLithuanianPhone(profile.phone)) {
       setProfileError(t('settings.phoneFormat'));
@@ -242,15 +248,14 @@ export default function SettingsPage() {
 
     setChangingPassword(true);
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user?.email) {
+    if (!ctxUser?.email) {
       setPasswordError(t('settings.userDataFailed'));
       setChangingPassword(false);
       return;
     }
 
     const { error: signInError } = await supabase.auth.signInWithPassword({
-      email: user.email,
+      email: ctxUser.email,
       password: currentPassword,
     });
 
@@ -701,6 +706,8 @@ export default function SettingsPage() {
             </div>
           )}
         </div>
+
+        <PwaInstallGuide />
       </div>
     </Layout>
   );

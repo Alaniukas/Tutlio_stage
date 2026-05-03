@@ -22,7 +22,8 @@ import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring'
 import { formatLessonStripeChargeEur } from '@/lib/stripeLessonPricing';
 import { ParentLessonDetailModal } from '@/components/parent/ParentLessonDetailModal';
 import { fetchStudentActiveLessonPackagesDeduped } from '@/lib/studentLessonPackagesLight';
-import { dedupeAuthGetUser, rpcGetStudentProfilesDeduped } from '@/lib/preload';
+import { rpcGetStudentProfilesDeduped } from '@/lib/preload';
+import { useUser } from '@/contexts/UserContext';
 
 // BigCalendar Setup
 const locales = { lt: lt };
@@ -135,6 +136,7 @@ interface SlotEvent {
 
 export default function StudentSchedule() {
     const { t, dateFnsLocale } = useTranslation();
+    const { user: ctxUser } = useUser();
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     // Parent context detection. Parents arrive either via the legacy
@@ -231,13 +233,15 @@ export default function StudentSchedule() {
     }, [isParentRoute, tutorId, tutorModalContact, cancellationHours, cancellationFeePercent, paymentTiming, paymentDeadlineHours]);
 
     useEffect(() => {
+        if (!ctxUser) return;
         void fetchInitialData();
         const onProfileChange = () => {
             void fetchInitialData();
         };
         window.addEventListener('student-profile-changed', onProfileChange);
         return () => window.removeEventListener('student-profile-changed', onProfileChange);
-    }, []);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [ctxUser?.id]);
     // OPTIMIZED: Memoize slot calculation to avoid recalculating on every render
     const { memoizedEvents, memoizedBgEvents } = useMemo(() => {
         const generatedEvents: SlotEvent[] = [];
@@ -439,14 +443,11 @@ export default function StudentSchedule() {
 
     // OPTIMIZED: Initial load with minimal date range (7 days) for instant display
     const fetchInitialData = async () => {
+        if (!ctxUser) return;
         setLoadError(null);
         setLoading(true);
         try {
-        const user = await dedupeAuthGetUser();
-        if (!user) {
-            setLoadError(t('stuSched.notLoggedIn'));
-            return;
-        }
+        const user = ctxUser;
 
         const urlStud = isParentRoute
             ? (searchParams.get('studentId') ??

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
 import { authHeaders } from '@/lib/apiHelpers';
 import { useTranslation } from '@/lib/i18n';
+import { useUser } from '@/contexts/UserContext';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import InvoiceSettingsForm from '@/components/InvoiceSettingsForm';
 import CreateInvoiceModal from '@/components/CreateInvoiceModal';
@@ -42,6 +43,7 @@ interface Invoice {
 
 export default function InvoicesPage() {
   const { t } = useTranslation();
+  const { user: ctxUser } = useUser();
   const orgPolicy = useOrgTutorPolicy();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -57,8 +59,8 @@ export default function InvoicesPage() {
   const [downloadingAllList, setDownloadingAllList] = useState(false);
 
   const fetchInvoices = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!ctxUser) return;
+    const user = ctxUser;
 
     setLoading(true);
 
@@ -99,7 +101,7 @@ export default function InvoicesPage() {
       setInvoices((data || []) as Invoice[]);
     }
     setLoading(false);
-  }, [statusFilter, invoicePeriodMode, invoiceMonth, invoiceRangeStart, invoiceRangeEnd]);
+  }, [ctxUser, statusFilter, invoicePeriodMode, invoiceMonth, invoiceRangeStart, invoiceRangeEnd]);
 
   const hasActivePeriodFilter = useMemo(() => {
     if (invoicePeriodMode === 'month') return Boolean(invoiceMonth && /^\d{4}-\d{2}$/.test(invoiceMonth));

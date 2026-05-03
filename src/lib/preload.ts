@@ -1,7 +1,7 @@
 import type { User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { getCached, setCache, dedupeAsync } from '@/lib/dataCache';
-import { startOfMonth, endOfMonth, isAfter, isBefore, addDays, subDays } from 'date-fns';
+import { startOfMonth, endOfMonth, isAfter, isBefore, addDays, subDays, subMonths, addMonths } from 'date-fns';
 
 /** Columns the tutor Dashboard needs (avoid `*` + share one deduped round-trip with Layout preload). */
 const TUTOR_DASH_SESSIONS_SELECT =
@@ -268,6 +268,7 @@ function getOrgAdmin(userId: string) {
 let orgPreloadRunning = false;
 let tutorPreloadRunning = false;
 let studentPreloadRunning = false;
+let parentPreloadRunning = false;
 
 /** Shared with CompanyTutors; v2 excludes org student profiles from tutor preload cache */
 export const COMPANY_TUTORS_CACHE_KEY = 'company_tutors_v2';
@@ -595,5 +596,171 @@ export async function preloadStudentData() {
     }
   } finally {
     studentPreloadRunning = false;
+  }
+}
+
+export function parentProfileDeduped(userId: string) {
+  return dedupeAsync(`rpc_parent_prof:${userId}`, () =>
+    supabase.rpc('get_parent_profile_by_user_id', { p_user_id: userId }),
+  );
+}
+
+export function parentStudentLinksDeduped(userId: string) {
+  return dedupeAsync(`parent_student_links:${userId}`, () =>
+    supabase
+      .from('parent_students')
+      .select(
+        'student_id, students(id, full_name, tutor_id, linked_user_id, profiles:tutor_id(full_name))',
+      ),
+  );
+}
+
+export async function preloadParentData() {
+  if (parentPreloadRunning) return;
+  if (getCached('parent_dashboard')) return;
+  parentPreloadRunning = true;
+
+  try {
+    const user = await getAuthUser();
+    if (!user) return;
+
+    const [parentProfileRes, linksRes] = await Promise.all([
+      parentProfileDeduped(user.id),
+      parentStudentLinksDeduped(user.id),
+    ]);
+
+    const parentRow = Array.isArray(parentProfileRes.data)
+      ? parentProfileRes.data[0]
+      : parentProfileRes.data;
+    const parentName = (parentRow as any)?.full_name || null;
+
+    const links = linksRes.data ?? [];
+    const studentsRaw = links
+      .map((l: any) => l.students)
+      .filter((s: any) => s?.id);
+    const studentIds: string[] = [...new Set(studentsRaw.map((s: any) => s.id))];
+
+    if (studentIds.length === 0) {
+      setCache('parent_dashboard', { parentName, children: [] });
+      return;
+    }
+
+    const now = new Date();
+    const past = subMonths(now, 6);
+    const future = addMonths(now, 3);
+
+    const tutorIds = [
+      ...new Set(
+        studentsRaw
+          .map((s: any) => s.tutor_id as string | null | undefined)
+          .filter(Boolean) as string[],
+      ),
+    ];
+
+    const [sessionsRes, tutorProfilesRes] = await Promise.all([
+      supabase
+        .from('sessions')
+        .select(
+          'id, student_id, start_time, end_time, status, cancelled_by, topic, paid, payment_status, price, meeting_link, tutor_comment, show_comment_to_student, subjects(name, is_group)',
+        )
+        .in('student_id', studentIds)
+        .gte('start_time', past.toISOString())
+        .lte('start_time', future.toISOString())
+        .order('start_time', { ascending: true })
+        .limit(2000),
+      tutorIds.length > 0
+        ? supabase
+            .from('profiles')
+            .select(
+              'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, payment_timing, payment_deadline_hours',
+            )
+            .in('id', tutorIds)
+        : Promise.resolve({ data: [], error: null } as any),
+    ]);
+
+    const tutorPolicies: Record<string, any> = {};
+    for (const tp of (tutorProfilesRes as any).data ?? []) {
+      tutorPolicies[tp.id] = {
+        tutorId: tp.id,
+        tutorName: tp.full_name ?? null,
+        tutorEmail: tp.email ?? null,
+        tutorPhone: tp.phone ?? null,
+        cancellationHours: tp.cancellation_hours ?? 24,
+        cancellationFeePercent: tp.cancellation_fee_percent ?? 0,
+        paymentTiming: tp.payment_timing ?? 'before_lesson',
+        paymentDeadlineHours: tp.payment_deadline_hours ?? 24,
+      };
+    }
+
+    const byStudent = new Map<string, any[]>();
+    for (const s of sessionsRes.data ?? []) {
+      const arr = byStudent.get((s as any).student_id) ?? [];
+      arr.push({
+        id: (s as any).id,
+        start_time: (s as any).start_time,
+        end_time: (s as any).end_time,
+        status: (s as any).status,
+        topic: (s as any).topic ?? null,
+        subjectName: (s as any).subjects?.name ?? null,
+        isGroupSubject: !!(s as any).subjects?.is_group,
+        paid: !!(s as any).paid,
+        payment_status: (s as any).payment_status,
+        price: (s as any).price ?? null,
+        meeting_link: (s as any).meeting_link ?? null,
+        cancelled_by: (s as any).cancelled_by ?? null,
+        tutor_comment: (s as any).tutor_comment ?? null,
+        show_comment_to_student: !!(s as any).show_comment_to_student,
+      });
+      byStudent.set((s as any).student_id, arr);
+    }
+
+    const children = studentsRaw.map((s: any) => {
+      const list = byStudent.get(s.id) ?? [];
+      const upcoming = list.filter(
+        (x: any) => x.status === 'active' && isAfter(new Date(x.end_time), now),
+      );
+      const completed = list.filter((x: any) => x.status === 'completed');
+      const cancelled = list.filter((x: any) => x.status === 'cancelled');
+      const noShow = list.filter((x: any) => x.status === 'no_show');
+      const unpaidPast = list.filter(
+        (x: any) =>
+          !x.paid &&
+          x.payment_status !== 'paid_by_student' &&
+          (x.status === 'completed' ||
+            (x.status === 'active' && new Date(x.end_time).getTime() < now.getTime())),
+      );
+
+      return {
+        studentId: s.id,
+        linkedUserId: s.linked_user_id ?? null,
+        fullName: s.full_name ?? '',
+        tutorName: (s.profiles as any)?.full_name ?? null,
+        tutorId: s.tutor_id ?? null,
+        upcoming,
+        completedCount: completed.length,
+        cancelledCount: cancelled.length,
+        noShowCount: noShow.length,
+        totalCount: list.length,
+        unpaidPastCount: unpaidPast.length,
+        nextSession: upcoming[0] ?? null,
+        otherUpcoming: upcoming.slice(1, 4),
+        tutorPolicy: s.tutor_id ? tutorPolicies[s.tutor_id] ?? null : null,
+      };
+    });
+
+    children.sort((a: any, b: any) => {
+      const at = a.nextSession?.start_time
+        ? new Date(a.nextSession.start_time).getTime()
+        : Number.POSITIVE_INFINITY;
+      const bt = b.nextSession?.start_time
+        ? new Date(b.nextSession.start_time).getTime()
+        : Number.POSITIVE_INFINITY;
+      if (at !== bt) return at - bt;
+      return a.fullName.localeCompare(b.fullName);
+    });
+
+    setCache('parent_dashboard', { parentName, children });
+  } finally {
+    parentPreloadRunning = false;
   }
 }

@@ -3,16 +3,12 @@ import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
 import Reveal from './Reveal';
 import type { LandingVariant } from './HeroSection';
 
-const ICONS = [
-  { label: 'Fi', bg: 'bg-rose-50', text: 'text-rose-400' },
-  { label: '#', bg: 'bg-purple-50', text: 'text-purple-400' },
-  { label: '✳', bg: 'bg-amber-50', text: 'text-amber-500' },
-  { label: 'N', bg: 'bg-gray-100', text: 'text-gray-500' },
-  { label: '⟰', bg: 'bg-gray-900', text: 'text-white' },
-  { label: 'G', bg: 'bg-emerald-50', text: 'text-emerald-500' },
-  { label: '◆', bg: 'bg-sky-50', text: 'text-sky-500' },
-  { label: '⊕', bg: 'bg-purple-50', text: 'text-purple-400' },
-  { label: 'D', bg: 'bg-gray-100', text: 'text-gray-400' },
+const INTEGRATIONS = [
+  { src: '/integrations/google-calendar.svg', alt: 'Google Calendar', size: 'w-12 h-12', y: '-translate-y-3', rotate: '-rotate-3' },
+  { src: '/integrations/google-meet.svg', alt: 'Google Meet', size: 'w-11 h-11', y: 'translate-y-2', rotate: 'rotate-2' },
+  { src: '/integrations/stripe.svg', alt: 'Stripe', size: 'w-14 h-14', y: '-translate-y-1', rotate: 'rotate-1' },
+  { src: '/integrations/zoom.svg', alt: 'Zoom', size: 'w-11 h-11', y: 'translate-y-4', rotate: '-rotate-2' },
+  { src: '/integrations/google-drive.svg', alt: 'Google Drive', size: 'w-12 h-12', y: '-translate-y-2', rotate: 'rotate-3' },
 ];
 
 export default function IntegrationsSection({ variant = 'tutor' }: { variant?: LandingVariant }) {
@@ -67,14 +63,14 @@ export default function IntegrationsSection({ variant = 'tutor' }: { variant?: L
         </Reveal>
 
         <Reveal delay={300}>
-          <div className="flex items-center justify-center gap-3 flex-wrap max-w-lg mx-auto">
-            {ICONS.map((ic, i) => (
+          <div className="flex items-center justify-center gap-8 sm:gap-12 flex-wrap max-w-xl mx-auto">
+            {INTEGRATIONS.map((integ, i) => (
               <div
                 key={i}
-                className={`${i === 4 ? 'w-14 h-14' : i % 3 === 0 ? 'w-11 h-11' : 'w-10 h-10'} ${ic.bg} rounded-full flex items-center justify-center shadow-sm border border-white animate-float`}
-                style={{ animationDelay: `${i * 0.4}s`, animationDuration: `${5 + (i % 3)}s` }}
+                className={`${integ.size} ${integ.y} ${integ.rotate} rounded-2xl bg-white flex items-center justify-center shadow-md border border-gray-100 animate-float p-2`}
+                style={{ animationDelay: `${i * 0.6}s`, animationDuration: `${5 + (i % 3)}s` }}
               >
-                <span className={`${ic.text} font-bold ${i === 4 ? 'text-sm' : 'text-xs'}`}>{ic.label}</span>
+                <img src={integ.src} alt={integ.alt} className="w-full h-full object-contain" />
               </div>
             ))}
           </div>

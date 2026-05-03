@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import Layout from '@/components/Layout';
 import { supabase } from '@/lib/supabase';
+import { useUser } from '@/contexts/UserContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -188,6 +189,7 @@ function DropdownWithCustom({
 
 export default function LessonSettingsPage() {
   const { t } = useTranslation();
+  const { user: ctxUser } = useUser();
   const orgPolicy = useOrgTutorPolicy();
   const [orgName, setOrgName] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
@@ -213,13 +215,16 @@ export default function LessonSettingsPage() {
   const [savingSubject, setSavingSubject] = useState(false);
 
   // Validation error
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    if (!ctxUser) return;
+    fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctxUser?.id]);
 
   useEffect(() => {
     const reloadSubjects = async () => {
-      if (document.visibilityState !== 'visible') return;
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (document.visibilityState !== 'visible' || !ctxUser) return;
+      const user = ctxUser;
       const { data: subjectsData, error } = await supabase
         .from('subjects')
         .select('*')
@@ -235,9 +240,9 @@ export default function LessonSettingsPage() {
   }, []);
 
   const fetchData = async () => {
+    if (!ctxUser) return;
     setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setLoading(false); return; }
+    const user = ctxUser;
     setUserId(user.id);
 
     const { data: tutorData } = await supabase
@@ -295,9 +300,9 @@ export default function LessonSettingsPage() {
       return;
     }
 
+    if (!ctxUser) return;
     setSaving(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setSaving(false); return; }
+    const user = ctxUser;
 
     const patch: Record<string, number> = {};
     if (!orgName || orgPolicy.editCancellation) {
@@ -361,9 +366,9 @@ export default function LessonSettingsPage() {
   const handleSaveSubject = async () => {
     if (!newSubject.name.trim()) return;
     if (orgName && !orgPolicy.editSubjects) return;
+    if (!ctxUser) return;
     setSavingSubject(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    const user = ctxUser;
 
     const priceToSave =
       orgName && !orgPolicy.editPricing ? (editingSubject?.price ?? newSubject.price) : newSubject.price;
