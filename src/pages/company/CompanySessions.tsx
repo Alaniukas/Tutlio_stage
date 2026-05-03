@@ -1031,7 +1031,10 @@ export default function CompanySessions() {
                           disabled={cancellingSession || cancellationReason.trim().length < 5}
                           onClick={handleCancelSession}
                         >
-                          {cancellingSession ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" />{t('compSess.cancelling')}</> : t('compSess.cancelConfirm')}
+                          <>
+                            {cancellingSession ? <Loader2 className="w-4 h-4 mr-1 animate-spin shrink-0" /> : null}
+                            {t('compSess.cancelConfirm')}
+                          </>
                         </Button>
                       </div>
                     </div>

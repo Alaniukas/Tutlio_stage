@@ -1,10 +1,11 @@
-// POST /api/chat-notify-on-message — after a chat message is sent, notify other participants
-// by email if they enabled it and the throttle window (email_notify_delay_hours) has passed
-// since the last notification for this conversation.
+// POST /api/chat-notify-on-message — after a chat message is sent:
+// - Web push to other participants (PWA), jei turi push_subscriptions (nepriklauso nuo email_notify).
+// - El. laiškas, jei įjungtas ir praėjo email_notify_delay_hours nuo paskutinio laiško šiam pokalbiui.
 
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
+import { sendPushForUserId } from './_lib/sendPush.js';
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -177,9 +178,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const now = Date.now();
   const senderName = await resolveDisplayName(sb, auth.userId);
   const preview = previewFromMessage(msg);
+  const publicAppUrl = (process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt').replace(/\/$/, '');
+  const apiBase = internalApiBaseUrl(req);
 
   for (const p of participants) {
     if (p.user_id === auth.userId) continue;
+
+    const path = await messagesPathForUser(sb, p.user_id as string);
+    const messagesUrl = `${publicAppUrl}${path}`;
+
+    /** Web push nepriklauso nuo el. laiško throttling / email_notify_* (PWA vartotojai tikisi momentinių žinučių). */
+    try {
+      const pushed = await sendPushForUserId(p.user_id as string, 'chat_new_message', {
+        senderName,
+        preview,
+        messagesUrl,
+      });
+      if (pushed > 0) {
+        console.log('[chat-notify-on-message] push ok user', p.user_id, 'devices', pushed);
+      }
+    } catch (e: unknown) {
+      console.error('[chat-notify-on-message] push failed:', e);
+    }
+
     if (p.email_notify_enabled === false) continue;
 
     const delayH = Math.min(168, Math.max(1, Number(p.email_notify_delay_hours) || 12));
@@ -189,11 +210,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { email, name } = await resolveRecipientEmail(sb, p.user_id as string);
     if (!email) continue;
-
-    const path = await messagesPathForUser(sb, p.user_id as string);
-    const apiBase = internalApiBaseUrl(req);
-    const publicAppUrl = (process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt').replace(/\/$/, '');
-    const messagesUrl = `${publicAppUrl}${path}`;
 
     try {
       const emailRes = await fetch(`${apiBase}/api/send-email`, {

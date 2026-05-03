@@ -971,9 +971,9 @@ export default function CompanyTutors() {
     <>
       <div className="max-w-4xl mx-auto space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">{t('compTut.title')}</h1>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between min-w-0">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">{t('compTut.title')}</h1>
             <p className="text-sm text-gray-500 mt-0.5">
               {t('compTut.activeSlots', { active: String(activeSlots), free: String(freeSlots), limit: String(tutorLimit) })}
             </p>
@@ -982,11 +982,11 @@ export default function CompanyTutors() {
             onClick={openInviteModal}
             disabled={!canCreateInvite}
             className={cn(
-              'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors',
+              'flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors touch-manipulation w-full sm:w-auto shrink-0',
               canCreateInvite ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'
             )}
           >
-            <Plus className="w-4 h-4" /> {t('compTut.createInvite')}
+            <Plus className="w-4 h-4 shrink-0" /> <span className="truncate">{t('compTut.createInvite')}</span>
           </button>
         </div>
 

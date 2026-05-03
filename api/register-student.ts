@@ -5,6 +5,7 @@
 
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
+import { insertParentInviteAndSendEmail } from './_lib/parentInvite.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -35,6 +36,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       payerEmail,
       payerPhone,
       acceptedAt,
+      /** When true (e.g. school org), skip parent invite email — admin may send separately; student can resend from portal. */
+      suppressParentInvite,
     } = req.body || {};
 
     if (!email || !password || !studentId) {
@@ -124,7 +127,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       accepted_terms_at: acceptedAt || null,
     }).eq('id', studentId);
 
-    return res.status(200).json({ success: true, userId: authData.user.id });
+    let parentInviteSent = false;
+    const skipInvite = !!suppressParentInvite;
+    if (
+      payerType === 'parent' &&
+      payerEmail &&
+      String(payerEmail).trim().includes('@') &&
+      !skipInvite
+    ) {
+      const inviteRes = await insertParentInviteAndSendEmail({
+        supabase,
+        appUrl,
+        parentEmail: String(payerEmail).trim(),
+        studentId,
+        studentFullName: String(fullName || ''),
+        parentName: payerName ? String(payerName).trim() : null,
+        source: 'student_self',
+        invitedByUserId: authData.user.id,
+      });
+      parentInviteSent = !('error' in inviteRes);
+      if ('error' in inviteRes) {
+        console.warn('[register-student] parent invite:', inviteRes.error);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      userId: authData.user.id,
+      parentInviteSent,
+      parentInviteSkipped: skipInvite || payerType !== 'parent',
+    });
   } catch (err: any) {
     console.error('[register-student] Error:', err?.message || err);
     return res.status(500).json({ error: 'Internal server error' });

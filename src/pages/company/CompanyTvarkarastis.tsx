@@ -1853,38 +1853,42 @@ export default function CompanyTvarkarastis() {
 
   return (
     <>
-      <div className="space-y-4">
+      <div className="space-y-4 min-w-0 max-w-full">
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">{t('compSch.title')}</h1>
-            <p className="text-sm text-gray-600 mt-1">
-              {t('compSch.subtitle')}
-              {canFullControl && <span className="ml-2 px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded">{t('compSch.fullControl')}</span>}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between min-w-0">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">{t('compSch.title')}</h1>
+            <p className="text-sm text-gray-600 mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span>{t('compSch.subtitle')}</span>
+              {canFullControl && (
+                <span className="inline-flex px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded whitespace-nowrap">
+                  {t('compSch.fullControl')}
+                </span>
+              )}
             </p>
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setFindLessonOpen(true)}>
-              <Search className="w-4 h-4 mr-2" />
-              {t('compSch.findLesson')}
+          <div className="flex flex-wrap gap-2 w-full sm:w-auto sm:justify-end sm:flex-shrink-0">
+            <Button variant="outline" onClick={() => setFindLessonOpen(true)} className="flex-1 min-w-[min(100%,10rem)] sm:flex-initial touch-manipulation gap-2">
+              <Search className="w-4 h-4 shrink-0" />
+              <span className="truncate text-xs sm:text-sm">{t('compSch.findLesson')}</span>
             </Button>
             {canFullControl && (
-              <Button variant="outline" onClick={() => setIsCreateAvailabilityOpen(true)}>
-                <Plus className="w-4 h-4 mr-2" />
-                {t('compSch.freeTime')}
+              <Button variant="outline" onClick={() => setIsCreateAvailabilityOpen(true)} className="flex-1 min-w-[min(100%,10rem)] sm:flex-initial touch-manipulation gap-2">
+                <Plus className="w-4 h-4 shrink-0" />
+                <span className="truncate text-xs sm:text-sm">{t('compSch.freeTime')}</span>
               </Button>
             )}
             {canView && (
-              <Button onClick={() => { resetCreateForm(); setIsCreateSessionOpen(true); }}>
-                <Plus className="w-4 h-4 mr-2" />
-                {t('compSch.newLesson')}
+              <Button onClick={() => { resetCreateForm(); setIsCreateSessionOpen(true); }} className="flex-1 min-w-[min(100%,10rem)] sm:flex-initial touch-manipulation gap-2">
+                <Plus className="w-4 h-4 shrink-0" />
+                <span className="truncate text-xs sm:text-sm">{t('compSch.newLesson')}</span>
               </Button>
             )}
           </div>
         </div>
 
         {/* Filters */}
-        <div className="bg-white rounded-lg border p-4 space-y-4">
+        <div className="bg-white rounded-lg border p-3 sm:p-4 space-y-4 min-w-0 max-w-full overflow-x-hidden">
           <div className="flex items-center gap-2">
             <Filter className="w-4 h-4 text-gray-500" />
             <h3 className="font-semibold text-sm">{t('compSch.filters')}</h3>
@@ -2000,37 +2004,37 @@ export default function CompanyTvarkarastis() {
         </div>
 
         {/* Calendar */}
-        <div className="bg-white rounded-lg border p-4">
+        <div className="bg-white rounded-lg border p-3 sm:p-4 min-w-0 max-w-full overflow-x-hidden">
           {loading ? (
             <div className="flex items-center justify-center h-96">
               <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
             </div>
           ) : (
             <div className="space-y-3">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button type="button" variant="outline" size="sm" onClick={goCalendarToday}>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between min-w-0">
+                <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
+                  <Button type="button" variant="outline" size="sm" onClick={goCalendarToday} className="touch-manipulation shrink-0">
                     {t('compSch.today')}
                   </Button>
-                  <div className="flex items-center gap-1 border rounded-md">
+                  <div className="flex items-center gap-1 border rounded-md min-w-0 max-w-full flex-1 sm:flex-initial basis-[min(100%,18rem)]">
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon"
-                      className="h-8 w-8 shrink-0"
+                      className="h-8 w-8 shrink-0 touch-manipulation"
                       onClick={goCalendarPrev}
                       aria-label={t('compSch.previousPeriod')}
                     >
                       <ChevronLeft className="w-4 h-4" />
                     </Button>
-                    <span className="text-sm font-medium text-gray-900 px-2 min-w-0 flex-1 text-center tabular-nums truncate">
+                    <span className="text-xs sm:text-sm font-medium text-gray-900 px-1 sm:px-2 min-w-0 flex-1 text-center tabular-nums truncate">
                       {calendarToolbarLabel}
                     </span>
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon"
-                      className="h-8 w-8 shrink-0"
+                      className="h-8 w-8 shrink-0 touch-manipulation"
                       onClick={goCalendarNext}
                       aria-label={t('compSch.nextPeriod')}
                     >
@@ -2038,12 +2042,12 @@ export default function CompanyTvarkarastis() {
                     </Button>
                   </div>
                 </div>
-                <div className="inline-flex rounded-md border border-gray-200 p-0.5 bg-gray-50">
+                <div className="flex flex-wrap justify-center sm:justify-end gap-1 rounded-md border border-gray-200 p-0.5 bg-gray-50 w-full sm:w-auto shrink-0">
                   <Button
                     type="button"
                     variant={currentView === Views.DAY ? 'default' : 'ghost'}
                     size="sm"
-                    className="text-xs h-8 px-3"
+                    className="text-xs h-8 px-2 sm:px-3 touch-manipulation flex-1 min-w-0 sm:flex-initial"
                     onClick={() => setCurrentView(Views.DAY)}
                   >
                     {t('compSch.day')}
@@ -2052,7 +2056,7 @@ export default function CompanyTvarkarastis() {
                     type="button"
                     variant={currentView === Views.WEEK ? 'default' : 'ghost'}
                     size="sm"
-                    className="text-xs h-8 px-3"
+                    className="text-xs h-8 px-2 sm:px-3 touch-manipulation flex-1 min-w-0 sm:flex-initial"
                     onClick={() => setCurrentView(Views.WEEK)}
                   >
                     {t('compSch.week')}
@@ -2061,7 +2065,7 @@ export default function CompanyTvarkarastis() {
                     type="button"
                     variant={currentView === Views.MONTH ? 'default' : 'ghost'}
                     size="sm"
-                    className="text-xs h-8 px-3"
+                    className="text-xs h-8 px-2 sm:px-3 touch-manipulation flex-1 min-w-0 sm:flex-initial"
                     onClick={() => setCurrentView(Views.MONTH)}
                   >
                     {t('compSch.month')}

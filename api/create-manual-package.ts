@@ -5,6 +5,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
+import { soloTutorUsesManualStudentPayments } from './_lib/soloManualStudentPayments.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -92,7 +93,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const { data: tutor, error: tutorErr } = await supabase
             .from('profiles')
-            .select('id, full_name, organization_id')
+            .select(
+                'id, full_name, organization_id, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, manual_payment_bank_details',
+            )
             .eq('id', tutorId)
             .single();
 
@@ -102,6 +105,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         if (tutor.organization_id) {
             return json(res, 403, { error: 'Manual payments are only available for individual tutors' });
+        }
+
+        if (!soloTutorUsesManualStudentPayments(tutor)) {
+            return json(res, 403, {
+                error: 'Manual student payments are not enabled for this tutor.',
+                details: 'Enable subscription_only, manual exemption, or platform admin manual-student flag.',
+            });
         }
 
         const tutorName = tutor.full_name || 'Korepetitorius';
@@ -184,6 +194,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             totalLessons,
                             pricePerLesson: pricePerLesson.toFixed(2),
                             totalPrice: totalPrice.toFixed(2),
+                            bankDetails: (tutor as { manual_payment_bank_details?: string | null }).manual_payment_bank_details || '',
                         },
                     },
                     20000,

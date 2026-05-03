@@ -9,6 +9,7 @@ import { authHeaders } from '@/lib/apiHelpers';
 import { Checkbox } from '@/components/ui/checkbox';
 import { CircleHelp, Loader2, Package } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
+import { soloTutorUsesManualStudentPayments } from '@/lib/subscription';
 
 interface SendPackageModalProps {
   isOpen: boolean;
@@ -106,12 +107,12 @@ export default function SendPackageModal({
     {
       const { data: profile } = await supabase
         .from('profiles')
-        .select('organization_id, subscription_plan, manual_subscription_exempt')
+        .select('organization_id, subscription_plan, manual_subscription_exempt, enable_manual_student_payments')
         .eq('id', effectiveTutorId)
         .single();
       const individual = !profile?.organization_id;
       setIsIndividualTutor(individual);
-      const manualOnly = !!individual && (profile?.subscription_plan === 'subscription_only' || profile?.manual_subscription_exempt === true);
+      const manualOnly = soloTutorUsesManualStudentPayments(profile);
       setIsManualOnlyPlan(manualOnly);
       if (!individual) setIsManual(false);
       if (manualOnly) setIsManual(true);

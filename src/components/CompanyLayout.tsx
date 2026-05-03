@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import OrgSuspendedBanner from '@/components/OrgSuspendedBanner';
+import PwaInstallPrompt from '@/components/PwaInstallPrompt';
 import { useTranslation } from '@/lib/i18n';
 import { useTotalChatUnread } from '@/hooks/useChat';
 import { OrgEntityProvider, type OrgEntityType } from '@/contexts/OrgEntityContext';
@@ -207,9 +208,10 @@ export default function CompanyLayout() {
               </div>
             </header>
 
-            <main className="min-h-0 flex-1 overflow-y-auto p-4 lg:p-6">
+            <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6">
               <Outlet />
             </main>
+            <PwaInstallPrompt settingsPath={`${orgBasePath}/instructions`} />
           </div>
         </div>
       </div>

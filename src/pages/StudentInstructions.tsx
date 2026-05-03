@@ -3,6 +3,7 @@ import { Play, ChevronDown, ChevronUp } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import StudentLayout from '@/components/StudentLayout';
 import { useTranslation } from '@/lib/i18n';
+import PwaInstallGuide from '@/components/PwaInstallGuide';
 
 interface VideoSection {
   id: string;
@@ -83,6 +84,11 @@ export default function StudentInstructions() {
           </Card>
         ))}
       </div>
+
+      <section className="space-y-3">
+        <h2 className="text-xl font-bold text-gray-900">{t('pwa.instructionsSectionTitle')}</h2>
+        <PwaInstallGuide variant="instructions" />
+      </section>
 
       <Card className="bg-gray-50 border-gray-200">
         <CardHeader>

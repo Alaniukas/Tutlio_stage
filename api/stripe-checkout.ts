@@ -3,6 +3,7 @@
 // Body: { sessionId: string, payerEmail?: string }
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { soloTutorUsesManualStudentPayments } from './_lib/soloManualStudentPayments.js';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
@@ -63,7 +64,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 profiles!sessions_tutor_id_fkey(
                     stripe_account_id, stripe_onboarding_complete,
                     payment_timing, payment_deadline_hours, organization_id,
-                    full_name
+                    full_name,
+                    subscription_plan, manual_subscription_exempt, enable_manual_student_payments
                 )
             `)
             .eq('id', sessionId)
@@ -75,6 +77,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const tutor = session.profiles as any;
         const student = session.students as any;
+
+        if (!tutor?.organization_id && soloTutorUsesManualStudentPayments(tutor)) {
+            return res.status(400).json({
+                error:
+                    'This tutor uses manual student payments; Stripe checkout for lessons is not available.',
+            });
+        }
 
         // 2. Determine which Stripe account to charge (org or individual tutor).
         /** School-type orgs: payer pays lesson price exactly; fees absorbed via application_fee on Connect. */

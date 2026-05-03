@@ -22,6 +22,7 @@ import { formatLessonStripeChargeEur } from '@/lib/stripeLessonPricing';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
 import { useUser } from '@/contexts/UserContext';
 import { fetchStudentActiveLessonPackagesDeduped, fetchSubjectNamesByIds } from '@/lib/studentLessonPackagesLight';
+import { soloTutorUsesManualStudentPayments } from '@/lib/subscription';
 
 interface Session {
     id: string;
@@ -599,7 +600,7 @@ export default function StudentSessions() {
             st.tutor_id
                 ? supabase
                       .from('profiles')
-                      .select('subscription_plan, manual_subscription_exempt')
+                      .select('organization_id, subscription_plan, manual_subscription_exempt, enable_manual_student_payments')
                       .eq('id', st.tutor_id)
                       .maybeSingle()
                 : Promise.resolve({ data: null });
@@ -621,12 +622,15 @@ export default function StudentSessions() {
                 .limit(600),
         ]);
         const tutorSub = tutorManualRes.data as
-            | { subscription_plan?: string | null; manual_subscription_exempt?: boolean | null }
+            | {
+                  organization_id?: string | null;
+                  subscription_plan?: string | null;
+                  manual_subscription_exempt?: boolean | null;
+                  enable_manual_student_payments?: boolean | null;
+              }
             | null
             | undefined;
-        setManualPaymentsOnly(
-            tutorSub?.subscription_plan === 'subscription_only' || tutorSub?.manual_subscription_exempt === true,
-        );
+        setManualPaymentsOnly(soloTutorUsesManualStudentPayments(tutorSub));
 
         if (sessionsRes.error) {
             console.warn('[StudentSessions] sessions load:', sessionsRes.error.code, sessionsRes.error.message);
@@ -1807,8 +1811,9 @@ export default function StudentSessions() {
                                 </div>
                                 <div className="flex gap-3">
                                     <Button variant="outline" onClick={() => setModalStep('cancel-confirm')} className="flex-1 rounded-xl">{t('stuSess.goBack')}</Button>
-                                    <Button variant="destructive" onClick={() => void handleCancelSession()} disabled={saving || cancellationReason.trim().length < 5} className="flex-1 rounded-xl">
-                                        {saving ? t('stuSess.cancelling') : t('stuSess.confirmCancelBtn')}
+                                    <Button variant="destructive" onClick={() => void handleCancelSession()} disabled={saving || cancellationReason.trim().length < 5} className="flex-1 rounded-xl gap-2">
+                                        {saving ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : null}
+                                        {t('stuSess.confirmCancelBtn')}
                                     </Button>
                                 </div>
                             </div>

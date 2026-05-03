@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase';
 import { getCached, setCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
 import { useUser } from '@/contexts/UserContext';
+import { soloTutorUsesManualStudentPayments } from '@/lib/subscription';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { sendEmail } from '@/lib/email';
 import { format, isAfter, isBefore, addDays, subDays, parseISO, startOfDay } from 'date-fns';
@@ -29,6 +30,7 @@ import {
     UserX,
     RotateCcw,
     X,
+    Loader2,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -38,6 +40,7 @@ import { DateTimeSpinner } from '@/components/TimeSpinner';
 import { Edit2 } from 'lucide-react';
 import { cancelSessionAndFillWaitlist } from '@/lib/lesson-actions';
 import {
+    tutorCalendarFallbackProfileDeduped,
     tutorDashboardSessionsDeduped,
     tutorDashboardOrgPackDeduped,
     tutorPreloadProfileDeduped,
@@ -269,15 +272,30 @@ export default function DashboardPage() {
         try {
         const user = ctxUser;
 
-        const profileData = ctxProfile ?? (await tutorPreloadProfileDeduped(user.id)).data;
+        let profileData =
+            (ctxProfile as typeof ctxProfile & Record<string, unknown> | null) ??
+            (await tutorPreloadProfileDeduped(user.id)).data;
         if (!profileData) {
             return;
         }
-        setTutorName(profileData?.full_name || user.email?.split('@')[0] || 'Korepetitorius');
-        const isManualOnlyPlan =
-            !profileData?.organization_id &&
-            (profileData?.subscription_plan === 'subscription_only' || profileData?.manual_subscription_exempt === true);
-        setIsStripeConnected(!!profileData?.stripe_account_id || isManualOnlyPlan);
+        const { data: paySync } = await tutorCalendarFallbackProfileDeduped(user.id);
+        if (paySync) {
+            profileData = {
+                ...profileData,
+                stripe_account_id: paySync.stripe_account_id ?? (profileData as { stripe_account_id?: string | null }).stripe_account_id,
+                organization_id: paySync.organization_id ?? (profileData as { organization_id?: string | null }).organization_id,
+                subscription_plan: paySync.subscription_plan ?? (profileData as { subscription_plan?: string | null }).subscription_plan,
+                manual_subscription_exempt:
+                    paySync.manual_subscription_exempt ??
+                    (profileData as { manual_subscription_exempt?: boolean | null }).manual_subscription_exempt,
+                enable_manual_student_payments:
+                    paySync.enable_manual_student_payments ??
+                    (profileData as { enable_manual_student_payments?: boolean | null }).enable_manual_student_payments,
+            };
+        }
+        setTutorName((profileData as { full_name?: string | null }).full_name || user.email?.split('@')[0] || 'Korepetitorius');
+        const isManualOnlyPlan = soloTutorUsesManualStudentPayments(profileData as Parameters<typeof soloTutorUsesManualStudentPayments>[0]);
+        setIsStripeConnected(!!(profileData as { stripe_account_id?: string | null }).stripe_account_id || isManualOnlyPlan);
         setPaymentTiming((profileData?.payment_timing as 'before_lesson' | 'after_lesson') || 'before_lesson');
         setPaymentDeadlineHours(profileData?.payment_deadline_hours ?? null);
         setOrgTutorFallback(!!profileData?.organization_id);
@@ -1982,7 +2000,7 @@ export default function DashboardPage() {
                     {/* Cancellation reason textarea */}
                     {cancelConfirmId === selectedSession?.id && (
                         <div className="space-y-2 pt-2 border-t border-gray-100">
-                            <label className="text-sm font-semibold text-gray-700">📝 {t('dash.cancelReasonLabel')}</label>
+                            <label className="text-sm font-semibold text-gray-700">{t('dash.cancelReasonLabel')}</label>
                             <textarea
                                 value={cancellationReason}
                                 onChange={(e) => setCancellationReason(e.target.value)}
@@ -1998,8 +2016,9 @@ export default function DashboardPage() {
                                 <Button variant="outline" size="sm" onClick={() => { setCancelConfirmId(null); setCancellationReason(''); }} className="rounded-xl flex-1">
                                     {t('dash.cancelBtn')}
                                 </Button>
-                                <Button variant="destructive" size="sm" onClick={handleCancelSession} disabled={saving || cancellationReason.trim().length < 5} className="rounded-xl flex-1">
-                                    {saving ? t('dash.cancelling') : t('dash.confirmCancel')}
+                                <Button variant="destructive" size="sm" onClick={handleCancelSession} disabled={saving || cancellationReason.trim().length < 5} className="rounded-xl flex-1 gap-2">
+                                    {saving ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : null}
+                                    {t('dash.confirmCancel')}
                                 </Button>
                             </div>
                         </div>
@@ -2011,11 +2030,13 @@ export default function DashboardPage() {
                     )}
 
                     <DialogFooter className="flex flex-col gap-3 pt-4 mt-1 border-t border-gray-100 w-full sm:flex-col">
+                        {cancelConfirmId !== selectedSession?.id && (
+                        <>
                         {selectedSession?.status === 'active' && (
                             <div className="flex w-full flex-col gap-2">
                                 <div className="grid grid-cols-2 gap-2">
                                     <Button
-                                        variant={cancelConfirmId === selectedSession.id ? 'default' : 'outline'}
+                                        variant="outline"
                                         onClick={() => {
                                             if (cancelConfirmId !== selectedSession.id) {
                                                 handleCancelSession();
@@ -2023,15 +2044,10 @@ export default function DashboardPage() {
                                         }}
                                         disabled={saving}
                                         size="sm"
-                                        className={cn(
-                                            'rounded-xl w-full',
-                                            cancelConfirmId === selectedSession.id
-                                                ? 'bg-orange-500 hover:bg-orange-600 text-white border-transparent'
-                                                : 'border-red-200 text-red-700 hover:bg-red-50',
-                                        )}
+                                        className="rounded-xl w-full border-red-200 text-red-700 hover:bg-red-50"
                                     >
                                         <XCircle className="w-4 h-4 mr-1" />
-                                        {cancelConfirmId === selectedSession.id ? t('dash.cancellingSession') : t('dash.cancelBtn')}
+                                        {t('cal.cancelLessonTitle')}
                                     </Button>
                                     <Button
                                         variant="outline"
@@ -2116,6 +2132,8 @@ export default function DashboardPage() {
                                     </Button>
                                 )}
                             </div>
+                        )}
+                        </>
                         )}
                     </DialogFooter>
                 </DialogContent>

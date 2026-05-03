@@ -1,27 +1,26 @@
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useEffect, useMemo } from 'react';
+import type { ReactNode } from 'react';
 import {
   LayoutDashboard,
   CalendarDays,
   MessageSquare,
   FileText,
-  LogOut,
   BookOpen,
+  Settings,
 } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
 import { useTranslation } from '@/lib/i18n';
 import { useTotalChatUnread } from '@/hooks/useChat';
 import { preloadParentData } from '@/lib/preload';
 import PwaInstallPrompt from '@/components/PwaInstallPrompt';
 
 interface ParentLayoutProps {
-  children: React.ReactNode;
+  children: ReactNode;
 }
 
 export default function ParentLayout({ children }: ParentLayoutProps) {
   const { t } = useTranslation();
   const location = useLocation();
-  const navigate = useNavigate();
   const chatUnreadTotal = useTotalChatUnread();
 
   useEffect(() => {
@@ -39,29 +38,14 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
       },
       { href: '/parent/messages', label: t('parent.messages'), icon: MessageSquare, badge: 'chat' as const },
       { href: '/parent/invoices', label: t('parent.invoices'), icon: FileText },
+      { href: '/parent/settings', label: t('parent.settingsNav'), icon: Settings },
     ],
     [t],
   );
 
-  const handleLogout = async () => {
-    try {
-      const prefix = 'tutlio_parent_profile_id_for_';
-      const keys: string[] = [];
-      for (let i = 0; i < localStorage.length; i += 1) {
-        const k = localStorage.key(i);
-        if (k && k.startsWith(prefix)) keys.push(k);
-      }
-      keys.forEach((k) => localStorage.removeItem(k));
-    } catch {
-      /* ignore */
-    }
-    await supabase.auth.signOut();
-    navigate('/login');
-  };
-
   return (
     <div className="min-h-screen bg-[#fffefc] flex flex-col relative overflow-x-hidden">
-      <PwaInstallPrompt settingsPath="/parent" />
+      <PwaInstallPrompt settingsPath="/parent/settings" />
       <div className="absolute top-0 right-0 w-96 h-96 bg-orange-100/40 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none z-0" />
       <div className="absolute bottom-32 left-0 w-96 h-96 bg-rose-100/30 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 pointer-events-none z-0" />
 
@@ -75,10 +59,10 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
         </span>
       </header>
 
-      <main className="flex-1 pb-28 relative z-10 flex flex-col min-h-0">{children}</main>
+      <main className="flex-1 pb-24 relative z-10 flex flex-col min-h-0">{children}</main>
 
       <nav
-        className="fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur-sm border-t border-gray-100 z-50 shadow-[0_-4px_20px_-8px_rgba(0,0,0,0.08)]"
+        className="fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur-sm border-t border-gray-100 z-50 shadow-[0_-4px_20px_-8px_rgba(0,0,0,0.08)] max-w-[100vw] overflow-x-hidden"
         style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
       >
         <div className="grid grid-cols-6 gap-0 px-0.5 sm:px-1 pt-2 pb-1">
@@ -116,19 +100,6 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
               </Link>
             );
           })}
-
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="relative flex flex-col items-center gap-1 min-w-0 py-1 rounded-2xl transition-all text-gray-400 hover:text-gray-700"
-          >
-            <div className="relative p-1.5 rounded-xl transition-all shrink-0">
-              <LogOut className="w-5 h-5 mx-auto" />
-            </div>
-            <span className="block w-full text-[11px] sm:text-xs font-semibold leading-tight text-center px-1">
-              {t('parent.logout')}
-            </span>
-          </button>
         </div>
       </nav>
     </div>

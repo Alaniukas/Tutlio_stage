@@ -64,7 +64,10 @@ export async function tryIssueSalesInvoiceForStripePackage(
   const entityType = String(invoiceProfile.entity_type || '');
   const isCompany = ['mb', 'uab', 'ii'].includes(entityType);
   const businessName = (invoiceProfile.business_name as string) || undefined;
-  const sellerName = isCompany ? businessName || tutor.full_name : tutor.full_name;
+  const fullName = typeof tutor.full_name === 'string' ? tutor.full_name.trim() : '';
+  const sellerName = isCompany
+    ? (businessName || '').trim() || fullName || 'Įmonė'
+    : fullName || (businessName || '').trim() || 'Korepetitorius';
 
   const sellerSnapshot = {
     name: sellerName || 'Korepetitorius',

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { AlertCircle, CheckCircle2, Building2, Lock, Plus, Eye, EyeOff, ArrowLeft, List, Pencil, FileText } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Building2, Lock, Plus, Eye, EyeOff, ArrowLeft, List, Pencil, FileText, Users } from 'lucide-react';
 import { FEATURE_REGISTRY, FEATURE_CATEGORIES, getFeaturesByCategory } from '@/lib/featureRegistry';
 import { useTranslation } from '@/lib/i18n';
 import AdminBlogPanel from '@/components/admin/AdminBlogPanel';
@@ -70,7 +70,17 @@ interface AuditRow {
   details: Record<string, unknown>;
 }
 
-type PanelView = 'list' | 'create' | 'createSchool' | 'detail' | 'blog';
+type PanelView = 'list' | 'create' | 'createSchool' | 'detail' | 'blog' | 'soloTutors';
+
+interface SoloTutorAdminRow {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  subscription_plan: string | null;
+  subscription_status: string | null;
+  enable_manual_student_payments: boolean;
+  effective_manual_student_payments: boolean;
+}
 
 export default function AdminPanel() {
   const { t, locale } = useTranslation();
@@ -116,6 +126,9 @@ export default function AdminPanel() {
   const [unarchiveLoadingTutorId, setUnarchiveLoadingTutorId] = useState<string | null>(null);
   const [detailFeaturesBase, setDetailFeaturesBase] = useState<Record<string, unknown>>({});
   const [detailStats, setDetailStats] = useState<OrgAdminStats | null>(null);
+  const [soloTutors, setSoloTutors] = useState<SoloTutorAdminRow[]>([]);
+  const [soloListLoading, setSoloListLoading] = useState(false);
+  const [soloToggleLoadingId, setSoloToggleLoadingId] = useState<string | null>(null);
 
   const fetchOrgList = useCallback(async () => {
     setListLoading(true);
@@ -132,9 +145,55 @@ export default function AdminPanel() {
     setListLoading(false);
   }, [platformAdminSecret]);
 
+  const fetchSoloTutors = useCallback(async () => {
+    setSoloListLoading(true);
+    try {
+      const res = await fetch('/api/admin-individual-tutors', {
+        headers: { 'x-admin-secret': platformAdminSecret },
+      });
+      const data = await res.json();
+      if (res.ok && Array.isArray(data.tutors)) setSoloTutors(data.tutors as SoloTutorAdminRow[]);
+      else setResult({ success: false, message: data.error || tRef.current('admin.failedToLoad') });
+    } catch {
+      setResult({ success: false, message: tRef.current('admin.serverError') });
+    }
+    setSoloListLoading(false);
+  }, [platformAdminSecret]);
+
   useEffect(() => {
     if (step === 'panel' && panelView === 'list') void fetchOrgList();
   }, [step, panelView, fetchOrgList]);
+
+  useEffect(() => {
+    if (step === 'panel' && panelView === 'soloTutors') void fetchSoloTutors();
+  }, [step, panelView, fetchSoloTutors]);
+
+  const toggleSoloManualPayments = async (row: SoloTutorAdminRow) => {
+    const next = !row.enable_manual_student_payments;
+    setSoloToggleLoadingId(row.id);
+    setResult(null);
+    try {
+      const res = await fetch('/api/admin-individual-tutors', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-secret': platformAdminSecret,
+        },
+        body: JSON.stringify({ tutor_id: row.id, enable_manual_student_payments: next }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setResult({ success: false, message: data.error || tRef.current('admin.failedToSave') });
+      } else {
+        setResult({ success: true, message: tRef.current('admin.saved') });
+        await fetchSoloTutors();
+      }
+    } catch {
+      setResult({ success: false, message: tRef.current('admin.serverError') });
+    } finally {
+      setSoloToggleLoadingId(null);
+    }
+  };
 
   const openDetail = async (id: string) => {
     setDetailId(id);
@@ -460,6 +519,14 @@ export default function AdminPanel() {
           </button>
           <button
             type="button"
+            onClick={() => { setPanelView('soloTutors'); setDetailId(null); }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${panelView === 'soloTutors' ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+          >
+            <Users className="w-4 h-4" />
+            {t('admin.soloTutors')}
+          </button>
+          <button
+            type="button"
             onClick={() => { setPanelView('create'); setDetailId(null); }}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${panelView === 'create' ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
           >
@@ -490,6 +557,65 @@ export default function AdminPanel() {
               ? <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
               : <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />}
             <span>{result.message}</span>
+          </div>
+        )}
+
+        {panelView === 'soloTutors' && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-400">{t('admin.soloTutorsSubtitle')}</p>
+            <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+              {soloListLoading ? (
+                <div className="p-8 text-center text-slate-400 text-sm">{t('common.loadingDots')}</div>
+              ) : soloTutors.length === 0 ? (
+                <div className="p-8 text-center text-slate-400 text-sm">—</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-white/10 text-left text-slate-400">
+                        <th className="px-4 py-3 font-medium">{t('admin.thName')}</th>
+                        <th className="px-4 py-3 font-medium">Email</th>
+                        <th className="px-4 py-3 font-medium whitespace-nowrap">{t('admin.platformPlan')}</th>
+                        <th className="px-4 py-3 font-medium whitespace-nowrap">{t('admin.platformSubStatus')}</th>
+                        <th className="px-4 py-3 font-medium whitespace-nowrap">{t('admin.colManualEffective')}</th>
+                        <th className="px-4 py-3 font-medium whitespace-nowrap">{t('admin.colManualPayments')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {soloTutors.map((row) => (
+                        <tr key={row.id} className="border-b border-white/5 hover:bg-white/5">
+                          <td className="px-4 py-3 font-medium text-white">{row.full_name || '—'}</td>
+                          <td className="px-4 py-3 text-slate-300 truncate max-w-[200px]">{row.email || '—'}</td>
+                          <td className="px-4 py-3 text-slate-300 font-mono text-xs">{row.subscription_plan || '—'}</td>
+                          <td className="px-4 py-3 text-slate-300 text-xs">{row.subscription_status || '—'}</td>
+                          <td className="px-4 py-3">
+                            <span className={row.effective_manual_student_payments ? 'text-emerald-400' : 'text-slate-500'}>
+                              {row.effective_manual_student_payments ? 'ON' : '—'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <button
+                              type="button"
+                              disabled={soloToggleLoadingId === row.id}
+                              onClick={() => void toggleSoloManualPayments(row)}
+                              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0 ${
+                                row.enable_manual_student_payments ? 'bg-indigo-600' : 'bg-white/20'
+                              } ${soloToggleLoadingId === row.id ? 'opacity-60' : ''}`}
+                            >
+                              <span
+                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                  row.enable_manual_student_payments ? 'translate-x-6' : 'translate-x-1'
+                                }`}
+                              />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

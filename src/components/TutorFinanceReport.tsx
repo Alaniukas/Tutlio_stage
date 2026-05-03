@@ -36,9 +36,11 @@ interface SessionRow {
 
 interface Props {
   userId: string;
+  /** Extra line under subtitle (e.g. how manual vs Stripe maps to lesson paid flags). */
+  supplementalNote?: string;
 }
 
-export default function TutorFinanceReport({ userId }: Props) {
+export default function TutorFinanceReport({ userId, supplementalNote }: Props) {
   const { t, dateFnsLocale } = useTranslation();
 
   const [periodMode, setPeriodMode] = useState<'month' | 'range'>('month');
@@ -158,6 +160,11 @@ export default function TutorFinanceReport({ userId }: Props) {
         <div>
           <h2 className="text-lg font-bold text-gray-900">{t('financeReport.title')}</h2>
           <p className="text-xs text-gray-500">{t('financeReport.subtitle')}</p>
+          {supplementalNote ? (
+            <p className="text-xs text-sky-900/90 mt-2 leading-relaxed bg-sky-50 border border-sky-100 rounded-lg px-3 py-2">
+              {supplementalNote}
+            </p>
+          ) : null}
         </div>
       </div>
 

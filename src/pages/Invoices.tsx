@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
 import { authHeaders } from '@/lib/apiHelpers';
 import { useTranslation } from '@/lib/i18n';
-import { useUser } from '@/contexts/UserContext';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import InvoiceSettingsForm from '@/components/InvoiceSettingsForm';
 import CreateInvoiceModal from '@/components/CreateInvoiceModal';
@@ -43,7 +42,6 @@ interface Invoice {
 
 export default function InvoicesPage() {
   const { t } = useTranslation();
-  const { user: ctxUser } = useUser();
   const orgPolicy = useOrgTutorPolicy();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -57,17 +55,27 @@ export default function InvoicesPage() {
   const [invoiceRangeEnd, setInvoiceRangeEnd] = useState('');
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [downloadingAllList, setDownloadingAllList] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
 
   const fetchInvoices = useCallback(async () => {
-    if (!ctxUser) return;
-    const user = ctxUser;
+    /** Tas pats `sub` kaip PostgREST `auth.uid()` — ne konteksto profilis. */
+    const { data: authData, error: authErr } = await supabase.auth.getUser();
+    const uid = authData?.user?.id;
+    if (authErr || !uid) {
+      setListError(authErr?.message || null);
+      setInvoices([]);
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
+    setListError(null);
 
+    /** Be įterpto `billing_batches(paid)`: jei RLS blokuoja susijusią „batch“ eilutę, visas sąskaitų SELECT gali sugriūti → tuščias sąrašas. */
     let query = supabase
       .from('invoices')
-      .select('*, billing_batches(paid)')
-      .eq('issued_by_user_id', user.id)
+      .select('*')
+      .eq('issued_by_user_id', uid)
       .order('created_at', { ascending: false });
 
     if (statusFilter !== 'all') {
@@ -97,11 +105,36 @@ export default function InvoicesPage() {
     const { data, error } = await query;
     if (error) {
       console.error('[Invoices] fetch error:', error);
-    } else {
-      setInvoices((data || []) as Invoice[]);
+      setListError(error.message || 'fetch_failed');
+      setInvoices([]);
+      setLoading(false);
+      return;
     }
+
+    const rows = (data || []) as Invoice[];
+    const batchIds = [...new Set(rows.map((inv) => inv.billing_batch_id).filter(Boolean))] as string[];
+    let batchPaidMap: Record<string, boolean> = {};
+    if (batchIds.length > 0) {
+      const { data: batches, error: batchErr } = await supabase
+        .from('billing_batches')
+        .select('id, paid')
+        .in('id', batchIds);
+      if (!batchErr) {
+        batchPaidMap = Object.fromEntries((batches ?? []).map((b) => [String(b.id), !!b.paid]));
+      }
+    }
+
+    const enriched = rows.map((inv) =>
+      ({
+        ...inv,
+        billing_batches:
+          inv.billing_batch_id != null ? { paid: !!batchPaidMap[String(inv.billing_batch_id)] } : null,
+      })
+    );
+
+    setInvoices(enriched as Invoice[]);
     setLoading(false);
-  }, [ctxUser, statusFilter, invoicePeriodMode, invoiceMonth, invoiceRangeStart, invoiceRangeEnd]);
+  }, [statusFilter, invoicePeriodMode, invoiceMonth, invoiceRangeStart, invoiceRangeEnd]);
 
   const hasActivePeriodFilter = useMemo(() => {
     if (invoicePeriodMode === 'month') return Boolean(invoiceMonth && /^\d{4}-\d{2}$/.test(invoiceMonth));
@@ -193,6 +226,49 @@ export default function InvoicesPage() {
   };
 
   const handleStatusChange = async (invoiceId: string, newStatus: 'paid' | 'cancelled') => {
+    const target = invoices.find(inv => inv.id === invoiceId);
+
+    // Monthly batch: must update billing_batches + sessions + invoice (same path as Stripe).
+    if (newStatus === 'paid' && target?.billing_batch_id) {
+      try {
+        const res = await fetch('/api/confirm-monthly-invoice-payment', {
+          method: 'POST',
+          headers: await authHeaders(),
+          body: JSON.stringify({
+            billingBatchId: target.billing_batch_id,
+            manualConfirm: true,
+          }),
+        });
+        let body: Record<string, unknown> = {};
+        try {
+          body = (await res.json()) as Record<string, unknown>;
+        } catch {
+          /* ignore */
+        }
+        if (!res.ok) {
+          console.error('[Invoices] confirm-monthly manual:', res.status, body);
+          window.alert(t('invoices.batchConfirmFailed'));
+          return;
+        }
+        setInvoices(prev =>
+          prev.map(inv =>
+            inv.id === invoiceId
+              ? {
+                  ...inv,
+                  status: 'paid',
+                  billing_batches: inv.billing_batches ? { paid: true } : { paid: true },
+                }
+              : inv,
+          ),
+        );
+        return;
+      } catch (e) {
+        console.error('[Invoices] confirm-monthly manual:', e);
+        window.alert(t('invoices.batchConfirmFailed'));
+        return;
+      }
+    }
+
     const { error } = await supabase
       .from('invoices')
       .update({ status: newStatus })
@@ -253,6 +329,12 @@ export default function InvoicesPage() {
             </Button>
           </div>
         </div>
+
+        {listError ? (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            {t('invoices.listLoadError', { message: listError })}
+          </div>
+        ) : null}
 
         {showSettings && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">

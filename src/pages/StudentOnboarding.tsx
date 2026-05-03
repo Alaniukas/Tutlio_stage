@@ -264,6 +264,7 @@ export default function StudentOnboarding() {
                 payerEmail: effectivePayerType === 'parent' ? payerEmail.trim() : null,
                 payerPhone: effectivePayerType === 'parent' ? payerPhone.trim() : null,
                 acceptedAt,
+                suppressParentInvite: isSchoolInvite,
             }),
         });
 
@@ -274,17 +275,15 @@ export default function StudentOnboarding() {
             return;
         }
 
-        // Finish onboarding immediately; parent invite can be created in background.
+        const regJson = (await apiRes.json().catch(() => ({}))) as {
+            parentInviteSent?: boolean;
+            parentInviteSkipped?: boolean;
+        };
+
         setStep('done');
         setSubmitting(false);
 
-        // School org: parent invite is sent when admin adds the student — avoid duplicate emails here.
-        if (isSchoolInvite) {
-            setParentInviteOutcome('skipped');
-            return;
-        }
-
-        if (effectivePayerType !== 'parent') {
+        if (isSchoolInvite || effectivePayerType !== 'parent') {
             setParentInviteOutcome('skipped');
             return;
         }
@@ -294,25 +293,7 @@ export default function StudentOnboarding() {
             return;
         }
 
-        setParentInviteOutcome('sending');
-        (async () => {
-            try {
-                const inv = await fetch('/api/create-parent-invite', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        parentEmail: payerEmail.trim(),
-                        studentId: studentData.id,
-                        parentName: payerName.trim() || undefined,
-                        parentPhone: payerPhone.trim() || undefined,
-                        source: 'student_self',
-                    }),
-                });
-                setParentInviteOutcome(inv.ok ? 'sent' : 'failed');
-            } catch {
-                setParentInviteOutcome('failed');
-            }
-        })();
+        setParentInviteOutcome(regJson.parentInviteSent ? 'sent' : 'failed');
     };
 
     if (loading) {

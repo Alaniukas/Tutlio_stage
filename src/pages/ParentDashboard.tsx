@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { getCached, setCache } from '@/lib/dataCache';
-import { parentProfileDeduped, parentStudentLinksDeduped } from '@/lib/preload';
+import { parentFullNameForUserDeduped, parentStudentLinksDeduped } from '@/lib/preload';
 import { useUser } from '@/contexts/UserContext';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from '@/lib/i18n';
@@ -18,7 +18,6 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import PwaInstallGuide from '@/components/PwaInstallGuide';
 import {
   ParentLessonDetailModal,
   type ParentTutorContactPolicy,
@@ -86,16 +85,13 @@ export default function ParentDashboard() {
     (async () => {
       if (!getCached('parent_dashboard')) setLoading(true);
 
-      const [parentProfileRes, linksRes] = await Promise.all([
-        parentProfileDeduped(user.id),
+      const [resolvedParentName, linksRes] = await Promise.all([
+        parentFullNameForUserDeduped(user.id),
         parentStudentLinksDeduped(user.id),
       ]);
 
-      const parentRow = Array.isArray(parentProfileRes.data)
-        ? parentProfileRes.data[0]
-        : parentProfileRes.data;
-      if (!cancelled && (parentRow as any)?.full_name) {
-        setParentName((parentRow as any).full_name);
+      if (!cancelled && resolvedParentName) {
+        setParentName(resolvedParentName);
       }
 
       const linksErr = linksRes.error;
@@ -104,6 +100,10 @@ export default function ParentDashboard() {
         if (!cancelled) {
           setChildren([]);
           setLoading(false);
+          setCache('parent_dashboard', {
+            parentName: resolvedParentName || null,
+            children: [],
+          });
         }
         return;
       }
@@ -117,6 +117,10 @@ export default function ParentDashboard() {
         if (!cancelled) {
           setChildren([]);
           setLoading(false);
+          setCache('parent_dashboard', {
+            parentName: resolvedParentName || null,
+            children: [],
+          });
         }
         return;
       }
@@ -245,11 +249,11 @@ export default function ParentDashboard() {
       });
 
       if (!cancelled) {
-        setParentName((prev) => (parentRow as any)?.full_name || prev);
+        setParentName((prev) => resolvedParentName || prev);
         setChildren(kids);
         setLoading(false);
         setCache('parent_dashboard', {
-          parentName: (parentRow as any)?.full_name || null,
+          parentName: resolvedParentName || null,
           children: kids,
         });
       }
@@ -262,6 +266,14 @@ export default function ParentDashboard() {
 
   const greetingName = useMemo(() => {
     if (parentName && parentName.trim()) return parentName.split(' ')[0];
+    const meta = user?.user_metadata as Record<string, unknown> | undefined;
+    const metaFull =
+      typeof meta?.full_name === 'string'
+        ? meta.full_name.trim()
+        : typeof meta?.name === 'string'
+          ? meta.name.trim()
+          : '';
+    if (metaFull) return metaFull.split(/\s+/)[0];
     const raw = (user?.email?.split('@')[0] || '').replace(/[._-]+/g, ' ').trim();
     if (!raw) return t('parent.portalGreetingFallback');
     const loc = locale === 'lt' ? 'lt-LT' : 'en-US';
@@ -274,7 +286,7 @@ export default function ParentDashboard() {
       )
       .filter(Boolean);
     return parts[0] ?? t('parent.portalGreetingFallback');
-  }, [parentName, user?.email, locale, t]);
+  }, [parentName, user?.email, user?.user_metadata, locale, t]);
 
   const getGreeting = () => {
     const h = now.getHours();
@@ -431,7 +443,6 @@ export default function ParentDashboard() {
               />
             ))}
 
-            <PwaInstallGuide />
           </>
         )}
       </div>

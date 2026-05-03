@@ -22,19 +22,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
 
   try {
-    const { checkoutSessionId, billingBatchId: billingBatchIdFromBody } = req.body as {
+    const { checkoutSessionId, billingBatchId: billingBatchIdFromBody, manualConfirm } = req.body as {
       checkoutSessionId?: string;
       billingBatchId?: string;
+      /** Tutor marks monthly batch paid off-platform (Sąskaitos); requires batch.tutor_id === auth user */
+      manualConfirm?: boolean;
     };
-
-    if (!checkoutSessionId && !billingBatchIdFromBody) {
-      return res.status(400).json({ error: 'Missing checkoutSessionId or billingBatchId' });
-    }
 
     let billingBatchId: string | undefined = billingBatchIdFromBody;
 
+    if (manualConfirm === true) {
+      if (!billingBatchIdFromBody) {
+        return res.status(400).json({ error: 'Missing billingBatchId' });
+      }
+      const { data: ownBatch, error: ownErr } = await supabase
+        .from('billing_batches')
+        .select('id, tutor_id, paid')
+        .eq('id', billingBatchIdFromBody)
+        .maybeSingle();
+      if (ownErr || !ownBatch) {
+        return res.status(404).json({ error: 'Billing batch not found' });
+      }
+      if (ownBatch.tutor_id !== auth.userId) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+      billingBatchId = billingBatchIdFromBody;
+      if (ownBatch.paid === true) {
+        try {
+          await supabase
+            .from('invoices')
+            .update({ status: 'paid' })
+            .eq('billing_batch_id', billingBatchId)
+            .eq('status', 'issued');
+        } catch {
+          /* ignore */
+        }
+        return res.status(200).json({ success: true, alreadyPaid: true });
+      }
+    } else if (!checkoutSessionId && !billingBatchIdFromBody) {
+      return res.status(400).json({ error: 'Missing checkoutSessionId or billingBatchId' });
+    }
+
     // 1) Optional: validate with Stripe checkout session (extra safety)
-    if (checkoutSessionId) {
+    if (!manualConfirm && checkoutSessionId) {
       try {
         const checkoutSession = await stripe.checkout.sessions.retrieve(checkoutSessionId);
 

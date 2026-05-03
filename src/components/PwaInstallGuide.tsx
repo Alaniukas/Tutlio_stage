@@ -1,7 +1,14 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Smartphone, Share, PlusSquare, MoreVertical, Download } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
+import { useUser } from '@/contexts/UserContext';
+import {
+  isPwaInstallPermanentlyHidden,
+  setPwaInstallPermanentlyHidden,
+  isGuideSettingsSessionHidden,
+  setGuideSettingsSessionHidden,
+} from '@/lib/pwaInstallPrefs';
 
 function getDeviceType(): 'ios' | 'android' | 'desktop' {
   if (typeof navigator === 'undefined') return 'desktop';
@@ -11,27 +18,88 @@ function getDeviceType(): 'ios' | 'android' | 'desktop' {
   return 'desktop';
 }
 
-export default function PwaInstallGuide() {
+export type PwaInstallGuideVariant = 'settings' | 'instructions';
+
+interface PwaInstallGuideProps {
+  /** `instructions` – žinyno puslapis: visada rodoma (ignoruoja slapinimą iš nustatymų). */
+  variant?: PwaInstallGuideVariant;
+}
+
+export default function PwaInstallGuide({ variant = 'settings' }: PwaInstallGuideProps) {
   const { t } = useTranslation();
+  const { user } = useUser();
   const sectionRef = useRef<HTMLDivElement>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const device = getDeviceType();
+  const embedded = variant === 'instructions';
+
+  const [allowViaDeepLink, setAllowViaDeepLink] = useState(() =>
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('section') === 'install-app',
+  );
+
+  const [localHideForever, setLocalHideForever] = useState(false);
+  const [localHideSessionGuide, setLocalHideSessionGuide] = useState(false);
 
   useEffect(() => {
-    if (searchParams.get('section') === 'install-app') {
-      setTimeout(() => {
-        sectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 300);
+    if (!user?.id || embedded) return;
+    setLocalHideSessionGuide(isGuideSettingsSessionHidden(user.id));
+  }, [user?.id, embedded]);
+
+  useEffect(() => {
+    if (searchParams.get('section') !== 'install-app') return;
+    setAllowViaDeepLink(true);
+
+    const scroll = () =>
+      sectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    scroll();
+    const t1 = window.setTimeout(scroll, 90);
+    const t2 = window.setTimeout(scroll, 420);
+
+    const stripTmr = window.setTimeout(() => {
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
         next.delete('section');
         return next;
       }, { replace: true });
-    }
+    }, 620);
+
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      window.clearTimeout(stripTmr);
+    };
   }, [searchParams, setSearchParams]);
 
+  const permBlocked =
+    !embedded &&
+    !!(user?.id && (localHideForever || isPwaInstallPermanentlyHidden(user.id))) &&
+    !allowViaDeepLink;
+  const sessBlocked =
+    !embedded &&
+    !!(user?.id && localHideSessionGuide) &&
+    !allowViaDeepLink;
+
+  if (permBlocked || sessBlocked) return null;
+
+  const handleHideGuideThisSession = () => {
+    if (!user?.id) return;
+    setGuideSettingsSessionHidden(user.id);
+    setLocalHideSessionGuide(true);
+  };
+
+  const handleHideGuideForever = () => {
+    if (!user?.id) return;
+    setPwaInstallPermanentlyHidden(user.id);
+    setLocalHideForever(true);
+  };
+
   return (
-    <div ref={sectionRef} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-5">
+    <div
+      ref={sectionRef}
+      className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-5 scroll-mt-28"
+    >
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center">
           <Smartphone className="w-5 h-5 text-indigo-600" />
@@ -97,6 +165,25 @@ export default function PwaInstallGuide() {
       <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3">
         <p className="text-xs text-indigo-700">{t('pwa.guideTip')}</p>
       </div>
+
+      {!embedded && user?.id && (
+        <div className="flex flex-col sm:flex-row flex-wrap gap-2 pt-2 border-t border-gray-100">
+          <button
+            type="button"
+            onClick={handleHideGuideThisSession}
+            className="text-sm font-medium text-gray-600 hover:text-gray-900 px-3 py-2 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
+          >
+            {t('pwa.guideHideThisVisit')}
+          </button>
+          <button
+            type="button"
+            onClick={handleHideGuideForever}
+            className="text-sm font-medium text-indigo-600 hover:text-indigo-800 px-3 py-2 rounded-xl border border-indigo-100 bg-indigo-50/60 hover:bg-indigo-50 transition-colors"
+          >
+            {t('pwa.guideDontShowInSettings')}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

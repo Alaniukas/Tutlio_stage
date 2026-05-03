@@ -1,23 +1,34 @@
 import { Link } from 'react-router-dom';
+import { Building2, CalendarDays, ListOrdered, Users } from 'lucide-react';
 import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
 import Reveal from './Reveal';
 
 export type LandingVariant = 'tutor' | 'schools';
 
-const CUSTOMER_LOGOS = [
+/** `invert:false` — spalvotas logotipas violetiniame marquee (nebenaudojamas brightness/invert maršalas). */
+const CUSTOMER_LOGOS: { src: string; alt: string; invert?: boolean }[] = [
   { src: '/wyzant-logo-reversed2x.png', alt: 'Wyzant' },
   { src: '/672a303d02b19dab2f248fd9_iTutor-logo.svg', alt: 'iTutor' },
   { src: '/hey_tutor_logo_2026.webp', alt: 'HeyTutor' },
   { src: '/602428438327a78cb4e7fcb3_learnerlogo.svg', alt: 'Learner' },
   { src: '/67cab891e121bff1e23d95eb_66ad096240b243e78bd71431_Fullmind-logo-plum-on-clear (1) 1.png', alt: 'Fullmind' },
+  { src: '/moku-moku-logo.png', alt: 'Moku Moku', invert: false },
   { src: '/logo.png', alt: 'Tutlio' },
   { src: '/tut_logo.svg', alt: 'Tut' },
 ];
+
+const HERO_SPOT_ICONS_TUTOR = [CalendarDays, ListOrdered] as const;
+const HERO_SPOT_ICONS_SCHOOLS = [Building2, Users] as const;
+
+function scrollToFeaturesSection() {
+  document.getElementById('tutlio-privalumai')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 
 export default function HeroSection({ variant = 'tutor' }: { variant?: LandingVariant }) {
   const { t, locale } = useTranslation();
   const p = variant === 'schools' ? 'schoolsLanding' : 'landing';
   const ctaLink = variant === 'schools' ? buildLocalizedPath('/kontaktai', locale) : '/register';
+  const spotIcons = variant === 'schools' ? HERO_SPOT_ICONS_SCHOOLS : HERO_SPOT_ICONS_TUTOR;
 
   return (
     <section className="relative overflow-hidden bg-gradient-to-b from-[#f5f5f3] via-[#f0efed] to-[#eae9e6]">
@@ -60,23 +71,42 @@ export default function HeroSection({ variant = 'tutor' }: { variant?: LandingVa
         </Reveal>
 
         <Reveal delay={300}>
-          <Link
-            to={ctaLink}
-            className="inline-flex items-center justify-center h-11 sm:h-12 px-7 sm:px-8 text-[13px] sm:text-sm rounded-full bg-gray-900 text-white font-semibold hover:bg-gray-800 transition-all duration-200 hover:scale-[1.03] hover:shadow-lg active:scale-[0.98]"
-          >
-            {t(`${p}.heroCta`)}
-          </Link>
+          <div className="flex justify-center">
+            <Link
+              to={ctaLink}
+              className="inline-flex items-center justify-center h-11 sm:h-12 px-7 sm:px-8 text-[13px] sm:text-sm rounded-full bg-gray-900 text-white font-semibold hover:bg-gray-800 transition-all duration-200 hover:scale-[1.03] hover:shadow-lg active:scale-[0.98]"
+            >
+              {t(`${p}.heroCta`)}
+            </Link>
+          </div>
         </Reveal>
 
         <Reveal delay={400}>
-          <div className="relative mt-10 sm:mt-14 lg:mt-20 mx-auto max-w-[1000px]">
-            <div className="relative rounded-2xl overflow-hidden shadow-2xl shadow-black/10 border border-gray-200/60">
-              <img
-                src="/landing/dashboard.png"
-                alt={t(`${p}.dashboardAlt`)}
-                className="w-full h-auto"
-                loading="lazy"
-              />
+          <div className="mt-12 sm:mt-14 mx-auto w-full max-w-md border-t border-gray-300/50 pt-10 sm:pt-12">
+            <ul className="space-y-6 text-left" aria-label={t(`${p}.heroSpotAria`)}>
+              {spotIcons.map((Icon, idx) => {
+                const n = idx + 1;
+                return (
+                  <li key={n} className="flex gap-3.5">
+                    <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200/90 bg-white/70 text-gray-700 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+                      <Icon className="h-4 w-4" strokeWidth={2} aria-hidden />
+                    </div>
+                    <div className="min-w-0 pt-0.5">
+                      <p className="text-sm font-semibold text-gray-900">{t(`${p}.heroSpot${n}Title`)}</p>
+                      <p className="mt-1 text-[13px] leading-relaxed text-gray-500">{t(`${p}.heroSpot${n}Body`)}</p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="mt-8 flex justify-center">
+              <button
+                type="button"
+                onClick={scrollToFeaturesSection}
+                className="inline-flex items-center justify-center h-10 sm:h-11 px-6 text-[13px] sm:text-sm rounded-full border border-gray-300/90 bg-white/80 font-medium text-gray-700 hover:bg-white hover:border-gray-400 transition-all duration-200 active:scale-[0.98] touch-manipulation"
+              >
+                {t(`${p}.heroMoreFeaturesCta`)}
+              </button>
             </div>
           </div>
         </Reveal>
@@ -97,7 +127,11 @@ export default function HeroSection({ variant = 'tutor' }: { variant?: LandingVa
                     key={i}
                     src={logo.src}
                     alt={logo.alt}
-                    className="h-6 sm:h-7 w-auto object-contain brightness-0 invert opacity-60 select-none"
+                    className={
+                      logo.invert === false
+                        ? 'h-9 sm:h-10 w-auto max-w-[140px] object-contain opacity-[0.98] select-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.25)]'
+                        : 'h-6 sm:h-7 w-auto object-contain brightness-0 invert opacity-60 select-none'
+                    }
                     draggable={false}
                   />
                 ))}

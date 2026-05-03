@@ -25,16 +25,25 @@ export default function ParentInvoices() {
   const filterStudentId = searchParams.get('studentId')?.trim() || null;
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     (async () => {
       setLoading(true);
+      setLoadError(null);
 
       const { data: parentProfile, error: parentErr } = await supabase
         .rpc('get_parent_profile_id_by_user_id', { p_user_id: user.id });
       if (parentErr) {
         console.warn('[ParentInvoices] parent profile rpc failed:', parentErr);
+        setLoadError(parentErr.message);
+        setInvoices([]);
+        setLoading(false);
+        return;
       }
 
       if (!parentProfile) {
@@ -56,23 +65,56 @@ export default function ParentInvoices() {
         return;
       }
 
-      const { data: sessions } = await supabase.from('sessions').select('id').in('student_id', studentIds);
-      const sessionIds = [...new Set((sessions ?? []).map((s) => s.id))];
-      if (!sessionIds.length) {
-        setInvoices([]);
+      /**
+       * Jei filtro nėra — skaitome sąskaitas tiesiai (RLS `invoices_parent_select` meta tik susijusias).
+       * Filtrą ?studentId=… — paliekame konkrečių vaikų S.F.: paketai pagal manual_sales_invoice_id + eilutės su session_ids (overlap).
+       * Anksčiau: „nėra sessions“ ⇒ tuščiai (paketas be pamokų neberodomas); paketų invoice_line.session_ids laikė paketo UUID, `.cs.{sessionId}` neveikė.
+       */
+      if (!filterStudentId) {
+        const { data: invsOpen, error: openErr } = await supabase
+          .from('invoices')
+          .select('id, invoice_number, issue_date, total_amount, status, pdf_storage_path')
+          .order('created_at', { ascending: false })
+          .limit(150);
+
+        if (openErr) {
+          console.warn('[ParentInvoices] invoices list:', openErr);
+          setLoadError(openErr.message);
+          setInvoices([]);
+          setLoading(false);
+          return;
+        }
+        setInvoices(invsOpen ?? []);
         setLoading(false);
         return;
       }
 
       const invoiceIdSet = new Set<string>();
-      const chunkSize = 40;
+      const { data: pkgRows } = await supabase
+        .from('lesson_packages')
+        .select('manual_sales_invoice_id')
+        .in('student_id', studentIds)
+        .not('manual_sales_invoice_id', 'is', null);
+      for (const r of pkgRows ?? []) {
+        const invId = r.manual_sales_invoice_id as string | null;
+        if (invId) invoiceIdSet.add(invId);
+      }
+
+      const { data: sessRows } = await supabase.from('sessions').select('id').in('student_id', studentIds);
+      const sessionIds = [...new Set((sessRows ?? []).map((s) => s.id))];
+      const chunkSize = 80;
       for (let i = 0; i < sessionIds.length; i += chunkSize) {
         const chunk = sessionIds.slice(i, i + chunkSize);
-        const orFilter = chunk.map((id) => `session_ids.cs.{${id}}`).join(',');
-        const { data: rows } = await supabase.from('invoice_line_items').select('invoice_id').or(orFilter);
-        for (const r of rows ?? []) {
-          invoiceIdSet.add(r.invoice_id as string);
+        if (!chunk.length) continue;
+        const { data: liRows, error: liErr } = await supabase
+          .from('invoice_line_items')
+          .select('invoice_id')
+          .overlaps('session_ids', chunk as unknown as string[]);
+        if (liErr) {
+          console.warn('[ParentInvoices] line_items overlaps:', liErr);
+          continue;
         }
+        for (const row of liRows ?? []) invoiceIdSet.add(row.invoice_id as string);
       }
 
       const invoiceIds = [...invoiceIdSet];
@@ -82,14 +124,20 @@ export default function ParentInvoices() {
         return;
       }
 
-      const { data: invs } = await supabase
+      const { data: invs, error: invListErr } = await supabase
         .from('invoices')
         .select('id, invoice_number, issue_date, total_amount, status, pdf_storage_path')
         .in('id', invoiceIds)
         .order('created_at', { ascending: false })
-        .limit(80);
+        .limit(150);
 
-      setInvoices(invs ?? []);
+      if (invListErr) {
+        console.warn('[ParentInvoices] invoices by id:', invListErr);
+        setLoadError(invListErr.message);
+        setInvoices([]);
+      } else {
+        setInvoices(invs ?? []);
+      }
       setLoading(false);
     })();
   }, [user?.id, filterStudentId]);
@@ -113,6 +161,15 @@ export default function ParentInvoices() {
     cancelled: 'bg-red-100 text-red-800',
   };
 
+  const invoiceStatusLabel = (status: string) => {
+    const labels: Record<string, string> = {
+      issued: t('invoices.statusIssued'),
+      paid: t('invoices.statusPaid'),
+      cancelled: t('invoices.statusCancelled'),
+    };
+    return labels[status] || status;
+  };
+
   if (loading) {
     return (
       <ParentLayout>
@@ -127,6 +184,11 @@ export default function ParentInvoices() {
     <ParentLayout>
       <main className="w-full max-w-5xl mx-auto px-4 pt-6 flex-1 flex flex-col min-h-0">
         <h1 className="text-xl font-black text-gray-900 tracking-tight mb-4">{t('parent.invoices')}</h1>
+        {loadError ? (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 mb-4">
+            {t('parent.invoicesLoadError', { message: loadError })}
+          </div>
+        ) : null}
         <div className="space-y-3">
           {invoices.length === 0 ? (
             <p className="text-gray-500 text-center py-12">{t('parent.noInvoices')}</p>
@@ -143,7 +205,7 @@ export default function ParentInvoices() {
                 <div className="flex items-center gap-3">
                   <span className="font-medium text-gray-800">{Number(inv.total_amount).toFixed(2)} €</span>
                   <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium', statusColor[inv.status] || statusColor.issued)}>
-                    {inv.status}
+                    {invoiceStatusLabel(inv.status)}
                   </span>
                   {inv.pdf_storage_path && (
                     <Button variant="ghost" size="sm" onClick={() => downloadPdf(inv)}>

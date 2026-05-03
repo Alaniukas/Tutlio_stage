@@ -3,6 +3,7 @@ import { CalendarRange } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Button } from '@/components/ui/button';
 import { useTranslation } from '@/lib/i18n';
 
 export interface MonthFilterInputProps {
@@ -63,13 +64,19 @@ export function MonthFilterInput({ value, onChange, className, id, disabled }: M
     onChange(`${y}-${String(m).padStart(2, '0')}`);
   };
 
+  const applyDraftAndClose = () => {
+    emit(draftYear, draftMonth);
+    setOpen(false);
+  };
+
   const selectedMonthStart = parseMonthValue(value);
   const displayValue = selectedMonthStart
     ? format(selectedMonthStart, 'LLLL yyyy', { locale: dateFnsLocale })
     : undefined;
 
+  // Radix Popover default modal=true treats native <select> dropdown as outside click — month never applies.
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
+    <Popover modal={false} open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <button
           id={id}
@@ -139,6 +146,9 @@ export function MonthFilterInput({ value, onChange, className, id, disabled }: M
               ))}
             </select>
           </div>
+          <Button type="button" size="sm" className="w-full rounded-lg" onClick={applyDraftAndClose}>
+            {t('invoices.monthFilterApply')}
+          </Button>
         </div>
       </PopoverContent>
     </Popover>

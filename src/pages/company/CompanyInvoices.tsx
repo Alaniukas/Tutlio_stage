@@ -354,30 +354,30 @@ export default function CompanyInvoices() {
   return (
     <>
       <div className="max-w-5xl mx-auto space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-              <FileText className="w-6 h-6 text-indigo-600" />
-              {t('invoices.titleCompany')}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between min-w-0">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900 flex items-center gap-2 flex-wrap">
+              <FileText className="w-6 h-6 text-indigo-600 shrink-0" />
+              <span className="break-words">{t('invoices.titleCompany')}</span>
             </h1>
             <p className="text-gray-500 mt-1 text-sm">{t('invoices.subtitleCompany')}</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2 w-full sm:w-auto sm:justify-end shrink-0">
             <Button
               variant="outline"
               size="sm"
               onClick={() => setShowSettings(!showSettings)}
-              className="rounded-xl gap-1"
+              className="rounded-xl gap-1 touch-manipulation flex-1 min-w-0 sm:flex-initial"
             >
-              <Settings className="w-4 h-4" />
-              {showSettings ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              <Settings className="w-4 h-4 shrink-0" />
+              {showSettings ? <ChevronUp className="w-3 h-3 shrink-0" /> : <ChevronDown className="w-3 h-3 shrink-0" />}
             </Button>
             <Button
               onClick={() => setIsCreateOpen(true)}
-              className="rounded-xl gap-2 bg-indigo-600 hover:bg-indigo-700"
+              className="rounded-xl gap-2 bg-indigo-600 hover:bg-indigo-700 touch-manipulation flex-1 min-w-0 sm:flex-initial"
             >
-              <Plus className="w-4 h-4" />
-              {t('invoices.create')}
+              <Plus className="w-4 h-4 shrink-0" />
+              <span className="truncate">{t('invoices.create')}</span>
             </Button>
           </div>
         </div>

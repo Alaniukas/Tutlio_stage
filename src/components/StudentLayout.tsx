@@ -47,7 +47,8 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
     const [studentName, setStudentName] = useState(cached?.studentName || '');
     const [tutor, setTutor] = useState<any>(cached?.tutor || null);
     const [isTutorModalOpen, setIsTutorModalOpen] = useState(false);
-    const [packageCountText, setPackageCountText] = useState(t('studentLayout.lessonCount', { remaining: 0, total: 0 }));
+    /** `null` = nerodyti badge (paketų nėra arba dar neįkelta) — nelieka 0/0. */
+    const [packageCountLabel, setPackageCountLabel] = useState<string | null>(null);
     const [studentProfiles, setStudentProfiles] = useState<Array<{ id: string; tutor_id: string | null; tutor_full_name: string | null; tutor_email: string | null }>>(cached?.studentProfiles || []);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
     const activeStudentProfileId = useMemo(
@@ -144,6 +145,10 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
             try {
                 const pkgs = await fetchStudentActiveLessonPackagesDeduped(supabase, selected.id);
                 if (cancelled) return;
+                if (pkgs.length === 0) {
+                    setPackageCountLabel(null);
+                    return;
+                }
                 const remaining = pkgs.reduce((sum, p) => sum + Number(p.available_lessons || 0), 0);
                 const total = pkgs.reduce((sum, p) => sum + Number(p.total_lessons || 0), 0);
                 let subjectName: string | null = null;
@@ -155,11 +160,11 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                 const label = subjectName
                     ? `${subjectName}: ${remaining}/${total}`
                     : t('studentLayout.lessonCount', { remaining, total });
-                setPackageCountText(label);
+                setPackageCountLabel(label);
             } catch (pkgErr) {
                 console.warn('[StudentLayout] Packages badge skipped:', pkgErr);
                 if (!cancelled) {
-                    setPackageCountText(t('studentLayout.lessonCount', { remaining: 0, total: 0 }));
+                    setPackageCountLabel(null);
                 }
             }
         })();
@@ -198,22 +203,22 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
     return (
         <div className="min-h-screen bg-white flex flex-col relative overflow-x-hidden">
             <OrgSuspendedBanner />
-            <PwaInstallPrompt settingsPath="/student/settings" />
+            <PwaInstallPrompt settingsPath="/student/instructions" />
             <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-50/40 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none" />
             <div className="absolute bottom-0 left-0 w-96 h-96 bg-slate-50/30 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 pointer-events-none" />
 
-            <header className="bg-white/80 backdrop-blur-md border-b border-gray-100 px-4 py-3 flex items-center justify-between sticky top-0 z-40">
-                <div className="flex items-center gap-4">
+            <header className="bg-white/80 backdrop-blur-md border-b border-gray-100 px-3 sm:px-4 py-3 flex items-center justify-between gap-2 sticky top-0 z-40 min-w-0">
+                <div className="flex items-center gap-2 sm:gap-4 min-w-0 flex-1">
                     <Link to="/" className="flex items-center gap-2 flex-shrink-0">
                         <img src="/logo-icon.png" alt="Tutlio" className="w-8 h-8 rounded-xl" />
                         <span className="font-black text-gray-900 text-base tracking-tight hidden sm:block">Tutlio</span>
                     </Link>
 
-                    <div className="cursor-pointer hover:bg-indigo-50/50 p-1.5 rounded-xl transition-colors shrink-0">
-                        <div className="flex items-center gap-2">
-                            <div onClick={() => setIsTutorModalOpen(true)}>
+                    <div className="cursor-pointer hover:bg-indigo-50/50 p-1.5 rounded-xl transition-colors min-w-0 flex-1 sm:flex-initial">
+                        <div className="flex items-center gap-2 min-w-0">
+                            <div onClick={() => setIsTutorModalOpen(true)} className="min-w-0">
                                 <p className="text-xs text-indigo-400 font-medium tracking-wide uppercase">{t('studentLayout.tutor')}</p>
-                                <p className="text-sm font-bold text-gray-900">{tutor?.full_name || '—'}</p>
+                                <p className="text-sm font-bold text-gray-900 truncate max-w-[40vw] sm:max-w-[14rem]">{tutor?.full_name || '—'}</p>
                             </div>
                             <Info className="w-4 h-4 text-indigo-300" onClick={() => setIsTutorModalOpen(true)} />
                             {studentProfiles.length > 1 && (
@@ -233,9 +238,9 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                     </div>
                 </div>
                 <div className="flex items-center gap-3">
-                    {location.pathname !== '/student/sessions' && (
+                    {location.pathname !== '/student/sessions' && packageCountLabel != null && packageCountLabel !== '' && (
                     <span className="hidden sm:inline-flex text-xs font-semibold text-indigo-700 bg-violet-50 border border-violet-200 px-2.5 py-1 rounded-lg">
-                        {packageCountText}
+                        {packageCountLabel}
                     </span>
                     )}
                     <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-sm shadow-sm ring-2 ring-white">
@@ -281,8 +286,11 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                 {children}
             </main>
 
-            <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-gray-100 z-50" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
-                <div className="flex items-center justify-around px-2 py-2">
+            <nav
+                className="fixed bottom-0 inset-x-0 bg-white border-t border-gray-100 z-50 max-w-[100vw] overflow-x-hidden"
+                style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
+            >
+                <div className="grid grid-cols-6 gap-0 px-0.5 sm:px-1 pt-2 pb-1 w-full">
                     {navItems.map((item) => {
                         const Icon = item.icon;
                         const active = location.pathname === item.href;
@@ -292,18 +300,21 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                             <Link
                                 key={item.href}
                                 to={item.href}
-                                className={`relative flex flex-col items-center gap-0.5 px-3 py-2 rounded-2xl transition-all ${active ? 'text-indigo-700' : highlight ? 'text-indigo-500' : 'text-gray-400 hover:text-gray-700'
+                                className={`relative flex flex-col items-center gap-1 min-w-0 py-1 rounded-2xl transition-all touch-manipulation ${active ? 'text-indigo-700' : highlight ? 'text-indigo-500' : 'text-gray-400 hover:text-gray-700'
                                     }`}
                             >
-                                <div className={`relative p-1.5 rounded-xl transition-all ${active ? 'bg-indigo-100' : highlight ? 'bg-indigo-50' : ''}`}>
-                                    <Icon className="w-5 h-5" />
+                                <div className={`relative p-1 sm:p-1.5 rounded-xl transition-all shrink-0 ${active ? 'bg-indigo-100' : highlight ? 'bg-indigo-50' : ''}`}>
+                                    <Icon className="w-5 h-5 mx-auto" />
                                     {showChatBadge && (
                                         <span className="absolute -top-0.5 -right-0.5 min-w-[15px] h-[15px] px-0.5 rounded-full bg-rose-500 text-[8px] font-bold text-white flex items-center justify-center border-2 border-white">
                                             {chatUnreadTotal > 9 ? '9+' : chatUnreadTotal}
                                         </span>
                                     )}
                                 </div>
-                                <span className={`text-[10px] font-medium leading-none ${active ? 'text-indigo-700' : highlight ? 'text-indigo-500' : ''}`}>
+                                <span
+                                    className={`block w-full text-[10px] sm:text-[11px] font-semibold leading-tight text-center px-0.5 line-clamp-2 break-words ${active ? 'text-indigo-700' : highlight ? 'text-indigo-500' : ''
+                                        }`}
+                                >
                                     {item.label}
                                 </span>
                             </Link>

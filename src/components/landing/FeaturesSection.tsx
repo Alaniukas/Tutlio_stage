@@ -179,9 +179,12 @@ export default function FeaturesSection({ variant = 'tutor' }: { variant?: Landi
           </div>
         </div>
 
-        {/* All features grid */}
+        {/* All features grid — scroll target from hero */}
         <Reveal delay={200}>
-          <div className="text-center mt-20 sm:mt-28 mb-10 sm:mb-14">
+          <div
+            id="tutlio-privalumai"
+            className="text-center mt-20 sm:mt-28 mb-10 sm:mb-14 scroll-mt-24 md:scroll-mt-[5.5rem]"
+          >
             <span className="inline-block px-4 py-1 rounded-full border border-gray-200 text-[12px] font-semibold text-gray-500 mb-5 tracking-wide uppercase">
               {t(`${p}.highlightsBadge`)}
             </span>

@@ -363,7 +363,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         session_ids: li.sessionIds,
       }));
 
-      await supabase.from('invoice_line_items').insert(lineItemInserts);
+      const { error: liInsertErr } = await supabase.from('invoice_line_items').insert(lineItemInserts);
+      if (liInsertErr) {
+        console.error('[generate-invoice] line items insert failed:', liInsertErr);
+        await supabase.from('invoices').delete().eq('id', invoice.id);
+        continue;
+      }
 
       // Generate PDF
       try {
@@ -405,8 +410,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.error('[generate-invoice] PDF generation error:', pdfErr);
       }
 
-      createdInvoices.push(invoice.id);
-
       const invoicedPkgIds = resolvedPackageIds.filter(id => lineItems.some(li => li.sessionIds.includes(id)));
       if (invoicedPkgIds.length > 0) {
         await supabase
@@ -425,6 +428,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .in('id', invoicedSessionIds);
         }
       }
+
+      createdInvoices.push(invoice.id);
     }
 
     return res.status(200).json({
@@ -478,15 +483,26 @@ async function getSellerProfile(userId: string, orgId: string | null, isOrgTutor
 }
 
 function buildSellerSnapshot(invoiceProfile: any, userProfile: any) {
-  const isCompany = ['mb', 'uab', 'ii'].includes(invoiceProfile.entity_type);
+  const entityType = String(invoiceProfile?.entity_type ?? '');
+  const isCompany = ['mb', 'uab', 'ii'].includes(entityType);
+  const bizRaw = invoiceProfile?.business_name;
+  const biz = typeof bizRaw === 'string' ? bizRaw.trim() : '';
+  const fullRaw = userProfile?.full_name;
+  const full = typeof fullRaw === 'string' ? fullRaw.trim() : '';
+  /** Vienių subjektams forma dažnai neturi aiškaus įmonės lauko „antraštės“ lauke Revkiščiuose — kombinuojame pavadinimą iš paskyros ir profilio DB. */
+  const displayName = isCompany ? biz || full || 'Įmonė' : full || biz || 'Korepetitorius';
   return {
-    name: isCompany
-      ? invoiceProfile.business_name
-      : userProfile.full_name || 'Korepetitorius',
-    entityType: invoiceProfile.entity_type,
-    companyCode: invoiceProfile.company_code || undefined,
-    vatCode: invoiceProfile.vat_code || undefined,
-    address: invoiceProfile.address || undefined,
+    name: displayName,
+    entityType,
+    companyCode:
+      typeof invoiceProfile.company_code === 'string' && invoiceProfile.company_code.trim()
+        ? invoiceProfile.company_code.trim()
+        : undefined,
+    vatCode:
+      typeof invoiceProfile.vat_code === 'string' && invoiceProfile.vat_code.trim()
+        ? invoiceProfile.vat_code.trim()
+        : undefined,
+    address: invoiceProfile.address?.trim?.() || undefined,
     activityNumber: invoiceProfile.activity_number || undefined,
     personalCode: invoiceProfile.personal_code || undefined,
     contactEmail: invoiceProfile.contact_email || userProfile.email || undefined,

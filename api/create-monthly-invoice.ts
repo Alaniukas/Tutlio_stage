@@ -8,6 +8,10 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
 import { generateInvoicePdf, type InvoicePdfData } from './_lib/invoicePdf.js';
+import {
+    soloTutorUsesManualStudentPayments,
+    trimManualPaymentBankDetails,
+} from './_lib/soloManualStudentPayments.js';
 
 // Stripe/platform fee helpers (inlined to avoid _lib import issues on Vercel)
 const STRIPE_FEE_PERCENT = 0.015;
@@ -77,7 +81,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // 1. Fetch tutor data
         const { data: tutor, error: tutorErr } = await supabase
             .from('profiles')
-            .select('id, full_name, stripe_account_id, stripe_onboarding_complete, organization_id')
+            .select(
+                'id, full_name, stripe_account_id, stripe_onboarding_complete, organization_id, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, manual_payment_bank_details',
+            )
             .eq('id', tutorId)
             .single();
 
@@ -127,10 +133,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return res.status(400).json({ error: 'No sessions found with payer email' });
         }
 
-        // 4. Determine Stripe account (org or tutor)
+        // 4. Determine Stripe account (organization always Stripe; solo may settle off-platform via manual-payment mode)
         let stripeAccountId: string | null = null;
         let ownerName = tutor.full_name || 'Korepetitorius';
         let useSchoolOrgAbsorbedFees = false;
+        let soloUsesManualStudentPayments = false;
+        let tutorManualBankDetails = '';
 
         if (tutor.organization_id) {
             const { data: org } = await supabase
@@ -146,13 +154,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ownerName = org.name || ownerName;
             useSchoolOrgAbsorbedFees = (org as { entity_type?: string }).entity_type === 'school';
         } else {
-            if (!tutor.stripe_onboarding_complete) {
-                return res.status(400).json({ error: 'Tutor Stripe account is not connected' });
+            soloUsesManualStudentPayments = soloTutorUsesManualStudentPayments(tutor);
+            tutorManualBankDetails = trimManualPaymentBankDetails(tutor.manual_payment_bank_details);
+            if (!soloUsesManualStudentPayments) {
+                if (!(tutor as { stripe_onboarding_complete?: boolean }).stripe_onboarding_complete) {
+                    return res.status(400).json({ error: 'Tutor Stripe account is not connected' });
+                }
+                stripeAccountId = (tutor as { stripe_account_id?: string }).stripe_account_id || null;
             }
-            stripeAccountId = tutor.stripe_account_id;
         }
 
-        if (!stripeAccountId) {
+        if (!stripeAccountId && !soloUsesManualStudentPayments) {
             return res.status(400).json({ error: 'Stripe paskyra nerasta' });
         }
 
@@ -219,13 +231,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 .update({ payment_batch_id: billingBatch.id })
                 .in('id', sessionIdsForBatch);
 
-            // Create Stripe Checkout
+            // Stripe Checkout (skipped for solo tutors in manual pupil-payment mode)
             const periodText = `${startDate.toLocaleDateString('lt-LT')} - ${endDate.toLocaleDateString('lt-LT')}`;
 
-            let checkoutSession: Stripe.Checkout.Session;
-            let payerCheckoutTotalEur: number;
+            let checkoutSession: Stripe.Checkout.Session | undefined;
+            let payerCheckoutTotalEur = totalLessonPrice;
             try {
-                if (useSchoolOrgAbsorbedFees) {
+                if (soloUsesManualStudentPayments) {
+                    checkoutSession = undefined;
+                    payerCheckoutTotalEur = totalLessonPrice;
+                } else if (useSchoolOrgAbsorbedFees) {
                     const { chargeCents, transferToSchoolCents } =
                         schoolInstallmentCheckoutCents(totalLessonPrice);
                     const applicationFeeCents = chargeCents - transferToSchoolCents;
@@ -269,7 +284,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         cancel_url: `${APP_URL}/student/sessions`,
                     });
                     payerCheckoutTotalEur = totalLessonPrice;
-                } else {
+                } else if (stripeAccountId) {
                     let baseCents = 0;
                     let feesCents = 0;
                     for (const s of payerSessions) {
@@ -324,6 +339,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         cancel_url: `${APP_URL}/student/sessions`,
                     });
                     payerCheckoutTotalEur = (baseCents + feesCents) / 100;
+                } else {
+                    throw new Error('[create-monthly-invoice] Missing Stripe account for checkout');
                 }
             } catch (stripeErr: any) {
                 console.error(`[create-monthly-invoice] Stripe checkout failed for ${payerEmail}, rolling back batch ${billingBatch.id}:`, stripeErr);
@@ -333,11 +350,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 continue;
             }
 
-            // Save Stripe checkout session ID
-            await supabase
-                .from('billing_batches')
-                .update({ stripe_checkout_session_id: checkoutSession.id })
-                .eq('id', billingBatch.id);
+            if (checkoutSession?.id) {
+                await supabase
+                    .from('billing_batches')
+                    .update({ stripe_checkout_session_id: checkoutSession.id })
+                    .eq('id', billingBatch.id);
+            }
 
             // Auto-generate S.F. if invoice profile exists (before email so PDF can be attached)
             let sfPdfBase64: string | null = null;
@@ -367,27 +385,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             });
 
             // Send invoice email with optional S.F. PDF attachment
-            if (checkoutSession.url) {
+            const monthlyEmailOk = soloUsesManualStudentPayments ? true : Boolean(checkoutSession?.url);
+            if (monthlyEmailOk) {
                 try {
+                    const emailData = soloUsesManualStudentPayments
+                        ? {
+                              recipientName: payerName,
+                              studentName: student.full_name,
+                              tutorName: ownerName,
+                              periodText,
+                              sessions: sessionsForEmail,
+                              totalAmount: payerCheckoutTotalEur.toFixed(2),
+                              paymentDeadline: paymentDeadlineDate.toLocaleDateString('lt-LT', {
+                                  year: 'numeric',
+                                  month: '2-digit',
+                                  day: '2-digit',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                              }),
+                              manualPaymentInstructions: true,
+                              bankDetails: tutorManualBankDetails || undefined,
+                              paymentLink: `${APP_URL}/student/sessions`,
+                          }
+                        : {
+                              recipientName: payerName,
+                              studentName: student.full_name,
+                              tutorName: ownerName,
+                              periodText,
+                              sessions: sessionsForEmail,
+                              totalAmount: payerCheckoutTotalEur.toFixed(2),
+                              paymentDeadline: paymentDeadlineDate.toLocaleDateString('lt-LT', {
+                                  year: 'numeric',
+                                  month: '2-digit',
+                                  day: '2-digit',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                              }),
+                              paymentLink: checkoutSession!.url as string,
+                          };
                     const emailPayload: Record<string, unknown> = {
                         type: 'monthly_invoice',
                         to: payerEmail,
-                        data: {
-                            recipientName: payerName,
-                            studentName: student.full_name,
-                            tutorName: ownerName,
-                            periodText,
-                            sessions: sessionsForEmail,
-                            totalAmount: payerCheckoutTotalEur.toFixed(2),
-                            paymentDeadline: paymentDeadlineDate.toLocaleDateString('lt-LT', {
-                                year: 'numeric',
-                                month: '2-digit',
-                                day: '2-digit',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                            }),
-                            paymentLink: checkoutSession.url,
-                        },
+                        data: emailData,
                     };
                     if (sfPdfBase64 && sfInvoiceNumber) {
                         (emailPayload as any).attachments = [{ filename: `${sfInvoiceNumber}.pdf`, content: sfPdfBase64 }];
@@ -407,7 +446,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 payerEmail,
                 sessionsCount: lessonCount,
                 totalAmount: totalLessonPrice,
-                checkoutUrl: checkoutSession.url,
+                checkoutUrl: checkoutSession?.url ?? null,
             });
 
             console.log(`[create-monthly-invoice] Created batch ${billingBatch.id} for ${payerEmail} with ${lessonCount} sessions`);
@@ -451,7 +490,10 @@ async function autoGenerateSF(
     if (!invoiceProfile) return null;
 
     const isCompany = ['mb', 'uab', 'ii'].includes(invoiceProfile.entity_type);
-    const sellerName = isCompany ? invoiceProfile.business_name : tutor.full_name;
+    const biz = typeof invoiceProfile.business_name === 'string' ? invoiceProfile.business_name.trim() : '';
+    const full =
+        tutor?.full_name && typeof tutor.full_name === 'string' ? tutor.full_name.trim() : '';
+    const sellerName = isCompany ? biz || full || 'Įmonė' : full || biz || 'Korepetitorius';
 
     const sellerSnapshot = {
         name: sellerName || 'Korepetitorius',

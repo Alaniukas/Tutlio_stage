@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Layout from '@/components/Layout';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { supabase } from '@/lib/supabase';
 import { authHeaders } from '@/lib/apiHelpers';
 import { CreditCard, CheckCircle2, ExternalLink, Loader2, Clock, Euro, FileText } from 'lucide-react';
@@ -13,6 +15,7 @@ import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import OrgTutorFinanceSummary from '@/components/OrgTutorFinanceSummary';
 import TutorFinanceReport from '@/components/TutorFinanceReport';
 import { useTranslation } from '@/lib/i18n';
+import { soloTutorUsesManualStudentPayments } from '@/lib/subscription';
 
 interface FinanceProfile {
   stripe_account_id: string | null;
@@ -46,15 +49,20 @@ export default function FinancePage() {
     enable_per_student_payment_override: false,
   });
   const [isSoloTutor, setIsSoloTutor] = useState(true);
+  /** Solo tutor rankiniai mokinių mokėjimai (planas / exempt / admin vėliava). */
+  const [soloManualStudentPayments, setSoloManualStudentPayments] = useState(false);
   const [loading, setLoading] = useState(true);
   const [stripeLoading, setStripeLoading] = useState(false);
   const [stripeError, setStripeError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  const [savedMessage, setSavedMessage] = useState<'stripe' | 'payment_settings' | null>(null);
+  const [savedMessage, setSavedMessage] = useState<'stripe' | 'payment_settings' | 'bank_details' | null>(null);
   const [savingPaymentSettings, setSavingPaymentSettings] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const [minBookingHours, setMinBookingHours] = useState(24);
+  /** Solo rankiniai: rodomas mokėtojams el. paštu (paketų pasiūlymuose). */
+  const [manualPaymentBankDetails, setManualPaymentBankDetails] = useState('');
+  const [savingBankDetails, setSavingBankDetails] = useState(false);
 
   const [isSendInvoiceModalOpen, setIsSendInvoiceModalOpen] = useState(false);
   const isOrgTutorEffective = orgPolicy.isOrgTutor || !isSoloTutor;
@@ -101,6 +109,7 @@ export default function FinancePage() {
 
   useEffect(() => {
     if (loading || !userId) return;
+    if (soloManualStudentPayments && !profile.stripe_account_id) return;
     if (stripeAutoVerifyRan.current) return;
     if (new URLSearchParams(location.search).get('stripe') === 'success') return;
     if (!profile.stripe_account_id || profile.stripe_onboarding_complete) return;
@@ -109,6 +118,7 @@ export default function FinancePage() {
   }, [
     loading,
     userId,
+    soloManualStudentPayments,
     profile.stripe_account_id,
     profile.stripe_onboarding_complete,
     location.search,
@@ -130,6 +140,9 @@ export default function FinancePage() {
     const { data: tutorData } = await tutorFinancePageProfileDeduped(user.id);
 
     setIsSoloTutor(!tutorData?.organization_id);
+    setSoloManualStudentPayments(soloTutorUsesManualStudentPayments(tutorData));
+
+    setManualPaymentBankDetails(typeof tutorData?.manual_payment_bank_details === 'string' ? tutorData.manual_payment_bank_details : '');
 
     setProfile({
       stripe_account_id: tutorData?.stripe_account_id || null,
@@ -201,6 +214,15 @@ export default function FinancePage() {
     );
   }
 
+  const showSessionFinanceReport =
+    !!userId && (profile.stripe_onboarding_complete || soloManualStudentPayments);
+  const stripeCardSpanClass =
+    profile.stripe_onboarding_complete && userId && !soloManualStudentPayments ? 'xl:col-span-4' : 'xl:col-span-12';
+  const reportSpanClass =
+    showSessionFinanceReport && profile.stripe_onboarding_complete && !soloManualStudentPayments
+      ? 'xl:col-span-8'
+      : 'xl:col-span-12';
+
   if (isOrgTutorEffective) {
     return (
       <Layout>
@@ -220,7 +242,9 @@ export default function FinancePage() {
       <div className="max-w-[1400px] mx-auto space-y-6 animate-fade-in px-4 sm:px-6 lg:px-8">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{t('finance.title')}</h1>
-          <p className="text-gray-500 mt-1 text-sm">{t('finance.subtitle')}</p>
+          <p className="text-gray-500 mt-1 text-sm">
+            {soloManualStudentPayments ? t('finance.subtitleManualPrimary') : t('finance.subtitle')}
+          </p>
         </div>
 
         {saveError && (
@@ -233,49 +257,153 @@ export default function FinancePage() {
           <div className="flex items-center gap-2 p-4 bg-green-50 border border-green-200 rounded-xl animate-fade-in">
             <CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0" />
             <span className="text-sm text-green-700 font-medium">
-              {savedMessage === 'stripe' ? t('finance.savedStripe') : t('finance.settingsSaved')}
+              {savedMessage === 'stripe'
+                ? t('finance.savedStripe')
+                : savedMessage === 'bank_details'
+                  ? t('finance.savedBankDetails')
+                  : t('finance.settingsSaved')}
             </span>
           </div>
         )}
 
         <div className="grid gap-6 xl:grid-cols-12 items-start">
-          {profile.stripe_onboarding_complete && userId && (
-            <div className="xl:col-span-8 min-w-0">
-              <TutorFinanceReport userId={userId} />
+          {soloManualStudentPayments && (
+            <div className="xl:col-span-12 bg-white rounded-2xl shadow-sm border border-sky-200 p-6 md:p-7 space-y-5">
+              <div className="flex items-start gap-3">
+                <CheckCircle2 className="w-6 h-6 text-sky-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">{t('finance.manualStudentPaymentsTitle')}</h2>
+                  <p className="text-sm text-sky-900/90 mt-1">{t('finance.manualModeBannerShort')}</p>
+                  <p className="text-sm text-gray-600 mt-2 leading-relaxed">{t('finance.manualStudentPaymentsDesc')}</p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="manual-bank-details" className="text-sm font-semibold text-gray-800">
+                  {t('finance.manualBankDetailsTitle')}
+                </Label>
+                <p className="text-xs text-gray-500">{t('finance.manualBankDetailsDesc')}</p>
+                <Textarea
+                  id="manual-bank-details"
+                  rows={5}
+                  value={manualPaymentBankDetails}
+                  onChange={(e) => setManualPaymentBankDetails(e.target.value)}
+                  placeholder={t('finance.manualBankDetailsPlaceholder')}
+                  className="rounded-xl border-gray-200 text-sm font-mono"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  className="rounded-xl bg-sky-600 hover:bg-sky-700 text-white"
+                  disabled={savingBankDetails || !userId}
+                  onClick={async () => {
+                    setSavingBankDetails(true);
+                    setSaveError(null);
+                    const trimmed = manualPaymentBankDetails.trim();
+                    const ok = await persistFinanceProfile({
+                      manual_payment_bank_details: trimmed.length > 0 ? trimmed : null,
+                    });
+                    if (ok) {
+                      setSaved(true);
+                      setSavedMessage('bank_details');
+                      setTimeout(() => {
+                        setSaved(false);
+                        setSavedMessage(null);
+                      }, 4000);
+                    }
+                    setSavingBankDetails(false);
+                  }}
+                >
+                  {savingBankDetails ? <Loader2 className="w-4 h-4 animate-spin" /> : t('finance.saveBankDetails')}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {showSessionFinanceReport && (
+            <div className={cn('min-w-0', reportSpanClass)}>
+              <TutorFinanceReport
+                userId={userId!}
+                supplementalNote={soloManualStudentPayments ? t('financeReport.supplementManualPayments') : undefined}
+              />
             </div>
           )}
 
         <div
           className={cn(
             'bg-white rounded-2xl shadow-sm border border-gray-100 p-6 md:p-7 space-y-6',
-            profile.stripe_onboarding_complete && userId ? 'xl:col-span-4' : 'xl:col-span-12',
+            soloManualStudentPayments && 'border-dashed border-amber-200/90 bg-amber-50/20',
+            stripeCardSpanClass,
           )}
         >
           <div>
-            <h2 className="text-lg font-semibold text-gray-900 mb-1">{t('finance.stripeAccount')}</h2>
-            <p className="text-sm text-gray-500">{t('finance.stripeAccountDesc')}</p>
+            <h2 className="text-lg font-semibold text-gray-900 mb-1">
+              {soloManualStudentPayments ? t('finance.stripeOptionalSectionTitle') : t('finance.stripeAccount')}
+            </h2>
+            <p className="text-sm text-gray-500">
+              {soloManualStudentPayments ? t('finance.stripeOptionalSectionDesc') : t('finance.stripeAccountDesc')}
+            </p>
           </div>
 
           {profile.stripe_onboarding_complete ? (
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-              <div className="flex items-center gap-2 px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
-                <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
-                <span className="text-sm font-semibold text-emerald-700">{t('finance.stripeConnected')}</span>
+            <div className="space-y-3">
+              {soloManualStudentPayments && (
+                <p className="text-xs text-sky-900 bg-sky-50 border border-sky-100 rounded-lg px-3 py-2">
+                  {t('finance.manualStudentPaymentsStripeOptional')}
+                </p>
+              )}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                <div className="flex items-center gap-2 px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+                  <span className="text-sm font-semibold text-emerald-700">{t('finance.stripeConnected')}</span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="rounded-xl gap-2 text-sm"
+                  onClick={() => handleStripeAction('manage')}
+                  disabled={stripeLoading}
+                >
+                  {stripeLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <ExternalLink className="w-4 h-4" />
+                  )}
+                  {t('finance.manageStripe')}
+                </Button>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="rounded-xl gap-2 text-sm"
-                onClick={() => handleStripeAction('manage')}
-                disabled={stripeLoading}
-              >
-                {stripeLoading ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <ExternalLink className="w-4 h-4" />
-                )}
-                {t('finance.manageStripe')}
-              </Button>
+            </div>
+          ) : soloManualStudentPayments ? (
+            <div className="space-y-5">
+              <div className="space-y-3">
+                <p className="text-sm text-gray-600">{t('finance.manualStudentPaymentsStripeOptional')}</p>
+                <div className="flex flex-col sm:flex-row gap-2 flex-wrap">
+                  <Button
+                    onClick={() => handleStripeAction('onboard')}
+                    disabled={stripeLoading}
+                    variant="outline"
+                    className="rounded-xl gap-2"
+                  >
+                    {stripeLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <CreditCard className="w-4 h-4" />
+                    )}
+                    {profile.stripe_account_id ? t('finance.continueStripe') : t('finance.connectStripe')}
+                  </Button>
+                  {profile.stripe_account_id && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-xl"
+                      disabled={stripeLoading}
+                      onClick={() => void verifyStripeOnboarding()}
+                    >
+                      {t('finance.verifyConnection')}
+                    </Button>
+                  )}
+                </div>
+              </div>
+              {stripeError && <p className="text-sm text-red-600">{stripeError}</p>}
             </div>
           ) : (
             <div className="space-y-4">

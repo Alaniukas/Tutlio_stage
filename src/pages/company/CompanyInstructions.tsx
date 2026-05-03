@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Play } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
+import PwaInstallGuide from '@/components/PwaInstallGuide';
 
 export default function CompanyInstructions() {
   const { t } = useTranslation();
@@ -71,6 +72,11 @@ export default function CompanyInstructions() {
             </div>
           </CardContent>
         </Card>
+
+        <section className="space-y-4">
+          <h2 className="text-xl font-bold text-gray-900">{t('pwa.instructionsSectionTitle')}</h2>
+          <PwaInstallGuide variant="instructions" />
+        </section>
 
         <Card className="bg-gray-50 border-gray-200">
           <CardHeader>

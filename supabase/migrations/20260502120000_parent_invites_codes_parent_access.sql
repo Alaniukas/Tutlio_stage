@@ -38,6 +38,7 @@ CREATE OR REPLACE FUNCTION public.get_parent_invite_preview(p_token text)
 RETURNS TABLE (
   parent_email text,
   parent_name text,
+  parent_phone text,
   student_full_name text,
   used boolean
 )
@@ -49,6 +50,7 @@ AS $$
   SELECT
     pi.parent_email,
     pi.parent_name,
+    s.payer_phone AS parent_phone,
     s.full_name AS student_full_name,
     pi.used
   FROM public.parent_invites pi
@@ -62,6 +64,7 @@ RETURNS TABLE (
   token text,
   parent_email text,
   parent_name text,
+  parent_phone text,
   student_full_name text,
   used boolean
 )
@@ -74,6 +77,7 @@ AS $$
     pi.token,
     pi.parent_email,
     pi.parent_name,
+    s.payer_phone AS parent_phone,
     s.full_name AS student_full_name,
     pi.used
   FROM public.parent_invites pi

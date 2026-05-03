@@ -6,6 +6,11 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { resolvePerLessonPaymentRules } from './_lib/perLessonPaymentRules.js';
+import {
+    soloTutorUsesManualStudentPayments,
+    trimManualPaymentBankDetails,
+} from './_lib/soloManualStudentPayments.js';
+import { isOrgTutor } from './_lib/isOrgTutor.js';
 
 const supabase = createClient(
     process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL!,
@@ -73,8 +78,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 tutor:profiles!inner(
                     id,
                     full_name,
+                    organization_id,
                     payment_timing,
-                    payment_deadline_hours
+                    payment_deadline_hours,
+                    subscription_plan,
+                    manual_subscription_exempt,
+                    enable_manual_student_payments,
+                    manual_payment_bank_details
                 )
             `)
             .eq('status', 'active')
@@ -115,7 +125,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 continue;
             }
 
-            const paymentLink = await getPaymentUrl(session.id, toEmail);
+            const tutorManual =
+                !isOrgTutor(tutor?.organization_id) && soloTutorUsesManualStudentPayments(tutor);
+            let paymentLink: string | null = null;
+            if (tutorManual) {
+                paymentLink =
+                    student?.payment_payer === 'parent'
+                        ? `${BASE_URL}/parent/lessons`
+                        : `${BASE_URL}/student/sessions`;
+            } else {
+                paymentLink = await getPaymentUrl(session.id, toEmail);
+            }
             if (!paymentLink) {
                 skipped.push(session.id);
                 continue;
@@ -147,6 +167,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 continue;
             }
 
+            const bankDetails = trimManualPaymentBankDetails(tutor.manual_payment_bank_details);
             const ok = await sendEmail({
                 type: 'payment_after_lesson_reminder',
                 to: toEmail,
@@ -159,6 +180,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     amount: session.price ?? 0,
                     paymentLink,
                     payByTime: payByStr,
+                    ...(tutorManual
+                        ? {
+                              manualPaymentInstructions: true,
+                              bankDetails: bankDetails || undefined,
+                              payerIsParent: student?.payment_payer === 'parent',
+                          }
+                        : {}),
                 },
             });
 

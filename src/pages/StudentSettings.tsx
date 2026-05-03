@@ -2,18 +2,17 @@ import { useEffect, useState } from 'react';
 import StudentLayout from '@/components/StudentLayout';
 import { supabase } from '@/lib/supabase';
 import { useUser } from '@/contexts/UserContext';
-import { Eye, EyeOff, Trash2, AlertTriangle, Check, LogOut } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Eye, EyeOff, Trash2, AlertTriangle, Check, LogOut, Mail } from 'lucide-react';
 import { formatLithuanianPhone, validateLithuanianPhone } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useTranslation } from '@/lib/i18n';
 import { buildPlatformPath } from '@/lib/platform';
 import PwaInstallGuide from '@/components/PwaInstallGuide';
+import { authHeaders } from '@/lib/apiHelpers';
 
 export default function StudentSettings() {
     const { t, locale } = useTranslation();
     const { user: ctxUser } = useUser();
-    const navigate = useNavigate();
     const [studentName, setStudentName] = useState('');
     const [email, setEmail] = useState('');
     const [phone, setPhone] = useState('');
@@ -32,6 +31,21 @@ export default function StudentSettings() {
     const [error, setError] = useState<string | null>(null);
     const [deleteConfirm, setDeleteConfirm] = useState(false);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
+
+    const [payerEmailDisp, setPayerEmailDisp] = useState('');
+    const [payerNameDisp, setPayerNameDisp] = useState('');
+    const [paymentPayer, setPaymentPayer] = useState<string | null>(null);
+    const [registeredParents, setRegisteredParents] = useState<Array<{ full_name: string | null; email: string | null }>>(
+        [],
+    );
+    const [draftPayerName, setDraftPayerName] = useState('');
+    const [draftPayerEmail, setDraftPayerEmail] = useState('');
+    const [inviteSending, setInviteSending] = useState(false);
+    const [savingPayerInvite, setSavingPayerInvite] = useState(false);
+    const [inviteBanner, setInviteBanner] = useState<'none' | 'ok' | 'err'>('none');
+    /** Mokėtojo pasirinkimas nustatymuose („aš“ / „tėvai“), kol nepakviesta tėvų paskyra. */
+    const [desiredPayer, setDesiredPayer] = useState<'self' | 'parent'>('self');
+    const [savingPayerSelf, setSavingPayerSelf] = useState(false);
 
     useEffect(() => {
         if (!ctxUser) return;
@@ -77,6 +91,145 @@ export default function StudentSettings() {
             setPhone(data.phone || '');
             setAge(data.age?.toString() || '');
             setGrade(data.grade || '');
+            const pe = String((data as { payer_email?: string | null }).payer_email ?? '').trim();
+            const pn = String((data as { payer_name?: string | null }).payer_name ?? '').trim();
+            setPayerEmailDisp(pe);
+            setPayerNameDisp(pn);
+            setPaymentPayer((data.payment_payer as string | null) ?? null);
+            setDraftPayerName(pn);
+            setDraftPayerEmail(pe);
+            setInviteBanner('none');
+            setDesiredPayer(String((data.payment_payer as string | null) ?? '').toLowerCase() === 'parent' ? 'parent' : 'self');
+
+            const { data: regs } = await supabase.rpc('get_registered_parents_for_linked_student', {
+                p_student_id: data.id,
+                p_linked_user_id: user.id,
+            });
+            setRegisteredParents(
+                (regs as Array<{ full_name: string | null; email: string | null }> | null) ?? [],
+            );
+        }
+    };
+
+    const paymentIsParent = String(paymentPayer ?? '').toLowerCase() === 'parent';
+    const payerEmailLooksValid = payerEmailDisp.includes('@');
+    const hasRegisteredParentPortal = registeredParents.length > 0;
+    /** Tėvų kvietimas vienu paspaudimu: DB mokėtojas – tėvai ir yra mokėtojo el. paštas + pasirinkta „tėvai“. */
+    const canOneClickInvite =
+        !hasRegisteredParentPortal &&
+        desiredPayer === 'parent' &&
+        payerEmailLooksValid &&
+        paymentIsParent;
+    /** Buvo „moku pats“, bet mokėtojo el. yra — prieš kvietimą užtenka įrašyti payment_payer = parent. */
+    const canPromoteSelfToParentInvite =
+        !hasRegisteredParentPortal &&
+        desiredPayer === 'parent' &&
+        payerEmailLooksValid &&
+        !paymentIsParent;
+    const needsParentContactForm =
+        !hasRegisteredParentPortal && desiredPayer === 'parent' && !payerEmailLooksValid;
+
+    const sendParentInvite = async () => {
+        setInviteBanner('none');
+        setInviteSending(true);
+        try {
+            const res = await fetch('/api/student-invite-parent', {
+                method: 'POST',
+                headers: await authHeaders(),
+                body: JSON.stringify({}),
+            });
+            const body = await res.json().catch(() => ({} as Record<string, unknown>));
+            if (res.status === 409 && Array.isArray(body.parents)) {
+                const normalized = (
+                    body.parents as Array<{ full_name?: string | null; email?: string | null }>
+                ).map((p) => ({ full_name: p.full_name ?? null, email: p.email ?? null }));
+                setRegisteredParents(normalized);
+                setInviteBanner('none');
+                return;
+            }
+            if (!res.ok) {
+                setInviteBanner('err');
+                return;
+            }
+            setInviteBanner('ok');
+        } catch {
+            setInviteBanner('err');
+        } finally {
+            setInviteSending(false);
+        }
+    };
+
+    const savePayerContactsAndInvite = async () => {
+        if (!studentId || !ctxUser) return;
+        const n = draftPayerName.trim();
+        const e = draftPayerEmail.trim().toLowerCase();
+        if (!n) {
+            setError(t('onboard.parentNameReq'));
+            return;
+        }
+        if (!e.includes('@')) {
+            setError(t('onboard.parentEmailReq'));
+            return;
+        }
+        setSavingPayerInvite(true);
+        setError(null);
+        setInviteBanner('none');
+        const { error: uErr } = await supabase
+            .from('students')
+            .update({
+                payer_name: n,
+                payer_email: e,
+                payment_payer: 'parent',
+            })
+            .eq('id', studentId);
+        if (uErr) {
+            console.warn('[StudentSettings] payer contacts update:', uErr);
+            setError(t('studentSettings.profileSaveError'));
+            setSavingPayerInvite(false);
+            return;
+        }
+        setPayerNameDisp(n);
+        setPayerEmailDisp(e);
+        setPaymentPayer('parent');
+        await sendParentInvite();
+        setSavingPayerInvite(false);
+    };
+
+    /** DB nustatyta „moka tėvas“, naudotojas pasirinkęs vėl „moku pats“ (tėvai dar neįsiregistravę portaluose). */
+    const persistPaymentPayerSelf = async () => {
+        if (!studentId || !ctxUser) return;
+        setSavingPayerSelf(true);
+        setError(null);
+        try {
+            const { error: uErr } = await supabase.from('students').update({ payment_payer: 'self' }).eq('id', studentId);
+            if (uErr) {
+                setError(t('studentSettings.profileSaveError'));
+                return;
+            }
+            setPaymentPayer('self');
+            setDesiredPayer('self');
+        } finally {
+            setSavingPayerSelf(false);
+        }
+    };
+
+    const promoteSelfToParentAndInvite = async () => {
+        if (!studentId || !ctxUser) return;
+        setInviteBanner('none');
+        setInviteSending(true);
+        setError(null);
+        try {
+            const { error: uErr } = await supabase.from('students').update({ payment_payer: 'parent' }).eq('id', studentId);
+            if (uErr) {
+                setError(t('studentSettings.profileSaveError'));
+                return;
+            }
+            setPaymentPayer('parent');
+            await sendParentInvite();
+        } catch {
+            setInviteBanner('err');
+        } finally {
+            setInviteSending(false);
         }
     };
 
@@ -178,6 +331,179 @@ export default function StudentSettings() {
                         {saving ? t('studentSettings.saving') : t('common.save')}
                     </button>
                 </div>
+
+                {studentId ? (
+                    <div className="bg-white rounded-3xl p-5 shadow-sm border border-violet-100">
+                        <div className="flex items-center gap-2 mb-2">
+                            <Mail className="w-5 h-5 text-violet-600" />
+                            <h2 className="font-bold text-gray-900">{t('studentSettings.parentInviteSectionTitle')}</h2>
+                        </div>
+                        {hasRegisteredParentPortal ? (
+                            <>
+                                <p className="text-sm font-semibold text-emerald-900 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2 mb-2">
+                                    {t('studentSettings.parentAccountLinkedTitle')}
+                                </p>
+                                <p className="text-xs text-gray-500 mb-3">{t('studentSettings.parentAccountLinkedDesc')}</p>
+                                <ul className="space-y-2 mb-3">
+                                    {registeredParents.map((p, i) => (
+                                        <li key={i} className="text-sm text-gray-800 bg-gray-50 rounded-xl px-3 py-2">
+                                            <span className="font-semibold">{p.full_name ?? '—'}</span>
+                                            {p.email ? (
+                                                <>
+                                                    {' '}
+                                                    <span className="text-gray-400">·</span>{' '}
+                                                    <a href={`mailto:${p.email}`} className="text-violet-600 font-medium underline">
+                                                        {p.email}
+                                                    </a>
+                                                </>
+                                            ) : null}
+                                        </li>
+                                    ))}
+                                </ul>
+                                <p className="text-xs text-gray-500">{t('studentSettings.parentInviteBlockedLinked')}</p>
+                            </>
+                        ) : (
+                            <>
+                                <p className="text-sm text-gray-600 mb-3">{t('studentSettings.payerChoiceIntro')}</p>
+                                <div className="flex rounded-2xl border border-gray-200 p-1 bg-gray-50 gap-1 mb-4">
+                                    <button
+                                        type="button"
+                                        onClick={() => setDesiredPayer('self')}
+                                        className={`flex-1 py-2.5 px-2 text-xs sm:text-sm font-semibold rounded-xl transition-colors ${
+                                            desiredPayer === 'self'
+                                                ? 'bg-white text-violet-700 shadow-sm border border-violet-100'
+                                                : 'text-gray-600 hover:text-gray-900'
+                                        }`}
+                                    >
+                                        {t('studentSettings.payerOptionSelf')}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setDesiredPayer('parent')}
+                                        className={`flex-1 py-2.5 px-2 text-xs sm:text-sm font-semibold rounded-xl transition-colors ${
+                                            desiredPayer === 'parent'
+                                                ? 'bg-white text-violet-700 shadow-sm border border-violet-100'
+                                                : 'text-gray-600 hover:text-gray-900'
+                                        }`}
+                                    >
+                                        {t('studentSettings.payerOptionParent')}
+                                    </button>
+                                </div>
+
+                                {desiredPayer === 'self' ? (
+                                    <div className="space-y-3">
+                                        <p className="text-sm text-gray-600">{t('studentSettings.payerChoiceSelfExplanation')}</p>
+                                        {paymentIsParent ? (
+                                            <button
+                                                type="button"
+                                                disabled={savingPayerSelf}
+                                                onClick={() => void persistPaymentPayerSelf()}
+                                                className="w-full py-3 rounded-2xl border border-gray-200 bg-gray-50 text-gray-900 font-bold text-sm hover:bg-gray-100 disabled:opacity-50 transition-colors"
+                                            >
+                                                {savingPayerSelf ? t('studentSettings.saving') : t('studentSettings.savePayerIsSelfCta')}
+                                            </button>
+                                        ) : null}
+                                    </div>
+                                ) : (
+                                    <>
+                                        <p className="text-sm text-gray-500 mb-4">{t('studentSettings.parentInviteSectionDesc')}</p>
+                                        {inviteBanner === 'ok' ? (
+                                            <p className="text-sm text-green-700 bg-green-50 rounded-xl px-3 py-2 mb-3">
+                                                {t('studentSettings.inviteParentSuccess')}
+                                            </p>
+                                        ) : null}
+                                        {inviteBanner === 'err' ? (
+                                            <p className="text-sm text-red-600 bg-red-50 rounded-xl px-3 py-2 mb-3">
+                                                {t('studentSettings.inviteParentError')}
+                                            </p>
+                                        ) : null}
+                                        {needsParentContactForm ? (
+                                            <div className="space-y-3">
+                                                <p className="text-sm text-gray-600">{t('studentSettings.parentDraftExplain')}</p>
+                                                <div>
+                                                    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">
+                                                        {t('studentSettings.payerDraftNameLabel')}
+                                                    </label>
+                                                    <input
+                                                        type="text"
+                                                        value={draftPayerName}
+                                                        onChange={(e) => setDraftPayerName(e.target.value)}
+                                                        className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 border border-transparent"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">
+                                                        {t('studentSettings.payerDraftEmailLabel')}
+                                                    </label>
+                                                    <input
+                                                        type="email"
+                                                        value={draftPayerEmail}
+                                                        onChange={(e) => setDraftPayerEmail(e.target.value)}
+                                                        className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 border border-transparent"
+                                                    />
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    disabled={savingPayerInvite || inviteSending}
+                                                    onClick={() => void savePayerContactsAndInvite()}
+                                                    className="w-full py-3 rounded-2xl bg-violet-600 text-white font-bold text-sm hover:bg-violet-700 disabled:opacity-50 transition-colors"
+                                                >
+                                                    {savingPayerInvite || inviteSending
+                                                        ? t('studentSettings.inviteParentSending')
+                                                        : t('studentSettings.savePayerContactsCta')}
+                                                </button>
+                                            </div>
+                                        ) : canOneClickInvite ? (
+                                            <div className="space-y-3">
+                                                {payerNameDisp ? (
+                                                    <p className="text-xs text-gray-500 mb-1">
+                                                        <span className="font-semibold text-gray-600">{t('studentSettings.payerName')}: </span>
+                                                        {payerNameDisp}
+                                                    </p>
+                                                ) : null}
+                                                <p className="text-xs text-gray-500 mb-4">
+                                                    <span className="font-semibold text-gray-600">{t('studentSettings.payerEmail')}: </span>
+                                                    {payerEmailDisp}
+                                                </p>
+                                                <button
+                                                    type="button"
+                                                    disabled={inviteSending}
+                                                    onClick={() => void sendParentInvite()}
+                                                    className="w-full py-3 rounded-2xl bg-violet-600 text-white font-bold text-sm hover:bg-violet-700 disabled:opacity-50 transition-colors"
+                                                >
+                                                    {inviteSending ? t('studentSettings.inviteParentSending') : t('studentSettings.inviteParentCta')}
+                                                </button>
+                                            </div>
+                                        ) : canPromoteSelfToParentInvite ? (
+                                            <div className="space-y-3">
+                                                {payerNameDisp ? (
+                                                    <p className="text-xs text-gray-500 mb-1">
+                                                        <span className="font-semibold text-gray-600">{t('studentSettings.payerName')}: </span>
+                                                        {payerNameDisp}
+                                                    </p>
+                                                ) : null}
+                                                <p className="text-xs text-gray-500 mb-1">
+                                                    <span className="font-semibold text-gray-600">{t('studentSettings.payerEmail')}: </span>
+                                                    {payerEmailDisp}
+                                                </p>
+                                                <button
+                                                    type="button"
+                                                    disabled={inviteSending}
+                                                    onClick={() => void promoteSelfToParentAndInvite()}
+                                                    className="w-full py-3 rounded-2xl bg-violet-600 text-white font-bold text-sm hover:bg-violet-700 disabled:opacity-50 transition-colors"
+                                                >
+                                                    {inviteSending ? t('studentSettings.inviteParentSending') : t('studentSettings.promoteParentAndInvite')}
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <p className="text-sm text-gray-500">{t('studentSettings.inviteParentNoEmail')}</p>
+                                        )}
+                                    </>
+                                )}
+                            </>
+                        )}
+                    </div>
+                ) : null}
 
                 <div className="bg-white rounded-3xl p-5 shadow-sm">
                     <div className="flex items-center justify-between mb-4">

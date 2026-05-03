@@ -38,6 +38,7 @@ import {
 } from '@/lib/studentPaymentModel';
 import StudentPaymentModelSection from '@/components/StudentPaymentModelSection';
 import { sendEmail } from '@/lib/email';
+import { copyTextToClipboard } from '@/lib/copyToClipboard';
 import StatusBadge from '@/components/StatusBadge';
 import Toast from '@/components/Toast';
 import { DateRangeFilter } from '@/components/DateRangeFilter';
@@ -840,11 +841,16 @@ export default function StudentsPage() {
     fetchStudents();
   };
 
-  const copyInviteLink = (code: string, id: string) => {
-    const url = `${baseUrl}/book/${code}`;
-    navigator.clipboard.writeText(url);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
+  const copyStudentInviteCode = async (code: string, studentId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const ok = await copyTextToClipboard(code);
+    if (ok) {
+      setCopiedId(studentId);
+      setTimeout(() => setCopiedId(null), 2000);
+    } else {
+      setToastMessage({ message: t('stu.copyInviteFailed'), type: 'error' });
+    }
   };
 
   const sendInviteEmail = (student: Student) => {
@@ -1598,15 +1604,15 @@ export default function StudentsPage() {
                                 <div className="flex items-center gap-1.5">
                                   <button
                                     type="button"
-                                    onClick={() => copyInviteLink(student.invite_code, student.id)}
+                                    onClick={(e) => void copyStudentInviteCode(student.invite_code, student.id, e)}
                                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${isCopied
                                       ? 'bg-green-50 border-green-200 text-green-700'
                                       : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-300 hover:text-indigo-600'
                                       }`}
-                                    title={t('stu.copyLink')}
+                                    title={t('stu.copyInviteCode')}
                                   >
                                     {isCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                                    {isCopied ? 'Nukopijuota!' : 'Kopijuoti'}
+                                    {isCopied ? t('stu.inviteCopied') : t('stu.copyInviteCode')}
                                   </button>
                                   {student.email && (
                                     <button
@@ -2610,31 +2616,36 @@ export default function StudentsPage() {
               <textarea
                 value={cancellationReason}
                 onChange={(e) => setCancellationReason(e.target.value)}
-                placeholder="{t('dash.cancelReasonPlaceholder')}"
+                placeholder={t('dash.cancelReasonPlaceholder')}
                 className="w-full p-3 rounded-xl border border-gray-200 text-sm resize-none focus:ring-2 focus:ring-red-200 focus:border-red-300 outline-none"
                 rows={3}
                 autoFocus
               />
               {cancellationReason.length > 0 && cancellationReason.trim().length < 5 && (
-                <p className="text-xs text-red-500">Bent 5 simboliai ({cancellationReason.trim().length}/5)</p>
+                <p className="text-xs text-red-500">
+                  {t('dash.minChars', { min: '5', current: String(cancellationReason.trim().length) })}
+                </p>
               )}
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={() => { setCancelConfirmId(null); setCancellationReason(''); }} className="rounded-xl flex-1">
                   {t('dash.cancelBtn')}
                 </Button>
-                <Button variant="destructive" size="sm" onClick={handleCancelSession} disabled={savingSession || cancellationReason.trim().length < 5} className="rounded-xl flex-1">
-                  {savingSession ? t('dash.cancelling') : t('dash.confirmCancel')}
+                <Button variant="destructive" size="sm" onClick={handleCancelSession} disabled={savingSession || cancellationReason.trim().length < 5} className="rounded-xl flex-1 gap-2">
+                  {savingSession ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : null}
+                  {t('dash.confirmCancel')}
                 </Button>
               </div>
             </div>
           )}
 
           <DialogFooter className="flex-col sm:flex-row gap-2 pt-2">
+            {cancelConfirmId !== selectedSessionForModal?.id && (
+            <>
             <div className="flex gap-2 flex-1 flex-wrap">
               {selectedSessionForModal?.status === 'active' && (
                 <>
                   <Button
-                    variant={cancelConfirmId === selectedSessionForModal.id ? "default" : "destructive"}
+                    variant="destructive"
                     onClick={() => {
                       if (cancelConfirmId !== selectedSessionForModal.id) {
                         handleCancelSession();
@@ -2642,13 +2653,10 @@ export default function StudentsPage() {
                     }}
                     disabled={savingSession}
                     size="sm"
-                    className={cn(
-                      "rounded-xl flex-1",
-                      cancelConfirmId === selectedSessionForModal.id ? "bg-orange-500 hover:bg-orange-600 text-white" : ""
-                    )}
+                    className="rounded-xl flex-1"
                   >
                     <XCircle className="w-4 h-4 mr-1" />
-                    {cancelConfirmId === selectedSessionForModal.id ? t('dash.cancellingSession') : t('dash.cancelBtn')}
+                    {t('cal.cancelLessonTitle')}
                   </Button>
                   <Button
                     variant="outline"
@@ -2742,6 +2750,8 @@ export default function StudentsPage() {
                 )}
               </Button>
             </div>
+            )}
+            </>
             )}
           </DialogFooter>
         </DialogContent>

@@ -1,5 +1,5 @@
 import webpush from 'web-push';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 const VAPID_PUBLIC = process.env.VAPID_PUBLIC_KEY || '';
 const VAPID_PRIVATE = process.env.VAPID_PRIVATE_KEY || '';
@@ -97,6 +97,76 @@ const PUSH_ELIGIBLE: Record<string, (data: any) => PushPayload | null> = {
   }),
 };
 
+function serviceSupabase(): SupabaseClient | null {
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  if (!supabaseUrl || !serviceKey) return null;
+  return createClient(supabaseUrl, serviceKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
+
+function absolutePayloadUrl(payload: PushPayload): string {
+  const appUrl = (process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt').replace(/\/$/, '');
+  const u = payload.url || '/';
+  if (u.startsWith('http')) return u;
+  return `${appUrl}${u.startsWith('/') ? u : `/${u}`}`;
+}
+
+async function deliverPayloadToUserSubscriptions(
+  sb: SupabaseClient,
+  userId: string,
+  payload: PushPayload,
+): Promise<number> {
+  const { data: subs } = await sb
+    .from('push_subscriptions')
+    .select('id, endpoint, p256dh, auth_key')
+    .eq('user_id', userId);
+
+  if (!subs?.length) return 0;
+
+  const pushData = JSON.stringify({
+    ...payload,
+    url: absolutePayloadUrl(payload),
+  });
+
+  let sent = 0;
+  for (const sub of subs) {
+    try {
+      await webpush.sendNotification(
+        {
+          endpoint: sub.endpoint,
+          keys: { p256dh: sub.p256dh, auth: sub.auth_key },
+        },
+        pushData,
+      );
+      sent++;
+    } catch (err: any) {
+      if (err.statusCode === 410 || err.statusCode === 404) {
+        await sb.from('push_subscriptions').delete().eq('id', sub.id);
+      } else {
+        console.error('[sendPush] error:', err.statusCode, err.message);
+      }
+    }
+  }
+  return sent;
+}
+
+/**
+ * Web push pagal Supabase user id (pvz. pokalbio dalyvis).
+ * Nenaudoja el. pašto throttling / email_notify_* — skirta momentiniams chat pranešimams.
+ */
+export async function sendPushForUserId(userId: string, type: string, data: any): Promise<number> {
+  if (!VAPID_PUBLIC || !VAPID_PRIVATE) return 0;
+  const builder = PUSH_ELIGIBLE[type];
+  if (!builder) return 0;
+  const payload = builder(data);
+  if (!payload) return 0;
+  const sb = serviceSupabase();
+  if (!sb) return 0;
+  return deliverPayloadToUserSubscriptions(sb, userId, payload);
+}
+
 /**
  * Send push notifications for a given email type.
  * Looks up push subscriptions by email, then sends to all active subscriptions.
@@ -115,13 +185,8 @@ export async function sendPushForEmail(
   const payload = builder(data);
   if (!payload) return 0;
 
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-  if (!supabaseUrl || !serviceKey) return 0;
-
-  const sb = createClient(supabaseUrl, serviceKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+  const sb = serviceSupabase();
+  if (!sb) return 0;
 
   const emails = Array.isArray(toEmail) ? toEmail : [toEmail];
   let sent = 0;
@@ -147,37 +212,7 @@ export async function sendPushForEmail(
 
     if (!userId) continue;
 
-    const { data: subs } = await sb
-      .from('push_subscriptions')
-      .select('id, endpoint, p256dh, auth_key')
-      .eq('user_id', userId);
-
-    if (!subs?.length) continue;
-
-    const appUrl = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
-    const pushData = JSON.stringify({
-      ...payload,
-      url: payload.url?.startsWith('http') ? payload.url : `${appUrl}${payload.url || '/'}`,
-    });
-
-    for (const sub of subs) {
-      try {
-        await webpush.sendNotification(
-          {
-            endpoint: sub.endpoint,
-            keys: { p256dh: sub.p256dh, auth: sub.auth_key },
-          },
-          pushData,
-        );
-        sent++;
-      } catch (err: any) {
-        if (err.statusCode === 410 || err.statusCode === 404) {
-          await sb.from('push_subscriptions').delete().eq('id', sub.id);
-        } else {
-          console.error('[sendPush] error:', err.statusCode, err.message);
-        }
-      }
-    }
+    sent += await deliverPayloadToUserSubscriptions(sb, userId, payload);
   }
 
   return sent;

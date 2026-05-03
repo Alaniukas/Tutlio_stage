@@ -24,6 +24,7 @@ import { ParentLessonDetailModal } from '@/components/parent/ParentLessonDetailM
 import { fetchStudentActiveLessonPackagesDeduped } from '@/lib/studentLessonPackagesLight';
 import { rpcGetStudentProfilesDeduped } from '@/lib/preload';
 import { useUser } from '@/contexts/UserContext';
+import { soloTutorUsesManualStudentPayments, trimManualPaymentBankDetails } from '@/lib/subscription';
 
 // BigCalendar Setup
 const locales = { lt: lt };
@@ -210,12 +211,19 @@ export default function StudentSchedule() {
     }>({ full_name: null, email: null, phone: null });
     const [showPaymentModal, setShowPaymentModal] = useState(false);
     const [pendingPaymentSession, setPendingPaymentSession] = useState<{
-        id: string; start: Date; end: Date; price: number | null; deadline: Date; tutorName: string;
+        id: string;
+        start: Date;
+        end: Date;
+        price: number | null;
+        deadline: Date;
+        tutorName: string;
+        tutorSoloManual?: boolean;
     } | null>(null);
     const [fetchingStripe, setFetchingStripe] = useState(false);
     const [creditBalance, setCreditBalance] = useState(0);
     const [activePackages, setActivePackages] = useState<LessonPackageSummary[]>([]);
     const [tutorOrgIsSchool, setTutorOrgIsSchool] = useState(false);
+    const [tutorSoloManualPayments, setTutorSoloManualPayments] = useState(false);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
 
     const parentLessonTutorPolicy = useMemo(() => {
@@ -231,6 +239,9 @@ export default function StudentSchedule() {
             paymentDeadlineHours,
         };
     }, [isParentRoute, tutorId, tutorModalContact, cancellationHours, cancellationFeePercent, paymentTiming, paymentDeadlineHours]);
+
+    const manualPaymentInBookingModal =
+        tutorSoloManualPayments || pendingPaymentSession?.tutorSoloManual === true;
 
     useEffect(() => {
         if (!ctxUser) return;
@@ -462,6 +473,7 @@ export default function StudentSchedule() {
 
         await dedupeAsync(dedupeKey, async () => {
         setTutorOrgIsSchool(false);
+        setTutorSoloManualPayments(false);
         let st: any = null;
 
         // Parent mode: resolve the active child once (auto-pick first linked
@@ -581,7 +593,7 @@ export default function StudentSchedule() {
         const studentGrade = parseStudentGrade(st.grade);
 
         const [tutorProfile, subs, individualPricing, availabilityRes, sessionsRes] = await Promise.all([
-            supabase.from('profiles').select('full_name, email, phone, cancellation_hours, cancellation_fee_percent, min_booking_hours, break_between_lessons, payment_timing, payment_deadline_hours, organization_id, has_active_license, personal_meeting_link').eq('id', st.tutor_id).single(),
+            supabase.from('profiles').select('full_name, email, phone, cancellation_hours, cancellation_fee_percent, min_booking_hours, break_between_lessons, payment_timing, payment_deadline_hours, organization_id, has_active_license, personal_meeting_link, subscription_plan, manual_subscription_exempt, enable_manual_student_payments').eq('id', st.tutor_id).single(),
             supabase.from('subjects').select('*').eq('tutor_id', st.tutor_id).order('name'),
             supabase
                 .from('student_individual_pricing')
@@ -1176,7 +1188,13 @@ export default function StudentSchedule() {
                 }
             }
 
-            const { data: tutorProfile } = await supabase.from('profiles').select('email, full_name, organization_id').eq('id', tutorId).single();
+            const { data: tutorProfile } = await supabase
+                .from('profiles')
+                .select(
+                    'email, full_name, organization_id, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, manual_payment_bank_details',
+                )
+                .eq('id', tutorId)
+                .single();
 
             if (usesPackage && activePackage) {
                 try {
@@ -1207,6 +1225,7 @@ export default function StudentSchedule() {
                 ? new Date(selectedTime.getTime() - paymentDeadlineHours * 3600000)
                 : new Date(endDT.getTime() + paymentDeadlineHours * 3600000);
 
+            const bookingTutorManual = soloTutorUsesManualStudentPayments(tutorProfile ?? null);
             setPendingPaymentSession({
                 id: sessionData.id,
                 start: selectedTime,
@@ -1214,6 +1233,7 @@ export default function StudentSchedule() {
                 price: selectedSubject?.price ?? null,
                 deadline,
                 tutorName: tutorProfile?.full_name ?? 'Korepetitorius',
+                tutorSoloManual: bookingTutorManual,
             });
             setShowPaymentModal(!usesPackage);
             setIsDialogOpen(false);
@@ -1298,10 +1318,10 @@ export default function StudentSchedule() {
                     console.error('Failed to sync booked session to Google Calendar:', e);
                 }
 
-                // Parent pays: send booking confirmation + Stripe checkout email to parent
+                // Parent pays: booking email + mokėjimo instrukcijos (Stripe arba rankinis korepetitoriaus režimas)
                 const payerEmail = studentPayerEmail?.trim() || '';
                 if (studentPaymentPayer === 'parent' && payerEmail) {
-                    sendEmail({
+                    const bookingToParentOk = await sendEmail({
                         type: 'booking_confirmation',
                         to: payerEmail,
                         data: {
@@ -1317,20 +1337,36 @@ export default function StudentSchedule() {
                             cancellationHours,
                             cancellationFeePercent,
                             paymentStatus: usesPackage ? 'paid' : 'pending',
-                            meetingLink: studentPersonalMeetingLink || tutorPersonalMeetingLink || selectedSubject?.meeting_link || null,
+                            meetingLink:
+                                studentPersonalMeetingLink ||
+                                tutorPersonalMeetingLink ||
+                                selectedSubject?.meeting_link ||
+                                null,
                         },
-                    }).catch((err) => console.error('Error sending payer booking confirmation:', err));
+                    });
+                    if (!bookingToParentOk) {
+                        console.error('[StudentSchedule] booking_confirmation to parent failed:', payerEmail);
+                    }
 
                     if (!usesPackage) {
+                        const tutorSoloManual = soloTutorUsesManualStudentPayments(tutorProfile ?? null);
+                        const tutorBankDetails = tutorSoloManual
+                            ? trimManualPaymentBankDetails(
+                                  (tutorProfile as { manual_payment_bank_details?: string | null })?.manual_payment_bank_details,
+                              )
+                            : '';
+
                         try {
                             const res = await fetch('/api/stripe-checkout', {
                                 method: 'POST',
                                 headers: await authHeaders(),
                                 body: JSON.stringify({ sessionId: sessionData.id, payerEmail }),
                             });
-                            const json = await res.json();
-                            if (json.url) {
-                                sendEmail({
+                            const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+                            const checkoutUrl = typeof json.url === 'string' ? json.url : '';
+
+                            if (checkoutUrl) {
+                                const payOk = await sendEmail({
                                     type: 'stripe_payment_forwarding',
                                     to: payerEmail,
                                     data: {
@@ -1339,9 +1375,41 @@ export default function StudentSchedule() {
                                         date: format(selectedTime, 'yyyy-MM-dd'),
                                         time: format(selectedTime, 'HH:mm'),
                                         amount: selectedSubject?.price ?? null,
-                                        paymentLink: json.url,
+                                        paymentLink: checkoutUrl,
                                     },
-                                }).catch((err) => console.error('Error sending parent payment email (fallback):', err));
+                                });
+                                if (!payOk) {
+                                    console.error('[StudentSchedule] stripe_payment_forwarding to parent failed:', payerEmail);
+                                }
+                            } else if (tutorSoloManual) {
+                                const origin = typeof window !== 'undefined' ? window.location.origin.replace(/\/$/, '') : '';
+                                const sessionsPath = `${origin || ''}/student/sessions`;
+                                const payOk = await sendEmail({
+                                    type: 'stripe_payment_forwarding',
+                                    to: payerEmail,
+                                    data: {
+                                        studentName: studentName || 'Mokinys',
+                                        tutorName: tutorProfile?.full_name || 'Korepetitorius',
+                                        date: format(selectedTime, 'yyyy-MM-dd'),
+                                        time: format(selectedTime, 'HH:mm'),
+                                        amount: selectedSubject?.price ?? null,
+                                        manualPaymentInstructions: true,
+                                        bankDetails: tutorBankDetails || undefined,
+                                        paymentLink: sessionsPath,
+                                        payerIsParent: true,
+                                    },
+                                });
+                                if (!payOk) {
+                                    console.error(
+                                        '[StudentSchedule] manual stripe_payment_forwarding to parent failed:',
+                                        payerEmail,
+                                    );
+                                }
+                            } else if (!json?.creditFullyCovered) {
+                                console.warn(
+                                    '[StudentSchedule] Parent payment instructions not sent (no Stripe URL, tutor not manual checkout):',
+                                    json?.error || res.status,
+                                );
                             }
                         } catch (e) {
                             console.error('Parent checkout/email failed:', e);
@@ -2026,9 +2094,17 @@ export default function StudentSchedule() {
                                                         </p>
                                                     )}
                                                     <p>
-                                                        {remaining > 0
-                                                            ? t('stuSched.cardTotal', { amount: formatLessonStripeChargeEur(remaining, tutorOrgIsSchool) })
-                                                            : t('stuSched.creditCoversFullLesson')}
+                                                        {remaining > 0 ? (
+                                                            tutorSoloManualPayments ? (
+                                                                t('stuSched.manualPayNoStripeNote')
+                                                            ) : (
+                                                                t('stuSched.cardTotal', {
+                                                                    amount: formatLessonStripeChargeEur(remaining, tutorOrgIsSchool),
+                                                                })
+                                                            )
+                                                        ) : (
+                                                            t('stuSched.creditCoversFullLesson')
+                                                        )}
                                                     </p>
                                                 </div>
                                             );
@@ -2059,27 +2135,37 @@ export default function StudentSchedule() {
                                 </a>
                             )}
 
-                            {mySessionData?.status === 'active' && !mySessionData.paid && (studentPaymentPayer !== 'parent' || isParentRoute) && (() => {
-                                const { remaining } = lessonCreditBreakdown(mySessionData.price);
-                                return (
-                                    <button
-                                        onClick={() => handleGoToStripe(mySessionData.id)}
-                                        disabled={fetchingStripe}
-                                        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
-                                    >
-                                        {fetchingStripe
-                                            ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('common.loading')}</>
-                                            : (
-                                                <>
-                                                    <CreditCard className="w-4 h-4" />
-                                                    {remaining > 0
-                                                        ? `${t('stuSched.payStripe')} — €${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}`
-                                                        : `${t('stuSched.payStripe')} — ${t('stuSess.payWithCredit')}`}
-                                                </>
-                                            )}
-                                    </button>
-                                );
-                            })()}
+                            {mySessionData?.status === 'active' && !mySessionData.paid && (studentPaymentPayer !== 'parent' || isParentRoute) &&
+                                (!tutorSoloManualPayments ? (
+                                    (() => {
+                                        const { remaining } = lessonCreditBreakdown(mySessionData.price);
+                                        return (
+                                            <button
+                                                onClick={() => handleGoToStripe(mySessionData.id)}
+                                                disabled={fetchingStripe}
+                                                className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
+                                            >
+                                                {fetchingStripe ? (
+                                                    <>
+                                                        <Loader2 className="w-4 h-4 animate-spin" /> {t('common.loading')}
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <CreditCard className="w-4 h-4" />
+                                                        {remaining > 0
+                                                            ? `${t('stuSched.payStripe')} — €${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}`
+                                                            : `${t('stuSched.payStripe')} — ${t('stuSess.payWithCredit')}`}
+                                                    </>
+                                                )}
+                                            </button>
+                                        );
+                                    })()
+                                ) : (
+                                    <div className="flex items-start gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                                        <Info className="w-5 h-5 text-slate-500 flex-shrink-0 mt-0.5" />
+                                        <p className="text-sm text-slate-800 leading-snug">{t('stuSched.manualPaymentBookingHint')}</p>
+                                    </div>
+                                ))}
 
                             {mySessionData?.status === 'active' && mySessionData.start_time && isAfter(new Date(mySessionData.start_time), new Date()) && (
                                 <div className="grid grid-cols-2 gap-3">
@@ -2152,15 +2238,22 @@ export default function StudentSchedule() {
                                                     {t('stuSched.creditRowApplied')}: €{creditApplied.toFixed(2)}
                                                 </p>
                                             )}
-                                            <p>
-                                                {remaining > 0 ? (
-                                                    <>
-                                                        <span className="font-medium">{t('stuSched.cardPayTotal')}</span> €{formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}
-                                                    </>
-                                                ) : (
+                                            {remaining > 0 && !manualPaymentInBookingModal && (
+                                                <p>
+                                                    <span className="font-medium">{t('stuSched.cardPayTotal')}</span>{' '}
+                                                    €{formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}
+                                                </p>
+                                            )}
+                                            {remaining > 0 && manualPaymentInBookingModal && (
+                                                <p className="text-slate-600 text-[13px] leading-snug">
+                                                    {t('stuSched.manualPayNoStripeNote')}
+                                                </p>
+                                            )}
+                                            {remaining <= 0 && (
+                                                <p>
                                                     <span className="font-medium text-emerald-800">{t('stuSched.creditCoversFullLesson')}</span>
-                                                )}
-                                            </p>
+                                                </p>
+                                            )}
                                         </>
                                     );
                                 })()}
@@ -2197,30 +2290,37 @@ export default function StudentSchedule() {
                                         <p className="text-sm text-violet-900">{t('stuSched.parentBookingPayNowHint')}</p>
                                     </div>
                                 ) : null}
-                                <button
-                                    type="button"
-                                    onClick={() => pendingPaymentSession && handleGoToStripe(pendingPaymentSession.id)}
-                                    disabled={fetchingStripe}
-                                    className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
-                                >
-                                    {fetchingStripe ? (
-                                        <>
-                                            <Loader2 className="w-4 h-4 animate-spin" /> Jungiamasi...
-                                        </>
-                                    ) : (
-                                        <>
-                                            <CreditCard className="w-4 h-4" />
-                                            {pendingPaymentSession?.price != null
-                                                ? (() => {
-                                                    const { remaining } = lessonCreditBreakdown(pendingPaymentSession.price);
-                                                    return remaining > 0
-                                                        ? `${t('stuSched.payStripe')} — €${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}`
-                                                        : `${t('stuSched.payStripe')} — ${t('stuSess.payWithCredit')}`;
-                                                })()
-                                                : t('stuSched.payStripe')}
-                                        </>
-                                    )}
-                                </button>
+                                {manualPaymentInBookingModal ? (
+                                    <div className="flex items-start gap-3 p-4 bg-slate-50 border border-slate-200 rounded-xl">
+                                        <Info className="w-5 h-5 text-slate-500 flex-shrink-0 mt-0.5" />
+                                        <p className="text-sm text-slate-800 leading-snug">{t('stuSched.manualPaymentBookingHint')}</p>
+                                    </div>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={() => pendingPaymentSession && handleGoToStripe(pendingPaymentSession.id)}
+                                        disabled={fetchingStripe}
+                                        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
+                                    >
+                                        {fetchingStripe ? (
+                                            <>
+                                                <Loader2 className="w-4 h-4 animate-spin" /> Jungiamasi...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <CreditCard className="w-4 h-4" />
+                                                {pendingPaymentSession?.price != null
+                                                    ? (() => {
+                                                        const { remaining } = lessonCreditBreakdown(pendingPaymentSession.price);
+                                                        return remaining > 0
+                                                            ? `${t('stuSched.payStripe')} — €${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}`
+                                                            : `${t('stuSched.payStripe')} — ${t('stuSess.payWithCredit')}`;
+                                                    })()
+                                                    : t('stuSched.payStripe')}
+                                            </>
+                                        )}
+                                    </button>
+                                )}
                             </>
                         )}
                     </div>

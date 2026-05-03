@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
-import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe';
+import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 const STRIPE_API_VERSION = '2026-02-25.clover' as any;

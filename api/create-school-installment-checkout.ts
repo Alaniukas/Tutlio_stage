@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
 import { verifyRequestAuth } from './_lib/auth.js';
-import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe';
+import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');

@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import Layout from '@/components/Layout';
 import { useTranslation } from '@/lib/i18n';
 import { useUser } from '@/contexts/UserContext';
+import PwaInstallGuide from '@/components/PwaInstallGuide';
 
 export default function Instructions() {
   const { t } = useTranslation();
@@ -72,6 +73,11 @@ export default function Instructions() {
               </div>
             </CardContent>
           </Card>
+
+          <section className="space-y-4">
+            <h2 className="text-xl font-bold text-gray-900">{t('pwa.instructionsSectionTitle')}</h2>
+            <PwaInstallGuide variant="instructions" />
+          </section>
 
           <Card className="bg-gray-50 border-gray-200">
             <CardHeader>
@@ -165,6 +171,11 @@ export default function Instructions() {
               </div>
             </CardContent>
           </Card>
+
+          <section className="space-y-4">
+            <h2 className="text-xl font-bold text-gray-900">{t('pwa.instructionsSectionTitle')}</h2>
+            <PwaInstallGuide variant="instructions" />
+          </section>
 
           <Card className="bg-gray-50 border-gray-200">
             <CardHeader>

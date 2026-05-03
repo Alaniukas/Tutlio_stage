@@ -95,9 +95,17 @@ export default function Layout({ children }: LayoutProps) {
   }, [profile, ctxUser?.email, userLoading, t]);
 
   useEffect(() => {
+    // Pathname-driven only: when query ?section= is stripped inside /instructions, search changes
+    // but pathname stays the same — we must not rerun this and snap scroll back to top.
+    const skipForPwaJump =
+      location.pathname === '/instructions' &&
+      new URLSearchParams(location.search).get('section') === 'install-app';
+    if (skipForPwaJump) return;
     mainRef.current?.scrollTo(0, 0);
     const raf = requestAnimationFrame(() => mainRef.current?.scrollTo(0, 0));
     return () => cancelAnimationFrame(raf);
+    // intentionally omit location.search from deps — see skipForPwaJump note above
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
 
   useEffect(() => {
@@ -119,7 +127,7 @@ export default function Layout({ children }: LayoutProps) {
   return (
     <div className="h-dvh max-h-dvh bg-white flex overflow-hidden relative">
       <OrgSuspendedBanner />
-      <PwaInstallPrompt settingsPath="/settings" />
+      <PwaInstallPrompt settingsPath="/instructions" />
       <div className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] bg-indigo-50/40 rounded-full blur-[80px] pointer-events-none z-0" />
       <div className="absolute bottom-[-10%] left-[-10%] w-[600px] h-[600px] bg-slate-50/40 rounded-full blur-[100px] pointer-events-none z-0" />
 
@@ -351,7 +359,7 @@ export default function Layout({ children }: LayoutProps) {
         <main
           ref={mainRef}
           className={cn(
-            'flex-1 min-h-0',
+            'flex-1 min-h-0 min-w-0 overflow-x-hidden',
             isCalendarRoute
               ? 'overflow-y-auto px-2 sm:px-3 py-2 sm:py-3'
               : 'overflow-y-auto px-4 xl:px-6 py-6',

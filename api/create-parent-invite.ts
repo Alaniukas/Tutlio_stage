@@ -1,11 +1,24 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
+import { verifyRequestAuth } from './_lib/auth.js';
 import { insertParentInviteAndSendEmail, type ParentInviteSource } from './_lib/parentInvite.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
+/**
+ * Legacy/server-only: use `x-internal-key` (service role) or POST from register-student /
+ * student-invite-parent. Anonymous browser calls are rejected.
+ */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  const auth = await verifyRequestAuth(req);
+  if (!auth?.isInternal) {
+    return res.status(401).json({
+      error:
+        'Unauthorized. Use POST /api/student-invite-parent as a logged-in student, or invoke from server with x-internal-key.',
+    });
+  }
 
   const supabaseUrlRaw = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   // allow alternative env name used in some deployments

@@ -15,13 +15,21 @@ import { fetchOrgTutorInvoicesDeduped } from '@/lib/fetchOrgTutorInvoicesDeduped
 
 type GroupingType = 'per_payment' | 'per_week' | 'single';
 
+const COMPANY_SELLER_ENTITIES = new Set(['mb', 'uab', 'ii']);
+
 interface SellerInfo {
   business_name?: string;
   company_code?: string;
   vat_code?: string;
   address?: string;
   contact_email?: string;
+  contact_phone?: string;
   entity_type?: string;
+  activity_number?: string;
+  personal_code?: string;
+  invoice_series?: string;
+  /** Tik peržiūrai: mokinio sąskaitose pardavėjo vardą imame iš Tutlio profilio (neiš įmonės lauko „Pavadinimas“). */
+  _previewSellerFullName?: string | null;
 }
 
 interface CreateInvoiceModalProps {
@@ -104,9 +112,33 @@ export default function CreateInvoiceModal({
       ]);
       const userJson = await userRes.json();
       const orgJson = orgRes ? await orgRes.json() : null;
-      const profileData = orgJson?.data || userJson.data;
+      const profileData = (orgJson?.data || userJson.data) as SellerInfo | null | undefined;
       setHasInvoiceProfile(!!profileData);
-      if (profileData) setSellerInfo(profileData);
+
+      let previewName: string | null | undefined;
+      const needsTutorName =
+        profileData &&
+        (!profileData.entity_type || !COMPANY_SELLER_ENTITIES.has(profileData.entity_type));
+
+      if (needsTutorName) {
+        try {
+          const { data: auth } = await supabase.auth.getUser();
+          const uid = auth?.user?.id;
+          if (uid) {
+            const { data: pf } = await supabase.from('profiles').select('full_name').eq('id', uid).maybeSingle();
+            previewName = (pf?.full_name || '').trim() || null;
+          }
+        } catch {
+          previewName = null;
+        }
+      }
+
+      if (profileData) {
+        setSellerInfo({
+          ...profileData,
+          _previewSellerFullName: previewName,
+        });
+      }
     } catch {
       setHasInvoiceProfile(false);
     }
@@ -450,10 +482,62 @@ export default function CreateInvoiceModal({
                         <Building2 className="w-3.5 h-3.5" />
                         {t('invoiceCreate.seller')}
                       </p>
-                      <p className="text-sm font-medium text-gray-900">{sellerInfo.business_name || '-'}</p>
-                      {sellerInfo.company_code && <p className="text-xs text-gray-600">{sellerInfo.company_code}</p>}
-                      {sellerInfo.vat_code && <p className="text-xs text-gray-600">{sellerInfo.vat_code}</p>}
-                      {sellerInfo.address && <p className="text-xs text-gray-600">{sellerInfo.address}</p>}
+                      {(() => {
+                        const isCompany =
+                          !!sellerInfo.entity_type && COMPANY_SELLER_ENTITIES.has(sellerInfo.entity_type);
+                        const tutorNameLine = sellerInfo._previewSellerFullName?.trim() || '';
+                        const bizLine = sellerInfo.business_name?.trim() || '';
+                        const primary = isCompany
+                          ? bizLine || tutorNameLine || sellerInfo.company_code?.trim() || '-'
+                          : tutorNameLine ||
+                            bizLine ||
+                            sellerInfo.activity_number?.trim() ||
+                            '-';
+
+                        return (
+                          <>
+                            <p className="text-sm font-medium text-gray-900">{primary}</p>
+                            {sellerInfo.entity_type && (
+                              <p className="text-xs text-gray-500 mb-1">
+                                {t(`invoiceSettings.entityType_${sellerInfo.entity_type}`)}
+                              </p>
+                            )}
+                            {isCompany ? (
+                              <>
+                                {sellerInfo.company_code?.trim() && (
+                                  <p className="text-xs text-gray-600">{sellerInfo.company_code}</p>
+                                )}
+                                {sellerInfo.vat_code?.trim() && (
+                                  <p className="text-xs text-gray-600">{sellerInfo.vat_code}</p>
+                                )}
+                                {sellerInfo.address?.trim() && (
+                                  <p className="text-xs text-gray-600">{sellerInfo.address}</p>
+                                )}
+                              </>
+                            ) : (
+                              <>
+                                {sellerInfo.activity_number?.trim() &&
+                                  sellerInfo.activity_number.trim() !== primary.trim() && (
+                                    <p className="text-xs text-gray-600">
+                                      {t('invoiceSettings.activityNumber')}: {sellerInfo.activity_number}
+                                    </p>
+                                  )}
+                                {sellerInfo.personal_code?.trim() && (
+                                  <p className="text-xs text-gray-600">
+                                    {t('invoiceSettings.personalCode')}: {sellerInfo.personal_code}
+                                  </p>
+                                )}
+                                {sellerInfo.contact_email?.trim() && (
+                                  <p className="text-xs text-gray-600">{sellerInfo.contact_email}</p>
+                                )}
+                                {sellerInfo.contact_phone?.trim() && (
+                                  <p className="text-xs text-gray-600">{sellerInfo.contact_phone}</p>
+                                )}
+                              </>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   )}
                   {buyerInfo && (

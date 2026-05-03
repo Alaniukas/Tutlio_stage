@@ -26,6 +26,7 @@ import { enUS } from 'date-fns/locale';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 
 import Layout from '@/components/Layout';
+import { soloTutorUsesManualStudentPayments } from '@/lib/subscription';
 import { useTranslation } from '@/lib/i18n';
 import { supabase } from '@/lib/supabase';
 import { useUser } from '@/contexts/UserContext';
@@ -445,6 +446,7 @@ export default function CalendarPage() {
       personal_meeting_link?: string | null;
       subscription_plan?: string | null;
       manual_subscription_exempt?: boolean | null;
+      enable_manual_student_payments?: boolean | null;
     } | null;
 
     if (ctxProfile?.id === user.id) {
@@ -454,6 +456,7 @@ export default function CalendarPage() {
         organization_id: ctxProfile.organization_id,
         subscription_plan: ctxProfile.subscription_plan ?? null,
         manual_subscription_exempt: ctxProfile.manual_subscription_exempt ?? null,
+        enable_manual_student_payments: ctxProfile.enable_manual_student_payments ?? null,
         personal_meeting_link: ctxProfile.personal_meeting_link ?? null,
       };
     } else {
@@ -461,10 +464,26 @@ export default function CalendarPage() {
       profileData = data ?? null;
     }
 
+    // Sintakronizuoti Stripe / rankinių mokėjimų laukus iš DB (UserContext gali būti pasenęs po admin / Finansų kitų langų)
+    const { data: paySync } = await tutorCalendarFallbackProfileDeduped(user.id);
+    if (paySync && profileData) {
+      profileData = {
+        ...profileData,
+        stripe_account_id: paySync.stripe_account_id ?? profileData.stripe_account_id,
+        organization_id: paySync.organization_id ?? profileData.organization_id,
+        google_calendar_connected:
+          paySync.google_calendar_connected ?? profileData.google_calendar_connected,
+        personal_meeting_link: paySync.personal_meeting_link ?? profileData.personal_meeting_link,
+        subscription_plan: paySync.subscription_plan ?? profileData.subscription_plan,
+        manual_subscription_exempt:
+          paySync.manual_subscription_exempt ?? profileData.manual_subscription_exempt,
+        enable_manual_student_payments:
+          paySync.enable_manual_student_payments ?? profileData.enable_manual_student_payments,
+      };
+    }
+
     setIsOrgTutor(!!profileData?.organization_id);
-    const isManualOnlyPlan =
-      !profileData?.organization_id &&
-      (profileData?.subscription_plan === 'subscription_only' || profileData?.manual_subscription_exempt === true);
+    const isManualOnlyPlan = soloTutorUsesManualStudentPayments(profileData);
     setStripeConnected(!!profileData?.stripe_account_id || isManualOnlyPlan);
     setGoogleCalendarConnected(!!profileData?.google_calendar_connected);
     setTutorMeetingLink((profileData as any)?.personal_meeting_link || '');
@@ -3336,14 +3355,14 @@ export default function CalendarPage() {
         )}
         <div className="flex flex-col w-full max-w-none px-0 sm:px-1">
         {/* Header */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center mb-4 flex-shrink-0">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Kalendorius</h1>
+        <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center mb-4 flex-shrink-0 min-w-0">
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Kalendorius</h1>
           <p className="text-sm text-gray-500 mt-0.5">{t('cal.manageSchedule')}</p>
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap w-full sm:w-auto min-w-0 sm:justify-end">
           {googleCalendarConnected ? (
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap min-w-0">
               <Button
                 variant="default"
                 onClick={handleGoogleCalendarSync}
@@ -3503,40 +3522,40 @@ export default function CalendarPage() {
           calendarExpanded ? 'calendar-expanded' : 'calendar-collapsed',
         )}>
         {/* Custom Toolbar */}
-        <div className="flex items-center justify-between gap-2 px-3 sm:px-6 py-3 sm:py-4 border-b border-gray-100">
+        <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 px-3 sm:px-6 py-3 sm:py-4 border-b border-gray-100 min-w-0">
           {/* Left: prev / today / next */}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 shrink-0">
             <button
               type="button"
               onClick={() => handleNavigate('back')}
-              className="p-2 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors text-gray-600"
+              className="p-2 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors text-gray-600 touch-manipulation min-h-[40px] min-w-[40px] flex items-center justify-center"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
             <button
               type="button"
               onClick={() => handleNavigate('today')}
-              className="px-2 sm:px-4 py-2 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors text-xs sm:text-sm font-medium text-gray-700"
+              className="px-2 sm:px-4 py-2 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors text-xs sm:text-sm font-medium text-gray-700 touch-manipulation min-h-[40px]"
             >
               {t('cal.today')}
             </button>
             <button
               type="button"
               onClick={() => handleNavigate('next')}
-              className="p-2 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors text-gray-600"
+              className="p-2 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors text-gray-600 touch-manipulation min-h-[40px] min-w-[40px] flex items-center justify-center"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
 
           {/* Center: label */}
-          <h2 className="text-xs sm:text-base font-semibold text-gray-800 capitalize text-center flex-1 truncate px-1">
+          <h2 className="text-xs sm:text-base font-semibold text-gray-800 capitalize text-center min-w-0 truncate px-1">
             <span className="hidden sm:inline">{getLabel()}</span>
             <span className="sm:hidden">{getLabelShort()}</span>
           </h2>
 
           {/* Right: view switcher */}
-          <div className="flex items-center bg-gray-100 rounded-xl p-1 gap-0.5">
+          <div className="flex items-center justify-end flex-wrap bg-gray-100 rounded-xl p-1 gap-0.5 shrink-0 max-w-[100%]">
             <button
               type="button"
               onClick={() => setCurrentView(Views.MONTH)}
@@ -4463,18 +4482,20 @@ export default function CalendarPage() {
                 <Button variant="outline" size="sm" onClick={() => { setCancelConfirmId(null); setCancellationReason(''); }} className="rounded-xl flex-1">
                   {t('cal.cancelBtn')}
                 </Button>
-                <Button variant="destructive" size="sm" onClick={handleCancelSession} disabled={saving || cancellationReason.trim().length < 5} className="rounded-xl flex-1">
-                  {saving ? t('cal.cancelling') : t('cal.confirmCancellation')}
+                <Button variant="destructive" size="sm" onClick={handleCancelSession} disabled={saving || cancellationReason.trim().length < 5} className="rounded-xl flex-1 gap-2">
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : null}
+                  {t('cal.confirmCancellation')}
                 </Button>
               </div>
             </div>
           )}
 
+          {cancelConfirmId !== selectedEvent?.id && (
           <div className="flex flex-col gap-2 pt-2">
             {selectedEvent?.status === 'completed' && (
               <div className="flex flex-wrap gap-2">
                 <Button
-                  variant={cancelConfirmId === selectedEvent.id ? "default" : "destructive"}
+                  variant="destructive"
                   onClick={() => {
                     if (cancelConfirmId !== selectedEvent.id) {
                       handleCancelSession();
@@ -4482,20 +4503,17 @@ export default function CalendarPage() {
                   }}
                   disabled={saving}
                   size="sm"
-                  className={cn(
-                    "rounded-xl flex-1",
-                    cancelConfirmId === selectedEvent.id ? "bg-orange-500 hover:bg-orange-600 text-white" : ""
-                  )}
+                  className="rounded-xl flex-1"
                 >
                   <XCircle className="w-4 h-4 mr-1" />
-                  {cancelConfirmId === selectedEvent.id ? t('cal.cancellingStatus') : t('cal.cancelCompletedLabel')}
+                  {t('cal.cancelCompletedLabel')}
                 </Button>
               </div>
             )}
             {selectedEvent?.status === 'active' && (
               <div className="flex flex-wrap gap-2">
                 <Button
-                  variant={cancelConfirmId === selectedEvent.id ? "default" : "destructive"}
+                  variant="destructive"
                   onClick={() => {
                     if (cancelConfirmId !== selectedEvent.id) {
                       handleCancelSession();
@@ -4503,13 +4521,10 @@ export default function CalendarPage() {
                   }}
                   disabled={saving}
                   size="sm"
-                  className={cn(
-                    "rounded-xl flex-1",
-                    cancelConfirmId === selectedEvent.id ? "bg-orange-500 hover:bg-orange-600 text-white" : ""
-                  )}
+                  className="rounded-xl flex-1"
                 >
                   <XCircle className="w-4 h-4 mr-1" />
-                  {cancelConfirmId === selectedEvent.id ? t('cal.cancellingStatus') : t('cal.cancelLabel')}
+                  {t('cal.cancelLessonTitle')}
                 </Button>
                 {!isAfter(new Date(), selectedEvent.end_time) && (
                   <Button
@@ -4661,6 +4676,7 @@ export default function CalendarPage() {
               )}
             </div>
           </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -5713,14 +5729,12 @@ export default function CalendarPage() {
                     disabled={massCancelLoading || massCancellationReason.trim().length < 5}
                     className="flex-1 rounded-lg bg-red-600 hover:bg-red-700"
                   >
-                    {massCancelLoading ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                        {t('cal.massCancelProcessing')}
-                      </>
-                    ) : (
-                      t('cal.massCancelConfirm', { count: String(massCancelPreviewSessions.length) })
-                    )}
+                    <>
+                      {massCancelLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2 shrink-0" /> : null}
+                      {massCancelLoading
+                        ? t('cal.confirmCancellation')
+                        : t('cal.massCancelConfirm', { count: String(massCancelPreviewSessions.length) })}
+                    </>
                   </Button>
                 </div>
 

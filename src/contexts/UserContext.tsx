@@ -18,6 +18,8 @@ interface UserProfile {
   subscription_plan?: string | null;
   /** Server-set exception — access without Stripe subscription */
   manual_subscription_exempt?: boolean;
+  /** Solo: rankiniai studentų mokėjimai (/admin arba istoriniai keliai). */
+  enable_manual_student_payments?: boolean;
   trial_ends_at?: string | null;
   phone?: string | null;
   preferred_locale?: string | null;
@@ -42,9 +44,9 @@ const UserContext = createContext<UserContextType>({
 
 export const useUser = () => useContext(UserContext);
 
-const PROFILE_SELECT_WITH_TRIAL = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, personal_meeting_link, break_between_lessons, min_booking_hours, subscription_status, subscription_plan, manual_subscription_exempt, trial_ends_at, phone, stripe_onboarding_complete, preferred_locale, payment_timing, payment_deadline_hours';
-const PROFILE_SELECT_LEGACY = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, personal_meeting_link, break_between_lessons, min_booking_hours, subscription_status, subscription_plan, manual_subscription_exempt, phone, stripe_onboarding_complete, preferred_locale, payment_timing, payment_deadline_hours';
-const PROFILE_SELECT_CORE = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, personal_meeting_link, break_between_lessons, min_booking_hours, subscription_status, subscription_plan, manual_subscription_exempt, phone';
+const PROFILE_SELECT_WITH_TRIAL = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, personal_meeting_link, break_between_lessons, min_booking_hours, subscription_status, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, trial_ends_at, phone, stripe_onboarding_complete, preferred_locale, payment_timing, payment_deadline_hours';
+const PROFILE_SELECT_LEGACY = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, personal_meeting_link, break_between_lessons, min_booking_hours, subscription_status, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, phone, stripe_onboarding_complete, preferred_locale, payment_timing, payment_deadline_hours';
+const PROFILE_SELECT_CORE = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, personal_meeting_link, break_between_lessons, min_booking_hours, subscription_status, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, phone';
 
 export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);

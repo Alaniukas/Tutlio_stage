@@ -81,7 +81,7 @@ export function tutorPreloadProfileDeduped(userId: string) {
     supabase
       .from('profiles')
       .select(
-        'full_name, organization_id, stripe_account_id, payment_timing, payment_deadline_hours, subscription_plan, manual_subscription_exempt',
+        'full_name, organization_id, stripe_account_id, payment_timing, payment_deadline_hours, subscription_plan, manual_subscription_exempt, enable_manual_student_payments',
       )
       .eq('id', userId)
       .maybeSingle(),
@@ -201,7 +201,7 @@ export function tutorFinancePageProfileDeduped(userId: string) {
     supabase
       .from('profiles')
       .select(
-        'organization_id, stripe_account_id, stripe_onboarding_complete, payment_timing, payment_deadline_hours, min_booking_hours, enable_per_lesson, enable_monthly_billing, enable_prepaid_packages, restrict_booking_on_overdue, enable_per_student_payment_override',
+        'organization_id, stripe_account_id, stripe_onboarding_complete, payment_timing, payment_deadline_hours, min_booking_hours, enable_per_lesson, enable_monthly_billing, enable_prepaid_packages, restrict_booking_on_overdue, enable_per_student_payment_override, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, manual_payment_bank_details',
       )
       .eq('id', userId)
       .maybeSingle(),
@@ -214,7 +214,7 @@ export function tutorCalendarFallbackProfileDeduped(userId: string) {
     supabase
       .from('profiles')
       .select(
-        'stripe_account_id, google_calendar_connected, organization_id, personal_meeting_link, subscription_plan, manual_subscription_exempt',
+        'stripe_account_id, google_calendar_connected, organization_id, personal_meeting_link, subscription_plan, manual_subscription_exempt, enable_manual_student_payments',
       )
       .eq('id', userId)
       .maybeSingle(),
@@ -599,10 +599,47 @@ export async function preloadStudentData() {
   }
 }
 
-export function parentProfileDeduped(userId: string) {
-  return dedupeAsync(`rpc_parent_prof:${userId}`, () =>
-    supabase.rpc('get_parent_profile_by_user_id', { p_user_id: userId }),
-  );
+/** Parse `get_parent_profile_by_user_id` result (array of rows or one row object). */
+export function parentFullNameFromRpcPayload(data: unknown): string | null {
+  if (data == null) return null;
+  let row: Record<string, unknown> | null = null;
+  if (Array.isArray(data)) {
+    const first = data[0];
+    row = first && typeof first === 'object' ? (first as Record<string, unknown>) : null;
+  } else if (typeof data === 'object') {
+    row = data as Record<string, unknown>;
+  }
+  if (!row) return null;
+  const raw = row.full_name;
+  const s = typeof raw === 'string' ? raw.trim() : '';
+  return s || null;
+}
+
+/**
+ * Tėvo pilnas vardas UI: pirma `parent_profiles` (paprasta RLS: savo eilutė),
+ * tada RPC — išvengia tuščio vardo kai RPC klientas grąžina netikėtą formą.
+ */
+export function parentFullNameForUserDeduped(userId: string) {
+  return dedupeAsync(`parent_full_name:${userId}`, async (): Promise<string | null> => {
+    const { data: row, error: selErr } = await supabase
+      .from('parent_profiles')
+      .select('full_name')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (!selErr) {
+      const fromTable = typeof row?.full_name === 'string' ? row.full_name.trim() : '';
+      if (fromTable) return fromTable;
+    } else {
+      console.warn('[parentFullNameForUserDeduped] parent_profiles:', selErr.message);
+    }
+
+    const { data: rpcData, error: rpcErr } = await supabase.rpc('get_parent_profile_by_user_id', {
+      p_user_id: userId,
+    });
+    if (rpcErr) console.warn('[parentFullNameForUserDeduped] rpc:', rpcErr.message);
+    return parentFullNameFromRpcPayload(rpcData);
+  });
 }
 
 export function parentStudentLinksDeduped(userId: string) {
@@ -624,15 +661,12 @@ export async function preloadParentData() {
     const user = await getAuthUser();
     if (!user) return;
 
-    const [parentProfileRes, linksRes] = await Promise.all([
-      parentProfileDeduped(user.id),
+    const [parentNameResolved, linksRes] = await Promise.all([
+      parentFullNameForUserDeduped(user.id),
       parentStudentLinksDeduped(user.id),
     ]);
 
-    const parentRow = Array.isArray(parentProfileRes.data)
-      ? parentProfileRes.data[0]
-      : parentProfileRes.data;
-    const parentName = (parentRow as any)?.full_name || null;
+    const parentName = parentNameResolved || null;
 
     const links = linksRes.data ?? [];
     const studentsRaw = links

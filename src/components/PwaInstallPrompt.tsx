@@ -3,9 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { X, Smartphone } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { useUser } from '@/contexts/UserContext';
-
-const PERMANENT_DISMISS_PREFIX = 'tutlio_pwa_install_dismissed_';
-const SESSION_DISMISS_KEY = 'tutlio_pwa_install_session_closed';
+import {
+  clearLegacyPwaGlobalSessionKeys,
+  isPwaInstallPermanentlyHidden,
+  isBannerSessionDismissed,
+  setBannerSessionDismissed,
+  setPwaInstallPermanentlyHidden,
+} from '@/lib/pwaInstallPrefs';
 
 function isStandalonePwa(): boolean {
   if (typeof window === 'undefined') return false;
@@ -26,10 +30,11 @@ export default function PwaInstallPrompt({ settingsPath }: PwaInstallPromptProps
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
+    clearLegacyPwaGlobalSessionKeys();
     if (!user?.id) return;
     if (isStandalonePwa()) return;
-    if (sessionStorage.getItem(SESSION_DISMISS_KEY) === '1') return;
-    if (localStorage.getItem(PERMANENT_DISMISS_PREFIX + user.id) === '1') return;
+    if (isBannerSessionDismissed(user.id)) return;
+    if (isPwaInstallPermanentlyHidden(user.id)) return;
 
     const timer = setTimeout(() => setVisible(true), 800);
     return () => clearTimeout(timer);
@@ -38,19 +43,17 @@ export default function PwaInstallPrompt({ settingsPath }: PwaInstallPromptProps
   if (!visible) return null;
 
   const handleDismiss = () => {
-    sessionStorage.setItem(SESSION_DISMISS_KEY, '1');
+    if (user?.id) setBannerSessionDismissed(user.id);
     setVisible(false);
   };
 
   const handleDontShowAgain = () => {
-    if (user?.id) {
-      localStorage.setItem(PERMANENT_DISMISS_PREFIX + user.id, '1');
-    }
+    if (user?.id) setPwaInstallPermanentlyHidden(user.id);
     setVisible(false);
   };
 
+  /** Nebesaugome globalaus session rakto („Kaip įdiegti?) – naujoje skiltyje atsidaro gidą, banerį galima rodyti vėl po navigacijos. */
   const handleHowTo = () => {
-    sessionStorage.setItem(SESSION_DISMISS_KEY, '1');
     setVisible(false);
     navigate(`${settingsPath}?section=install-app`);
   };

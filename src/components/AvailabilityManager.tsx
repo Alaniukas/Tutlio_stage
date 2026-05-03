@@ -17,6 +17,7 @@ import { Trash2, Plus, Pencil, Check, X } from 'lucide-react';
 import TimeSpinner from '@/components/TimeSpinner';
 import Toast from '@/components/Toast';
 import { useTranslation } from '@/lib/i18n';
+import { soloTutorUsesManualStudentPayments } from '@/lib/subscription';
 
 interface AvailabilitySlot {
   id: string;
@@ -123,10 +124,13 @@ export default function AvailabilityManager() {
 
     const { data: profileData } = await supabase
       .from('profiles')
-      .select('stripe_account_id, organization_id')
+      .select(
+        'stripe_account_id, organization_id, subscription_plan, manual_subscription_exempt, enable_manual_student_payments',
+      )
       .eq('id', user.id)
       .single();
-    setStripeConnected(!!profileData?.stripe_account_id);
+    const manualOk = soloTutorUsesManualStudentPayments(profileData);
+    setStripeConnected(!!profileData?.stripe_account_id || manualOk);
     setIsOrgTutor(!!profileData?.organization_id);
 
     const { data: subs } = await supabase.from('subjects').select('id, name, grade_min, grade_max, is_group, max_students').eq('tutor_id', user.id);

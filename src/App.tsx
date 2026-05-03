@@ -61,6 +61,8 @@ import ParentDashboard from '@/pages/ParentDashboard';
 import ParentSessions from '@/pages/ParentSessions';
 import ParentInvoices from '@/pages/ParentInvoices';
 import ParentMessages from '@/pages/ParentMessages';
+import ParentInstructions from '@/pages/ParentInstructions';
+import ParentSettings from '@/pages/ParentSettings';
 import ParentRegister from '@/pages/ParentRegister';
 import SchoolContractComplete from '@/pages/SchoolContractComplete';
 import SupabaseAuthHashErrors from '@/components/SupabaseAuthHashErrors';
@@ -208,6 +210,8 @@ export default function App({ basename }: { basename: string }) {
           <Route path="/parent/child/:studentId/waitlist" element={<ParentLegacyChildToLessonsRedirect />} />
           <Route path="/parent/invoices" element={<ParentInvoices />} />
           <Route path="/parent/messages" element={<ParentMessages />} />
+          <Route path="/parent/settings" element={<ParentSettings />} />
+          <Route path="/parent/instructions" element={<ParentInstructions />} />
           {/* Catch-all for /parent/* – stay inside the parent portal instead of bouncing to /login. */}
           <Route path="/parent/*" element={<Navigate to="/parent" replace />} />
         </Route>

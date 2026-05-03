@@ -92,6 +92,59 @@ const getAppUrl = () => {
   return process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 };
 
+function prefersManualInstructions(d: any): boolean {
+  return d?.manualPaymentInstructions === true || d?.manualPaymentInstructions === 'true';
+}
+
+/** Nekintantys tekstai rankinio mokėjimo el. paštu – neklauso `src/lib/i18n` pakrovimo į serverio bundle / `t()` grandinės. */
+const MANUAL_OFF_PLATFORM_PAY_COPY = {
+  lt: {
+    lead:
+      'Pamoką apmokėkite pagal žemiau pateiktus korepetitoriaus duomenis iki nurodyto termino (kortele per platformą šio korepetitoriaus mokėjimas negalimas).',
+    portalHint:
+      'Po pavedimo ar kito mokėjimo korepetitorius pažymės pamoką apmokėtą sistemoje — būseną pamatysite „Pamokų“ puslapyje Tutlio aplikacijoje.',
+    btnParent: 'Atidaryti mokinio pamokų peržiūrą',
+    btnStudent: 'Atidaryti pamokų puslapį',
+  },
+  en: {
+    lead:
+      "Pay using your tutor's instructions below before the deadline. This tutor does not accept card checkout on the platform.",
+    portalHint:
+      'After you pay, your tutor marks the lesson in Tutlio — you can track status on your Lessons page.',
+    btnParent: 'Open lesson overview',
+    btnStudent: 'Open my lessons page',
+  },
+} as const;
+
+function manualPayLocale(lc: Locale): 'lt' | 'en' {
+  return lc === 'en' ? 'en' : 'lt';
+}
+
+/** Already HTML-escaped strings from sanitizeEmailData. */
+function manualBankDetailsInnerHtml(d: { bankDetails?: string }, locale: Locale): string {
+  const raw = typeof d.bankDetails === 'string' ? d.bankDetails.trim() : '';
+  if (!raw) return '';
+  return `<div style="background:#fefce8; border:1px solid #fde047; border-radius:12px; padding:16px; margin:16px 0;">
+    <p style="color:#854d0e; font-size:13px; font-weight:700; margin:0 0 10px;">${t(locale, 'em.manualPkgBankHeading')}</p>
+    <pre style="color:#713f12; font-size:14px; margin:0; white-space:pre-wrap; font-family:ui-monospace,Menlo,Consolas,monospace; line-height:1.55;">${raw}</pre>
+  </div>`;
+}
+
+function manualOffPlatformPaymentHtml(d: { bankDetails?: string; payerIsParent?: boolean }, locale: Locale): string {
+  const appUrl = getAppUrl();
+  const portalHref = d.payerIsParent ? `${appUrl}/parent/lessons` : `${appUrl}/student/sessions`;
+  const m = MANUAL_OFF_PLATFORM_PAY_COPY[manualPayLocale(locale)];
+  const portalLabel = d.payerIsParent ? m.btnParent : m.btnStudent;
+  return `
+    ${manualBankDetailsInnerHtml(d, locale)}
+    <p style="color:#374151; font-size:14px; line-height:1.6; margin:16px 0 8px;">${m.lead}</p>
+    <div style="text-align:center; margin-top: 20px;">
+      ${outlookEmailButton(portalHref, portalLabel, '#64748b', { fontSize: '15px', padding: '14px 32px', fontWeight: '600' })}
+    </div>
+    <p style="color:#9ca3af; font-size:12px; text-align:center; margin-top:16px;">${m.portalHint}</p>
+  `;
+}
+
 const baseStyles = `
   <style>
     body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f3f4f6; }
@@ -776,6 +829,17 @@ function paymentReviewNeeded(d: any, locale: Locale) {
 }
 
 function stripePaymentForwarding(d: any, locale: Locale) {
+  const tableBlock = table(
+    td(t(locale, 'em.labelDate'), d.date) +
+      td(t(locale, 'em.labelTime'), d.time) +
+      td(t(locale, 'em.labelPriceAlt'), `€${d.amount}`, false),
+  );
+  const payBlock = prefersManualInstructions(d)
+    ? manualOffPlatformPaymentHtml(d, locale)
+    : `<div style="text-align:center; margin-top: 30px;">
+          ${outlookEmailButton(String(d.paymentLink), t(locale, 'em.btnPayNow'), '#4f46e5', { fontSize: '16px', padding: '16px 42px' })}
+        </div>
+        <p style="color:#9ca3af; font-size:12px; text-align:center; margin-top:20px;">${t(locale, 'em.stripeRedirect')}</p>`;
   return {
     subject: t(locale, 'em.stripePaySub', { student: d.studentName, date: d.date }),
     html: wrap(`
@@ -786,11 +850,8 @@ function stripePaymentForwarding(d: any, locale: Locale) {
       <div class="body">
         <p class="greeting">${t(locale, 'em.hiPlain')}</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.stripePayBody', { student: d.studentName, tutor: d.tutorName })}</p>
-        ${table(td(t(locale, 'em.labelDate'), d.date) + td(t(locale, 'em.labelTime'), d.time) + td(t(locale, 'em.labelPriceAlt'), `€${d.amount}`, false))}
-        <div style="text-align:center; margin-top: 30px;">
-          ${outlookEmailButton(String(d.paymentLink), t(locale, 'em.btnPayNow'), '#4f46e5', { fontSize: '16px', padding: '16px 42px' })}
-        </div>
-        <p style="color:#9ca3af; font-size:12px; text-align:center; margin-top:20px;">${t(locale, 'em.stripeRedirect')}</p>
+        ${tableBlock}
+        ${payBlock}
       </div>${footerFor(locale)}`, locale),
   };
 }
@@ -803,6 +864,12 @@ function paymentAfterLessonReminder(d: any, locale: Locale) {
         </p>
       </div>`
     : '';
+  const payBlock = prefersManualInstructions(d)
+    ? manualOffPlatformPaymentHtml(d, locale)
+    : `<div style="text-align:center; margin-top: 24px;">
+          ${outlookEmailButton(String(d.paymentLink), t(locale, 'em.btnPayNowArrow'), '#4f46e5', { fontSize: '15px', padding: '14px 32px' })}
+        </div>
+        <p style="color:#9ca3af; font-size:12px; text-align:center; margin-top:16px;">${t(locale, 'em.alreadyPaid')}</p>`;
   return {
     subject: t(locale, 'em.afterLessonSub', { tutor: d.tutorName }),
     html: wrap(`
@@ -822,10 +889,7 @@ function paymentAfterLessonReminder(d: any, locale: Locale) {
       td(t(locale, 'em.labelPriceAlt'), `€${d.amount}`, false) +
       td(t(locale, 'em.labelPayBy'), d.payByTime, false)
     )}
-        <div style="text-align:center; margin-top: 24px;">
-          ${outlookEmailButton(String(d.paymentLink), t(locale, 'em.btnPayNowArrow'), '#4f46e5', { fontSize: '15px', padding: '14px 32px' })}
-        </div>
-        <p style="color:#9ca3af; font-size:12px; text-align:center; margin-top:16px;">${t(locale, 'em.alreadyPaid')}</p>
+        ${payBlock}
       </div>${footerFor(locale)}`, locale),
   };
 }
@@ -1051,6 +1115,14 @@ function sessionCommentAdded(d: any, locale: Locale) {
 
 function paymentReminderEmail(d: any, locale: Locale) {
   const timingLt = d.paymentTiming === 'before_lesson' ? t(locale, 'em.payReminderBefore') : t(locale, 'em.payReminderAfter');
+  const payBlock = prefersManualInstructions(d)
+    ? manualOffPlatformPaymentHtml(d, locale)
+    : `<div style="text-align:center; margin: 24px 0;">
+          ${outlookEmailButton(String(d.paymentUrl), t(locale, 'em.btnPayNowArrow'), '#4f46e5', { fontSize: '15px', padding: '14px 32px' })}
+        </div>
+        <p style="color:#9ca3af; font-size:12px; text-align:center;">
+          ${t(locale, 'em.alreadyPaid')}
+        </p>`;
   return {
     subject: t(locale, 'em.payReminderSub', { date: d.date, time: d.time }),
     html: wrap(`
@@ -1072,12 +1144,7 @@ function paymentReminderEmail(d: any, locale: Locale) {
         <p style="color:#ef4444; font-size:14px; font-weight:600;">
           ${t(locale, 'em.payReminderUrgent')}
         </p>
-        <div style="text-align:center; margin: 24px 0;">
-          ${outlookEmailButton(String(d.paymentUrl), t(locale, 'em.btnPayNowArrow'), '#4f46e5', { fontSize: '15px', padding: '14px 32px' })}
-        </div>
-        <p style="color:#9ca3af; font-size:12px; text-align:center;">
-          ${t(locale, 'em.alreadyPaid')}
-        </p>
+        ${payBlock}
       </div>
       ${footerFor(locale)}
     `, locale),
@@ -1166,6 +1233,14 @@ function prepaidPackageRequest(d: any, locale: Locale) {
   const totalLessonsLabel = d.totalLessons === 1 ? t(locale, 'em.lessonSingular') : d.totalLessons < 10 ? t(locale, 'em.lessonFew') : t(locale, 'em.lessonMany');
   const pricePerLesson = formatMoney(d.pricePerLesson, 'EUR', locale);
   const totalPrice = formatMoney(d.totalPrice, 'EUR', locale);
+  const payBlock = prefersManualInstructions(d)
+    ? manualOffPlatformPaymentHtml(d, locale)
+    : `<div style="text-align:center; margin-top: 24px;">
+          ${outlookEmailButton(String(d.paymentLink), t(locale, 'em.packagePayBtn', { price: totalPrice }), '#7c3aed', { fontSize: '16px', padding: '16px 42px' })}
+        </div>
+        <p style="color:#9ca3af; font-size:12px; text-align:center; margin-top:16px;">
+          ${t(locale, 'em.stripeRedirect')}
+        </p>`;
   return {
     subject: t(locale, 'em.packageReqSub', { count: String(d.totalLessons), label: totalLessonsLabel }),
     html: wrap(`
@@ -1184,18 +1259,13 @@ function prepaidPackageRequest(d: any, locale: Locale) {
           td(t(locale, 'em.labelPricePerLesson'), pricePerLesson) +
           td(t(locale, 'em.labelPayable'), `<strong style="font-size:16px;">${totalPrice}</strong>`, false)
         )}
-        <div style="background:#f0fdf4; border:1px solid#bbf7d0; border-radius:12px; padding:16px; margin:20px 0;">
+        <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:12px; padding:16px; margin:20px 0;">
           <p style="color:#166534; font-size:14px; margin:0; line-height:1.6;">
             ${t(locale, 'em.packageHowTitle')}<br/>
             ${t(locale, 'em.packageHowBody', { count: String(d.totalLessons), subject: d.subjectName, label: d.totalLessons === 1 ? t(locale, 'em.lessonSingular') : d.totalLessons < 10 ? t(locale, 'em.lessonFew') : t(locale, 'em.lessonMany') })}
           </p>
         </div>
-        <div style="text-align:center; margin-top: 24px;">
-          ${outlookEmailButton(String(d.paymentLink), t(locale, 'em.packagePayBtn', { price: totalPrice }), '#7c3aed', { fontSize: '16px', padding: '16px 42px' })}
-        </div>
-        <p style="color:#9ca3af; font-size:12px; text-align:center; margin-top:16px;">
-          ${t(locale, 'em.stripeRedirect')}
-        </p>
+        ${payBlock}
       </div>
       ${footerFor(locale)}
     `, locale),
@@ -1326,12 +1396,16 @@ function monthlyInvoice(d: any, locale: Locale) {
         </div>
         ` : ''}
 
-        <div style="text-align:center; margin-top: 24px;">
+        ${
+          prefersManualInstructions(d)
+            ? manualOffPlatformPaymentHtml(d, locale)
+            : `<div style="text-align:center; margin-top: 24px;">
           ${outlookEmailButton(String(d.paymentLink), t(locale, 'em.invoicePayBtn', { amount: d.totalAmount }), '#4f46e5', { fontSize: '16px', padding: '16px 42px' })}
         </div>
         <p style="color:#9ca3af; font-size:12px; text-align:center; margin-top:16px;">
           ${t(locale, 'em.stripeRedirect')}
-        </p>
+        </p>`
+        }
       </div>
       ${footerFor(locale)}
     `, locale),
@@ -1361,6 +1435,14 @@ function manualPackageRequest(d: any, locale: Locale) {
           td(t(locale, 'em.labelPricePerLesson'), pricePerLesson) +
           td(t(locale, 'em.labelPayable'), `<strong style="font-size:16px;">${totalPrice}</strong>`, false)
         )}
+        ${
+          typeof d.bankDetails === 'string' && d.bankDetails.trim().length > 0
+            ? `<div style="background:#fefce8; border:1px solid #fde047; border-radius:12px; padding:16px; margin:16px 0;">
+          <p style="color:#854d0e; font-size:13px; font-weight:700; margin:0 0 10px;">${esc(t(locale, 'em.manualPkgBankHeading'))}</p>
+          <pre style="color:#713f12; font-size:14px; margin:0; white-space:pre-wrap; font-family:ui-monospace,Menlo,Consolas,monospace; line-height:1.55;">${esc(d.bankDetails.trim())}</pre>
+        </div>`
+            : ''
+        }
         <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:12px; padding:16px; margin:20px 0;">
           <p style="color:#166534; font-size:14px; margin:0; line-height:1.6;">
             ${t(locale, 'em.manualPkgHowTitle')}<br/>
@@ -1631,6 +1713,25 @@ function productUpdateSfAndChat(d: any, locale: Locale) {
   };
 }
 
+/** Vidinis HTML (be išorinio wrap) – bodyHtml neescapinamas (tik serverio generuotas turinys). */
+function customHtmlAnnouncement(d: any, locale: Locale) {
+  if (!d?.subject || typeof d.subject !== 'string') {
+    throw new Error('custom_html_announcement: missing data.subject');
+  }
+  if (!d?.bodyHtml || typeof d.bodyHtml !== 'string') {
+    throw new Error('custom_html_announcement: missing data.bodyHtml');
+  }
+  return {
+    subject: String(d.subject),
+    html: wrap(
+      `<div class="body" style="padding:20px 24px;">
+        ${d.bodyHtml}
+      </div>${footerFor(locale)}`,
+      locale,
+    ),
+  };
+}
+
 function isAuthorizedRequest(req: VercelRequest): boolean {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
   const internalKey = typeof req.headers['x-internal-key'] === 'string' ? req.headers['x-internal-key'] : '';
@@ -1799,6 +1900,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'chat_new_message': emailContent = chatNewMessage(data, locale); break;
       case 'chat_message_digest': emailContent = chatMessageDigest(data, locale); break;
       case 'product_update_sf_chat': emailContent = productUpdateSfAndChat(data, locale); break;
+      case 'custom_html_announcement': emailContent = customHtmlAnnouncement(data, locale); break;
       case 'school_contract': emailContent = schoolContract(data, locale); break;
       case 'school_installment_request': emailContent = schoolInstallmentRequest(data, locale); break;
       case 'tutor_student_assigned': emailContent = tutorStudentAssigned(data, locale); break;
@@ -1829,9 +1931,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: msg });
     }
 
-    sendPushForEmail(Array.isArray(to) ? to : [to], type, rawData).catch((e) =>
-      console.error('[send-email] push error:', e?.message || e),
-    );
+    // Chat push siunčiamas iš /api/chat-notify-on-message (pagal user_id, nepriklausomai nuo el. throttling).
+    if (type !== 'chat_new_message') {
+      sendPushForEmail(Array.isArray(to) ? to : [to], type, rawData).catch((e) =>
+        console.error('[send-email] push error:', e?.message || e),
+      );
+    }
 
     return res.status(200).json({ success: true, id: result?.id });
   } catch (err: any) {
