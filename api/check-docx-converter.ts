@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { promises as fs } from 'fs';
+import { hasDocxConverterEnv } from './_lib/docxConverter';
 
 const execFileAsync = promisify(execFile);
 
@@ -53,27 +54,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const libreOffice = await detectLibreOffice();
   const hasConvertApiSecret = Boolean(process.env.CONVERTAPI_SECRET);
+  const hasRemoteConverter = hasDocxConverterEnv();
 
-  const primaryMode = libreOffice.available
-    ? 'libreoffice'
-    : hasConvertApiSecret
-      ? 'convertapi'
-      : 'none';
+  const primaryMode = hasRemoteConverter
+    ? 'docx_converter_service'
+    : libreOffice.available
+      ? 'libreoffice'
+      : hasConvertApiSecret
+        ? 'convertapi'
+        : 'none';
 
   return res.status(200).json({
     ok: primaryMode !== 'none',
     primaryMode,
     libreOffice,
     hasConvertApiSecret,
+    hasRemoteConverter,
     envHints: {
       libreOfficePath: process.env.LIBREOFFICE_PATH || null,
       convertApiSecretConfigured: hasConvertApiSecret,
+      docxConverterUrl: (process.env.DOCX_CONVERTER_URL || '').trim() ? '(set)' : null,
     },
     recommendation:
-      primaryMode === 'libreoffice'
-        ? 'Ready: using free local LibreOffice conversion.'
-        : primaryMode === 'convertapi'
-          ? 'LibreOffice not detected. Fallback to ConvertAPI is available.'
-          : 'No converter available. Install LibreOffice or configure CONVERTAPI_SECRET.',
+      primaryMode === 'docx_converter_service'
+        ? 'Using hosted DOCX converter (DOCX_CONVERTER_URL + DOCX_CONVERTER_API_KEY).'
+        : primaryMode === 'libreoffice'
+          ? 'Ready: using free local LibreOffice conversion.'
+          : primaryMode === 'convertapi'
+            ? 'LibreOffice not detected. Fallback to ConvertAPI is available.'
+            : 'No converter available. Set DOCX_CONVERTER_URL + DOCX_CONVERTER_API_KEY, or install LibreOffice, or CONVERTAPI_SECRET.',
   });
 }

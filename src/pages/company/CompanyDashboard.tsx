@@ -12,13 +12,14 @@ import {
   ChevronRight,
   CheckCircle,
   CreditCard,
-  Clock,
+  X,
 } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, isAfter, isBefore, addDays, subDays } from 'date-fns';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import StatusBadge from '@/components/StatusBadge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useTranslation } from '@/lib/i18n';
+import { useDismissibleDashboardItemIds } from '@/hooks/useDismissibleDashboardItemIds';
+import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 
 interface StatCard {
   label: string;
@@ -51,7 +52,7 @@ interface OrgSessionRow {
 
 interface RecentOrgPayment {
   id: string;
-  type: 'lesson' | 'package' | 'invoice';
+  type: 'lesson' | 'package' | 'invoice' | 'school_installment';
   title: string;
   subtitle: string;
   amount: number;
@@ -63,9 +64,32 @@ const DASH_CACHE_KEY = 'company_dashboard';
 export default function CompanyDashboard() {
   const { t, dateFnsLocale } = useTranslation();
   const location = useLocation();
+  const navigate = useNavigate();
   const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
+  const openCompanyLessonModal = (sessionId: string) => {
+    navigate(`${orgBasePath}/sessions?open=${encodeURIComponent(sessionId)}`);
+  };
   const cached = getCached<any>(DASH_CACHE_KEY);
   const [loading, setLoading] = useState(!cached);
+  const [orgIdForDismiss, setOrgIdForDismiss] = useState<string | null>(cached?.orgIdForDismiss ?? null);
+  const companyAttentionRowsKey = orgIdForDismiss
+    ? `tutlio:v1:company_dash_attention_rows:${orgIdForDismiss}`
+    : undefined;
+  const companyPaymentRowsKey = orgIdForDismiss
+    ? `tutlio:v1:company_dash_payment_rows:${orgIdForDismiss}`
+    : undefined;
+  const {
+    dismissedIds: dismissedCompanyAttentionIds,
+    dismiss: dismissCompanyAttentionRow,
+    restoreAll: restoreAllCompanyAttentionRows,
+    ready: companyAttentionRowsReady,
+  } = useDismissibleDashboardItemIds(companyAttentionRowsKey);
+  const {
+    dismissedIds: dismissedCompanyPaymentIds,
+    dismiss: dismissCompanyPaymentRow,
+    restoreAll: restoreAllCompanyPaymentRows,
+    ready: companyPaymentRowsReady,
+  } = useDismissibleDashboardItemIds(companyPaymentRowsKey);
   const [orgName, setOrgName] = useState(cached?.orgName ?? '');
   const [tutorLimit, setTutorLimit] = useState(cached?.tutorLimit ?? 0);
   const [activeTutors, setActiveTutors] = useState(cached?.activeTutors ?? 0);
@@ -82,10 +106,10 @@ export default function CompanyDashboard() {
   const [tutorPayMap, setTutorPayMap] = useState<Map<string, TutorPay>>(
     cached?.tutorPayEntries ? new Map(cached.tutorPayEntries) : new Map()
   );
-  const [selectedSession, setSelectedSession] = useState<OrgSessionRow | null>(null);
 
   useEffect(() => {
-    if (!getCached(DASH_CACHE_KEY)) void loadData();
+    // Always refresh in background; cache is only for fast initial paint.
+    void loadData();
   }, []);
 
   const loadData = async () => {
@@ -108,32 +132,16 @@ export default function CompanyDashboard() {
       }
       const org = adminRow.organizations as any;
       const organizationId = adminRow.organization_id;
+      setOrgIdForDismiss(organizationId);
       setOrgName(org?.name || '');
       setTutorLimit(org?.tutor_limit || 0);
 
-      const { data: adminUsers } = await supabase
-        .from('organization_admins')
-        .select('user_id')
-        .eq('organization_id', organizationId);
-      const adminIds = new Set((adminUsers || []).map((a: any) => a.user_id));
-
-      const { data: tutors } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('organization_id', organizationId);
-      const { data: linkedStudents } = await supabase
-        .from('students')
-        .select('linked_user_id')
-        .eq('organization_id', organizationId)
-        .not('linked_user_id', 'is', null);
-      const linkedStudentUserIds = new Set(
-        (linkedStudents || [])
-          .map((s: any) => s.linked_user_id)
-          .filter((id: string | null | undefined): id is string => Boolean(id)),
+      const visibleTutors = await getOrgVisibleTutors(
+        supabase as any,
+        organizationId,
+        'id, email',
       );
-      const tutorIds = (tutors || [])
-        .map((tu: any) => tu.id)
-        .filter((id: string) => !adminIds.has(id) && !linkedStudentUserIds.has(id));
+      const tutorIds = visibleTutors.map((tu: any) => tu.id);
       setActiveTutors(tutorIds.length);
 
       const { count: pendingCount } = await supabase
@@ -143,13 +151,27 @@ export default function CompanyDashboard() {
         .eq('used', false);
       setPendingInvites(pendingCount || 0);
 
+      /** Tutor-scope dashboard blocks; payments list also merges school installments below */
+      let tutorRecentMerged: RecentOrgPayment[] = [];
+      let cacheSessionsMonth = 0;
+      let cacheUpcomingCount = 0;
+      let cacheEarningsMonth = 0;
+      let cacheEarningsTotal = 0;
+      let cacheUpcomingList: OrgSessionRow[] = [];
+      let cacheAttentionList: OrgSessionRow[] = [];
+      let cacheCancelledList: OrgSessionRow[] = [];
+      let cacheTutorPayEntries: [string, TutorPay][] = [];
+
       if (tutorIds.length === 0) {
+        setTutorPayMap(new Map());
         setUpcomingList([]);
         setAttentionList([]);
         setCancelledList([]);
-        setRecentPayments([]);
-        return;
-      }
+        setSessionsThisMonth(0);
+        setUpcomingSessions(0);
+        setEarningsThisMonth(0);
+        setEarningsTotal(0);
+      } else {
 
       const { data: tutorProfiles } = await supabase
       .from('profiles')
@@ -267,6 +289,14 @@ export default function CompanyDashboard() {
       setUpcomingList(upcomingFiltered);
       setAttentionList(attentionFiltered);
       setCancelledList(cancelledFiltered);
+      cacheSessionsMonth = completed.length;
+      cacheUpcomingCount = upcoming.length;
+      cacheEarningsMonth = completed.reduce((sum: number, s: any) => sum + (s.price || 0), 0);
+      cacheEarningsTotal = totalPaid.reduce((sum: number, s: any) => sum + (s.price || 0), 0);
+      cacheUpcomingList = upcomingFiltered;
+      cacheAttentionList = attentionFiltered;
+      cacheCancelledList = cancelledFiltered;
+      cacheTutorPayEntries = Array.from(tutorMap.entries());
 
       const [paidLessonsRes, paidPackagesRes, paidInvoicesRes] = await Promise.all([
       supabase
@@ -345,20 +375,65 @@ export default function CompanyDashboard() {
       paidAt: b.paid_at,
     }));
 
-      const merged = [...lessonPayments, ...packagePayments, ...invoicePayments]
+      tutorRecentMerged = [...lessonPayments, ...packagePayments, ...invoicePayments]
       .sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime())
       .slice(0, 5);
-      setRecentPayments(merged);
+      } /* tutorIds.length > 0 */
+
+      const { data: schoolPaidRows, error: schoolPaidErr } = await supabase
+        .from('school_payment_installments')
+        .select(
+          `
+          id,
+          amount,
+          paid_at,
+          installment_number,
+          contract:school_contracts(organization_id, student:students(full_name))
+        `,
+        )
+        .eq('payment_status', 'paid')
+        .not('paid_at', 'is', null)
+        .order('paid_at', { ascending: false })
+        .limit(30);
+      if (schoolPaidErr) console.error('[CompanyDashboard] school installments:', schoolPaidErr);
+
+      const schoolInstPayments: RecentOrgPayment[] = (schoolPaidRows || [])
+        .map((row: any) => {
+          const contract = Array.isArray(row.contract) ? row.contract[0] : row.contract;
+          if (contract?.organization_id !== organizationId) return null;
+          const student = contract?.student;
+          const studentOne = Array.isArray(student) ? student[0] : student;
+          return {
+            id: `school_installment_${row.id}`,
+            type: 'school_installment' as const,
+            title: `${studentOne?.full_name || t('common.student')}`,
+            subtitle: `${t('companyDash.recentSchoolInstallment')} · ${t('school.installments')} #${row.installment_number}`,
+            amount: Number(row.amount || 0),
+            paidAt: row.paid_at as string,
+          };
+        })
+        .filter(Boolean) as RecentOrgPayment[];
+
+      const finalRecentMerged = [...tutorRecentMerged, ...schoolInstPayments]
+        .sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime())
+        .slice(0, 5);
+      setRecentPayments(finalRecentMerged);
 
       setCache(DASH_CACHE_KEY, {
-        orgName: org?.name || '', tutorLimit: org?.tutor_limit || 0,
-        activeTutors: tutorIds.length, pendingInvites: pendingCount || 0,
-        sessionsThisMonth: completed.length, upcomingSessions: upcoming.length,
-        earningsThisMonth: completed.reduce((sum: number, s: any) => sum + (s.price || 0), 0),
-        earningsTotal: totalPaid.reduce((sum: number, s: any) => sum + (s.price || 0), 0),
-        upcomingList: upcomingFiltered, attentionList: attentionFiltered,
-        cancelledList: cancelledFiltered, recentPayments: merged,
-        tutorPayEntries: Array.from(tutorMap.entries()),
+        orgIdForDismiss: organizationId,
+        orgName: org?.name || '',
+        tutorLimit: org?.tutor_limit || 0,
+        activeTutors: tutorIds.length,
+        pendingInvites: pendingCount || 0,
+        sessionsThisMonth: cacheSessionsMonth,
+        upcomingSessions: cacheUpcomingCount,
+        earningsThisMonth: cacheEarningsMonth,
+        earningsTotal: cacheEarningsTotal,
+        upcomingList: cacheUpcomingList,
+        attentionList: cacheAttentionList,
+        cancelledList: cacheCancelledList,
+        recentPayments: finalRecentMerged,
+        tutorPayEntries: cacheTutorPayEntries,
       });
     } finally {
       setLoading(false);
@@ -399,6 +474,9 @@ export default function CompanyDashboard() {
       iconColor: 'text-violet-600',
     },
   ];
+
+  const visibleCompanyAttention = attentionList.filter((s) => !dismissedCompanyAttentionIds.has(s.id));
+  const visibleCompanyPayments = recentPayments.filter((p) => !dismissedCompanyPaymentIds.has(p.id));
 
   if (loading) {
     return (
@@ -452,7 +530,16 @@ export default function CompanyDashboard() {
                   {upcomingList.map((s) => (
                     <div
                       key={s.id}
-                      className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 border border-transparent"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => openCompanyLessonModal(s.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          openCompanyLessonModal(s.id);
+                        }
+                      }}
+                      className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 border border-transparent cursor-pointer hover:bg-gray-100 hover:border-gray-200 transition-colors"
                     >
                       <div className="w-1 h-10 rounded-full bg-blue-400 flex-shrink-0" />
                       <div className="flex-1 min-w-0">
@@ -482,15 +569,31 @@ export default function CompanyDashboard() {
                   <AlertCircle className="w-5 h-5 text-amber-500" />
                   <h2 className="text-lg font-bold text-gray-900">{t('companyDash.needsAttention')}</h2>
                 </div>
-                <span className="text-xs font-medium bg-amber-100 text-amber-700 px-2 py-1 rounded-md">
-                  {attentionList.length} {t('companyDash.entries')}
-                </span>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs font-medium bg-amber-100 text-amber-700 px-2 py-1 rounded-md">
+                    {companyAttentionRowsReady ? visibleCompanyAttention.length : attentionList.length}{' '}
+                    {t('companyDash.entries')}
+                  </span>
+                </div>
               </div>
               {attentionList.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-8">{t('companyDash.noAttention')}</p>
+              ) : companyAttentionRowsReady && visibleCompanyAttention.length === 0 ? (
+                <div className="text-center py-8 space-y-2">
+                  <p className="text-sm text-gray-500">{t('dash.allRowsHiddenHint')}</p>
+                  {companyAttentionRowsKey && (
+                    <button
+                      type="button"
+                      onClick={restoreAllCompanyAttentionRows}
+                      className="text-sm text-indigo-600 hover:underline font-medium"
+                    >
+                      {t('dash.restoreHiddenRows')}
+                    </button>
+                  )}
+                </div>
               ) : (
                 <div className="space-y-2">
-                  {attentionList.map((s) => {
+                  {visibleCompanyAttention.map((s) => {
                     const tp = tutorPayMap.get(s.tutor_id);
                     const start = new Date(s.start_time);
                     const end = new Date(s.end_time);
@@ -506,187 +609,212 @@ export default function CompanyDashboard() {
                     return (
                       <div
                         key={s.id}
-                        onClick={() => setSelectedSession(s)}
-                        className="flex items-center gap-3 p-3 rounded-xl border border-amber-100 bg-amber-50/50 hover:shadow-md hover:border-amber-200 transition-all cursor-pointer group"
+                        className="flex items-center gap-1 p-3 rounded-xl border border-amber-100 bg-amber-50/50 hover:shadow-md hover:border-amber-200 transition-all group"
                       >
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
-                          isPendingConfirm ? 'bg-amber-100 group-hover:bg-amber-200' : 'bg-red-50 group-hover:bg-red-100'
-                        }`}>
-                          {isPendingConfirm
-                            ? <CreditCard className="w-5 h-5 text-amber-600" />
-                            : <AlertCircle className="w-5 h-5 text-red-500" />}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-sm font-semibold text-gray-900 truncate">
-                              {s.student?.full_name || t('common.student')}
-                            </p>
-                            <div className="scale-90 origin-right"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} endTime={s.end_time} /></div>
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => openCompanyLessonModal(s.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              openCompanyLessonModal(s.id);
+                            }
+                          }}
+                          className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
+                        >
+                          <div
+                            className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
+                              isPendingConfirm ? 'bg-amber-100 group-hover:bg-amber-200' : 'bg-red-50 group-hover:bg-red-100'
+                            }`}
+                          >
+                            {isPendingConfirm ? (
+                              <CreditCard className="w-5 h-5 text-amber-600" />
+                            ) : (
+                              <AlertCircle className="w-5 h-5 text-red-500" />
+                            )}
                           </div>
-                          <p className="text-xs text-gray-500 mt-0.5">
-                            {format(start, 'd MMM yyyy, HH:mm', { locale: dateFnsLocale })}
-                            {s.topic ? ` · ${s.topic}` : ''}
-                          </p>
-                          <p className="text-[11px] mt-1 font-medium px-1.5 py-0.5 rounded-md inline-block">
-                            {isPendingConfirm
-                              ? <span className="text-amber-700 bg-amber-50">{t('dash.reasonPendingConfirm')}</span>
-                              : diffMs <= 0
-                                ? <span className="text-red-600 bg-red-50">{t('dash.deadlinePassed')}</span>
-                                : <span className="text-orange-600 bg-orange-50">{t('dash.hoursLeft').replace('{n}', String(remainingHours))}</span>}
-                          </p>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm font-semibold text-gray-900 truncate">
+                                {s.student?.full_name || t('common.student')}
+                              </p>
+                              <div className="scale-90 origin-right">
+                                <StatusBadge
+                                  status={s.status}
+                                  paymentStatus={s.payment_status}
+                                  paid={s.paid}
+                                  endTime={s.end_time}
+                                />
+                              </div>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              {format(start, 'd MMM yyyy, HH:mm', { locale: dateFnsLocale })}
+                              {s.topic ? ` · ${s.topic}` : ''}
+                            </p>
+                            <p className="text-[11px] mt-1 font-medium px-1.5 py-0.5 rounded-md inline-block">
+                              {isPendingConfirm ? (
+                                <span className="text-amber-700 bg-amber-50">{t('dash.reasonPendingConfirm')}</span>
+                              ) : diffMs <= 0 ? (
+                                <span className="text-red-600 bg-red-50">{t('dash.deadlinePassed')}</span>
+                              ) : (
+                                <span className="text-orange-600 bg-orange-50">
+                                  {t('dash.hoursLeft').replace('{n}', String(remainingHours))}
+                                </span>
+                              )}
+                            </p>
+                          </div>
                         </div>
+                        {companyAttentionRowsKey && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              dismissCompanyAttentionRow(s.id);
+                            }}
+                            className="p-1.5 h-fit rounded-lg text-gray-400 hover:text-gray-700 hover:bg-white/80 flex-shrink-0 self-center"
+                            aria-label={t('dash.dismissRow')}
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     );
                   })}
+                  {companyAttentionRowsReady &&
+                    companyAttentionRowsKey &&
+                    dismissedCompanyAttentionIds.size > 0 &&
+                    visibleCompanyAttention.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={restoreAllCompanyAttentionRows}
+                        className="w-full text-center text-xs text-indigo-600 hover:underline font-medium pt-1"
+                      >
+                        {t('dash.restoreHiddenRows')}
+                      </button>
+                    )}
                 </div>
               )}
             </div>
           </div>
         )}
 
-        {activeTutors > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {(activeTutors > 0 || recentPayments.length > 0) && (
+          <div className={`grid gap-6 ${activeTutors > 0 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'}`}>
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <CreditCard className="w-5 h-5 text-emerald-600" />
                   <h2 className="text-lg font-bold text-gray-900">{t('companyDash.recentPayments')}</h2>
                 </div>
-                <Link to={`${orgBasePath}/finance`} className="text-xs text-indigo-600 hover:underline flex items-center gap-1">
+                <Link
+                  to={orgBasePath === '/school' ? `${orgBasePath}/finance?tab=payments` : `${orgBasePath}/finance`}
+                  className="text-xs text-indigo-600 hover:underline flex items-center gap-1"
+                >
                   {t('common.finance')} <ChevronRight className="w-3 h-3" />
                 </Link>
               </div>
               {recentPayments.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-8">{t('companyDash.noPayments')}</p>
+              ) : companyPaymentRowsReady && visibleCompanyPayments.length === 0 ? (
+                <div className="text-center py-8 space-y-2">
+                  <p className="text-sm text-gray-500">{t('dash.allRowsHiddenHint')}</p>
+                  {companyPaymentRowsKey && (
+                    <button
+                      type="button"
+                      onClick={restoreAllCompanyPaymentRows}
+                      className="text-sm text-indigo-600 hover:underline font-medium"
+                    >
+                      {t('dash.restoreHiddenRows')}
+                    </button>
+                  )}
+                </div>
               ) : (
                 <div className="space-y-2">
-                  {recentPayments.map((p) => (
-                    <div key={p.id} className="flex items-center justify-between gap-3 p-3 rounded-xl bg-gray-50">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">{p.title}</p>
-                        <p className="text-xs text-gray-500 mt-0.5">{p.subtitle}</p>
+                  {visibleCompanyPayments.map((p) => (
+                    <div key={p.id} className="flex items-center gap-1 p-3 rounded-xl bg-gray-50">
+                      <div className="flex items-center justify-between gap-3 flex-1 min-w-0">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">{p.title}</p>
+                          <p className="text-xs text-gray-500 mt-0.5">{p.subtitle}</p>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <p className="text-sm font-semibold text-gray-900">€{p.amount.toFixed(2)}</p>
+                          <p className="text-xs text-gray-400">
+                            {format(new Date(p.paidAt), 'd MMM', { locale: dateFnsLocale })}
+                          </p>
+                        </div>
                       </div>
-                      <div className="text-right flex-shrink-0">
-                        <p className="text-sm font-semibold text-gray-900">€{p.amount.toFixed(2)}</p>
-                        <p className="text-xs text-gray-400">
-                          {format(new Date(p.paidAt), 'd MMM', { locale: dateFnsLocale })}
+                      {companyPaymentRowsKey && (
+                        <button
+                          type="button"
+                          onClick={() => dismissCompanyPaymentRow(p.id)}
+                          className="p-1.5 h-fit rounded-lg text-gray-400 hover:text-gray-700 hover:bg-white flex-shrink-0 self-center"
+                          aria-label={t('dash.dismissRow')}
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {companyPaymentRowsReady &&
+                    companyPaymentRowsKey &&
+                    dismissedCompanyPaymentIds.size > 0 &&
+                    visibleCompanyPayments.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={restoreAllCompanyPaymentRows}
+                        className="w-full text-center text-xs text-indigo-600 hover:underline font-medium"
+                      >
+                        {t('dash.restoreHiddenRows')}
+                      </button>
+                    )}
+                </div>
+              )}
+            </div>
+
+            {activeTutors > 0 ? (
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="w-5 h-5 text-red-400" />
+                    <h2 className="text-lg font-bold text-gray-900">{t('companyDash.cancelledPaid')}</h2>
+                  </div>
+                  <Link to={`${orgBasePath}/sessions`} className="text-xs text-indigo-600 hover:underline flex items-center gap-1">
+                    {t('companyDash.allLabel')} <ChevronRight className="w-3 h-3" />
+                  </Link>
+                </div>
+                {cancelledList.length === 0 ? (
+                  <p className="text-sm text-gray-400 text-center py-8">{t('companyDash.noCancelledPaid')}</p>
+                ) : (
+                  <div className="space-y-2">
+                    {cancelledList.map((s) => (
+                      <div
+                        key={s.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => openCompanyLessonModal(s.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            openCompanyLessonModal(s.id);
+                          }
+                        }}
+                        className="p-3 rounded-xl border border-red-100 bg-red-50/40 cursor-pointer hover:bg-red-50/70 transition-colors"
+                      >
+                        <p className="text-sm font-semibold text-gray-900">{s.student?.full_name || t('common.student')}</p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {format(new Date(s.start_time), 'EEE d MMM yyyy, HH:mm', { locale: dateFnsLocale })}
+                          {s.topic ? ` · ${s.topic}` : ''}
                         </p>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="w-5 h-5 text-red-400" />
-                  <h2 className="text-lg font-bold text-gray-900">{t('companyDash.cancelledPaid')}</h2>
-                </div>
-                <Link to={`${orgBasePath}/sessions`} className="text-xs text-indigo-600 hover:underline flex items-center gap-1">
-                  {t('companyDash.allLabel')} <ChevronRight className="w-3 h-3" />
-                </Link>
+                    ))}
+                  </div>
+                )}
               </div>
-              {cancelledList.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-8">{t('companyDash.noCancelledPaid')}</p>
-              ) : (
-                <div className="space-y-2">
-                  {cancelledList.map((s) => (
-                    <div key={s.id} className="p-3 rounded-xl border border-red-100 bg-red-50/40">
-                      <p className="text-sm font-semibold text-gray-900">{s.student?.full_name || t('common.student')}</p>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {format(new Date(s.start_time), 'EEE d MMM yyyy, HH:mm', { locale: dateFnsLocale })}
-                        {s.topic ? ` · ${s.topic}` : ''}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            ) : null}
           </div>
         )}
-
-        {selectedSession && (() => {
-          const ss = selectedSession;
-          const tp = tutorPayMap.get(ss.tutor_id);
-          const start = new Date(ss.start_time);
-          const end = new Date(ss.end_time);
-          const isPendingConfirm = ss.payment_status === 'paid_by_student';
-          const deadlineBaseHours = tp?.payment_deadline_hours ?? 24;
-          const deadline =
-            tp?.payment_timing === 'before_lesson'
-              ? new Date(start.getTime() - deadlineBaseHours * 3600000)
-              : new Date(end.getTime() + deadlineBaseHours * 3600000);
-          const diffMs = deadline.getTime() - Date.now();
-          const remainingHours = Math.max(0, Math.floor(diffMs / 3600000));
-
-          return (
-            <Dialog open onOpenChange={() => setSelectedSession(null)}>
-              <DialogContent className="w-[95vw] sm:max-w-md max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle>{t('cal.lessonInfo')}</DialogTitle>
-                </DialogHeader>
-
-                <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium ${
-                  isPendingConfirm
-                    ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                    : diffMs <= 0
-                      ? 'bg-red-50 text-red-700 border border-red-200'
-                      : 'bg-orange-50 text-orange-700 border border-orange-200'
-                }`}>
-                  {isPendingConfirm
-                    ? <CreditCard className="w-4 h-4 flex-shrink-0" />
-                    : <Clock className="w-4 h-4 flex-shrink-0" />}
-                  <span>
-                    {isPendingConfirm
-                      ? t('dash.reasonPendingConfirm')
-                      : diffMs <= 0
-                        ? t('dash.deadlinePassed')
-                        : t('dash.hoursLeft').replace('{n}', String(remainingHours))}
-                  </span>
-                </div>
-
-                <div className="space-y-3 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">{t('common.student')}</span>
-                    <span className="font-medium text-gray-900">{ss.student?.full_name || '—'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">{t('companyDash.tutor')}</span>
-                    <span className="font-medium text-gray-900">{ss.tutor_name || '—'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">{t('common.date')}</span>
-                    <span className="font-medium text-gray-900">{format(start, 'd MMM yyyy', { locale: dateFnsLocale })}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">{t('common.time')}</span>
-                    <span className="font-medium text-gray-900">
-                      {format(start, 'HH:mm')} – {format(end, 'HH:mm')}
-                    </span>
-                  </div>
-                  {ss.topic && (
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">{t('cal.topicLabel')}</span>
-                      <span className="font-medium text-gray-900">{ss.topic}</span>
-                    </div>
-                  )}
-                  {ss.price != null && (
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">{t('common.price')}</span>
-                      <span className="font-semibold text-gray-900">€{ss.price}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-500">{t('common.status')}</span>
-                    <StatusBadge status={ss.status} paymentStatus={ss.payment_status} paid={ss.paid} endTime={ss.end_time} />
-                  </div>
-                </div>
-              </DialogContent>
-            </Dialog>
-          );
-        })()}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Link

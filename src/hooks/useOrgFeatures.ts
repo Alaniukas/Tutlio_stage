@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { supabase } from '@/lib/supabase';
+import { dedupeAuthGetUser, orgSuspensionRowDeduped, tutorSidebarProfileDeduped } from '@/lib/preload';
 import { FEATURE_REGISTRY } from '@/lib/featureRegistry';
 import { parseOrgContactVisibility, type OrgContactVisibility } from '@/lib/orgContactVisibility';
 
@@ -28,35 +28,24 @@ export function useOrgFeatures(): OrgFeaturesState {
   useEffect(() => {
     async function loadFeatures() {
       try {
-        // Get current user
-        const { data: { user } } = await supabase.auth.getUser();
+        const user = await dedupeAuthGetUser();
         if (!user) {
           setRawFeatures(null);
           setLoading(false);
           return;
         }
 
-        // Get user profile
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('organization_id')
-          .eq('id', user.id)
-          .single();
-
-        if (!profile?.organization_id) {
+        const { data: prof } = await tutorSidebarProfileDeduped(user.id);
+        const orgId = prof?.organization_id ?? null;
+        if (!orgId) {
           setRawFeatures(null);
           setLoading(false);
           return;
         }
 
-        setOrganizationId(profile.organization_id);
+        setOrganizationId(orgId);
 
-        // Get organization features
-        const { data: org } = await supabase
-          .from('organizations')
-          .select('features')
-          .eq('id', profile.organization_id)
-          .single();
+        const { data: org } = await orgSuspensionRowDeduped(orgId);
 
         if (!org) {
           setRawFeatures(null);
@@ -120,11 +109,7 @@ export function useOrgFeature(organizationId: string | null, featureId: string) 
       }
 
       try {
-        const { data: org } = await supabase
-          .from('organizations')
-          .select('features')
-          .eq('id', organizationId)
-          .single();
+        const { data: org } = await orgSuspensionRowDeduped(organizationId);
 
         if (!org) {
           setLoading(false);

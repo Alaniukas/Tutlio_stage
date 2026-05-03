@@ -20,11 +20,6 @@ export const ee: Record<string, string> = {
   'about.valuesDesc': 'Miks tuhanded eraõpetajad usaldavad meid iga päev.',
   'about.valuesTitle': 'Meie väärtused',
 
-  'blog.backToAll': 'Kõik artiklid',
-  'blog.empty': 'Artikleid pole veel. Tulge varsti tagasi!',
-  'blog.notFound': 'Artiklit ei leitud',
-  'blog.readMore': 'Loe edasi',
-  'blog.subtitle': 'Nõuanded, juhtumiuuringud ja ülevaated, mis aitavad teil oma õpetamistegevust nutikamalt juhtida.',
   'auth.agreeWith': 'Nõustun',
   'auth.backToLogin': 'Tagasi sisselogimisele',
   'auth.backToTutorStudentLogin': 'Tagasi õpetaja / õpilase sisselogimisele',

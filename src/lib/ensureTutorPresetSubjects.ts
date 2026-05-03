@@ -1,11 +1,11 @@
 import { supabase } from '@/lib/supabase';
-import { normalizeSubjectPreset, subjectPresetKey, type LooseSubjectPreset } from '@/lib/subjectPresetDedupe';
+import { normalizeSubjectPreset, subjectTutorLessonKey, type LooseSubjectPreset } from '@/lib/subjectPresetDedupe';
 
 export type TutorSubjectPreset = LooseSubjectPreset;
 
 /**
- * Inserts invitation subjects only if the same one does not already exist (guards against duplicate invitation
- * processing and different colour formats like #fff vs #FFF).
+ * Inserts invitation presets when that tutor does not already have the same lesson
+ * (name + duration + price). Colour is ignored so org/admin and invite cannot duplicate the same slot.
  */
 export async function ensureTutorPresetSubjects(
   tutorId: string,
@@ -15,31 +15,29 @@ export async function ensureTutorPresetSubjects(
 
   const { data: existing } = await supabase
     .from('subjects')
-    .select('name, duration_minutes, price, color')
+    .select('name, duration_minutes, price')
     .eq('tutor_id', tutorId);
 
-  const have = new Set(
-    (existing || []).map((r: { name: string; duration_minutes: number; price: unknown; color: string | null }) =>
-      subjectPresetKey({
+  const taken = new Set(
+    (existing || []).map((r: { name: string; duration_minutes: number; price: unknown }) =>
+      subjectTutorLessonKey({
         name: r.name,
         duration_minutes: r.duration_minutes,
-        price: Number(r.price),
-        color: r.color,
+        price: r.price,
       })
     )
   );
 
-  const rows = presets
-    .map((s) => {
-      const n = normalizeSubjectPreset(s);
-      return { tutor_id: tutorId, ...n };
-    })
-    .filter((r) => {
-      const k = subjectPresetKey(r);
-      if (have.has(k)) return false;
-      have.add(k);
-      return true;
-    });
+  type Row = { tutor_id: string; name: string; duration_minutes: number; price: number; color: string };
+  const rows: Row[] = [];
+  for (const s of presets) {
+    const n = normalizeSubjectPreset(s);
+    const row: Row = { tutor_id: tutorId, ...n };
+    const lk = subjectTutorLessonKey(row);
+    if (taken.has(lk)) continue;
+    taken.add(lk);
+    rows.push(row);
+  }
 
   if (rows.length === 0) return;
 

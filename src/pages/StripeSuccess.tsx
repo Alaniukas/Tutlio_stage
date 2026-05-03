@@ -52,7 +52,9 @@ export default function StripeSuccess() {
                 const cancelSessionId = window.localStorage.getItem('stripe_cancel_session_id');
                 if (cancelSessionId) {
                     window.localStorage.removeItem('stripe_cancel_session_id');
-                    navigate('/student/sessions', {
+                    const penaltyReturn = window.localStorage.getItem('stripe_penalty_success_return');
+                    if (penaltyReturn) window.localStorage.removeItem('stripe_penalty_success_return');
+                    navigate(penaltyReturn || '/student/sessions', {
                         replace: true,
                         state: { sessionId: cancelSessionId, flow: 'cancel_after_payment' },
                     });

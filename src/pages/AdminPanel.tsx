@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AlertCircle, CheckCircle2, Building2, Lock, Plus, Eye, EyeOff, ArrowLeft, List, Pencil, FileText } from 'lucide-react';
@@ -10,7 +10,7 @@ type Step = 'lock' | 'panel';
 interface FormState {
   orgName: string;
   orgEmail: string;
-  tutorLimit: number;
+  tutorLicenseCount: number;
   adminEmail: string;
   adminPassword: string;
 }
@@ -32,7 +32,7 @@ interface OrgListRow {
   id: string;
   name: string;
   email: string;
-  tutor_limit: number;
+  tutor_license_count?: number;
   status: string;
   features: Record<string, unknown>;
   tutor_count: number;
@@ -48,6 +48,12 @@ interface TutorRow {
   full_name: string | null;
   email: string | null;
   phone: string | null;
+}
+
+interface ArchivedTutorRow {
+  id: string;
+  full_name: string | null;
+  email: string | null;
 }
 
 interface StudentRow {
@@ -68,6 +74,8 @@ type PanelView = 'list' | 'create' | 'createSchool' | 'detail' | 'blog';
 
 export default function AdminPanel() {
   const { t, locale } = useTranslation();
+  const tRef = useRef(t);
+  useEffect(() => { tRef.current = t; }, [t]);
   const [step, setStep] = useState<Step>('lock');
   const [secretInput, setSecretInput] = useState('');
   const [platformAdminSecret, setPlatformAdminSecret] = useState('');
@@ -76,7 +84,7 @@ export default function AdminPanel() {
   const [form, setForm] = useState<FormState>({
     orgName: '',
     orgEmail: '',
-    tutorLimit: 5,
+    tutorLicenseCount: 5,
     adminEmail: '',
     adminPassword: '',
   });
@@ -96,13 +104,16 @@ export default function AdminPanel() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailTutors, setDetailTutors] = useState<TutorRow[]>([]);
+  const [detailArchivedTutors, setDetailArchivedTutors] = useState<ArchivedTutorRow[]>([]);
   const [detailStudents, setDetailStudents] = useState<StudentRow[]>([]);
   const [detailAudit, setDetailAudit] = useState<AuditRow[]>([]);
-  const [editTutorLimit, setEditTutorLimit] = useState(5);
+  const [editTutorLicenseCount, setEditTutorLicenseCount] = useState(0);
   const [editStatus, setEditStatus] = useState<'active' | 'suspended'>('active');
   const [editFeatures, setEditFeatures] = useState<Record<string, boolean>>({});
   const [detailName, setDetailName] = useState('');
   const [saveLoading, setSaveLoading] = useState(false);
+  const [archiveLoadingTutorId, setArchiveLoadingTutorId] = useState<string | null>(null);
+  const [unarchiveLoadingTutorId, setUnarchiveLoadingTutorId] = useState<string | null>(null);
   const [detailFeaturesBase, setDetailFeaturesBase] = useState<Record<string, unknown>>({});
   const [detailStats, setDetailStats] = useState<OrgAdminStats | null>(null);
 
@@ -114,12 +125,12 @@ export default function AdminPanel() {
       });
       const data = await res.json();
       if (res.ok && data.organizations) setOrgList(data.organizations);
-      else setResult({ success: false, message: data.error || t('admin.failedToLoad') });
+      else setResult({ success: false, message: data.error || tRef.current('admin.failedToLoad') });
     } catch {
-      setResult({ success: false, message: t('admin.serverError') });
+      setResult({ success: false, message: tRef.current('admin.serverError') });
     }
     setListLoading(false);
-  }, [platformAdminSecret, t]);
+  }, [platformAdminSecret]);
 
   useEffect(() => {
     if (step === 'panel' && panelView === 'list') void fetchOrgList();
@@ -136,7 +147,7 @@ export default function AdminPanel() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setResult({ success: false, message: data.error || t('common.error') });
+        setResult({ success: false, message: data.error || tRef.current('common.error') });
         setDetailStats(null);
         setDetailLoading(false);
         return;
@@ -152,7 +163,7 @@ export default function AdminPanel() {
           : null
       );
       setDetailName(org.name);
-      setEditTutorLimit(org.tutor_limit);
+      setEditTutorLicenseCount(Number(org.tutor_license_count) || 0);
       setEditStatus(org.status === 'suspended' ? 'suspended' : 'active');
 
       const orgFeatures = org.features && typeof org.features === 'object' ? org.features : {};
@@ -163,10 +174,11 @@ export default function AdminPanel() {
       setEditFeatures(mergedFeatures);
       setDetailFeaturesBase(orgFeatures as Record<string, unknown>);
       setDetailTutors(data.tutors || []);
+      setDetailArchivedTutors(data.archived_tutors || []);
       setDetailStudents(data.students || []);
       setDetailAudit(data.audit || []);
     } catch {
-      setResult({ success: false, message: t('admin.serverError') });
+      setResult({ success: false, message: tRef.current('admin.serverError') });
       setDetailStats(null);
     }
     setDetailLoading(false);
@@ -190,23 +202,97 @@ export default function AdminPanel() {
           'x-admin-secret': platformAdminSecret,
         },
         body: JSON.stringify({
-          tutor_limit: editTutorLimit,
+          tutor_license_count: editTutorLicenseCount,
           status: editStatus,
           features: merged,
         }),
       });
       const data = await res.json();
       if (res.ok) {
-        setResult({ success: true, message: t('admin.saved') });
+        setResult({ success: true, message: tRef.current('admin.saved') });
         void openDetail(detailId);
         void fetchOrgList();
       } else {
-        setResult({ success: false, message: data.error || t('admin.failedToSave') });
+        setResult({ success: false, message: data.error || tRef.current('admin.failedToSave') });
       }
     } catch {
-      setResult({ success: false, message: t('admin.serverError') });
+      setResult({ success: false, message: tRef.current('admin.serverError') });
     }
     setSaveLoading(false);
+  };
+
+  const archiveTutorFromAdmin = async (tutor: TutorRow) => {
+    if (!detailId) return;
+    const label = tutor.full_name || tutor.email || tutor.id;
+    const confirmed = window.confirm(
+      `Archyvuoti korepetitorių "${label}"?\n\nPaskyra nebus ištrinta, bet bus atkabinta nuo įmonės ir dings iš org admin pusės.`
+    );
+    if (!confirmed) return;
+
+    setArchiveLoadingTutorId(tutor.id);
+    setResult(null);
+    try {
+      const res = await fetch(`/api/admin-organizations?id=${encodeURIComponent(detailId)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-secret': platformAdminSecret,
+        },
+        body: JSON.stringify({
+          action: 'archive_tutor',
+          tutor_id: tutor.id,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setResult({ success: false, message: data.error || tRef.current('admin.failedToSave') });
+      } else {
+        setResult({ success: true, message: 'Korepetitorius suarchyvuotas.' });
+        await openDetail(detailId);
+        await fetchOrgList();
+      }
+    } catch {
+      setResult({ success: false, message: tRef.current('admin.serverError') });
+    } finally {
+      setArchiveLoadingTutorId(null);
+    }
+  };
+
+  const unarchiveTutorFromAdmin = async (tutor: ArchivedTutorRow) => {
+    if (!detailId) return;
+    const label = tutor.full_name || tutor.email || tutor.id;
+    const confirmed = window.confirm(
+      `Atarchyvuoti korepetitorių "${label}"?\n\nJis bus grąžintas atgal į šią įmonę, o anksčiau atkabinti jo mokiniai bus vėl priskirti jam.`
+    );
+    if (!confirmed) return;
+
+    setUnarchiveLoadingTutorId(tutor.id);
+    setResult(null);
+    try {
+      const res = await fetch(`/api/admin-organizations?id=${encodeURIComponent(detailId)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-secret': platformAdminSecret,
+        },
+        body: JSON.stringify({
+          action: 'unarchive_tutor',
+          tutor_id: tutor.id,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setResult({ success: false, message: data.error || tRef.current('admin.failedToSave') });
+      } else {
+        setResult({ success: true, message: 'Korepetitorius atarchyvuotas.' });
+        await openDetail(detailId);
+        await fetchOrgList();
+      }
+    } catch {
+      setResult({ success: false, message: tRef.current('admin.serverError') });
+    } finally {
+      setUnarchiveLoadingTutorId(null);
+    }
   };
 
   const toggleFeature = (featureId: string) => {
@@ -252,7 +338,7 @@ export default function AdminPanel() {
         body: JSON.stringify({
           orgName: form.orgName.trim(),
           orgEmail: form.orgEmail.trim(),
-          tutorLimit: form.tutorLimit,
+          tutorLicenseCount: form.tutorLicenseCount,
           adminEmail: form.adminEmail.trim(),
           adminPassword: form.adminPassword,
         }),
@@ -261,15 +347,15 @@ export default function AdminPanel() {
       const data = await res.json();
 
       if (data.success) {
-        setResult({ success: true, message: t('admin.companyCreated', { name: form.orgName, email: form.adminEmail }) });
-        setForm({ orgName: '', orgEmail: '', tutorLimit: 5, adminEmail: '', adminPassword: '' });
+        setResult({ success: true, message: tRef.current('admin.companyCreated', { name: form.orgName, email: form.adminEmail }) });
+        setForm({ orgName: '', orgEmail: '', tutorLicenseCount: 5, adminEmail: '', adminPassword: '' });
         void fetchOrgList();
         setPanelView('list');
       } else {
-        setResult({ success: false, message: data.error || t('admin.failedToCreate') });
+        setResult({ success: false, message: data.error || tRef.current('admin.failedToCreate') });
       }
     } catch {
-      setResult({ success: false, message: t('admin.serverError') });
+      setResult({ success: false, message: tRef.current('admin.serverError') });
     }
 
     setLoading(false);
@@ -300,15 +386,15 @@ export default function AdminPanel() {
       if (data.success) {
         setResult({
           success: true,
-          message: t('admin.schoolCreated', { name: schoolForm.schoolName.trim(), email: schoolForm.adminEmail.trim() }),
+          message: tRef.current('admin.schoolCreated', { name: schoolForm.schoolName.trim(), email: schoolForm.adminEmail.trim() }),
         });
         setSchoolForm({ schoolName: '', schoolEmail: '', adminEmail: '', adminPassword: '' });
         setPanelView('list');
       } else {
-        setResult({ success: false, message: data.error || t('admin.failedToCreate') });
+        setResult({ success: false, message: data.error || tRef.current('admin.failedToCreate') });
       }
     } catch {
-      setResult({ success: false, message: t('admin.serverError') });
+      setResult({ success: false, message: tRef.current('admin.serverError') });
     }
 
     setLoading(false);
@@ -434,7 +520,7 @@ export default function AdminPanel() {
                             <p className="text-xs text-slate-400 truncate">{o.email || '—'}</p>
                             <div className="mt-2 flex flex-wrap gap-2 text-xs">
                               <span className="rounded-lg bg-white/5 border border-white/10 px-2 py-1 text-slate-300">
-                                {t('admin.tutorsSlash')}: {o.tutor_count} / {o.tutor_limit}
+                                {t('admin.tutorLicenseCount')}: {o.tutor_license_count ?? 0}
                               </span>
                               <span className="rounded-lg bg-white/5 border border-white/10 px-2 py-1 text-slate-300">
                                 {t('admin.students')}: {o.student_count}
@@ -463,7 +549,7 @@ export default function AdminPanel() {
                   <thead>
                     <tr className="border-b border-white/10 text-left text-slate-400">
                       <th className="px-4 py-3 font-medium">{t('admin.thName')}</th>
-                      <th className="px-4 py-3 font-medium">{t('admin.thTutorLimit')}</th>
+                      <th className="px-4 py-3 font-medium">{t('admin.tutorLicenseCount')}</th>
                       <th className="px-4 py-3 font-medium">{t('admin.thStudents')}</th>
                       <th className="px-4 py-3 font-medium whitespace-nowrap">{t('admin.thLessons')}</th>
                       <th className="px-4 py-3 font-medium whitespace-nowrap">{t('admin.thRevenue')}</th>
@@ -481,7 +567,7 @@ export default function AdminPanel() {
                       return (
                         <tr key={o.id} className="border-b border-white/5 hover:bg-white/5">
                           <td className="px-4 py-3 font-medium">{o.name}</td>
-                          <td className="px-4 py-3 text-slate-300">{o.tutor_count} / {o.tutor_limit}</td>
+                          <td className="px-4 py-3 text-slate-300 tabular-nums">{o.tutor_license_count ?? 0}</td>
                           <td className="px-4 py-3 text-slate-300">{o.student_count}</td>
                           <td className="px-4 py-3 text-slate-300 tabular-nums">{o.lessons_occurred ?? '—'}</td>
                           <td className="px-4 py-3 text-slate-300 tabular-nums">
@@ -569,15 +655,16 @@ export default function AdminPanel() {
                   <form onSubmit={saveDetail} className="space-y-4">
                     <div className="grid sm:grid-cols-2 gap-4">
                       <div className="space-y-1.5">
-                        <Label className="text-slate-300">{t('admin.tutorLimit')}</Label>
+                        <Label className="text-slate-300">{t('admin.tutorLicenseCount')}</Label>
                         <Input
                           type="number"
-                          min={1}
+                          min={0}
                           max={10000}
-                          value={editTutorLimit}
-                          onChange={(e) => setEditTutorLimit(Number(e.target.value))}
+                          value={editTutorLicenseCount}
+                          onChange={(e) => setEditTutorLicenseCount(Math.max(0, Number(e.target.value) || 0))}
                           className="bg-white/10 border-white/20 text-white rounded-xl"
                         />
+                        <p className="text-[11px] text-slate-400">{t('admin.tutorLicenseCountHint')}</p>
                       </div>
                       <div className="space-y-1.5">
                         <Label className="text-slate-300">{t('admin.status')}</Label>
@@ -662,11 +749,49 @@ export default function AdminPanel() {
                   <ul className="space-y-2 text-sm text-slate-300 max-h-48 overflow-y-auto">
                     {detailTutors.map((tu) => (
                       <li key={tu.id} className="flex justify-between gap-2 border-b border-white/5 pb-2">
-                        <span>{tu.full_name || '—'}</span>
-                        <span className="text-slate-500 truncate">{tu.email}</span>
+                        <div className="min-w-0">
+                          <span>{tu.full_name || '—'}</span>
+                          <div className="text-slate-500 truncate text-xs">{tu.email}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void archiveTutorFromAdmin(tu)}
+                          disabled={archiveLoadingTutorId === tu.id}
+                          className="text-xs px-2 py-1 rounded-lg border border-red-500/30 text-red-300 hover:bg-red-500/10 disabled:opacity-50"
+                        >
+                          {archiveLoadingTutorId === tu.id ? 'Archyvuojama...' : 'Archyvuoti'}
+                        </button>
                       </li>
                     ))}
                   </ul>
+                </div>
+
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-5">
+                  <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+                    Archyvuoti korepetitoriai ({detailArchivedTutors.length})
+                  </h3>
+                  {detailArchivedTutors.length === 0 ? (
+                    <p className="text-sm text-slate-500">Nėra</p>
+                  ) : (
+                    <ul className="space-y-2 text-sm text-slate-300 max-h-48 overflow-y-auto">
+                      {detailArchivedTutors.map((tu) => (
+                        <li key={tu.id} className="flex justify-between gap-2 border-b border-white/5 pb-2">
+                          <div className="min-w-0">
+                            <span>{tu.full_name || '—'}</span>
+                            <div className="text-slate-500 truncate text-xs">{tu.email || '—'}</div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void unarchiveTutorFromAdmin(tu)}
+                            disabled={unarchiveLoadingTutorId === tu.id}
+                            className="text-xs px-2 py-1 rounded-lg border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-50"
+                          >
+                            {unarchiveLoadingTutorId === tu.id ? 'Atstatoma...' : 'Atarchyvuoti'}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
 
                 <div className="bg-white/5 border border-white/10 rounded-2xl p-5">
@@ -730,18 +855,18 @@ export default function AdminPanel() {
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-sm text-slate-300">{t('admin.tutorLimitLabel')}</Label>
+                <Label className="text-sm text-slate-300">{t('admin.tutorLicenseCount')}</Label>
                 <div className="flex items-center gap-3">
                   <Input
                     type="number"
-                    min={1}
+                    min={0}
                     max={100}
-                    value={form.tutorLimit}
-                    onChange={(e) => setForm({ ...form, tutorLimit: Number(e.target.value) })}
+                    value={form.tutorLicenseCount}
+                    onChange={(e) => setForm({ ...form, tutorLicenseCount: Number(e.target.value) })}
                     required
                     className="bg-white/10 border-white/20 text-white rounded-xl w-24"
                   />
-                  <span className="text-slate-400 text-sm">{t('admin.maxTutors')}</span>
+                  <span className="text-slate-400 text-sm">{t('admin.tutorLicenseCountHint')}</span>
                 </div>
               </div>
             </div>

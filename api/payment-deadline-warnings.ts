@@ -1,7 +1,7 @@
 // ─── Vercel Cron Function: Payment Deadline Warnings ─────────────────────────
 // Runs every 5 minutes via vercel.json cron schedule.
 // Finds active, unpaid sessions whose payment deadline is between now and 30 minutes
-// from now, and sends a warning email to the tutor.
+// from now, and sends a warning to the solo tutor, or to organization admins for org tutors (tutor never gets payment details).
 //
 // A session's payment deadline = session.start_time - tutor.cancellation_hours hours.
 // We send the warning when: 0 ≤ (deadline - now) ≤ 30 minutes.
@@ -12,6 +12,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { resolvePerLessonPaymentRules } from './_lib/perLessonPaymentRules.js';
+import { isOrgTutor } from './_lib/isOrgTutor.js';
 
 const supabase = createClient(
     process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL!,
@@ -28,6 +29,27 @@ async function sendWarningEmail(payload: any) {
         body: JSON.stringify(payload),
     });
     return resp.ok;
+}
+
+async function getOrgAdminProfiles(
+    organizationId: string,
+): Promise<Array<{ email: string; full_name: string | null }>> {
+    const { data: orgAdmins } = await supabase
+        .from('organization_admins')
+        .select('user_id')
+        .eq('organization_id', organizationId);
+    const adminIds = (orgAdmins || []).map((a: { user_id: string }) => a.user_id).filter(Boolean);
+    if (adminIds.length === 0) return [];
+    const { data: adminProfiles } = await supabase
+        .from('profiles')
+        .select('email, full_name')
+        .in('id', adminIds);
+    return (adminProfiles || [])
+        .map((p: { email?: string; full_name?: string | null }) => ({
+            email: String(p.email || '').trim(),
+            full_name: p.full_name ?? null,
+        }))
+        .filter((p) => p.email.length > 0);
 }
 
 async function getPaymentUrl(sessionId: string, payerEmail: string | null): Promise<string | null> {
@@ -89,6 +111,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           id,
           full_name,
           email,
+          organization_id,
           cancellation_hours,
           payment_timing,
           payment_deadline_hours
@@ -150,29 +173,65 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 const deadlineTime = deadline.toLocaleTimeString('lt-LT', {
                     hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Vilnius'
                 });
-                const paymentContext = paymentTiming === 'after_lesson'
-                    ? 'Student was supposed to pay after lesson by ' + deadlineTime
-                    : 'Payment deadline was by ' + deadlineTime;
+                const paymentContext =
+                    paymentTiming === 'after_lesson'
+                        ? `Po pamokos mokėjimas turėjo būti atliktas iki ${deadlineTime}.`
+                        : `Mokėjimo terminas – iki ${deadlineTime}.`;
 
-                // 1) Warning to tutor
-                const sentTutor = await sendWarningEmail({
-                    type: 'payment_deadline_warning_tutor',
-                    to: tutor.email,
-                    data: {
-                        tutorName: tutor.full_name,
-                        studentName: student.full_name,
-                        studentEmail: student.email,
-                        studentPhone: student.phone,
-                        sessionDate,
-                        sessionTime,
-                        deadlineTime,
-                        paymentContext,
-                        price: session.price ?? '–',
-                    },
-                });
+                // 1) Solo tutor gets warning email; org tutors never — same info goes to org admins instead
+                let tutorStepOk = false;
+                if (isOrgTutor(tutor.organization_id)) {
+                    const admins = await getOrgAdminProfiles(tutor.organization_id);
+                    if (admins.length === 0) {
+                        console.warn(
+                            '[payment-deadline-warnings] No org admin emails for organization_id',
+                            tutor.organization_id,
+                            'session',
+                            session.id,
+                        );
+                        tutorStepOk = true;
+                    } else {
+                        let allSent = true;
+                        for (const admin of admins) {
+                            const ok = await sendWarningEmail({
+                                type: 'payment_deadline_warning_org_admin',
+                                to: admin.email,
+                                data: {
+                                    recipientName: admin.full_name || 'Administratoriau',
+                                    studentName: student.full_name,
+                                    studentEmail: student.email,
+                                    studentPhone: student.phone,
+                                    sessionDate,
+                                    sessionTime,
+                                    deadlineTime,
+                                    paymentContext,
+                                    price: session.price ?? '–',
+                                    assignedTutorName: tutor.full_name || 'Korepetitorius',
+                                },
+                            });
+                            if (!ok) allSent = false;
+                        }
+                        tutorStepOk = allSent;
+                    }
+                } else {
+                    tutorStepOk = await sendWarningEmail({
+                        type: 'payment_deadline_warning_tutor',
+                        to: tutor.email,
+                        data: {
+                            tutorName: tutor.full_name,
+                            studentName: student.full_name,
+                            studentEmail: student.email,
+                            studentPhone: student.phone,
+                            sessionDate,
+                            sessionTime,
+                            deadlineTime,
+                            paymentContext,
+                            price: session.price ?? '–',
+                        },
+                    });
+                }
 
-                if (sentTutor) {
-                    // Mark the session so we don't send again
+                if (tutorStepOk) {
                     await supabase
                         .from('sessions')
                         .update({ payment_deadline_warning_sent: true })

@@ -1,12 +1,257 @@
+import type { User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { getCached, setCache, dedupeAsync } from '@/lib/dataCache';
-import { startOfMonth, endOfMonth, isAfter, isBefore, addDays } from 'date-fns';
+import { startOfMonth, endOfMonth, isAfter, isBefore, addDays, subDays } from 'date-fns';
+
+/** Columns the tutor Dashboard needs (avoid `*` + share one deduped round-trip with Layout preload). */
+const TUTOR_DASH_SESSIONS_SELECT =
+  'id, student_id, subject_id, start_time, end_time, status, paid, price, topic, created_at, meeting_link, cancellation_reason, payment_status, tutor_comment, show_comment_to_student, is_late_cancelled, cancellation_penalty_amount, penalty_resolution, cancelled_by, no_show_when, credit_applied_amount, lesson_package_id, payment_batch_id, subjects(is_trial, name), student:students(full_name, email, phone, payer_email, payer_phone, grade)';
+
+/** Single in-flight tutor dashboard sessions fetch (Layout preload + Dashboard share the same promise). */
+export function tutorDashboardSessionsDeduped(tutorUserId: string) {
+  const now = new Date();
+  const rangeStart = subDays(now, 90).toISOString();
+  const rangeEnd = addDays(now, 366).toISOString();
+  return dedupeAsync(`tutor_dash_sessions:${tutorUserId}`, () =>
+    supabase
+      .from('sessions')
+      .select(TUTOR_DASH_SESSIONS_SELECT)
+      .eq('tutor_id', tutorUserId)
+      .gte('start_time', rangeStart)
+      .lte('start_time', rangeEnd)
+      .order('start_time', { ascending: true })
+      .limit(800),
+  );
+}
 
 function getAuthUser() {
   return dedupeAsync('auth_user', async () => {
     const { data: { user } } = await supabase.auth.getUser();
     return user;
   });
+}
+
+/** One in-flight `getUser` per wave (StrictMode, UserContext + page both calling auth). */
+export function dedupeAuthGetUser(): Promise<User | null> {
+  return getAuthUser();
+}
+
+/** Parallel `OrgSuspendedBanner` / StrictMode bursts → one round-trip per org id. */
+export function orgSuspensionRowDeduped(organizationId: string) {
+  return dedupeAsync(`org_sf:${organizationId}`, () =>
+    supabase.from('organizations').select('status, features').eq('id', organizationId).maybeSingle(),
+  );
+}
+
+/** Shared guard + suspended banner paths (students have no profiles.organization_id row). */
+export function rpcGetStudentByUserIdDeduped(p_user_id: string) {
+  return dedupeAsync(`rpc_gsbuyid:${p_user_id}`, () =>
+    supabase.rpc('get_student_by_user_id', { p_user_id }),
+  );
+}
+
+export function tutorProfileOrgIdDeduped(tutorUserId: string) {
+  return dedupeAsync(`prof_org:${tutorUserId}`, () =>
+    supabase.from('profiles').select('organization_id').eq('id', tutorUserId).maybeSingle(),
+  );
+}
+
+/** Coalesces StudentLayout (`null`), StudentSchedule (active kid), preload, Sessions. */
+export function rpcGetStudentProfilesDeduped(p_user_id: string, p_student_id: string | null) {
+  const sk = p_student_id === undefined || p_student_id === null ? 'null' : p_student_id;
+  return dedupeAsync(`rpc_gsprof:${p_user_id}:${sk}`, () =>
+    supabase.rpc('get_student_profiles', { p_user_id, p_student_id: p_student_id ?? null }),
+  );
+}
+
+/** Tutor Layout + useOrgFeatures + useOrgTutorPolicy — vienas `profiles` užklausos skrydis. */
+export function tutorSidebarProfileDeduped(userId: string) {
+  return dedupeAsync(`prof_tutor_sidebar:${userId}`, () =>
+    supabase
+      .from('profiles')
+      .select('full_name, organization_id, company_commission_percent, has_active_license')
+      .eq('id', userId)
+      .maybeSingle(),
+  );
+}
+
+/** `preloadTutorData` stripe / payment laukai (kitas stulpinių rinkinys nei sidebar). */
+export function tutorPreloadProfileDeduped(userId: string) {
+  return dedupeAsync(`prof_tutor_preload:${userId}`, () =>
+    supabase
+      .from('profiles')
+      .select(
+        'full_name, organization_id, stripe_account_id, payment_timing, payment_deadline_hours, subscription_plan, manual_subscription_exempt',
+      )
+      .eq('id', userId)
+      .maybeSingle(),
+  );
+}
+
+/**
+ * Mokėtos „vienišos“ pamokos (dashboard „Paskutiniai mokėjimai“) — vienas in-flight tarp fetchData ir poll.
+ * Laiko riba sumažina planner darbą prie didelės istorijos.
+ */
+export function tutorRecentPaidLessonsDeduped(tutorId: string) {
+  const since = subDays(new Date(), 800).toISOString();
+  return dedupeAsync(`tutor_recent_paid_lessons:${tutorId}`, () =>
+    supabase
+      .from('sessions')
+      .select('id, start_time, price, topic, lesson_package_id, student:students(full_name)')
+      .eq('tutor_id', tutorId)
+      .eq('paid', true)
+      .is('lesson_package_id', null)
+      .is('payment_batch_id', null)
+      .neq('status', 'cancelled')
+      .gte('start_time', since)
+      .order('start_time', { ascending: false })
+      .limit(20),
+  );
+}
+
+/** Tutor Dashboard org tutor „atnaujinimų“ blokas (-7 d.) + ta pati organizacijos eilutė kaip OrgSuspended/useOrgFeatures. */
+export function tutorDashboardOrgPackDeduped(tutorUserId: string, organizationId: string) {
+  const weekAgo = subDays(new Date(), 7).toISOString();
+  return dedupeAsync(`dash_org_feed:${tutorUserId}`, () =>
+    Promise.all([
+      supabase
+        .from('availability')
+        .select('id, created_at, is_recurring, day_of_week, start_time, end_time, specific_date, end_date')
+        .eq('tutor_id', tutorUserId)
+        .eq('created_by_role', 'org_admin')
+        .gte('created_at', weekAgo)
+        .order('created_at', { ascending: false })
+        .limit(6),
+      supabase
+        .from('sessions')
+        .select('id, created_at, start_time, topic, student:students(full_name), subjects(name)')
+        .eq('tutor_id', tutorUserId)
+        .eq('created_by_role', 'org_admin')
+        .gte('created_at', weekAgo)
+        .order('created_at', { ascending: false })
+        .limit(6),
+      orgSuspensionRowDeduped(organizationId),
+    ]),
+  );
+}
+
+export function tutorStudentCountEstimatedDeduped(tutorId: string) {
+  return dedupeAsync(`tutor_stu_est_count:${tutorId}`, () =>
+    supabase.from('students').select('*', { count: 'estimated', head: true }).eq('tutor_id', tutorId),
+  );
+}
+
+export function tutorRecentPaidPackagesDeduped(tutorId: string) {
+  return dedupeAsync(`tutor_recent_pkgs:${tutorId}`, () =>
+    supabase
+      .from('lesson_packages')
+      .select('id, paid_at, total_price, total_lessons, students!student_id(full_name), subjects!subject_id(name)')
+      .eq('tutor_id', tutorId)
+      .eq('paid', true)
+      .not('paid_at', 'is', null)
+      .order('paid_at', { ascending: false })
+      .limit(20),
+  );
+}
+
+export function tutorRecentPaidInvoicesDeduped(tutorId: string) {
+  return dedupeAsync(`tutor_recent_inv:${tutorId}`, () =>
+    supabase
+      .from('billing_batches')
+      .select('id, paid_at, total_amount, period_start_date, period_end_date, payer_name')
+      .eq('tutor_id', tutorId)
+      .eq('paid', true)
+      .not('paid_at', 'is', null)
+      .order('paid_at', { ascending: false })
+      .limit(20),
+  );
+}
+
+export function orgTutorPolicyRowDeduped(organizationId: string) {
+  return dedupeAsync(`org_tutor_pol:${organizationId}`, () =>
+    supabase
+      .from('organizations')
+      .select(
+        'org_tutor_lesson_edit, org_tutors_can_edit_lesson_settings, invoice_issuer_mode, tutor_license_count, tutor_limit',
+      )
+      .eq('id', organizationId)
+      .maybeSingle(),
+  );
+}
+
+/** `preloadTutorData` + Calendar + Students — tas pats `students` sąrašas. */
+export function tutorStudentsRowsDeduped(tutorId: string) {
+  return dedupeAsync(`tutor_students_star:${tutorId}`, () =>
+    supabase
+      .from('students')
+      .select('*, linked_user_id')
+      .eq('tutor_id', tutorId)
+      .order('created_at', { ascending: false }),
+  );
+}
+
+export function profilePersonalMeetingLinkDeduped(userId: string) {
+  return dedupeAsync(`prof_pml:${userId}`, () =>
+    supabase.from('profiles').select('personal_meeting_link').eq('id', userId).maybeSingle(),
+  );
+}
+
+export function tutorFinancePageProfileDeduped(userId: string) {
+  return dedupeAsync(`prof_finance_page:${userId}`, () =>
+    supabase
+      .from('profiles')
+      .select(
+        'organization_id, stripe_account_id, stripe_onboarding_complete, payment_timing, payment_deadline_hours, min_booking_hours, enable_per_lesson, enable_monthly_billing, enable_prepaid_packages, restrict_booking_on_overdue, enable_per_student_payment_override',
+      )
+      .eq('id', userId)
+      .maybeSingle(),
+  );
+}
+
+/** Kai UserContext dar neturi profilio — tie patys laukai kaip Calendar buvo traukę vienoje užklausoje. */
+export function tutorCalendarFallbackProfileDeduped(userId: string) {
+  return dedupeAsync(`prof_cal_fallback:${userId}`, () =>
+    supabase
+      .from('profiles')
+      .select(
+        'stripe_account_id, google_calendar_connected, organization_id, personal_meeting_link, subscription_plan, manual_subscription_exempt',
+      )
+      .eq('id', userId)
+      .maybeSingle(),
+  );
+}
+
+export function tutorSubjectsCalendarDeduped(tutorId: string) {
+  return dedupeAsync(`tutor_subj_cal:${tutorId}`, () =>
+    supabase
+      .from('subjects')
+      .select('id, name, duration_minutes, price, color, meeting_link, grade_min, grade_max, is_group, max_students')
+      .eq('tutor_id', tutorId),
+  );
+}
+
+export function tutorStudentPricingAllDeduped(tutorId: string) {
+  return dedupeAsync(`tutor_stu_price_all:${tutorId}`, () =>
+    supabase.from('student_individual_pricing').select('*').eq('tutor_id', tutorId),
+  );
+}
+
+export function tutorSubjectPricesRowsAllDeduped(tutorId: string) {
+  return dedupeAsync(`tutor_tsp_all:${tutorId}`, () =>
+    supabase.from('tutor_subject_prices').select('*').eq('tutor_id', tutorId),
+  );
+}
+
+export function tutorAvailabilityAllRowsDeduped(tutorId: string) {
+  return dedupeAsync(`tutor_avail_all:${tutorId}`, () =>
+    supabase.from('availability').select('*').eq('tutor_id', tutorId),
+  );
+}
+
+export function organizationSubjectTemplatesDeduped(orgId: string) {
+  return dedupeAsync(`org_tpl:${orgId}`, () =>
+    supabase.from('organizations').select('org_subject_templates').eq('id', orgId).maybeSingle(),
+  );
 }
 
 function getOrgAdmin(userId: string) {
@@ -24,9 +269,12 @@ let orgPreloadRunning = false;
 let tutorPreloadRunning = false;
 let studentPreloadRunning = false;
 
+/** Shared with CompanyTutors; v2 excludes org student profiles from tutor preload cache */
+export const COMPANY_TUTORS_CACHE_KEY = 'company_tutors_v2';
+
 export async function preloadOrgAdminData() {
   if (orgPreloadRunning) return;
-  if (getCached('company_tutors') && getCached('company_students') && getCached('company_sessions')) return;
+  if (getCached(COMPANY_TUTORS_CACHE_KEY) && getCached('company_students') && getCached('company_sessions')) return;
   orgPreloadRunning = true;
 
   try {
@@ -39,7 +287,7 @@ export async function preloadOrgAdminData() {
     const org = adminRow.organizations as any;
     const orgId = adminRow.organization_id;
 
-    const [{ data: adminUsers }, { data: tutorData }, { data: inviteData }] = await Promise.all([
+    const [{ data: adminUsers }, { data: tutorData }, { data: inviteData }, { data: linkedStudentsRows }] = await Promise.all([
       supabase
         .from('organization_admins')
         .select('user_id')
@@ -53,18 +301,38 @@ export async function preloadOrgAdminData() {
         .select('*')
         .eq('organization_id', orgId)
         .order('created_at', { ascending: false }),
+      supabase
+        .from('students')
+        .select('linked_user_id, email')
+        .eq('organization_id', orgId),
     ]);
 
     const adminIds = new Set((adminUsers || []).map((a: any) => a.user_id));
-    const visibleTutors = (tutorData || []).filter((t: any) => !adminIds.has(t.id));
+    const linkedStudentUserIds = new Set(
+      (linkedStudentsRows || [])
+        .map((s: { linked_user_id?: string | null }) => s.linked_user_id)
+        .filter((id: string | null | undefined): id is string => !!id)
+    );
+    const linkedStudentEmails = new Set(
+      (linkedStudentsRows || [])
+        .map((s: { email?: string | null }) => String(s.email || '').trim().toLowerCase())
+        .filter((email: string) => email.length > 0)
+    );
+    // Match CompanyTutors: exclude org admins and org student accounts (linked profiles)
+    const visibleTutors = (tutorData || []).filter(
+      (t: { id: string; email?: string | null }) =>
+        !adminIds.has(t.id) &&
+        !linkedStudentUserIds.has(t.id) &&
+        !linkedStudentEmails.has(String(t.email || '').trim().toLowerCase())
+    );
     const tutorIds = visibleTutors.map((t: any) => t.id);
 
-    if (!getCached('company_tutors')) {
+    if (!getCached(COMPANY_TUTORS_CACHE_KEY)) {
       const enrichedInvites = (inviteData || []).map((inv: any) => ({
         ...inv,
         tutor: (tutorData || []).find((t: any) => t.id === inv.used_by_profile_id) || null,
       }));
-      setCache('company_tutors', {
+      setCache(COMPANY_TUTORS_CACHE_KEY, {
         orgId, tutorLimit: org?.tutor_limit || 0,
         tutors: visibleTutors, invites: enrichedInvites,
       });
@@ -250,44 +518,20 @@ export async function preloadTutorData() {
     const user = await getAuthUser();
     if (!user) return;
 
-    const [profileRes, studentsRes, sessionsRes, countRes, subjectsCountRes] = await Promise.all([
-      supabase.from('profiles')
-        .select('full_name, organization_id, stripe_account_id, payment_timing, payment_deadline_hours, subscription_plan, manual_subscription_exempt')
-        .eq('id', user.id)
-        .maybeSingle(),
+    const [profileRes, studentsRes, sessionsRes, countRes] = await Promise.all([
+      tutorPreloadProfileDeduped(user.id),
+      tutorStudentsRowsDeduped(user.id),
+      tutorDashboardSessionsDeduped(user.id),
       supabase.from('students')
-        .select('*, linked_user_id')
-        .eq('tutor_id', user.id)
-        .order('created_at', { ascending: false }),
-      supabase.from('sessions')
-        .select('id, student_id, subject_id, start_time, end_time, status, paid, price, topic, created_at, meeting_link, cancellation_reason, payment_status, tutor_comment, show_comment_to_student, is_late_cancelled, cancellation_penalty_amount, penalty_resolution, cancelled_by, subjects(is_trial, name), student:students(full_name, email, phone, payer_email, payer_phone, grade)')
-        .eq('tutor_id', user.id)
-        .order('start_time', { ascending: true })
-        .limit(300),
-      supabase.from('students')
-        .select('id', { count: 'exact', head: true })
-        .eq('tutor_id', user.id),
-      supabase.from('subjects')
         .select('id', { count: 'exact', head: true })
         .eq('tutor_id', user.id),
     ]);
 
     if (!getCached('tutor_dashboard')) {
-      const p = profileRes.data;
-      const isManualOnly = !p?.organization_id &&
-        (p?.subscription_plan === 'subscription_only' || p?.manual_subscription_exempt === true);
       setCache('tutor_dashboard', {
         sessions: sessionsRes.data || [],
         studentCount: countRes.count || 0,
-        tutorName: p?.full_name || user.email?.split('@')[0] || '',
-        isStripeConnected: !!p?.stripe_account_id || isManualOnly,
-        hasSubjects: (subjectsCountRes.count || 0) > 0,
-        orgTutorFallback: !!p?.organization_id,
-        paymentTiming: p?.payment_timing || 'before_lesson',
-        paymentDeadlineHours: p?.payment_deadline_hours ?? null,
-        currentUserId: user.id,
-        recentPayments: [],
-        tutorUpdates: [],
+        tutorName: profileRes.data?.full_name || user.email?.split('@')[0] || '',
       });
     }
 
@@ -311,10 +555,7 @@ export async function preloadStudentData() {
     const ACTIVE_KEY = 'tutlio_active_student_profile_id';
     const selectedId = typeof window !== 'undefined' ? localStorage.getItem(ACTIVE_KEY) : null;
 
-    const { data: studentRows } = await supabase.rpc('get_student_profiles', {
-      p_user_id: user.id,
-      p_student_id: selectedId || null,
-    });
+    const { data: studentRows } = await rpcGetStudentProfilesDeduped(user.id, selectedId || null);
 
     const st = studentRows?.[0];
     if (!st) return;
@@ -322,12 +563,17 @@ export async function preloadStudentData() {
     const threeMonthsAgo = new Date();
     threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
 
+    const STUDENT_PRELOAD_SESSION_COLS =
+      'id,start_time,end_time,status,paid,price,topic,meeting_link,payment_status,tutor_comment,show_comment_to_student,subject_id';
+
     const [sessionsRes, waitlistRes] = await Promise.all([
-      supabase.from('sessions')
-        .select('*, subjects(is_group, max_students)')
+      supabase
+        .from('sessions')
+        .select(STUDENT_PRELOAD_SESSION_COLS)
         .eq('student_id', st.id)
         .gte('start_time', threeMonthsAgo.toISOString())
-        .order('start_time', { ascending: true }),
+        .order('start_time', { ascending: true })
+        .limit(400),
       supabase.from('waitlists')
         .select('id, notes, session:sessions(start_time, end_time, topic, price)')
         .eq('student_id', st.id)
@@ -341,10 +587,6 @@ export async function preloadStudentData() {
       setCache('student_dashboard', {
         student: { full_name: st.full_name, grade: st.grade, tutor: null },
         sessions,
-        activeStudentId: st.id,
-        paymentPayer: st.payment_payer || null,
-        activePackages: [],
-        installments: [],
       });
     }
 

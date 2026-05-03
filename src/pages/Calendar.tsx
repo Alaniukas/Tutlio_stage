@@ -18,6 +18,8 @@ import {
   addWeeks,
   addMonths,
   parseISO,
+  isValid,
+  subDays,
 } from 'date-fns';
 import { lt } from 'date-fns/locale';
 import { enUS } from 'date-fns/locale';
@@ -26,7 +28,6 @@ import 'react-big-calendar/lib/css/react-big-calendar.css';
 import Layout from '@/components/Layout';
 import { useTranslation } from '@/lib/i18n';
 import { supabase } from '@/lib/supabase';
-import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { useUser } from '@/contexts/UserContext';
 import { sendEmail } from '@/lib/email';
 import { authHeaders } from '@/lib/apiHelpers';
@@ -82,13 +83,26 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { cancelSessionAndFillWaitlist } from '@/lib/lesson-actions';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { formatContactForTutorView } from '@/lib/orgContactVisibility';
 import Toast from '@/components/Toast';
+import { dedupeAsync } from '@/lib/dataCache';
+import {
+  dedupeAuthGetUser,
+  orgSuspensionRowDeduped,
+  tutorSidebarProfileDeduped,
+  tutorStudentsRowsDeduped,
+  tutorCalendarFallbackProfileDeduped,
+  tutorSubjectsCalendarDeduped,
+  tutorStudentPricingAllDeduped,
+  tutorSubjectPricesRowsAllDeduped,
+  tutorAvailabilityAllRowsDeduped,
+  organizationSubjectTemplatesDeduped,
+} from '@/lib/preload';
 
 const locales = { lt, en: enUS };
 
@@ -99,6 +113,9 @@ const localizer = dateFnsLocalizer({
   getDay,
   locales,
 });
+
+const CALENDAR_SESSION_COLUMNS =
+  'id, tutor_id, student_id, start_time, end_time, status, paid, meeting_link, cancellation_reason, cancelled_at, topic, price, payment_status, tutor_comment, show_comment_to_student, hidden_from_calendar, subject_id, available_spots, recurring_session_id, lesson_package_id, payment_batch_id, no_show_when, is_late_cancelled, subjects(is_trial, name), student:students(full_name, email, phone, payer_email, payer_phone, grade, admin_comment, admin_comment_visible_to_tutor)';
 
 interface Session {
   id: string;
@@ -176,28 +193,43 @@ function parseStudentGrade(grade: string | null | undefined): number {
   return match ? parseInt(match[1]) : 1;
 }
 
+/** One row per subject id — avoids duplicate dropdown rows if subject_ids or API repeats ids. */
+function dedupeSubjectsById<T extends { id: string }>(list: T[]): T[] {
+  const m = new Map<string, T>();
+  for (const item of list) {
+    if (item?.id && !m.has(item.id)) m.set(item.id, item);
+  }
+  return Array.from(m.values());
+}
+
+function uniqueSubjectIds(ids: string[] | null | undefined): string[] {
+  return [...new Set((ids || []).filter((id): id is string => typeof id === 'string' && id.length > 0))];
+}
+
 export default function CalendarPage() {
   const { t, locale, dateFnsLocale } = useTranslation();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const orgPolicy = useOrgTutorPolicy();
   const licenseFrozen = orgPolicy.isOrgTutor && orgPolicy.orgUsesLicenses && !orgPolicy.hasActiveLicense;
   const { contactVisibility } = useOrgFeatures();
-  const cc = getCached<any>('tutor_calendar');
+  const { profile: ctxProfile } = useUser();
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
-  const [sessions, setSessions] = useState<Session[]>(cc?.sessions ?? []);
-  const [students, setStudents] = useState<Student[]>(cc?.students ?? []);
-  const [subjects, setSubjects] = useState<Subject[]>(cc?.subjects ?? []);
-  const [individualPricing, setIndividualPricing] = useState<any[]>(cc?.individualPricing ?? []);
-  const [tutorSubjectPrices, setTutorSubjectPrices] = useState<any[]>(cc?.tutorSubjectPrices ?? []);
-  const [calOrgSubjectTemplates, setCalOrgSubjectTemplates] = useState<{ id: string; name: string }[]>(cc?.calOrgSubjectTemplates ?? []);
-  const [availability, setAvailability] = useState<Availability[]>(cc?.availability ?? []);
-  const [loading, setLoading] = useState(!cc);
-  const [stripeConnected, setStripeConnected] = useState(cc?.stripeConnected ?? false);
-  const [isOrgTutor, setIsOrgTutor] = useState(cc?.isOrgTutor ?? false);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [individualPricing, setIndividualPricing] = useState<any[]>([]);
+  const [tutorSubjectPrices, setTutorSubjectPrices] = useState<any[]>([]);
+  const [calOrgSubjectTemplates, setCalOrgSubjectTemplates] = useState<{ id: string; name: string }[]>([]);
+  const [availability, setAvailability] = useState<Availability[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [stripeConnected, setStripeConnected] = useState(false);
+  const [isOrgTutor, setIsOrgTutor] = useState(false);
 
-  const [googleCalendarConnected, setGoogleCalendarConnected] = useState(cc?.googleCalendarConnected ?? false);
+  // Google Calendar state
+  const [googleCalendarConnected, setGoogleCalendarConnected] = useState(false);
   const [googleCalendarSyncing, setGoogleCalendarSyncing] = useState(false);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(cc?.currentUserId ?? null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   // Calendar view & date state – default to day view on mobile
   const [currentView, setCurrentView] = useState<View>(
@@ -205,6 +237,17 @@ export default function CalendarPage() {
   );
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [calendarExpanded, setCalendarExpanded] = useState(false);
+
+  useEffect(() => {
+    const raw = searchParams.get('date');
+    if (!raw || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return;
+    const parsed = parse(raw, 'yyyy-MM-dd', new Date());
+    if (!isValid(parsed)) return;
+    setCurrentDate(startOfDay(parsed));
+    const next = new URLSearchParams(searchParams);
+    next.delete('date');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   // Slot choice popup (C2: Calendar day click → create free time or lesson)
   const [slotChoiceOpen, setSlotChoiceOpen] = useState(false);
@@ -317,18 +360,8 @@ export default function CalendarPage() {
   const [groupCancelChoice, setGroupCancelChoice] = useState<'single' | 'all_future' | null>(null);
 
   useEffect(() => {
-    if (!getCached('tutor_calendar')) fetchData();
+    fetchData();
   }, []);
-
-  useEffect(() => {
-    if (!loading && sessions.length > 0) {
-      setCache('tutor_calendar', {
-        sessions, students, subjects, individualPricing,
-        tutorSubjectPrices, calOrgSubjectTemplates, availability,
-        stripeConnected, isOrgTutor, googleCalendarConnected, currentUserId,
-      });
-    }
-  }, [loading, sessions, students, subjects, availability]);
 
   // Set default dates when mass cancel modal opens
   useEffect(() => {
@@ -372,17 +405,13 @@ export default function CalendarPage() {
     (async () => {
       const subjectId = (selectedEvent as any)?.subject_id as string | null | undefined;
       if (!subjectId) return;
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await dedupeAuthGetUser();
       if (!user) return;
-      const { data: tutorProfile } = await supabase
-        .from('profiles')
-        .select('organization_id')
-        .eq('id', user.id)
-        .maybeSingle();
-      const orgId = (tutorProfile as any)?.organization_id as string | null | undefined;
+      const { data: tutorProfile } = await tutorSidebarProfileDeduped(user.id);
+      const orgId = tutorProfile?.organization_id as string | null | undefined;
       if (!orgId) return;
       const [{ data: orgRow }, { data: subjRow }] = await Promise.all([
-        supabase.from('organizations').select('features').eq('id', orgId).maybeSingle(),
+        orgSuspensionRowDeduped(orgId),
         supabase.from('subjects').select('is_trial').eq('id', subjectId).maybeSingle(),
       ]);
       const feat = (orgRow as any)?.features;
@@ -400,17 +429,36 @@ export default function CalendarPage() {
   }, [selectedEvent?.id]);
 
   const fetchData = async () => {
-    if (!getCached('tutor_calendar')) setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await dedupeAuthGetUser();
     if (!user) { setLoading(false); return; }
+
+    await dedupeAsync(`cal:${user.id}`, async () => {
+    setLoading(true);
     setCurrentUserId(user.id);
 
-    // Use UserContext profile instead of fetching again
-    const { data: profileData } = await supabase
-      .from('profiles')
-      .select('stripe_account_id, google_calendar_connected, organization_id, personal_meeting_link, subscription_plan, manual_subscription_exempt')
-      .eq('id', user.id)
-      .single();
+    let profileData: {
+      stripe_account_id?: string | null;
+      google_calendar_connected?: boolean | null;
+      organization_id?: string | null;
+      personal_meeting_link?: string | null;
+      subscription_plan?: string | null;
+      manual_subscription_exempt?: boolean | null;
+    } | null;
+
+    if (ctxProfile?.id === user.id) {
+      profileData = {
+        stripe_account_id: ctxProfile.stripe_account_id,
+        google_calendar_connected: ctxProfile.google_calendar_connected,
+        organization_id: ctxProfile.organization_id,
+        subscription_plan: ctxProfile.subscription_plan ?? null,
+        manual_subscription_exempt: ctxProfile.manual_subscription_exempt ?? null,
+        personal_meeting_link: ctxProfile.personal_meeting_link ?? null,
+      };
+    } else {
+      const { data } = await tutorCalendarFallbackProfileDeduped(user.id);
+      profileData = data ?? null;
+    }
+
     setIsOrgTutor(!!profileData?.organization_id);
     const isManualOnlyPlan =
       !profileData?.organization_id &&
@@ -440,14 +488,19 @@ export default function CalendarPage() {
         .in('id', toHide.map(s => s.id));
     }
 
-    // Fetch sessions (excluding hidden ones)
-    // Note: Use .not() instead of .eq(false) to include NULL values (for backwards compatibility)
+    const calPast = subDays(now, 420).toISOString();
+    const calFuture = addDays(now, 460).toISOString();
+
+    // Fetch sessions in a bounded window — index-friendly; mass-cancel naudoja atskirą užklausą
     const { data: sessionsData } = await supabase
       .from('sessions')
-      .select('*, student:students(full_name, email, phone, payer_email, payer_phone, grade, admin_comment, admin_comment_visible_to_tutor)')
+      .select(CALENDAR_SESSION_COLUMNS)
       .eq('tutor_id', user.id)
       .not('hidden_from_calendar', 'eq', true)
-      .limit(1000);
+      .gte('start_time', calPast)
+      .lte('start_time', calFuture)
+      .order('start_time', { ascending: true })
+      .limit(1400);
 
     const parsedSessions = (sessionsData || []).map((session: any) => ({
       ...session,
@@ -456,47 +509,42 @@ export default function CalendarPage() {
     }));
     setSessions(parsedSessions);
 
-    const { data: studentsData } = await supabase
-      .from('students')
-      .select('id, full_name, grade, email, payment_payer, payer_email, payment_model, personal_meeting_link')
-      .eq('tutor_id', user.id);
-    setStudents(studentsData || []);
+    const { data: studentsData } = await tutorStudentsRowsDeduped(user.id);
+    const calStudents =
+      studentsData?.map((row: Record<string, unknown>) => ({
+        id: row.id,
+        full_name: row.full_name,
+        grade: row.grade,
+        email: row.email,
+        payment_payer: row.payment_payer,
+        payer_email: row.payer_email,
+        payment_model: row.payment_model,
+        personal_meeting_link: row.personal_meeting_link,
+      })) ?? [];
+    setStudents(calStudents as Student[]);
 
-    const { data: subjectsData } = await supabase
-      .from('subjects')
-      .select('id, name, duration_minutes, price, color, meeting_link, grade_min, grade_max, is_group, max_students')
-      .eq('tutor_id', user.id);
-    setSubjects(subjectsData || []);
+    const { data: subjectsData } = await tutorSubjectsCalendarDeduped(user.id);
+    setSubjects(dedupeSubjectsById(subjectsData || []));
 
-    // Fetch individual pricing for all students - batch fetch (GOOD, keep it)
-    const { data: pricingData } = await supabase
-      .from('student_individual_pricing')
-      .select('*')
-      .eq('tutor_id', user.id);
+    const { data: pricingData } = await tutorStudentPricingAllDeduped(user.id);
     setIndividualPricing(pricingData || []);
 
-    const { data: tspData } = await supabase
-      .from('tutor_subject_prices')
-      .select('*')
-      .eq('tutor_id', user.id);
+    const { data: tspData } = await tutorSubjectPricesRowsAllDeduped(user.id);
     setTutorSubjectPrices(tspData || []);
 
     if (profileData?.organization_id) {
-      const { data: orgRow } = await supabase.from('organizations').select('org_subject_templates').eq('id', profileData.organization_id).maybeSingle();
+      const { data: orgRow } = await organizationSubjectTemplatesDeduped(profileData.organization_id);
       const tpl = (orgRow as any)?.org_subject_templates;
       if (Array.isArray(tpl)) {
         setCalOrgSubjectTemplates(tpl.filter((t: any) => t?.id && t?.name).map((t: any) => ({ id: t.id, name: String(t.name).trim() })));
       }
     }
 
-    const { data: av } = await supabase
-      .from('availability')
-      .select('*')
-      .eq('tutor_id', user.id);
+    const { data: av } = await tutorAvailabilityAllRowsDeduped(user.id);
     setAvailability(av || []);
 
-    invalidateCache('tutor_dashboard');
     setLoading(false);
+    });
   };
 
   const getTutorSubjectPrice = useCallback((subjectName: string | null | undefined) => {
@@ -529,19 +577,21 @@ export default function CalendarPage() {
 
   // Subjects available in "assign student to slot" flow
   const assignFilteredSubjects = useMemo(() => {
+    const subjList = dedupeSubjectsById(subjects);
+    const slotIds = uniqueSubjectIds(editingSlot?.subjectIds);
+
     // If no student selected, return all subjects (for new flow where subject comes first)
     if (!assignStudentId) {
-      // Still apply slot subject_ids filter if available
-      if (editingSlot?.subjectIds?.length) {
-        return subjects.filter(subj => editingSlot.subjectIds!.includes(subj.id));
+      if (slotIds.length > 0) {
+        return subjList.filter((subj) => slotIds.includes(subj.id));
       }
-      return subjects;
+      return subjList;
     }
 
     const student = students.find(s => s.id === assignStudentId);
     const studentGrade = parseStudentGrade(student?.grade);
 
-    return subjects.filter(subj => {
+    return subjList.filter(subj => {
       // Grade check (only when subject range is explicitly set)
       if (subj.grade_min != null && subj.grade_max != null) {
         if (studentGrade < subj.grade_min || studentGrade > subj.grade_max) {
@@ -549,9 +599,8 @@ export default function CalendarPage() {
         }
       }
 
-      // Slot subject_ids check (if slot was restricted to specific subjects)
-      if (editingSlot?.subjectIds?.length) {
-        return editingSlot.subjectIds.includes(subj.id);
+      if (slotIds.length > 0) {
+        return slotIds.includes(subj.id);
       }
 
       return true;
@@ -646,7 +695,7 @@ export default function CalendarPage() {
               ruleIsRecurring: rule.is_recurring,
               ruleDate: rule.specific_date,
               ruleDayOfWeek: rule.day_of_week,
-              ruleSubjectIds: rule.subject_ids || [],
+              ruleSubjectIds: uniqueSubjectIds(rule.subject_ids),
               ruleMeetingLink: rule.meeting_link || '',
             });
           }
@@ -863,6 +912,11 @@ export default function CalendarPage() {
 
   const handleSelectSlot = useCallback(({ start, end }: { start: Date; end: Date }, opts?: { forceCreate?: boolean }) => {
     if (isAvailabilityModalOpen || isEventModalOpen || isCreateModalOpen || isUpcomingListModalOpen) return;
+    // Header "Create lesson" uses forceCreate and bypasses slot popup — block here when frozen.
+    if (opts?.forceCreate && licenseFrozen) {
+      setToastMessage({ message: t('cal.licenseFrozenDesc'), type: 'warning' });
+      return;
+    }
     // Only require Stripe + subjects for individual tutors. Org tutors manage calendars/sessions without their own Stripe.
     if (!isOrgTutor && (!stripeConnected || subjects.length === 0)) {
       alert(t('cal.connectStripeFirst'));
@@ -880,11 +934,11 @@ export default function CalendarPage() {
           ruleDate: hit.ruleDate,
           ruleDayOfWeek: hit.ruleDayOfWeek,
           blockStart: hit.start_time,
-          subjectIds: hit.ruleSubjectIds || [],
+          subjectIds: uniqueSubjectIds(hit.ruleSubjectIds),
         });
         setSlotEditStart(hit.ruleStart);
         setSlotEditEnd(hit.ruleEnd);
-        setSlotEditSubjects(hit.ruleSubjectIds || []);
+        setSlotEditSubjects(uniqueSubjectIds(hit.ruleSubjectIds));
         setIsSlotEditOpen(true);
         return;
       }
@@ -909,9 +963,13 @@ export default function CalendarPage() {
 
     setPendingSlot({ start, end });
     setSlotChoiceOpen(true);
-  }, [isAvailabilityModalOpen, isEventModalOpen, isCreateModalOpen, isUpcomingListModalOpen, backgroundEvents, stripeConnected, subjects.length, isOrgTutor]);
+  }, [isAvailabilityModalOpen, isEventModalOpen, isCreateModalOpen, isUpcomingListModalOpen, backgroundEvents, stripeConnected, subjects.length, isOrgTutor, licenseFrozen, t]);
 
   const openCreateLessonFromSlot = () => {
+    if (licenseFrozen) {
+      setToastMessage({ message: t('cal.licenseFrozenDesc'), type: 'warning' });
+      return;
+    }
     if (!pendingSlot) return;
     setSlotChoiceOpen(false);
     setSelectedSlot(pendingSlot);
@@ -945,12 +1003,12 @@ export default function CalendarPage() {
         ruleDate: event.ruleDate,
         ruleDayOfWeek: event.ruleDayOfWeek,
         blockStart: event.start_time,
-        subjectIds: event.ruleSubjectIds,
+        subjectIds: uniqueSubjectIds(event.ruleSubjectIds),
         meetingLink: event.ruleMeetingLink,
       });
       setSlotEditStart(event.ruleStart);
       setSlotEditEnd(event.ruleEnd);
-      setSlotEditSubjects(event.ruleSubjectIds);
+      setSlotEditSubjects(uniqueSubjectIds(event.ruleSubjectIds));
       setSlotEditMeetingLink(event.ruleMeetingLink || '');
       setIsSlotEditOpen(true);
       return;
@@ -1186,6 +1244,11 @@ export default function CalendarPage() {
 
     if (!hasStudents || !startTime || !endTime) {
       alert(t('cal.selectStudentAndTime'));
+      return;
+    }
+
+    if (licenseFrozen) {
+      setToastMessage({ message: t('cal.licenseFrozenDesc'), type: 'warning' });
       return;
     }
 
@@ -1934,6 +1997,10 @@ export default function CalendarPage() {
     // Check if we have at least one student (either single or multi-select)
     const hasStudents = assignStudentIds.length > 0 || assignStudentId;
     if (!hasStudents || !assignSubjectId || !assignSelectedSlot || !editingSlot) return;
+    if (licenseFrozen) {
+      setToastMessage({ message: t('cal.licenseFrozenDesc'), type: 'warning' });
+      return;
+    }
     setAssignSaving(true);
 
     const { data: { user } } = await supabase.auth.getUser();
@@ -3338,6 +3405,8 @@ export default function CalendarPage() {
               const end = addHours(now, 1);
               handleSelectSlot({ start: now, end }, { forceCreate: true });
             }}
+            disabled={licenseFrozen}
+            title={licenseFrozen ? t('cal.licenseFrozenTitle') : undefined}
             className="gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow-md hover:shadow-lg transition-all font-semibold"
           >
             <Plus className="w-4 h-4" />
@@ -3357,8 +3426,11 @@ export default function CalendarPage() {
         </div>
       )}
 
-      {/* Reminder: Stripe / lesson types – individual tutors only, not org_tutor */}
-      {!isOrgTutor && (!stripeConnected || subjects.length === 0) && (
+      {/* Reminder: solo tutors only — hide while calendar loads (avoids flash) and when org tutor or Stripe+subjects OK */}
+      {!loading &&
+        !orgPolicy.isOrgTutor &&
+        !isOrgTutor &&
+        (!stripeConnected || subjects.length === 0) && (
         <div className="mb-4 p-4 rounded-2xl border border-amber-200 bg-amber-50 flex flex-wrap items-center gap-3">
           <AlertCircle className="w-6 h-6 text-amber-600 flex-shrink-0" />
           <div className="flex-1 min-w-0">
@@ -3973,8 +4045,9 @@ export default function CalendarPage() {
                   const isGroupLesson = selectedSubject?.is_group;
                   const hasStudents = isGroupLesson ? selectedStudentIds.length > 0 : !!selectedStudentId;
                   const weekdayMissing = isRecurring && recurringFrequency !== 'monthly' && selectedWeekdays.length === 0;
-                  return saving || !hasStudents || !startTime || !endTime || (isRecurring && !recurringEndDate) || weekdayMissing;
+                  return licenseFrozen || saving || !hasStudents || !startTime || !endTime || (isRecurring && !recurringEndDate) || weekdayMissing;
                 })()}
+                title={licenseFrozen ? t('cal.licenseFrozenTitle') : undefined}
                 className="rounded-xl"
               >
                 {saving ? t('cal.saving') : isRecurring ? t('cal.createRecurring') : t('cal.createLessonBtn')}
@@ -5166,7 +5239,7 @@ export default function CalendarPage() {
                   const { error } = await supabase.from('availability').update({
                     start_time: slotEditStart,
                     end_time: slotEditEnd,
-                    subject_ids: slotEditSubjects,
+                    subject_ids: uniqueSubjectIds(slotEditSubjects),
                     meeting_link: slotEditMeetingLink || null
                   }).eq('id', editingSlot.ruleId);
                   if (!error && currentUserId) {
@@ -5230,7 +5303,7 @@ export default function CalendarPage() {
                 setAssignStudentId('');
                 setAssignStudentIds([]);
                 // Auto-fill meeting link from availability slot (or subject if slot has none)
-                const selectedSubject = subjects.find(s => s.id === val);
+                const selectedSubject = assignFilteredSubjects.find(s => s.id === val) ?? subjects.find(s => s.id === val);
                 if (selectedSubject) {
                   const slotMeetingLink = editingSlot?.meetingLink || '';
                   setAssignMeetingLink(slotMeetingLink || selectedSubject.meeting_link || '');
@@ -5241,8 +5314,8 @@ export default function CalendarPage() {
                   <SelectValue placeholder={t('cal.selectSubjectPlaceholderDots')} />
                 </SelectTrigger>
                 <SelectContent>
-                  {subjects.length > 0 ? (
-                    subjects.map(s => (
+                  {assignFilteredSubjects.length > 0 ? (
+                    assignFilteredSubjects.map(s => (
                       <SelectItem key={s.id} value={s.id}>
                         {s.name}
                         {s.is_group && s.max_students && (
@@ -5271,7 +5344,7 @@ export default function CalendarPage() {
 
             {/* Student Selection - Shows after subject is selected */}
             {assignSubjectId && (() => {
-              const selectedSubject = subjects.find(s => s.id === assignSubjectId);
+              const selectedSubject = assignFilteredSubjects.find(s => s.id === assignSubjectId) ?? subjects.find(s => s.id === assignSubjectId);
               const isGroupLesson = selectedSubject?.is_group;
               const maxStudents = selectedSubject?.max_students || 1;
 
@@ -5442,7 +5515,8 @@ export default function CalendarPage() {
             </Button>
             <Button
               onClick={handleAssignStudent}
-              disabled={(!assignStudentId && assignStudentIds.length === 0) || !assignSubjectId || !assignSelectedSlot || assignSaving}
+              disabled={licenseFrozen || (!assignStudentId && assignStudentIds.length === 0) || !assignSubjectId || !assignSelectedSlot || assignSaving}
+              title={licenseFrozen ? t('cal.licenseFrozenTitle') : undefined}
               className="rounded-xl bg-indigo-600 hover:bg-indigo-700"
             >
               {assignSaving ? (

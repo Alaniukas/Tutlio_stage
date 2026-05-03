@@ -4,14 +4,19 @@ import StatusBadge from '@/components/StatusBadge';
 import SessionFiles from '@/components/SessionFiles';
 import { supabase } from '@/lib/supabase';
 import { getCached, setCache } from '@/lib/dataCache';
+import {
+    fetchStudentActiveLessonPackagesDeduped,
+    fetchSubjectNamesByIds,
+} from '@/lib/studentLessonPackagesLight';
 import { authHeaders } from '@/lib/apiHelpers';
+import { dedupeAuthGetUser, rpcGetStudentProfilesDeduped } from '@/lib/preload';
 import { format, isAfter, isBefore } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 import { CalendarDays, Clock, Zap, BookOpen, Settings, Play, XCircle, CheckCircle, RefreshCw, CreditCard, Loader2, Package, Users, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn, normalizeUrl } from '@/lib/utils';
 import { useStudentPaymentBlock } from '@/hooks/useStudentPaymentBlock';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
-import { formatCustomerChargeEur } from '@/lib/stripeLessonPricing';
+import { formatLessonStripeChargeEur } from '@/lib/stripeLessonPricing';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useTranslation } from '@/lib/i18n';
@@ -51,11 +56,13 @@ export default function StudentDashboard() {
     const [selectedSession, setSelectedSession] = useState<Session | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [stripeLoading, setStripeLoading] = useState(false);
-    const [paymentPayer, setPaymentPayer] = useState<string | null>(sdc?.paymentPayer ?? null);
-    const [activePackages, setActivePackages] = useState<LessonPackage[]>(sdc?.activePackages ?? []);
-    const [installments, setInstallments] = useState<InstallmentPayment[]>(sdc?.installments ?? []);
+    const [paymentPayer, setPaymentPayer] = useState<string | null>(null);
+    const [activePackages, setActivePackages] = useState<LessonPackage[]>([]);
+    const [installments, setInstallments] = useState<InstallmentPayment[]>([]);
     const [paymentsExpanded, setPaymentsExpanded] = useState(false);
-    const [activeStudentId, setActiveStudentId] = useState<string | null>(sdc?.activeStudentId ?? null);
+    const [activeStudentId, setActiveStudentId] = useState<string | null>(null);
+    const [isSchoolOrgStudent, setIsSchoolOrgStudent] = useState(false);
+    const [tutorOrgIsSchool, setTutorOrgIsSchool] = useState(false);
     const { blocked: paymentBookingBlocked, loading: paymentBlockLoading } = useStudentPaymentBlock(activeStudentId);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
     const now = new Date();
@@ -85,22 +92,24 @@ export default function StudentDashboard() {
         setStripeLoading(false);
     };
 
+    // Visada perkrauti iš DB: student_dashboard cache gali būti pasenęs, o StudentSessions
+    // atnaujina tik student_sessions — kitaip „Artimiausia pamoka“ rodytų klaidingą paid.
     useEffect(() => {
-        if (!getCached('student_dashboard')) void fetchData();
+        void fetchData();
     }, []);
 
     useEffect(() => {
         if (!loading && student) {
-            setCache('student_dashboard', {
-                student, sessions, paymentPayer,
-                activePackages, installments, activeStudentId,
-            });
+            setCache('student_dashboard', { student, sessions });
         }
-    }, [loading, student, sessions, activePackages, installments]);
+    }, [loading, student, sessions]);
+
+    const STUDENT_DASH_SESSION_COLS =
+        'id,start_time,end_time,status,paid,price,topic,meeting_link,payment_status,tutor_comment,show_comment_to_student,subject_id';
 
     const fetchData = async () => {
         if (!getCached('student_dashboard')) setLoading(true);
-        const { data: { user } } = await supabase.auth.getUser();
+        const user = await dedupeAuthGetUser();
         if (!user) {
             setLoading(false);
             return;
@@ -109,10 +118,10 @@ export default function StudentDashboard() {
         const selectedStudentId = typeof window !== 'undefined'
             ? localStorage.getItem(ACTIVE_STUDENT_PROFILE_KEY)
             : null;
-        let { data: studentRows, error: rpcError } = await supabase.rpc('get_student_profiles', {
-            p_user_id: user.id,
-            p_student_id: selectedStudentId || null,
-        });
+        let { data: studentRows, error: rpcError } = await rpcGetStudentProfilesDeduped(
+            user.id,
+            selectedStudentId || null,
+        );
         if (rpcError) {
             console.error('[StudentDashboard] get_student_profiles', rpcError);
             setLoading(false);
@@ -122,10 +131,7 @@ export default function StudentDashboard() {
         let studentRow = studentRows?.[0];
 
         if (!studentRow && selectedStudentId) {
-            const { data: fallbackRows, error: fallbackError } = await supabase.rpc('get_student_profiles', {
-                p_user_id: user.id,
-                p_student_id: null,
-            });
+            const { data: fallbackRows, error: fallbackError } = await rpcGetStudentProfilesDeduped(user.id, null);
             if (fallbackError) {
                 console.error('[StudentDashboard] get_student_profiles fallback', fallbackError);
             } else {
@@ -138,6 +144,8 @@ export default function StudentDashboard() {
 
         if (!studentRow) {
             setActiveStudentId(null);
+            setIsSchoolOrgStudent(false);
+            setTutorOrgIsSchool(false);
             setStudent(null);
             setSessions([]);
             setActivePackages([]);
@@ -148,11 +156,13 @@ export default function StudentDashboard() {
         if (studentRow) {
             setActiveStudentId(studentRow.id);
             setPaymentPayer(studentRow.payment_payer || null);
+            const ent = String((studentRow as { organization_entity_type?: string }).organization_entity_type ?? '').trim();
+            setIsSchoolOrgStudent(ent === 'school');
 
             let tutorInfo: StudentInfo['tutor'] = null;
             if (studentRow.tutor_id) {
                 const [{ data: tutorProf }, { data: vis }] = await Promise.all([
-                    supabase.from('profiles').select('email, phone').eq('id', studentRow.tutor_id).single(),
+                    supabase.from('profiles').select('email, phone, organization_id').eq('id', studentRow.tutor_id).single(),
                     supabase.rpc('get_tutor_contact_visibility_for_student', { p_tutor_id: studentRow.tutor_id }),
                 ]);
                 const cv = parseOrgContactVisibility((vis as Record<string, unknown>) || null);
@@ -161,6 +171,23 @@ export default function StudentDashboard() {
                     email: maskTutorContact(tutorProf?.email ?? null, cv.studentSeesTutorEmail),
                     phone: maskTutorContact(tutorProf?.phone ?? null, cv.studentSeesTutorPhone),
                 };
+                {
+                    let tutorOrgSchoolResolved =
+                        String((studentRow as { tutor_organization_entity_type?: string }).tutor_organization_entity_type ?? '')
+                            .trim() === 'school';
+                    const oid = (tutorProf as { organization_id?: string | null } | null)?.organization_id;
+                    if (!tutorOrgSchoolResolved && oid) {
+                        const { data: oe } = await supabase
+                            .from('organizations')
+                            .select('entity_type')
+                            .eq('id', oid)
+                            .maybeSingle();
+                        tutorOrgSchoolResolved = oe?.entity_type === 'school';
+                    }
+                    setTutorOrgIsSchool(tutorOrgSchoolResolved);
+                }
+            } else {
+                setTutorOrgIsSchool(false);
             }
 
             setStudent({
@@ -172,27 +199,83 @@ export default function StudentDashboard() {
             const threeMonthsAgo = new Date();
             threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
 
-            const { data: sessionsData } = await supabase
+            const { data: sessionRowsRaw, error: sessionsErr } = await supabase
                 .from('sessions')
-                .select('*, subjects(is_group, max_students)')
+                .select(STUDENT_DASH_SESSION_COLS)
                 .eq('student_id', studentRow.id)
                 .gte('start_time', threeMonthsAgo.toISOString())
-                .order('start_time', { ascending: true });
-            setSessions(sessionsData || []);
+                .order('start_time', { ascending: true })
+                .limit(400);
 
-            const { data: packagesData } = await supabase
-                .from('lesson_packages')
-                .select('id, total_lessons, available_lessons, expires_at, subject_id, subjects(name)')
-                .eq('student_id', studentRow.id)
-                .eq('active', true)
-                .eq('paid', true)
-                .gt('available_lessons', 0);
+            if (sessionsErr) {
+                console.warn(
+                    '[StudentDashboard] sessions',
+                    sessionsErr.code,
+                    sessionsErr.message,
+                );
+                const fb =
+                    getCached<{ sessions?: Session[] }>('student_dashboard')?.sessions ||
+                    getCached<{ sessions?: Session[] }>('student_sessions')?.sessions;
+                setSessions(Array.isArray(fb) ? fb : []);
+            } else {
+                const rows = (sessionRowsRaw || []) as Record<string, unknown>[];
+                const subjectIds = [...new Set(rows.map((r) => r.subject_id).filter(Boolean) as string[])];
+                let subjectMeta: Record<string, { is_group?: boolean; max_students?: number | null }> = {};
+                if (subjectIds.length > 0) {
+                    const { data: subs } = await supabase
+                        .from('subjects')
+                        .select('id,is_group,max_students')
+                        .in('id', subjectIds);
+                    for (const s of subs ?? []) {
+                        const row = s as { id: string; is_group?: boolean; max_students?: number | null };
+                        subjectMeta[row.id] = {
+                            is_group: row.is_group ?? undefined,
+                            max_students: row.max_students,
+                        };
+                    }
+                }
+                const merged: Session[] = rows.map((row) => {
+                    const sid = row.subject_id as string | null | undefined;
+                    const sm = sid ? subjectMeta[sid] : undefined;
+                    return {
+                        ...(row as unknown as Session),
+                        subjects: sm
+                            ? {
+                                  is_group: sm.is_group,
+                                  max_students: sm.max_students ?? undefined,
+                              }
+                            : null,
+                    };
+                });
+                setSessions(merged);
+            }
+
+            const pkgsRows = await fetchStudentActiveLessonPackagesDeduped(
+                supabase,
+                studentRow.id,
+            );
+            const nameMap = await fetchSubjectNamesByIds(
+                supabase,
+                pkgsRows.map((p) => p.subject_id).filter(Boolean) as string[],
+            );
             const nowTs = Date.now();
-            const visiblePackages = ((packagesData || []) as LessonPackage[]).filter((pkg) => {
-                if (!pkg.expires_at) return true;
-                const ts = new Date(pkg.expires_at).getTime();
-                return !Number.isNaN(ts) && ts > nowTs;
-            });
+            const visiblePackages: LessonPackage[] = pkgsRows
+                .filter((pkg) => {
+                    if (!pkg.expires_at) return true;
+                    const ts = new Date(pkg.expires_at).getTime();
+                    return !Number.isNaN(ts) && ts > nowTs;
+                })
+                .map((p) => ({
+                    id: p.id,
+                    total_lessons: Number(p.total_lessons || 0),
+                    available_lessons: Number(p.available_lessons || 0),
+                    expires_at: p.expires_at,
+                    subject_id: p.subject_id || '',
+                    subjects:
+                        p.subject_id && nameMap[p.subject_id]
+                            ? { name: nameMap[p.subject_id] }
+                            : undefined,
+                }));
             setActivePackages(visiblePackages);
 
             const { data: installmentsData } = await supabase
@@ -254,7 +337,7 @@ export default function StudentDashboard() {
                     )}
                 </div>
 
-                {paymentBookingBlocked && !paymentBlockLoading && (
+                {paymentBookingBlocked && !paymentBlockLoading && !isSchoolOrgStudent && (
                     <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                             <p className="text-sm font-bold text-amber-900">{t('studentDash.paymentRequired')}</p>
@@ -334,7 +417,7 @@ export default function StudentDashboard() {
                     </div>
                 )}
 
-                {installments.length > 0 && (
+                {installments.length > 0 && !isSchoolOrgStudent && (
                     <div className="bg-white border border-gray-200 rounded-3xl p-4">
                         <button
                             type="button"
@@ -479,17 +562,19 @@ export default function StudentDashboard() {
                     </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-3 mt-4">
-                    <div className="bg-white rounded-3xl p-5 border border-gray-100 shadow-sm text-center">
+                <div className={`grid gap-3 mt-4 ${isSchoolOrgStudent ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                    <div className={`bg-white rounded-3xl p-5 border border-gray-100 shadow-sm text-center ${isSchoolOrgStudent ? 'max-w-xs mx-auto w-full' : ''}`}>
                         <div className="w-10 h-10 rounded-full bg-violet-50 flex items-center justify-center mx-auto mb-2"><BookOpen className="w-4 h-4 text-violet-600" /></div>
                         <p className="text-3xl font-black text-gray-900">{sessions.length}</p>
                         <p className="text-xs text-gray-500 font-bold mt-1 uppercase tracking-wider">{t('studentDash.totalLessons')}</p>
                     </div>
+                    {!isSchoolOrgStudent && (
                     <div className="bg-white rounded-3xl p-5 border border-gray-100 shadow-sm text-center">
                         <div className="w-10 h-10 rounded-full bg-green-50 flex items-center justify-center mx-auto mb-2"><Zap className="w-4 h-4 text-green-600" /></div>
                         <p className="text-3xl font-black text-gray-900">{sessions.filter(s => s.paid).length}</p>
                         <p className="text-xs text-gray-500 font-bold mt-1 uppercase tracking-wider">{t('studentDash.paidLessons')}</p>
                     </div>
+                    )}
                 </div>
 
             </div>
@@ -525,19 +610,26 @@ export default function StudentDashboard() {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-3 text-sm">
-                            <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
-                                <p className="text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">{t('studentDash.priceLabel')}</p>
-                                <p className="font-bold text-gray-900">€{selectedSession?.price ?? '–'}</p>
-                                {selectedSession?.status === 'active' && !selectedSession.paid && selectedSession.price != null && (
-                                    <p className="text-[11px] text-gray-500 mt-1">{t('studentDash.cardTotal', { amount: formatCustomerChargeEur(selectedSession.price) })}</p>
-                                )}
-                            </div>
+                        {isSchoolOrgStudent ? (
                             <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100 flex flex-col items-center justify-center">
                                 <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wider">{t('studentDash.statusLabel')}</p>
                                 <StatusBadge status={selectedSession?.status || ''} paymentStatus={selectedSession?.payment_status} paid={selectedSession?.paid} endTime={selectedSession?.end_time} />
                             </div>
-                        </div>
+                        ) : (
+                            <div className="grid grid-cols-2 gap-3 text-sm">
+                                <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
+                                    <p className="text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">{t('studentDash.priceLabel')}</p>
+                                    <p className="font-bold text-gray-900">€{selectedSession?.price ?? '–'}</p>
+                                    {selectedSession?.status === 'active' && !selectedSession.paid && selectedSession.price != null && (
+                                        <p className="text-[11px] text-gray-500 mt-1">{t('studentDash.cardTotal', { amount: formatLessonStripeChargeEur(selectedSession.price, tutorOrgIsSchool) })}</p>
+                                    )}
+                                </div>
+                                <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100 flex flex-col items-center justify-center">
+                                    <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wider">{t('studentDash.statusLabel')}</p>
+                                    <StatusBadge status={selectedSession?.status || ''} paymentStatus={selectedSession?.payment_status} paid={selectedSession?.paid} endTime={selectedSession?.end_time} />
+                                </div>
+                            </div>
+                        )}
 
                         {selectedSession?.show_comment_to_student && selectedSession?.tutor_comment && (
                             <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-100">
@@ -565,7 +657,7 @@ export default function StudentDashboard() {
                             >
                                 {stripeLoading
                                     ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('common.loading')}</>
-                                    : <><CreditCard className="w-4 h-4" /> {t('studentDash.stripePayBtn', { amount: formatCustomerChargeEur(selectedSession.price) })}</>
+                                    : <><CreditCard className="w-4 h-4" /> {t('studentDash.stripePayBtn', { amount: formatLessonStripeChargeEur(selectedSession.price, tutorOrgIsSchool) })}</>
                                 }
                             </button>
                         )}

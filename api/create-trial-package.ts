@@ -4,6 +4,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
+import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
 
 // Stripe/platform fee helpers (inlined to avoid _lib import issues on Vercel)
 const STRIPE_FEE_PERCENT = 0.015;
@@ -176,7 +177,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: orgStripe } = await supabase
       .from('organizations')
-      .select('stripe_account_id, stripe_onboarding_complete')
+      .select('stripe_account_id, stripe_onboarding_complete, entity_type')
       .eq('id', adminRow.organization_id)
       .single();
 
@@ -184,8 +185,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return json(res, 400, { error: 'Organization Stripe account is not connected' });
     }
 
+    const useSchoolOrgAbsorbedFees = orgStripe.entity_type === 'school';
+
     const basePriceEur = trialPriceEur;
-    const totalWithFeesEur = customerTotalEur(basePriceEur);
+    const payerChargedTotalEur = useSchoolOrgAbsorbedFees ? basePriceEur : customerTotalEur(basePriceEur);
     const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur);
     const tutorTransferCents = baseCents;
 
@@ -219,38 +222,95 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // gracefully fall back to charging platform account only (no transfer_data).
     let checkoutSession;
     try {
-      checkoutSession = await stripe.checkout.sessions.create({
-        mode: 'payment',
-        customer_email: customerEmail || undefined,
-        payment_method_types: ['card'],
-        line_items: [
-          {
-            price_data: {
-              currency: 'eur',
-              product_data: {
-                name: `Bandomoji pamoka – ${trialTopic}`,
-                description: `Trial lesson – ${tutor.full_name || 'tutor'}`,
+      if (useSchoolOrgAbsorbedFees) {
+        const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(basePriceEur);
+        const applicationFeeCents = chargeCents - transferToSchoolCents;
+        if (chargeCents < 50 || applicationFeeCents < 1 || applicationFeeCents >= chargeCents) {
+          return json(res, 400, { error: 'Netinkama bandomosios pamokos suma' });
+        }
+        checkoutSession = await stripe.checkout.sessions.create({
+          mode: 'payment',
+          customer_email: customerEmail || undefined,
+          payment_method_types: ['card'],
+          line_items: [
+            {
+              price_data: {
+                currency: 'eur',
+                product_data: {
+                  name: `Bandomoji pamoka – ${trialTopic}`,
+                  description: `Trial lesson – ${tutor.full_name || 'tutor'}`,
+                },
+                unit_amount: chargeCents,
               },
-              unit_amount: baseCents,
+              quantity: 1,
             },
-            quantity: 1,
+          ],
+          payment_intent_data: {
+            application_fee_amount: applicationFeeCents,
+            transfer_data: {
+              destination: orgStripe.stripe_account_id,
+            },
+            metadata: {
+              tutlio_package_id: lessonPackage.id,
+              tutor_id: tutorId,
+              student_id: studentId,
+              subject_id: subjectId,
+              is_trial: 'true',
+              tutlio_school_org_absorbed: 'true',
+            },
           },
-          {
-            price_data: {
-              currency: 'eur',
-              product_data: {
-                name: 'Platformos administravimo mokestis',
-                description: 'Tutlio platform fee and payment processing',
+          metadata: {
+            tutlio_package_id: lessonPackage.id,
+            tutor_id: tutorId,
+            student_id: studentId,
+            subject_id: subjectId,
+            is_trial: 'true',
+            tutlio_school_org_absorbed: 'true',
+          },
+          success_url: `${APP_URL}/package-success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${APP_URL}/package-cancelled`,
+        });
+      } else {
+        checkoutSession = await stripe.checkout.sessions.create({
+          mode: 'payment',
+          customer_email: customerEmail || undefined,
+          payment_method_types: ['card'],
+          line_items: [
+            {
+              price_data: {
+                currency: 'eur',
+                product_data: {
+                  name: `Bandomoji pamoka – ${trialTopic}`,
+                  description: `Trial lesson – ${tutor.full_name || 'tutor'}`,
+                },
+                unit_amount: baseCents,
               },
-              unit_amount: feesCents,
+              quantity: 1,
             },
-            quantity: 1,
-          },
-        ],
-        payment_intent_data: {
-          transfer_data: {
-            destination: orgStripe.stripe_account_id,
-            amount: tutorTransferCents,
+            {
+              price_data: {
+                currency: 'eur',
+                product_data: {
+                  name: 'Platformos administravimo mokestis',
+                  description: 'Tutlio platform fee and payment processing',
+                },
+                unit_amount: feesCents,
+              },
+              quantity: 1,
+            },
+          ],
+          payment_intent_data: {
+            transfer_data: {
+              destination: orgStripe.stripe_account_id,
+              amount: tutorTransferCents,
+            },
+            metadata: {
+              tutlio_package_id: lessonPackage.id,
+              tutor_id: tutorId,
+              student_id: studentId,
+              subject_id: subjectId,
+              is_trial: 'true',
+            },
           },
           metadata: {
             tutlio_package_id: lessonPackage.id,
@@ -259,17 +319,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             subject_id: subjectId,
             is_trial: 'true',
           },
-        },
-        metadata: {
-          tutlio_package_id: lessonPackage.id,
-          tutor_id: tutorId,
-          student_id: studentId,
-          subject_id: subjectId,
-          is_trial: 'true',
-        },
-        success_url: `${APP_URL}/package-success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${APP_URL}/package-cancelled`,
-      });
+          success_url: `${APP_URL}/package-success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${APP_URL}/package-cancelled`,
+        });
+      }
     } catch (e: any) {
       const isMissingDestination =
         e?.code === 'resource_missing' &&
@@ -321,7 +374,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     await supabase
       .from('lesson_packages')
-      .update({ stripe_checkout_session_id: checkoutSession.id, total_price: totalWithFeesEur })
+      .update({ stripe_checkout_session_id: checkoutSession.id, total_price: payerChargedTotalEur })
       .eq('id', lessonPackage.id);
 
     // Send email to payer with trial payment link (same template as prepaid packages)

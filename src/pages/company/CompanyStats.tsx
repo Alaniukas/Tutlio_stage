@@ -4,6 +4,7 @@ import { getCached, setCache } from '@/lib/dataCache';
 import { TrendingUp, Award, AlertTriangle, Wallet, BookOpen } from 'lucide-react';
 import { DateRangeFilter } from '@/components/DateRangeFilter';
 import { useTranslation } from '@/lib/i18n';
+import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 
 interface TutorStat {
   id: string;
@@ -49,30 +50,11 @@ export default function CompanyStats() {
       .maybeSingle();
     if (!adminRow) return;
 
-    // Load all profiles in org
-    const { data: tutorData } = await supabase
-      .from('profiles')
-      .select('id, full_name, company_commission_percent')
-      .eq('organization_id', adminRow.organization_id);
-
-    // Exclude organization admins from tutor stats (they are managers, not tutors)
-    const { data: adminUsers } = await supabase
-      .from('organization_admins')
-      .select('user_id')
-      .eq('organization_id', adminRow.organization_id);
-    const adminIds = new Set((adminUsers || []).map((a: any) => a.user_id));
-    const { data: linkedStudents } = await supabase
-      .from('students')
-      .select('linked_user_id')
-      .eq('organization_id', adminRow.organization_id)
-      .not('linked_user_id', 'is', null);
-    const linkedStudentUserIds = new Set(
-      (linkedStudents || [])
-        .map((s: any) => s.linked_user_id)
-        .filter((id: string | null | undefined): id is string => Boolean(id)),
+    const tutorList = await getOrgVisibleTutors(
+      supabase as any,
+      adminRow.organization_id,
+      'id, full_name, email, company_commission_percent',
     );
-
-    const tutorList = (tutorData || []).filter((t) => !adminIds.has(t.id) && !linkedStudentUserIds.has(t.id));
 
     if (tutorList.length === 0) { setLoading(false); return; }
 

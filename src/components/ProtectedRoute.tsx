@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { hasActiveSubscription, tutorHasPlatformSubscriptionAccess } from '@/lib/subscription';
-import { ensureTutorPresetSubjects } from '@/lib/ensureTutorPresetSubjects';
 import { useUser } from '@/contexts/UserContext';
 
 export default function ProtectedRoute() {
@@ -140,43 +139,25 @@ export default function ProtectedRoute() {
         return;
       }
 
-      const orgToken = ctxUser.user_metadata?.org_token;
+      const orgTokenRaw = ctxUser.user_metadata?.org_token;
+      const orgToken = typeof orgTokenRaw === 'string' ? orgTokenRaw.trim().toUpperCase() : '';
       let linkedToOrg = false;
 
       if (orgToken && !profile?.organization_id) {
-        const { data: invite } = await supabase
-          .from('tutor_invites')
-          .select('id, organization_id, used, subjects_preset, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent')
-          .eq('token', orgToken)
-          .maybeSingle();
-
-        if (invite) {
-          await supabase
-            .from('profiles')
-            .upsert({
-              id: ctxUser.id,
-              email: ctxUser.email,
-              full_name: ctxUser.user_metadata?.full_name,
-              phone: ctxUser.user_metadata?.phone || '',
-              organization_id: invite.organization_id,
-              cancellation_hours: invite.cancellation_hours ?? 24,
-              cancellation_fee_percent: invite.cancellation_fee_percent ?? 0,
-              reminder_student_hours: invite.reminder_student_hours ?? 2,
-              reminder_tutor_hours: invite.reminder_tutor_hours ?? 2,
-              break_between_lessons: invite.break_between_lessons ?? 0,
-              min_booking_hours: invite.min_booking_hours ?? 1,
-              company_commission_percent: invite.company_commission_percent ?? 0,
-            });
-
-          if (!invite.used) {
-            await supabase
-              .from('tutor_invites')
-              .update({ used: true, used_by_profile_id: ctxUser.id })
-              .eq('id', invite.id);
-
-            await ensureTutorPresetSubjects(ctxUser.id, invite.subjects_preset as any);
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          const claimRes = await fetch('/api/claim-tutor-invite', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ token: orgToken }),
+          });
+          if (claimRes.ok) {
+            const claimData = await claimRes.json().catch(() => null);
+            linkedToOrg = Boolean(claimData?.organizationId);
           }
-          linkedToOrg = true;
         }
       }
 

@@ -1,5 +1,5 @@
-import { useEffect, useState, useMemo } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { useEffect, useState, useMemo, useCallback } from 'react';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { SessionStatCards } from '@/components/SessionStatCards';
 import { calculateSessionStats } from '@/lib/session-stats';
 import { supabase } from '@/lib/supabase';
@@ -7,7 +7,7 @@ import { getCached, setCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
 import { format } from 'date-fns';
 import { useTranslation } from '@/lib/i18n';
-import { CalendarDays, Search, ChevronDown, ListOrdered, UserX, XCircle, CheckCircle, Pencil, Ban, Loader2, MessageSquare } from 'lucide-react';
+import { CalendarDays, Search, ChevronDown, ListOrdered, UserX, XCircle, CheckCircle, Pencil, Ban, Loader2, MessageSquare, Trash2 } from 'lucide-react';
 import { defaultNoShowWhenForNow, buildNoShowSessionPatch } from '@/lib/noShowWhen';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/dialog';
 import StatusBadge from '@/components/StatusBadge';
 import { cn } from '@/lib/utils';
+import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
 import { DateRangeFilter } from '@/components/DateRangeFilter';
 import { DateTimeSpinner } from '@/components/TimeSpinner';
@@ -53,6 +54,8 @@ interface Session {
   recurring_session_id?: string | null;
   tutor_comment?: string | null;
   show_comment_to_student?: boolean;
+  student_admin_comment?: string | null;
+  student_admin_comment_visible_to_tutor?: boolean;
 }
 
 interface Subject {
@@ -62,9 +65,40 @@ interface Subject {
   tutor_id: string;
 }
 
+const ORG_SESSION_DETAIL_SELECT =
+  '*, student:students(full_name, admin_comment, admin_comment_visible_to_tutor), subjects(is_group), tutor_comment, show_comment_to_student';
+
+function mapOrgSessionRow(row: any, tutorList: { id: string; full_name: string }[]): Session {
+  return {
+    id: row.id,
+    tutor_id: row.tutor_id,
+    student_id: row.student_id,
+    start_time: row.start_time,
+    end_time: row.end_time,
+    status: row.status,
+    price: row.price,
+    topic: row.topic,
+    paid: row.paid,
+    payment_status: row.payment_status || null,
+    cancellation_reason: row.cancellation_reason,
+    cancelled_by: row.cancelled_by ?? null,
+    tutor_name: tutorList.find((t) => t.id === row.tutor_id)?.full_name || '–',
+    student_name: row.student?.full_name || '–',
+    subject_is_group: row.subjects?.is_group ?? null,
+    subject_id: row.subject_id || null,
+    meeting_link: row.meeting_link || null,
+    recurring_session_id: row.recurring_session_id || null,
+    tutor_comment: row.tutor_comment || null,
+    show_comment_to_student: row.show_comment_to_student ?? false,
+    student_admin_comment: row.student?.admin_comment ?? null,
+    student_admin_comment_visible_to_tutor: row.student?.admin_comment_visible_to_tutor ?? false,
+  };
+}
+
 export default function CompanySessions() {
   const { t, locale, dateFnsLocale } = useTranslation();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
 
   const statusOptions = useMemo(
@@ -108,6 +142,8 @@ export default function CompanySessions() {
   const [groupEditChoice, setGroupEditChoice] = useState<'single' | 'all_future'>('single');
   const [savingEdit, setSavingEdit] = useState(false);
   const [togglingPaid, setTogglingPaid] = useState(false);
+  const [deletingSession, setDeletingSession] = useState(false);
+  const [deleteRecurringOpen, setDeleteRecurringOpen] = useState(false);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [students, setStudents] = useState<{ id: string; full_name: string; tutor_id: string; linked_user_id: string | null }[]>(sc?.students ?? []);
   const [filterStudent, setFilterStudent] = useState('');
@@ -128,28 +164,10 @@ export default function CompanySessions() {
       .maybeSingle();
     if (!adminRow) return;
 
-    const { data: adminUsers } = await supabase
-      .from('organization_admins')
-      .select('user_id')
-      .eq('organization_id', adminRow.organization_id);
-    const adminIds = new Set((adminUsers || []).map((a: any) => a.user_id));
-
-    const { data: tutorData } = await supabase
-      .from('profiles')
-      .select('id, full_name')
-      .eq('organization_id', adminRow.organization_id);
-    const { data: linkedStudents } = await supabase
-      .from('students')
-      .select('linked_user_id')
-      .eq('organization_id', adminRow.organization_id)
-      .not('linked_user_id', 'is', null);
-    const linkedStudentUserIds = new Set(
-      (linkedStudents || [])
-        .map((s: any) => s.linked_user_id)
-        .filter((id: string | null | undefined): id is string => Boolean(id)),
-    );
-    const tutorList = (tutorData || []).filter(
-      (t: any) => !adminIds.has(t.id) && !linkedStudentUserIds.has(t.id),
+    const tutorList = await getOrgVisibleTutors(
+      supabase as any,
+      adminRow.organization_id,
+      'id, full_name, email',
     );
     setTutors(tutorList);
 
@@ -157,7 +175,7 @@ export default function CompanySessions() {
       supabase
         .from('students')
         .select('id, full_name, tutor_id, linked_user_id')
-        .in('tutor_id', tutorList.map(t => t.id))
+        .eq('organization_id', adminRow.organization_id)
         .order('full_name'),
       supabase
         .from('subjects')
@@ -177,34 +195,13 @@ export default function CompanySessions() {
 
     const { data: sessionsData } = await supabase
       .from('sessions')
-      .select('*, student:students(full_name), subjects(is_group), tutor_comment, show_comment_to_student')
+      .select(ORG_SESSION_DETAIL_SELECT)
       .in('tutor_id', tutorIds)
       .gte('start_time', threeMonthsAgo.toISOString())
       .order('start_time', { ascending: false })
       .limit(2000);
 
-    const enriched: Session[] = (sessionsData || []).map((s: any) => ({
-      id: s.id,
-      tutor_id: s.tutor_id,
-      student_id: s.student_id,
-      start_time: s.start_time,
-      end_time: s.end_time,
-      status: s.status,
-      price: s.price,
-      topic: s.topic,
-      paid: s.paid,
-      payment_status: s.payment_status || null,
-      cancellation_reason: s.cancellation_reason,
-      cancelled_by: s.cancelled_by ?? null,
-      tutor_name: tutorList.find(t => t.id === s.tutor_id)?.full_name || '–',
-      student_name: s.student?.full_name || '–',
-      subject_is_group: s.subjects?.is_group ?? null,
-      subject_id: s.subject_id || null,
-      meeting_link: s.meeting_link || null,
-      recurring_session_id: s.recurring_session_id || null,
-      tutor_comment: s.tutor_comment || null,
-      show_comment_to_student: s.show_comment_to_student ?? false,
-    }));
+    const enriched: Session[] = (sessionsData || []).map((s: any) => mapOrgSessionRow(s, tutorList));
 
     setSessions(enriched);
     setCache('company_sessions', { sessions: enriched, tutors: tutorList, students: studentsResult.data || [] });
@@ -276,6 +273,49 @@ export default function CompanySessions() {
     }
   };
 
+  const hardDeleteCompanySession = async (sessionId: string, deleteScope: 'single' | 'future' = 'single') => {
+    const resp = await fetch('/api/delete-session', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: JSON.stringify({ sessionId, deleteScope }),
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(text || t('cal.deleteFailed'));
+    }
+  };
+
+  const hardDeleteCompanySessionWithApproval = async (deleteScope: 'single' | 'future') => {
+    if (!selectedSession) return;
+    const targetId = selectedSession.id;
+    const msg =
+      deleteScope === 'future' ? t('cal.deleteConfirmFuture') : t('cal.deleteConfirmSingle');
+    if (!confirm(msg)) return;
+
+    setDeletingSession(true);
+    setDeleteRecurringOpen(false);
+    setSelectedSession(null);
+
+    try {
+      await hardDeleteCompanySession(targetId, deleteScope);
+      loadData();
+    } catch (e: any) {
+      alert(e?.message || t('cal.deleteFailed'));
+      loadData();
+    } finally {
+      setDeletingSession(false);
+    }
+  };
+
+  const handleHardDeleteCompanySession = () => {
+    if (!selectedSession) return;
+    if (selectedSession.recurring_session_id) {
+      setDeleteRecurringOpen(true);
+      return;
+    }
+    void hardDeleteCompanySessionWithApproval('single');
+  };
+
   const handleSaveEdit = async () => {
     if (!selectedSession) return;
     setSavingEdit(true);
@@ -322,26 +362,104 @@ export default function CompanySessions() {
     setSavingEdit(false);
   };
 
-  const openSessionDialog = (session: Session) => {
-    setSelectedSession(session);
-    setCancelMode(false);
-    setCancellationReason('');
-    setEditMode(false);
-    setGroupEditChoice('single');
-    setEditTopic(session.topic || '');
-    const start = new Date(session.start_time);
-    const end = new Date(session.end_time);
-    const durMs = end.getTime() - start.getTime();
-    setEditStartTime(format(start, "yyyy-MM-dd'T'HH:mm"));
-    setEditDurationMinutes(Math.round(durMs / 60000));
-    setEditTutorId(session.tutor_id);
-    setEditStudentId(session.student_id);
-    setEditSubjectId(session.subject_id || '');
-    setEditPrice(session.price || 0);
-    setEditMeetingLink(session.meeting_link || '');
-    setEditPaid(session.paid);
-    setEditStatus(session.status);
-  };
+  const openSessionDialog = useCallback(
+    (session: Session) => {
+      setSelectedSession(session);
+      setCancelMode(false);
+      setCancellationReason('');
+      setEditMode(false);
+      setDeleteRecurringOpen(false);
+      setGroupEditChoice('single');
+      setEditTopic(session.topic || '');
+      const start = new Date(session.start_time);
+      const end = new Date(session.end_time);
+      const durMs = end.getTime() - start.getTime();
+      setEditStartTime(format(start, "yyyy-MM-dd'T'HH:mm"));
+      setEditDurationMinutes(Math.round(durMs / 60000));
+      setEditTutorId(session.tutor_id);
+      setEditStudentId(session.student_id);
+      setEditSubjectId(session.subject_id || '');
+      setEditPrice(session.price || 0);
+      setEditMeetingLink(session.meeting_link || '');
+      setEditPaid(session.paid);
+      setEditStatus(session.status);
+
+      const sid = session.id;
+      void (async () => {
+        const { data: row, error } = await supabase
+          .from('sessions')
+          .select(ORG_SESSION_DETAIL_SELECT)
+          .eq('id', sid)
+          .maybeSingle();
+        if (error || !row) return;
+        const mapped = mapOrgSessionRow(row, tutors);
+        setSelectedSession((prev) => (!prev || prev.id !== sid ? prev : mapped));
+        setSessions((prev) => prev.map((s) => (s.id === sid ? mapped : s)));
+      })();
+    },
+    [tutors],
+  );
+
+  const deepLinkSessionId = searchParams.get('open')?.trim() ?? '';
+
+  /** Open lesson modal from dashboard (or deep link): ?open=<sessionId> */
+  useEffect(() => {
+    if (!deepLinkSessionId || loading) return;
+    if (tutors.length === 0) {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete('open');
+          return next;
+        },
+        { replace: true },
+      );
+      return;
+    }
+
+    const clearOpenParam = () => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete('open');
+          return next;
+        },
+        { replace: true },
+      );
+    };
+
+    const fromList = sessions.find((s) => s.id === deepLinkSessionId);
+    if (fromList) {
+      openSessionDialog(fromList);
+      clearOpenParam();
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      const { data: row, error } = await supabase
+        .from('sessions')
+        .select(ORG_SESSION_DETAIL_SELECT)
+        .eq('id', deepLinkSessionId)
+        .maybeSingle();
+      if (cancelled) return;
+      if (error || !row) {
+        clearOpenParam();
+        return;
+      }
+      if (!tutors.some((tu) => tu.id === row.tutor_id)) {
+        clearOpenParam();
+        return;
+      }
+      const enriched = mapOrgSessionRow(row, tutors);
+      openSessionDialog(enriched);
+      clearOpenParam();
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [deepLinkSessionId, loading, sessions, tutors, setSearchParams, openSessionDialog]);
 
   const isFutureSession = (session: Session | null) => {
     if (!session) return false;
@@ -873,10 +991,25 @@ export default function CompanySessions() {
                         <MessageSquare className="w-3 h-3" />
                         {t('compSess.tutorComment')}
                         <span className="text-[10px] font-normal ml-1">
-                          ({selectedSession.show_comment_to_student ? t('compSess.visibleToStudent') : t('compSess.visibleToAdminOnly')})
+                          ({selectedSession.show_comment_to_student ? t('compSess.visibleToStudent') : t('compSess.tutorCommentNotForStudent')})
                         </span>
                       </Label>
                       <p className="text-sm mt-1 bg-blue-50 border border-blue-100 rounded-lg p-2 whitespace-pre-wrap">{selectedSession.tutor_comment}</p>
+                    </div>
+                  )}
+
+                  {String(selectedSession.student_admin_comment || '').trim().length > 0 && (
+                    <div>
+                      <Label className="text-xs text-gray-500 flex items-center gap-1">
+                        <MessageSquare className="w-3 h-3" />
+                        {t('compStu.adminComment')}
+                        <span className="text-[10px] font-normal ml-1">
+                          ({selectedSession.student_admin_comment_visible_to_tutor ? t('compStu.commentVisibleBoth') : t('compStu.commentVisibleAdmin')})
+                        </span>
+                      </Label>
+                      <p className="text-sm mt-1 bg-amber-50 border border-amber-100 rounded-lg p-2 whitespace-pre-wrap">
+                        {selectedSession.student_admin_comment}
+                      </p>
                     </div>
                   )}
 
@@ -904,19 +1037,21 @@ export default function CompanySessions() {
                     </div>
                   )}
 
-                  {selectedSession.status === 'active' && !cancelMode && (
+                  {!cancelMode && (selectedSession.status === 'active' || selectedSession.status === 'completed') && (
                     <div className="space-y-2 pt-1">
-                      <Button
-                        variant="outline"
-                        className={cn('w-full rounded-xl', selectedSession.paid ? 'border-amber-200 text-amber-700 hover:bg-amber-50' : 'border-green-200 text-green-700 hover:bg-green-50')}
-                        disabled={togglingPaid}
-                        onClick={handleTogglePaid}
-                      >
-                        {togglingPaid ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : selectedSession.paid ? <XCircle className="w-4 h-4 mr-2" /> : <CheckCircle className="w-4 h-4 mr-2" />}
-                        {selectedSession.paid ? t('compSess.markUnpaid') : t('compSess.markPaid')}
-                      </Button>
+                      {selectedSession.status === 'active' && (
+                        <Button
+                          variant="outline"
+                          className={cn('w-full rounded-xl', selectedSession.paid ? 'border-amber-200 text-amber-700 hover:bg-amber-50' : 'border-green-200 text-green-700 hover:bg-green-50')}
+                          disabled={togglingPaid}
+                          onClick={handleTogglePaid}
+                        >
+                          {togglingPaid ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : selectedSession.paid ? <XCircle className="w-4 h-4 mr-2" /> : <CheckCircle className="w-4 h-4 mr-2" />}
+                          {selectedSession.paid ? t('compSess.markUnpaid') : t('compSess.markPaid')}
+                        </Button>
+                      )}
 
-                      {isFutureSession(selectedSession) && (
+                      {selectedSession.status === 'active' && isFutureSession(selectedSession) && (
                         <>
                           <Button variant="outline" className="w-full rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50" onClick={() => setEditMode(true)}>
                             <Pencil className="w-4 h-4 mr-2" />
@@ -929,14 +1064,26 @@ export default function CompanySessions() {
                         </>
                       )}
 
+                      {selectedSession.status === 'active' && (
+                        <Button
+                          variant="outline"
+                          className="w-full border-rose-200 text-rose-800 hover:bg-rose-50 rounded-xl"
+                          disabled={markingNoShow}
+                          onClick={(e) => { e.stopPropagation(); void handleMarkStudentNoShow(); }}
+                        >
+                          <UserX className="w-4 h-4 mr-2" />
+                          {markingNoShow ? t('compSess.markNoShowSaving') : t('compSess.markNoShow')}
+                        </Button>
+                      )}
+
                       <Button
                         variant="outline"
-                        className="w-full border-rose-200 text-rose-800 hover:bg-rose-50 rounded-xl"
-                        disabled={markingNoShow}
-                        onClick={(e) => { e.stopPropagation(); void handleMarkStudentNoShow(); }}
+                        className="w-full rounded-xl border-red-200 text-red-700 hover:bg-red-50"
+                        disabled={deletingSession}
+                        onClick={() => void handleHardDeleteCompanySession()}
                       >
-                        <UserX className="w-4 h-4 mr-2" />
-                        {markingNoShow ? t('compSess.markNoShowSaving') : t('compSess.markNoShow')}
+                        {deletingSession ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
+                        {t('cal.deleteSession')}
                       </Button>
                     </div>
                   )}
@@ -946,6 +1093,46 @@ export default function CompanySessions() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setSelectedSession(null)}>{t('compSess.close')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteRecurringOpen} onOpenChange={setDeleteRecurringOpen}>
+        <DialogContent className="w-[95vw] sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Trash2 className="w-5 h-5 text-red-600" />
+              {t('cal.deleteRecurringTitle')}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="text-sm text-gray-600 space-y-2">
+            <p>{t('cal.deleteChoose')}</p>
+            <p className="text-xs text-gray-500">{t('cal.deleteHint')}</p>
+          </div>
+          <DialogFooter className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteRecurringOpen(false)}
+              className="rounded-xl"
+              disabled={deletingSession}
+            >
+              {t('cal.cancelBtn')}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => void hardDeleteCompanySessionWithApproval('single')}
+              className="rounded-xl border-red-200 text-red-700 hover:bg-red-50"
+              disabled={deletingSession}
+            >
+              {t('cal.deleteOnlyThis')}
+            </Button>
+            <Button
+              onClick={() => void hardDeleteCompanySessionWithApproval('future')}
+              className="rounded-xl bg-red-600 hover:bg-red-700 text-white"
+              disabled={deletingSession}
+            >
+              {t('cal.deleteThisAndFuture')}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

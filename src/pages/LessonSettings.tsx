@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import Layout from '@/components/Layout';
 import { supabase } from '@/lib/supabase';
-import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -23,6 +22,7 @@ import { Trash2, Plus, BookOpen, Clock, Euro, Save, Pencil, ShieldAlert, Bell, C
 import { cn } from '@/lib/utils';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useTranslation } from '@/lib/i18n';
+import { tutorSubjectsContainLessonDuplicate } from '@/lib/subjectPresetDedupe';
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 
@@ -82,21 +82,21 @@ function SettingsSection({
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden transition-all">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between p-4 sm:p-6 text-left hover:bg-gray-50/50 transition-colors"
+        className="w-full flex items-center justify-between p-6 text-left hover:bg-gray-50/50 transition-colors"
       >
-        <div className="flex items-center gap-3 min-w-0">
-          <div className={cn("w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center flex-shrink-0", iconBg)}>
+        <div className="flex items-center gap-3">
+          <div className={cn("w-10 h-10 rounded-full flex items-center justify-center", iconBg)}>
             {icon}
           </div>
-          <div className="min-w-0">
-            <h2 className="text-sm sm:text-base font-semibold text-gray-900">{title}</h2>
-            <p className="text-xs text-gray-500 truncate">{description}</p>
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">{title}</h2>
+            <p className="text-xs text-gray-500">{description}</p>
           </div>
         </div>
-        <ChevronDown className={cn("w-5 h-5 text-gray-400 transition-transform duration-200 flex-shrink-0 ml-2", open && "rotate-180")} />
+        <ChevronDown className={cn("w-5 h-5 text-gray-400 transition-transform duration-200", open && "rotate-180")} />
       </button>
       <div className={cn("transition-all duration-200 ease-in-out", open ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0 overflow-hidden")}>
-        <div className="px-4 sm:px-6 pb-6 border-t border-gray-50">
+        <div className="px-6 pb-6 border-t border-gray-50">
           {children}
         </div>
       </div>
@@ -189,11 +189,10 @@ function DropdownWithCustom({
 export default function LessonSettingsPage() {
   const { t } = useTranslation();
   const orgPolicy = useOrgTutorPolicy();
-  const lsc = getCached<any>('tutor_lesson_settings');
-  const [orgName, setOrgName] = useState<string | null>(lsc?.orgName ?? null);
-  const [userId, setUserId] = useState<string | null>(lsc?.userId ?? null);
-  const [subjects, setSubjects] = useState<Subject[]>(lsc?.subjects ?? []);
-  const [settings, setSettings] = useState<LessonSettings>(lsc?.settings ?? {
+  const [orgName, setOrgName] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [settings, setSettings] = useState<LessonSettings>({
     cancellation_hours: 24,
     cancellation_fee_percent: 0,
     reminder_student_hours: 2,
@@ -201,11 +200,11 @@ export default function LessonSettingsPage() {
     break_between_lessons: 0,
     min_booking_hours: 24,
   });
-  const [loading, setLoading] = useState(!lsc);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [paymentTiming, setPaymentTiming] = useState<'before_lesson' | 'after_lesson'>(lsc?.paymentTiming ?? 'before_lesson');
-  const [paymentDeadlineHours, setPaymentDeadlineHours] = useState<number | null>(lsc?.paymentDeadlineHours ?? null);
+  const [paymentTiming, setPaymentTiming] = useState<'before_lesson' | 'after_lesson'>('before_lesson');
+  const [paymentDeadlineHours, setPaymentDeadlineHours] = useState<number | null>(null);
 
   // Subject dialog state
   const [isSubjectDialogOpen, setIsSubjectDialogOpen] = useState(false);
@@ -214,7 +213,7 @@ export default function LessonSettingsPage() {
   const [savingSubject, setSavingSubject] = useState(false);
 
   // Validation error
-  useEffect(() => { if (!getCached('tutor_lesson_settings')) fetchData(); }, []);
+  useEffect(() => { fetchData(); }, []);
 
   useEffect(() => {
     const reloadSubjects = async () => {
@@ -236,7 +235,7 @@ export default function LessonSettingsPage() {
   }, []);
 
   const fetchData = async () => {
-    if (!getCached('tutor_lesson_settings')) setLoading(true);
+    setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); return; }
     setUserId(user.id);
@@ -269,21 +268,6 @@ export default function LessonSettingsPage() {
       .order('name');
 
     if (!error) setSubjects(subjectsData || []);
-    setCache('tutor_lesson_settings', {
-      userId: user.id, orgName: tutorData?.organization_id ? (tutorData.organizations as any)?.name || null : null,
-      subjects: subjectsData || [], settings: {
-        cancellation_hours: tutorData?.cancellation_hours ?? 24,
-        cancellation_fee_percent: tutorData?.cancellation_fee_percent ?? 0,
-        reminder_student_hours: tutorData?.reminder_student_hours ?? 2,
-        reminder_tutor_hours: tutorData?.reminder_tutor_hours ?? 2,
-        break_between_lessons: tutorData?.break_between_lessons ?? 0,
-        min_booking_hours: tutorData?.min_booking_hours ?? 24,
-      },
-      paymentTiming: (tutorData?.payment_timing as 'before_lesson' | 'after_lesson') ?? 'before_lesson',
-      paymentDeadlineHours: tutorData?.payment_deadline_hours ?? null,
-    });
-    invalidateCache('tutor_calendar');
-    invalidateCache('tutor_dashboard');
     setLoading(false);
   };
 
@@ -345,9 +329,6 @@ export default function LessonSettingsPage() {
       console.error('[LessonSettings] profiles update', error);
       alert(error.message || t('lessonSet.saveFailed'));
     } else {
-      invalidateCache('tutor_lesson_settings');
-      invalidateCache('tutor_calendar');
-      invalidateCache('tutor_dashboard');
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     }
@@ -386,8 +367,24 @@ export default function LessonSettingsPage() {
 
     const priceToSave =
       orgName && !orgPolicy.editPricing ? (editingSubject?.price ?? newSubject.price) : newSubject.price;
+    const insertPrice = orgName && !orgPolicy.editPricing ? 0 : newSubject.price;
 
     if (editingSubject) {
+      if (
+        tutorSubjectsContainLessonDuplicate(
+          subjects,
+          {
+            name: newSubject.name.trim(),
+            duration_minutes: newSubject.duration_minutes,
+            price: priceToSave,
+          },
+          editingSubject.id
+        )
+      ) {
+        alert(t('compSet.subjectDuplicateForTutor'));
+        setSavingSubject(false);
+        return;
+      }
       const { error } = await supabase.from('subjects').update({
         name: newSubject.name.trim(),
         duration_minutes: newSubject.duration_minutes,
@@ -401,11 +398,22 @@ export default function LessonSettingsPage() {
       }).eq('id', editingSubject.id);
       if (!error) { await fetchData(); setIsSubjectDialogOpen(false); }
     } else {
+      if (
+        tutorSubjectsContainLessonDuplicate(subjects, {
+          name: newSubject.name.trim(),
+          duration_minutes: newSubject.duration_minutes,
+          price: insertPrice,
+        })
+      ) {
+        alert(t('compSet.subjectDuplicateForTutor'));
+        setSavingSubject(false);
+        return;
+      }
       const { error } = await supabase.from('subjects').insert([{
         tutor_id: user.id,
         name: newSubject.name.trim(),
         duration_minutes: newSubject.duration_minutes,
-        price: orgName && !orgPolicy.editPricing ? 0 : newSubject.price,
+        price: insertPrice,
         color: newSubject.color,
         meeting_link: newSubject.meeting_link.trim() || null,
         grade_min: newSubject.grade_min,
@@ -429,7 +437,7 @@ export default function LessonSettingsPage() {
     <Layout>
       <div className="max-w-3xl mx-auto space-y-4 animate-fade-in">
         {/* Page Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">{t('lessonSet.title')}</h1>
             <p className="text-gray-500 mt-1 text-sm">{t('lessonSet.subtitle')}</p>

@@ -6,6 +6,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
+import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
 
 // Stripe/platform fee helpers (inlined to avoid _lib import issues on Vercel)
 const STRIPE_FEE_PERCENT = 0.015;
@@ -35,7 +36,7 @@ function getEnv(name: string): string | null {
     return v && String(v).trim().length > 0 ? String(v) : null;
 }
 
-async function postJsonWithTimeout(url: string, payload: unknown, timeoutMs = 7000) {
+async function postInternalJson(url: string, payload: unknown, timeoutMs = 7000) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -53,32 +54,35 @@ async function postJsonWithTimeout(url: string, payload: unknown, timeoutMs = 70
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
 /** Same deployment as this handler (Vercel isolates freeze before fire-and-forget fetch completes). */
-function resolveSendEmailUrl(req: VercelRequest): string {
+function resolveApiUrl(req: VercelRequest, path: '/api/send-email' | '/api/generate-invoice'): string {
     const vu = process.env.VERCEL_URL;
     if (vu && String(vu).trim()) {
         const host = String(vu).replace(/^https?:\/\//, '').replace(/\/$/, '');
-        return `https://${host}/api/send-email`;
+        return `https://${host}${path}`;
     }
     const origin = typeof req.headers.origin === 'string' ? req.headers.origin.trim() : '';
-    if (origin) return `${origin.replace(/\/$/, '')}/api/send-email`;
+    if (origin) return `${origin.replace(/\/$/, '')}${path}`;
     const base = (getEnv('APP_URL') || getEnv('VITE_APP_URL') || 'http://127.0.0.1:3002').replace(/\/$/, '');
-    return `${base}/api/send-email`;
+    return `${base}${path}`;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
 
     const auth = await verifyRequestAuth(req);
-    if (!auth) return json(res, 401, { error: 'Unauthorized' });
+    if (!auth?.userId) return json(res, 401, { error: 'Unauthorized' });
 
-    const { tutorId, studentId, subjectId, totalLessons, pricePerLesson: requestedPriceRaw, expiresAt } = req.body as {
+    const { tutorId, studentId, subjectId, totalLessons, pricePerLesson: requestedPriceRaw, expiresAt, attachSalesInvoice } = req.body as {
         tutorId: string;
         studentId: string;
         subjectId: string;
         totalLessons: number;
         pricePerLesson?: number;
         expiresAt?: string;
+        /** Default true: generate S.F. and attach to payment email when invoice profile exists */
+        attachSalesInvoice?: boolean;
     };
+    const shouldAttachSf = attachSalesInvoice !== false;
 
     if (!tutorId || !studentId || !subjectId || !totalLessons) {
         return json(res, 400, { error: 'Missing required fields' });
@@ -159,11 +163,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // 3. Determine which Stripe account to use (org or tutor)
         let stripeAccountId: string | null = null;
         let ownerName = tutor.full_name || 'Korepetitorius';
+        let useSchoolOrgAbsorbedFees = false;
 
         if (tutor.organization_id) {
             const { data: org } = await supabase
                 .from('organizations')
-                .select('stripe_account_id, stripe_onboarding_complete, name')
+                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type')
                 .eq('id', tutor.organization_id)
                 .single();
 
@@ -172,6 +177,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
             stripeAccountId = org.stripe_account_id;
             ownerName = org.name || ownerName;
+            useSchoolOrgAbsorbedFees = org.entity_type === 'school';
         } else {
             if (!tutor.stripe_onboarding_complete) {
                 return json(res, 400, { error: 'Tutor Stripe account is not connected' });
@@ -183,15 +189,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return json(res, 400, { error: 'Stripe paskyra nerasta' });
         }
 
-        // 4. Calculate total price with fees (destination charge — transfer = base pamokoms)
+        // 4. Totals — school org Connect: payer pays package list price only; fees absorbed via application_fee
         const basePriceEur = pricePerLesson * totalLessons;
-        const totalWithFeesEur = customerTotalEur(basePriceEur);
-        const { baseCents, feesCents: feeCents } = lessonCheckoutBreakdownCents(basePriceEur);
-        // Destination charge strategy:
-        // - student pays total (lessons + platform + estimated Stripe fee)
-        // - tutor receives exactly base lesson amount
-        // - platform keeps remainder and covers actual Stripe processing fee
-        const tutorTransferCents = baseCents;
+        const payerChargedTotalEur = useSchoolOrgAbsorbedFees ? basePriceEur : customerTotalEur(basePriceEur);
 
         // 5. Always create a NEW package record (will be activated after payment)
         // Multiple packages can exist for same student/subject - they'll be used in order
@@ -230,39 +230,99 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // 6. Determine customer email (payer or student)
         const customerEmail = student.payer_email || student.email || undefined;
 
-        // 7. Create Stripe Checkout session (Destination Charge)
-        const checkoutSession = await stripe.checkout.sessions.create({
-            mode: 'payment',
-            customer_email: customerEmail,
-            payment_method_types: ['card'],
-            line_items: [
-                {
-                    price_data: {
-                        currency: 'eur',
-                        product_data: {
-                            name: `${totalLessons} lessons – ${subject.name}`,
-                            description: `Package – ${ownerName}`,
+        // 7. Create Stripe Checkout session
+        let checkoutSession: Stripe.Response<Stripe.Checkout.Session>;
+        if (useSchoolOrgAbsorbedFees) {
+            const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(basePriceEur);
+            const applicationFeeCents = chargeCents - transferToSchoolCents;
+            if (chargeCents < 50 || applicationFeeCents < 1 || applicationFeeCents >= chargeCents) {
+                await supabase.from('lesson_packages').delete().eq('id', lessonPackage.id);
+                return json(res, 400, {
+                    error: 'Netinkama suma paketo apmokėjimui.',
+                });
+            }
+            checkoutSession = await stripe.checkout.sessions.create({
+                mode: 'payment',
+                customer_email: customerEmail,
+                payment_method_types: ['card'],
+                line_items: [
+                    {
+                        price_data: {
+                            currency: 'eur',
+                            product_data: {
+                                name: `${totalLessons} lessons – ${subject.name}`,
+                                description: `Package – ${ownerName}`,
+                            },
+                            unit_amount: chargeCents,
                         },
-                        unit_amount: baseCents,
+                        quantity: 1,
                     },
-                    quantity: 1,
+                ],
+                payment_intent_data: {
+                    application_fee_amount: applicationFeeCents,
+                    transfer_data: {
+                        destination: stripeAccountId,
+                    },
+                    metadata: {
+                        tutlio_package_id: lessonPackage.id,
+                        tutor_id: tutorId,
+                        student_id: studentId,
+                        subject_id: subjectId,
+                        tutlio_school_org_absorbed: 'true',
+                    },
                 },
-                {
-                    price_data: {
-                        currency: 'eur',
-                        product_data: {
-                            name: 'Platformos administravimo mokestis',
-                            description: 'Tutlio platform fee and payment processing',
+                metadata: {
+                    tutlio_package_id: lessonPackage.id,
+                    tutor_id: tutorId,
+                    student_id: studentId,
+                    subject_id: subjectId,
+                    tutlio_school_org_absorbed: 'true',
+                },
+                success_url: `${APP_URL}/package-success?session_id={CHECKOUT_SESSION_ID}`,
+                cancel_url: `${APP_URL}/package-cancelled`,
+            });
+        } else {
+            const { baseCents, feesCents: feeCents } = lessonCheckoutBreakdownCents(basePriceEur);
+            const tutorTransferCents = baseCents;
+            checkoutSession = await stripe.checkout.sessions.create({
+                mode: 'payment',
+                customer_email: customerEmail,
+                payment_method_types: ['card'],
+                line_items: [
+                    {
+                        price_data: {
+                            currency: 'eur',
+                            product_data: {
+                                name: `${totalLessons} lessons – ${subject.name}`,
+                                description: `Package – ${ownerName}`,
+                            },
+                            unit_amount: baseCents,
                         },
-                        unit_amount: feeCents,
+                        quantity: 1,
                     },
-                    quantity: 1,
-                },
-            ],
-            payment_intent_data: {
-                transfer_data: {
-                    destination: stripeAccountId,
-                    amount: tutorTransferCents,
+                    {
+                        price_data: {
+                            currency: 'eur',
+                            product_data: {
+                                name: 'Platformos administravimo mokestis',
+                                description: 'Tutlio platform fee and payment processing',
+                            },
+                            unit_amount: feeCents,
+                        },
+                        quantity: 1,
+                    },
+                ],
+                payment_intent_data: {
+                    transfer_data: {
+                        destination: stripeAccountId,
+                        amount: tutorTransferCents,
+                    },
+                    metadata: {
+                        tutlio_package_id: lessonPackage.id,
+                        tutor_id: tutorId,
+                        student_id: studentId,
+                        subject_id: subjectId,
+                    },
                 },
                 metadata: {
                     tutlio_package_id: lessonPackage.id,
@@ -270,16 +330,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     student_id: studentId,
                     subject_id: subjectId,
                 },
-            },
-            metadata: {
-                tutlio_package_id: lessonPackage.id,
-                tutor_id: tutorId,
-                student_id: studentId,
-                subject_id: subjectId,
-            },
-            success_url: `${APP_URL}/package-success?session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${APP_URL}/package-cancelled`,
-        });
+                success_url: `${APP_URL}/package-success?session_id={CHECKOUT_SESSION_ID}`,
+                cancel_url: `${APP_URL}/package-cancelled`,
+            });
+        }
 
         // 8. Save Stripe checkout session ID to package
         await supabase
@@ -290,36 +344,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // 9. Generate pre-payment invoice (S.F.) and attach PDF to email
         let invoicePdfBase64: string | null = null;
         let invoiceNumber: string | null = null;
-        try {
-            const invRes = await postJsonWithTimeout(
-                resolveSendEmailUrl(req).replace('/send-email', '/generate-invoice'),
-                {
-                    periodStart: new Date().toISOString().slice(0, 10),
-                    periodEnd: new Date().toISOString().slice(0, 10),
-                    groupingType: 'single',
-                    tutorId,
-                    studentId,
-                    packageIds: [lessonPackage.id],
-                },
-                15000,
-            );
-            if (invRes.ok) {
-                const invData = await invRes.json() as any;
-                if (invData.invoiceIds?.[0]) {
-                    const invId = invData.invoiceIds[0];
-                    const { data: inv } = await supabase.from('invoices').select('invoice_number, pdf_storage_path').eq('id', invId).single();
-                    if (inv?.pdf_storage_path) {
-                        invoiceNumber = inv.invoice_number;
-                        const { data: blob } = await supabase.storage.from('invoices').download(inv.pdf_storage_path);
-                        if (blob) {
-                            const arrayBuf = await blob.arrayBuffer();
-                            invoicePdfBase64 = Buffer.from(arrayBuf).toString('base64');
+        if (shouldAttachSf) {
+            try {
+                const issuedByUserId = auth.userId!;
+                const invRes = await postInternalJson(
+                    resolveApiUrl(req, '/api/generate-invoice'),
+                    {
+                        periodStart: new Date().toISOString().slice(0, 10),
+                        periodEnd: new Date().toISOString().slice(0, 10),
+                        groupingType: 'single',
+                        tutorId,
+                        studentId,
+                        packageIds: [lessonPackage.id],
+                        allowPendingStripePackages: true,
+                        issuedByUserId,
+                    },
+                    20000,
+                );
+                if (invRes.ok) {
+                    const invData = (await invRes.json().catch(() => null)) as any;
+                    if (invData?.invoiceIds?.[0]) {
+                        const invId = invData.invoiceIds[0];
+                        const { data: inv } = await supabase.from('invoices').select('invoice_number, pdf_storage_path').eq('id', invId).single();
+                        if (inv?.pdf_storage_path) {
+                            invoiceNumber = inv.invoice_number;
+                            const { data: blob } = await supabase.storage.from('invoices').download(inv.pdf_storage_path);
+                            if (blob) {
+                                const arrayBuf = await blob.arrayBuffer();
+                                invoicePdfBase64 = Buffer.from(arrayBuf).toString('base64');
+                            }
                         }
                     }
+                } else {
+                    const errText = await invRes.text().catch(() => '');
+                    console.error('[create-package-checkout] generate-invoice HTTP', invRes.status, errText);
                 }
+            } catch (e) {
+                console.error('[create-package-checkout] pre-payment invoice error:', e);
             }
-        } catch (e) {
-            console.error('[create-package-checkout] pre-payment invoice error:', e);
         }
 
         // 10. Send email to payer with package details, payment link, and optional invoice PDF
@@ -337,15 +399,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         subjectName: subject.name,
                         totalLessons,
                         pricePerLesson: pricePerLesson.toFixed(2),
-                        totalPrice: totalWithFeesEur.toFixed(2),
+                        totalPrice: payerChargedTotalEur.toFixed(2),
                         paymentLink: checkoutSession.url,
                     },
                 };
                 if (invoicePdfBase64 && invoiceNumber) {
                     emailPayload.attachments = [{ filename: `${invoiceNumber}.pdf`, content: invoicePdfBase64 }];
                 }
-                const emailRes = await postJsonWithTimeout(
-                    resolveSendEmailUrl(req),
+                const emailRes = await postInternalJson(
+                    resolveApiUrl(req, '/api/send-email'),
                     emailPayload,
                     20000,
                 );

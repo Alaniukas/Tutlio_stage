@@ -12,11 +12,12 @@ import Toast from '@/components/Toast';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { useTranslation } from '@/lib/i18n';
-import { getCached, setCache } from '@/lib/dataCache';
+import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
+import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 
 type CompanyFinanceCache = {
   orgId: string;
-  stripeComplete: boolean;
+  stripeComplete: boolean; // true only when stripe_account_id + onboarding complete (same as Checkout API)
   paymentTiming: 'before_lesson' | 'after_lesson';
   paymentDeadlineHours: number;
   enablePerLesson: boolean;
@@ -61,9 +62,13 @@ export default function CompanyFinance() {
   const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
   const [invoiceSending, setInvoiceSending] = useState(false);
+  const [invoiceIncludeSalesInvoice, setInvoiceIncludeSalesInvoice] = useState(true);
   const [expandedStudents, setExpandedStudents] = useState<Set<string>>(new Set());
 
-  useEffect(() => { if (!getCached('company_finance')) fetchFinanceSettings(); }, []);
+  /** Always refresh from DB — cache alone hid stale `stripeComplete` after Stripe verify. */
+  useEffect(() => {
+    void fetchFinanceSettings();
+  }, []);
 
   useEffect(() => {
     if (!loading && location.hash === '#billing-models') {
@@ -79,8 +84,9 @@ export default function CompanyFinance() {
     if (params.get('stripe') === 'success') verifyStripe();
   }, [orgId, location.search, orgFeaturesLoading]);
 
-  const fetchFinanceSettings = async () => {
-    if (!getCached('company_finance')) setLoading(true);
+  const fetchFinanceSettings = async (options?: { background?: boolean }) => {
+    const background = options?.background === true;
+    if (!background && !getCached('company_finance')) setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); return; }
 
@@ -100,7 +106,7 @@ export default function CompanyFinance() {
     const { data: orgData, error: orgError } = await supabase
       .from('organizations')
       .select(
-        'stripe_onboarding_complete, payment_timing, payment_deadline_hours, enable_per_lesson, enable_monthly_billing, enable_prepaid_packages, restrict_booking_on_overdue'
+        'stripe_account_id, stripe_onboarding_complete, payment_timing, payment_deadline_hours, enable_per_lesson, enable_monthly_billing, enable_prepaid_packages, restrict_booking_on_overdue'
       )
       .eq('id', adminRow.organization_id)
       .single();
@@ -116,7 +122,7 @@ export default function CompanyFinance() {
     if (orgError) {
       setToastMessage({ message: t('companyFinance.fetchFailed', { msg: orgError.message }), type: 'error' });
     } else if (orgData) {
-      stripeCompleteLocal = orgData.stripe_onboarding_complete || false;
+      stripeCompleteLocal = !!(orgData.stripe_onboarding_complete && orgData.stripe_account_id?.trim());
       paymentTimingLocal = (orgData.payment_timing as 'before_lesson' | 'after_lesson') || 'before_lesson';
       paymentDeadlineHoursLocal = orgData.payment_deadline_hours || 24;
       enablePerLessonLocal = orgData.enable_per_lesson ?? true;
@@ -125,21 +131,10 @@ export default function CompanyFinance() {
       restrictBookingOnOverdueLocal = orgData.restrict_booking_on_overdue ?? false;
     }
 
-    const { data: adminUsers2 } = await supabase.from('organization_admins').select('user_id').eq('organization_id', adminRow.organization_id);
-    const adminIds2 = new Set((adminUsers2 || []).map((a: any) => a.user_id));
-    const { data: tutorData2 } = await supabase.from('profiles').select('id, full_name').eq('organization_id', adminRow.organization_id);
-    const { data: linkedStudents } = await supabase
-      .from('students')
-      .select('linked_user_id')
-      .eq('organization_id', adminRow.organization_id)
-      .not('linked_user_id', 'is', null);
-    const linkedStudentUserIds = new Set(
-      (linkedStudents || [])
-        .map((s: any) => s.linked_user_id)
-        .filter((id: string | null | undefined): id is string => Boolean(id)),
-    );
-    const orgTutorsLocal = (tutorData2 || []).filter(
-      (tu: any) => !adminIds2.has(tu.id) && !linkedStudentUserIds.has(tu.id),
+    const orgTutorsLocal = await getOrgVisibleTutors(
+      supabase as any,
+      adminRow.organization_id,
+      'id, full_name, email',
     );
 
     setOrgId(organizationId);
@@ -305,7 +300,8 @@ export default function CompanyFinance() {
       });
       const json = await res.json();
       if (json.complete) {
-        setStripeComplete(true);
+        invalidateCache('company_finance');
+        await fetchFinanceSettings({ background: true });
         setToastMessage({ message: t('companyFinance.stripeConnected'), type: 'success' });
       } else {
         setToastMessage({ message: t('companyFinance.stripeIncomplete'), type: 'error' });
@@ -544,7 +540,13 @@ export default function CompanyFinance() {
         </div>
       </div>
       {/* Org Invoice Dialog */}
-      <Dialog open={isSendInvoiceOpen} onOpenChange={setIsSendInvoiceOpen}>
+      <Dialog
+        open={isSendInvoiceOpen}
+        onOpenChange={(open) => {
+          setIsSendInvoiceOpen(open);
+          if (open) setInvoiceIncludeSalesInvoice(true);
+        }}
+      >
         <DialogContent className="w-[95vw] sm:w-full max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -686,6 +688,18 @@ export default function CompanyFinance() {
                       );
                     })}
                   </div>
+                  <label className="flex items-start gap-3 cursor-pointer rounded-xl border border-gray-200 bg-gray-50/80 px-3 py-2.5">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 w-4 h-4 rounded border-gray-300 text-blue-600"
+                      checked={invoiceIncludeSalesInvoice}
+                      onChange={(e) => setInvoiceIncludeSalesInvoice(e.target.checked)}
+                    />
+                    <span className="text-sm text-gray-800">
+                      <span className="font-medium">{t('invoices.includeSfInEmail')}</span>
+                      <span className="block text-xs text-gray-500 mt-0.5">{t('invoices.includeSfInEmailHint')}</span>
+                    </span>
+                  </label>
                   <Button onClick={handleSendOrgInvoice} disabled={invoiceSending} className="w-full rounded-xl bg-blue-600 hover:bg-blue-700">
                     {invoiceSending ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{t('common.sending')}</> : `${t('companyFinance.sendNInvoices')} (${studentEntries.length})`}
                   </Button>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { getCached, setCache } from '@/lib/dataCache';
+import { COMPANY_TUTORS_CACHE_KEY } from '@/lib/preload';
 import {
   Users, Plus, Copy, Check, Trash2, UserCheck, UserX,
   ChevronRight, ChevronDown, X, Pencil, Mail, Send, AlertCircle
@@ -8,7 +9,7 @@ import {
 import { format } from 'date-fns';
 import { useTranslation } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { dedupeSubjectPresets, subjectPresetKey } from '@/lib/subjectPresetDedupe';
+import { dedupeSubjectPresets, subjectPresetKey, tutorSubjectsContainLessonDuplicate } from '@/lib/subjectPresetDedupe';
 import { removeOrgSubjectTemplatesMatchingPreset } from '@/lib/orgSubjectTemplateCleanup';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -330,17 +331,20 @@ function TutorSubjectPriceRow({ template, existing, onSave, onDelete }: {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-const TUTORS_CACHE_KEY = 'company_tutors';
-
 export default function CompanyTutors() {
   const { t, dateFnsLocale } = useTranslation();
-  const tc = getCached<any>(TUTORS_CACHE_KEY);
+  const tc = getCached<any>(COMPANY_TUTORS_CACHE_KEY);
   const [loading, setLoading] = useState(!tc);
   const [orgId, setOrgId] = useState<string | null>(tc?.orgId ?? null);
   const [tutorLimit, setTutorLimit] = useState(tc?.tutorLimit ?? 0);
+  const [tutorLicenseCount, setTutorLicenseCount] = useState<number>(tc?.tutorLicenseCount ?? 0);
   const [tutors, setTutors] = useState<Tutor[]>(tc?.tutors ?? []);
   const [invites, setInvites] = useState<Invite[]>(tc?.invites ?? []);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [usedInvitesOpen, setUsedInvitesOpen] = useState(false);
+  const [licenseBusyTutorIds, setLicenseBusyTutorIds] = useState<Set<string>>(new Set());
+  const [licenseError, setLicenseError] = useState<string | null>(null);
+  const [licenseInfoError, setLicenseInfoError] = useState<string | null>(null);
 
   // ── Invite modal ──
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
@@ -381,6 +385,7 @@ export default function CompanyTutors() {
   const [selectedTutor, setSelectedTutor] = useState<TutorDetail | null>(null);
   const [tutorModalOpen, setTutorModalOpen] = useState(false);
   const [savingTutor, setSavingTutor] = useState(false);
+  const [archivingTutor, setArchivingTutor] = useState(false);
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [showAddSubject, setShowAddSubject] = useState(false);
@@ -410,7 +415,7 @@ export default function CompanyTutors() {
   const [editCommissionPercent, setEditCommissionPercent] = useState(0);
   const [editMeetingLink, setEditMeetingLink] = useState('');
 
-  useEffect(() => { loadData({ silent: !!getCached(TUTORS_CACHE_KEY) }); }, []);
+  useEffect(() => { loadData({ silent: !!getCached(COMPANY_TUTORS_CACHE_KEY) }); }, []);
 
   const loadData = async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent === true;
@@ -423,7 +428,7 @@ export default function CompanyTutors() {
 
     const { data: adminRow } = await supabase
       .from('organization_admins')
-      .select('organization_id, organizations(tutor_limit)')
+      .select('organization_id, organizations(tutor_limit, tutor_license_count)')
       .eq('user_id', user.id)
       .maybeSingle();
     if (!adminRow) {
@@ -432,17 +437,25 @@ export default function CompanyTutors() {
     }
 
     setOrgId(adminRow.organization_id);
-    const org = adminRow.organizations as any;
-    setTutorLimit(org?.tutor_limit || 0);
+    const orgJoinedRaw = (adminRow as any).organizations as any;
+    const orgJoined = Array.isArray(orgJoinedRaw) ? orgJoinedRaw[0] : orgJoinedRaw;
+    const joinedTutorLimit = Number(orgJoined?.tutor_limit) || 0;
+    const joinedLicenseCount = Number(orgJoined?.tutor_license_count) || 0;
+    setTutorLimit(joinedTutorLimit);
+    // Backwards-compat: older orgs used tutor_limit to mean license count.
+    let effectiveLicenseCount = Math.max(joinedLicenseCount, joinedTutorLimit);
+    setLicenseInfoError(null);
 
     // Try to load organization default settings (columns may not exist yet)
     const { data: orgData } = await supabase
       .from('organizations')
-      .select('*')
+      .select('tutor_license_count, default_cancellation_hours, default_cancellation_fee_percent, default_reminder_student_hours, default_reminder_tutor_hours, default_break_between_lessons, default_min_booking_hours, default_company_commission_percent')
       .eq('id', adminRow.organization_id)
       .maybeSingle();
 
     if (orgData) {
+      const directLicenseCount = Number((orgData as any).tutor_license_count) || 0;
+      if (directLicenseCount > 0) effectiveLicenseCount = directLicenseCount;
       setOrgDefaults({
         cancellation_hours: (orgData as any).default_cancellation_hours || 24,
         cancellation_fee_percent: (orgData as any).default_cancellation_fee_percent || 0,
@@ -453,6 +466,44 @@ export default function CompanyTutors() {
         company_commission_percent: (orgData as any).default_company_commission_percent || 0,
       });
     }
+
+    // If RLS prevents reading tutor_license_count via client queries, fall back to server endpoint.
+    // IMPORTANT: Do this in background so the page never "hangs" on a pending request.
+    const startLicenseInfoFetch = () => {
+      // If we already have a reliable count (joined or direct orgData), don't fetch.
+      if (effectiveLicenseCount > 0) {
+        setTutorLicenseCount(effectiveLicenseCount);
+        return;
+      }
+      void (async () => {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session?.access_token) return;
+
+          const controller = new AbortController();
+          // Give serverless + Supabase auth time; this must never block the UI.
+          const timeout = setTimeout(() => controller.abort(), 8000);
+          const resp = await fetch('/api/org-license-info', {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${session.access_token}` },
+            signal: controller.signal,
+          }).finally(() => clearTimeout(timeout));
+
+          const json = await resp.json().catch(() => ({}));
+          if (!resp.ok) return;
+
+          const apiCount = Number(json?.tutorLicenseCount) || 0;
+          if (apiCount > 0) {
+            setLicenseInfoError(null);
+            setTutorLicenseCount(apiCount);
+          }
+        } catch (e: any) {
+          // Silent: do not scare admins with transient timeouts.
+          if (e?.name === 'AbortError') return;
+        }
+      })();
+    };
+    startLicenseInfoFetch();
 
     // Find all organization admins so they are not shown as tutors
     const { data: adminUsers } = await supabase
@@ -468,24 +519,51 @@ export default function CompanyTutors() {
 
     const { data: linkedStudents } = await supabase
       .from('students')
-      .select('linked_user_id')
-      .eq('organization_id', adminRow.organization_id)
-      .not('linked_user_id', 'is', null);
+      .select('linked_user_id, email, tutor_id')
+      .eq('organization_id', adminRow.organization_id);
     const linkedStudentUserIds = new Set(
       (linkedStudents || [])
         .map((s: any) => s.linked_user_id)
         .filter((id: string | null | undefined): id is string => !!id)
     );
+    const linkedStudentEmails = new Set(
+      (linkedStudents || [])
+        .map((s: any) => String(s.email || '').trim().toLowerCase())
+        .filter((email: string) => email.length > 0)
+    );
 
-    // Filter out organization admins so they are not counted as tutors
-    const visibleTutors = (tutorData || []).filter((t: any) => !adminIds.has(t.id) && !linkedStudentUserIds.has(t.id));
-    setTutors(visibleTutors);
+    // Only show real tutors (not students accidentally in `profiles`).
+    // A tutor is either assigned to any student in this org OR has accepted an invite.
+    const assignedTutorIds = new Set(
+      (linkedStudents || [])
+        .map((s: any) => s.tutor_id)
+        .filter((id: string | null | undefined): id is string => !!id)
+    );
 
     const { data: inviteData } = await supabase
       .from('tutor_invites')
       .select('*')
       .eq('organization_id', adminRow.organization_id)
       .order('created_at', { ascending: false });
+
+    const acceptedTutorIds = new Set(
+      (inviteData || [])
+        .map((inv: any) => inv.used_by_profile_id)
+        .filter((id: string | null | undefined): id is string => !!id)
+    );
+
+    const tutorIdSet = new Set<string>([...assignedTutorIds, ...acceptedTutorIds]);
+
+    const visibleTutors = (tutorData || []).filter((t: any) => {
+      const email = String(t.email || '').trim().toLowerCase();
+      return (
+        tutorIdSet.has(t.id) &&
+        !adminIds.has(t.id) &&
+        !linkedStudentUserIds.has(t.id) &&
+        !linkedStudentEmails.has(email)
+      );
+    });
+    setTutors(visibleTutors);
 
     const enriched = (inviteData || []).map((inv: any) => ({
       ...inv,
@@ -539,11 +617,63 @@ export default function CompanyTutors() {
     catalogDeduped.sort((a, b) => a.preset.name.localeCompare(b.preset.name, 'lt'));
     setOrgSubjectCatalogOptions(catalogDeduped);
 
-    setCache(TUTORS_CACHE_KEY, {
-      orgId: adminRow.organization_id, tutorLimit: org?.tutor_limit || 0,
+    setCache(COMPANY_TUTORS_CACHE_KEY, {
+      orgId: adminRow.organization_id,
+      tutorLimit: joinedTutorLimit,
+      tutorLicenseCount: effectiveLicenseCount,
       tutors: visibleTutors, invites: enriched,
     });
     if (!silent) setLoading(false);
+  };
+
+  const licenseUsedCount = useMemo(() => {
+    if (!tutorLicenseCount) return 0;
+    return tutors.filter((tu) => tu.has_active_license !== false).length;
+  }, [tutors, tutorLicenseCount]);
+
+  const orgUsesLicenses = tutorLicenseCount > 0;
+  const showLicenseUi = tutorLicenseCount > 0;
+
+  const setTutorLicense = async (tutorId: string, next: boolean) => {
+    if (!orgId) return;
+    setLicenseError(null);
+
+    setLicenseBusyTutorIds((prev) => new Set(prev).add(tutorId));
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch('/api/org-set-tutor-license', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
+        body: JSON.stringify({ tutorId, hasActiveLicense: next }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setLicenseError(data?.error || t('compTut.serverError', { status: String(res.status) }));
+        return;
+      }
+      setTutors((prev) => {
+        const updated = prev.map((tu) => (tu.id === tutorId ? { ...tu, has_active_license: next } : tu));
+        setCache(COMPANY_TUTORS_CACHE_KEY, {
+          orgId,
+          tutorLimit,
+          tutorLicenseCount,
+          tutors: updated,
+          invites,
+        });
+        return updated;
+      });
+    } catch (e: any) {
+      setLicenseError(e?.message || t('compTut.serverErrorGeneric'));
+    } finally {
+      setLicenseBusyTutorIds((prev) => {
+        const n = new Set(prev);
+        n.delete(tutorId);
+        return n;
+      });
+    }
   };
 
   // ── Invite modal helpers ──
@@ -712,6 +842,38 @@ export default function CompanyTutors() {
     setSavingTutor(false);
   };
 
+  const handleArchiveTutor = async () => {
+    if (!selectedTutor) return;
+    const confirmed = window.confirm(
+      'Ar tikrai archyvuoti šį korepetitorių? Paskyra nebus ištrinta, bet dings iš organizacijos sąrašų, o mokiniai bus atkabinti nuo šio korepetitoriaus.'
+    );
+    if (!confirmed) return;
+
+    setArchivingTutor(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch('/api/archive-org-tutor', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
+        body: JSON.stringify({ tutorId: selectedTutor.id }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error || 'Failed to archive tutor');
+      }
+      await loadData();
+      setTutorModalOpen(false);
+      setSelectedTutor(null);
+    } catch (e: any) {
+      alert(e?.message || 'Nepavyko archyvuoti korepetitoriaus');
+    } finally {
+      setArchivingTutor(false);
+    }
+  };
+
   const handleSaveTutorSubjectPrice = async (templateId: string, price: number, durationMinutes: number) => {
     if (!selectedTutor || !orgId) return;
     const existing = tutorSubjectPrices.find(p => p.org_subject_template_id === templateId);
@@ -746,12 +908,29 @@ export default function CompanyTutors() {
   };
 
   const handleSaveSubject = async (subject: Subject) => {
+    if (
+      selectedTutor &&
+      tutorSubjectsContainLessonDuplicate(selectedTutor.subjects, subject, subject.id)
+    ) {
+      alert(t('compSet.subjectDuplicateForTutor'));
+      return;
+    }
     await supabase.from('subjects').update({ price: subject.price, duration_minutes: subject.duration_minutes }).eq('id', subject.id);
     if (selectedTutor) setSelectedTutor({ ...selectedTutor, subjects: selectedTutor.subjects.map(s => s.id === subject.id ? subject : s) });
   };
 
   const handleAddSubject = async () => {
     if (!selectedTutor || !newSubjectName.trim()) return;
+    if (
+      tutorSubjectsContainLessonDuplicate(selectedTutor.subjects, {
+        name: newSubjectName.trim(),
+        duration_minutes: newSubjectDuration,
+        price: newSubjectPrice,
+      })
+    ) {
+      alert(t('compSet.subjectDuplicateForTutor'));
+      return;
+    }
     setSavingSubject(true);
     const { data } = await supabase.from('subjects').insert({
       tutor_id: selectedTutor.id, name: newSubjectName.trim(),
@@ -830,6 +1009,44 @@ export default function CompanyTutors() {
           )}
         </div>
 
+        {/* License usage */}
+        {showLicenseUi && (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-gray-900">{t('compTut.license')}</p>
+                <p className="text-xs text-gray-500 mt-0.5">{t('compTut.licenseDesc')}</p>
+              </div>
+              <div className="flex-shrink-0 text-sm font-semibold text-gray-900">
+                {licenseUsedCount} / {tutorLicenseCount}
+              </div>
+            </div>
+            <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden mt-3">
+              <div
+                className="h-full bg-gradient-to-r from-emerald-400 via-sky-400 to-indigo-400 rounded-full transition-all"
+                style={{
+                  width: tutorLicenseCount > 0 ? `${Math.min(100, (licenseUsedCount / tutorLicenseCount) * 100)}%` : '0%',
+                }}
+              />
+            </div>
+            {licenseError && (
+              <div className="mt-3 flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+                <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
+                <p className="text-xs text-red-700">{licenseError}</p>
+              </div>
+            )}
+          </div>
+        )}
+        {!showLicenseUi && licenseInfoError && (
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-amber-900">
+            <p className="text-sm font-semibold">{t('compTut.license')}</p>
+            <p className="text-xs mt-0.5">
+              Nepavyko įkelti licencijų informacijos. Patikrinkite naršyklės Network, ar `GET /api/org-license-info` grąžina 200.
+            </p>
+            <p className="text-[11px] mt-1 text-amber-800 break-all">Detalės: {licenseInfoError}</p>
+          </div>
+        )}
+
         {/* Registered tutors */}
         <section>
           <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-3">{t('compTut.registered', { count: String(tutors.length) })}</h2>
@@ -850,9 +1067,47 @@ export default function CompanyTutors() {
                     </div>
                     <p className="text-xs text-gray-500 truncate">{tutor.email}</p>
                   </div>
-                  <span className="flex items-center gap-1 text-xs text-green-600 bg-green-50 px-2 py-1 rounded-full font-medium">
-                    <UserCheck className="w-3 h-3" /> {t('compTut.active')}
-                  </span>
+                  {showLicenseUi && (() => {
+                    const licensed = tutor.has_active_license !== false;
+                    const disableEnable = !licensed && licenseUsedCount >= tutorLicenseCount;
+                    const busy = licenseBusyTutorIds.has(tutor.id);
+                    return (
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span
+                          className={cn(
+                            'flex items-center gap-1 text-xs px-2 py-1 rounded-full font-medium',
+                            licensed ? 'text-emerald-700 bg-emerald-50' : 'text-gray-600 bg-gray-100',
+                          )}
+                        >
+                          {licensed ? <UserCheck className="w-3 h-3" /> : <UserX className="w-3 h-3" />}
+                          {licensed ? t('compTut.licensed') : t('compTut.unlicensed')}
+                        </span>
+                        <label
+                          className={cn(
+                            'inline-flex items-center gap-2 text-xs font-medium select-none rounded-lg px-2 py-1',
+                            'bg-gray-50 border border-gray-200',
+                            (disableEnable || busy) && 'opacity-50 cursor-not-allowed',
+                          )}
+                          title={disableEnable && !licensed ? t('compTut.limitReached') : undefined}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded border-gray-300"
+                            checked={licensed}
+                            disabled={busy || (disableEnable && !licensed)}
+                            onChange={(e) => void setTutorLicense(tutor.id, e.target.checked)}
+                          />
+                          <span className="text-gray-700">{t('compTut.license')}</span>
+                        </label>
+                      </div>
+                    );
+                  })()}
+                  {!orgUsesLicenses && (
+                    <span className="flex items-center gap-1 text-xs text-green-600 bg-green-50 px-2 py-1 rounded-full font-medium">
+                      <UserCheck className="w-3 h-3" /> {t('compTut.active')}
+                    </span>
+                  )}
                   <ChevronRight className="w-4 h-4 text-gray-300" />
                 </button>
               ))}
@@ -901,19 +1156,30 @@ export default function CompanyTutors() {
           </section>
         )}
 
-        {/* Used invites */}
+        {/* Used invites (collapsible) */}
         {invites.filter(i => i.used).length > 0 && (
           <section>
-            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">{t('compTut.usedInvites')}</h2>
-            <div className="space-y-2">
-              {invites.filter(i => i.used).map(invite => (
-                <div key={invite.id} className="bg-gray-50 rounded-2xl border border-gray-100 px-4 py-3 flex items-center gap-3 opacity-60">
-                  <Check className="w-4 h-4 text-green-500 flex-shrink-0" />
-                  <p className="text-sm font-mono text-gray-500 tracking-widest">{invite.type === 'full' ? invite.invitee_email : invite.token}</p>
-                  {invite.tutor && <span className="text-xs text-gray-500 ml-auto">→ {invite.tutor.full_name}</span>}
-                </div>
-              ))}
-            </div>
+            <button
+              type="button"
+              onClick={() => setUsedInvitesOpen((v) => !v)}
+              className="w-full flex items-center justify-between text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3"
+            >
+              <span>{t('compTut.usedInvites')}</span>
+              <span className="text-xs font-medium text-gray-400 normal-case">
+                {usedInvitesOpen ? t('common.hide') : t('common.show')}
+              </span>
+            </button>
+            {usedInvitesOpen && (
+              <div className="space-y-2">
+                {invites.filter(i => i.used).map(invite => (
+                  <div key={invite.id} className="bg-gray-50 rounded-2xl border border-gray-100 px-4 py-3 flex items-center gap-3 opacity-60">
+                    <Check className="w-4 h-4 text-green-500 flex-shrink-0" />
+                    <p className="text-sm font-mono text-gray-500 tracking-widest">{invite.type === 'full' ? invite.invitee_email : invite.token}</p>
+                    {invite.tutor && <span className="text-xs text-gray-500 ml-auto">→ {invite.tutor.full_name}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
         )}
       </div>
@@ -1049,7 +1315,7 @@ export default function CompanyTutors() {
 
       {/* ── Tutor detail modal ─────────────────────────────────────────────── */}
       <Dialog open={tutorModalOpen} onOpenChange={setTutorModalOpen}>
-        <DialogContent className="w-[95vw] sm:max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl w-[calc(100%-2rem)] max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{t('compTut.tutorInfo')}</DialogTitle></DialogHeader>
 
           {selectedTutor && (
@@ -1283,6 +1549,9 @@ export default function CompanyTutors() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setTutorModalOpen(false)}>{t('compTut.cancelBtn')}</Button>
+            <Button variant="destructive" onClick={handleArchiveTutor} disabled={archivingTutor || savingTutor}>
+              {archivingTutor ? 'Archyvuojama...' : 'Archyvuoti'}
+            </Button>
             <Button onClick={handleSaveTutor} disabled={savingTutor}>{savingTutor ? t('compTut.saving') : t('compTut.save')}</Button>
           </DialogFooter>
         </DialogContent>

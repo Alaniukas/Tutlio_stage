@@ -2,7 +2,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import { useEffect, useRef, useState, useMemo } from 'react';
-import { preloadTutorData } from '@/lib/preload';
+import { preloadTutorData, dedupeAuthGetUser, tutorSidebarProfileDeduped } from '@/lib/preload';
 import { buildPlatformPath } from '@/lib/platform';
 import {
   LayoutDashboard,
@@ -36,7 +36,7 @@ interface LayoutProps {
 export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const { t } = useTranslation();
-  const { profile } = useUser();
+  const { profile, user: ctxUser, loading: userLoading } = useUser();
   const [profileOrgId, setProfileOrgId] = useState<string | null>(profile?.organization_id ?? null);
   const isOrgTutor = !!(profile?.organization_id || profileOrgId);
   const chatUnreadTotal = useTotalChatUnread();
@@ -69,26 +69,30 @@ export default function Layout({ children }: LayoutProps) {
   }, [isOrgTutor, t]);
 
   useEffect(() => {
-    const getUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        setTutorEmail(user.email || '');
-        const { data } = await supabase
-          .from('profiles')
-          .select('full_name, organization_id')
-          .eq('id', user.id)
-          .maybeSingle();
-        setTutorName(data?.full_name || user.email?.split('@')[0] || t('common.tutor'));
-        setProfileOrgId(data?.organization_id ?? null);
-      }
-    };
-    getUser();
-    preloadTutorData();
+    void preloadTutorData();
   }, []);
 
   useEffect(() => {
     try { localStorage.setItem('tutlio_sidebar_expanded', String(sidebarExpanded)); } catch {}
   }, [sidebarExpanded]);
+
+  useEffect(() => {
+    if (ctxUser?.email) setTutorEmail(ctxUser.email);
+    if (profile) {
+      setTutorName(profile.full_name || ctxUser?.email?.split('@')[0] || t('common.tutor'));
+      setProfileOrgId(profile.organization_id ?? null);
+      return;
+    }
+    if (userLoading) return;
+    void (async () => {
+      const user = await dedupeAuthGetUser();
+      if (!user) return;
+      setTutorEmail((e) => e || user.email || '');
+      const { data } = await tutorSidebarProfileDeduped(user.id);
+      setTutorName(data?.full_name || user.email?.split('@')[0] || t('common.tutor'));
+      setProfileOrgId(data?.organization_id ?? null);
+    })();
+  }, [profile, ctxUser?.email, userLoading, t]);
 
   useEffect(() => {
     mainRef.current?.scrollTo(0, 0);

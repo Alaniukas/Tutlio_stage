@@ -1,7 +1,9 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, type ReactNode } from 'react';
 import StudentLayout from '@/components/StudentLayout';
+import ParentLayout from '@/components/ParentLayout';
 import StatusBadge from '@/components/StatusBadge';
 import { supabase } from '@/lib/supabase';
+import { dedupeAsync } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
 import { format, addDays, getDay, startOfWeek, parse, addHours, isBefore, isAfter, parseISO, differenceInHours, startOfMonth, endOfMonth, startOfDay, endOfDay } from 'date-fns';
 import { lt } from 'date-fns/locale';
@@ -12,12 +14,15 @@ import { ChevronLeft, ChevronRight, LayoutGrid, CalendarDays, List, Check, Calen
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { cn, normalizeUrl } from '@/lib/utils';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate, useMatch } from 'react-router-dom';
 import { sendEmail } from '@/lib/email';
 import { useStudentPaymentBlock } from '@/hooks/useStudentPaymentBlock';
 import { shouldUsePackageForBooking } from '@/lib/studentPaymentModel';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
-import { formatCustomerChargeEur } from '@/lib/stripeLessonPricing';
+import { formatLessonStripeChargeEur } from '@/lib/stripeLessonPricing';
+import { ParentLessonDetailModal } from '@/components/parent/ParentLessonDetailModal';
+import { fetchStudentActiveLessonPackagesDeduped } from '@/lib/studentLessonPackagesLight';
+import { dedupeAuthGetUser, rpcGetStudentProfilesDeduped } from '@/lib/preload';
 
 // BigCalendar Setup
 const locales = { lt: lt };
@@ -59,6 +64,55 @@ interface LessonPackageSummary {
     total_lessons: number;
 }
 
+/** Be įterptų `subjects(*)`: RLS/postgres užklausos nerą lūžta nuo 57014 (statement timeout). */
+const PARENT_SCHEDULE_SESSION_COLS =
+    'id,start_time,end_time,status,paid,price,topic,meeting_link,payment_status,tutor_comment,show_comment_to_student,subject_id,student_id,available_spots';
+
+async function enrichScheduleSessionsWithSubjects(
+    client: typeof supabase,
+    raw: Record<string, unknown>[],
+): Promise<ExistingSession[]> {
+    const subjectIds = [...new Set(raw.map((r) => r.subject_id).filter(Boolean) as string[])];
+    const meta: Record<string, { name: string; is_group?: boolean; max_students?: number | null }> = {};
+    if (subjectIds.length > 0) {
+        const { data: subs, error } = await client
+            .from('subjects')
+            .select('id,name,is_group,max_students')
+            .in('id', subjectIds);
+        if (error) {
+            console.warn('[StudentSchedule] subjects enrich', error.code, error.message);
+        } else {
+            for (const s of subs ?? []) {
+                const row = s as {
+                    id: string;
+                    name: string;
+                    is_group?: boolean;
+                    max_students?: number | null;
+                };
+                meta[row.id] = {
+                    name: row.name,
+                    is_group: row.is_group,
+                    max_students: row.max_students,
+                };
+            }
+        }
+    }
+    return raw.map((row) => {
+        const sid = row.subject_id as string | null | undefined;
+        const sm = sid ? meta[sid] : undefined;
+        return {
+            ...(row as unknown as ExistingSession),
+            subjects: sm
+                ? {
+                      name: sm.name,
+                      is_group: sm.is_group,
+                      max_students: sm.max_students ?? undefined,
+                  }
+                : null,
+        };
+    });
+}
+
 // Helper function to parse student grade string to number
 // e.g., "5 klasė" -> 5, "Studentas" -> 13 (DB stores Lithuanian grade strings)
 function parseStudentGrade(grade: string | null): number {
@@ -82,6 +136,22 @@ interface SlotEvent {
 export default function StudentSchedule() {
     const { t, dateFnsLocale } = useTranslation();
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    // Parent context detection. Parents arrive either via the legacy
+    // /parent/child/:studentId/schedule path OR the canonical /parent/calendar?studentId=…
+    const legacyParentMatch = useMatch('/parent/child/:studentId/schedule');
+    const parentCalendarMatch = useMatch('/parent/calendar');
+    // Layout / role-aware copy keys off the route, not the resolved studentId,
+    // so labels stay correct even before the auto-picked child resolves.
+    const isParentRoute = !!legacyParentMatch || !!parentCalendarMatch;
+    const parentBookingStudentId = legacyParentMatch?.params.studentId
+        ?? (parentCalendarMatch ? (searchParams.get('studentId') ?? '') : '');
+    const parentSessionsPath = parentBookingStudentId
+        ? `/parent/lessons?studentId=${parentBookingStudentId}`
+        : '/student/sessions';
+    const scheduleReturnPath = parentBookingStudentId
+        ? `/parent/calendar?studentId=${parentBookingStudentId}`
+        : '/student/schedule';
     const [availability, setAvailability] = useState<Availability[]>([]);
     const [existingSessions, setExistingSessions] = useState<ExistingSession[]>([]);
     const [studentId, setStudentId] = useState('');
@@ -95,7 +165,6 @@ export default function StudentSchedule() {
     const [currentView, setCurrentView] = useState<View>(
         typeof window !== 'undefined' && window.innerWidth < 768 ? Views.DAY : Views.WEEK
     );
-    const [searchParams] = useSearchParams();
     const initialDate = searchParams.get('date');
     const [currentDate, setCurrentDate] = useState<Date>(initialDate ? parseISO(initialDate) : new Date());
     const [events, setEvents] = useState<SlotEvent[]>([]);
@@ -132,6 +201,11 @@ export default function StudentSchedule() {
     const [studentName, setStudentName] = useState<string>('');
     const [paymentTiming, setPaymentTiming] = useState<'before_lesson' | 'after_lesson'>('before_lesson');
     const [paymentDeadlineHours, setPaymentDeadlineHours] = useState(24);
+    const [tutorModalContact, setTutorModalContact] = useState<{
+        full_name: string | null;
+        email: string | null;
+        phone: string | null;
+    }>({ full_name: null, email: null, phone: null });
     const [showPaymentModal, setShowPaymentModal] = useState(false);
     const [pendingPaymentSession, setPendingPaymentSession] = useState<{
         id: string; start: Date; end: Date; price: number | null; deadline: Date; tutorName: string;
@@ -139,7 +213,22 @@ export default function StudentSchedule() {
     const [fetchingStripe, setFetchingStripe] = useState(false);
     const [creditBalance, setCreditBalance] = useState(0);
     const [activePackages, setActivePackages] = useState<LessonPackageSummary[]>([]);
+    const [tutorOrgIsSchool, setTutorOrgIsSchool] = useState(false);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
+
+    const parentLessonTutorPolicy = useMemo(() => {
+        if (!isParentRoute || !tutorId) return null;
+        return {
+            tutorId,
+            tutorName: tutorModalContact.full_name,
+            tutorEmail: tutorModalContact.email,
+            tutorPhone: tutorModalContact.phone,
+            cancellationHours,
+            cancellationFeePercent,
+            paymentTiming,
+            paymentDeadlineHours,
+        };
+    }, [isParentRoute, tutorId, tutorModalContact, cancellationHours, cancellationFeePercent, paymentTiming, paymentDeadlineHours]);
 
     useEffect(() => {
         void fetchInitialData();
@@ -199,12 +288,23 @@ export default function StudentSchedule() {
         const addOccupiedEvent = (sStart: Date, sEnd: Date, isMySession: boolean, sessionId?: string, isGroup?: boolean, subjectName?: string) => {
             const extendedEnd = new Date(sEnd.getTime() + breakBetweenLessons * 60000);
             const isPast = isBefore(sStart, now);
-            let title = isMySession ? t('stuSched.myLesson') : t('stuSched.occupied');
-            if (isPast) title = isMySession ? t('stuSched.occurred') : t('stuSched.occupied');
-
-            // Add group indicator if it's a group lesson
-            if (isMySession && isGroup) {
-                title = isPast ? t('stuSched.occurredGroup') : t('stuSched.myLessonGroup');
+            // In parent mode the "my session" actually means the *child's* session,
+            // so swap copy to make ownership clear when many kids share a household.
+            let title: string;
+            if (!isMySession) {
+                title = t('stuSched.occupied');
+            } else if (isPast) {
+                if (isGroup) {
+                    title = isParentRoute ? t('stuSched.childOccurredGroup') : t('stuSched.occurredGroup');
+                } else {
+                    title = isParentRoute ? t('stuSched.childOccurred') : t('stuSched.occurred');
+                }
+            } else {
+                if (isGroup) {
+                    title = isParentRoute ? t('stuSched.childLessonGroup') : t('stuSched.myLessonGroup');
+                } else {
+                    title = isParentRoute ? t('stuSched.childLesson') : t('stuSched.myLesson');
+                }
             }
 
             generatedEvents.push({
@@ -252,7 +352,10 @@ export default function StudentSchedule() {
         });
 
         return { memoizedEvents: generatedEvents, memoizedBgEvents: generatedBgEvents };
-    }, [availability, existingSessions, occupiedSlots, minBookingHours, breakBetweenLessons, studentId, subjects, loadedRanges]);
+    // NOTE: do NOT add `t` to deps — `useTranslation()` returns a fresh `t`
+    // ref every render, which would trigger an infinite re-render loop here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [availability, existingSessions, occupiedSlots, minBookingHours, breakBetweenLessons, studentId, subjects, loadedRanges, isParentRoute]);
 
     useEffect(() => {
         // Always update events when memoized values change
@@ -261,6 +364,26 @@ export default function StudentSchedule() {
         setBgEvents(memoizedBgEvents);
     }, [memoizedEvents, memoizedBgEvents]);
 
+    // When the parent navigates from the dashboard with `?sessionId=XYZ`,
+    // auto-open the my-session detail modal once that session has been
+    // loaded into `existingSessions`. We consume the param so future state
+    // changes don't keep re-opening the modal.
+    const sessionIdParam = searchParams.get('sessionId');
+    useEffect(() => {
+        if (!sessionIdParam) return;
+        if (!existingSessions || existingSessions.length === 0) return;
+        const sess = existingSessions.find((s) => s.id === sessionIdParam);
+        if (!sess) return;
+        setMySessionData(sess);
+        setIsMySessionModalOpen(true);
+        if (typeof window !== 'undefined') {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('sessionId');
+            url.searchParams.delete('flow');
+            window.history.replaceState(null, '', url.toString());
+        }
+    }, [sessionIdParam, existingSessions]);
+
     // Helper to check if a date range is already loaded
     const isRangeLoaded = (start: Date, end: Date) => {
         return loadedRanges.some(range =>
@@ -268,7 +391,12 @@ export default function StudentSchedule() {
         );
     };
 
-    const fetchOccupiedSlotsViaApi = async (params: { tutorId: string; studentId: string; startISO: string; endISO: string }) => {
+    const fetchOccupiedSlotsViaApiInner = async (params: {
+        tutorId: string;
+        studentId: string;
+        startISO: string;
+        endISO: string;
+    }) => {
         try {
             const { data: { session } } = await supabase.auth.getSession();
             if (!session?.access_token) return [];
@@ -297,39 +425,131 @@ export default function StudentSchedule() {
         }
     };
 
+    /** Kartoja `/api/get-occupied-slots` iškvietimą Strict Mode / paraleliniams range. */
+    const fetchOccupiedSlotsDeduped = (params: {
+        tutorId: string;
+        studentId: string;
+        startISO: string;
+        endISO: string;
+    }) =>
+        dedupeAsync(
+            `occ_slots:${params.tutorId}:${params.studentId}:${params.startISO}:${params.endISO}`,
+            () => fetchOccupiedSlotsViaApiInner(params),
+        );
+
     // OPTIMIZED: Initial load with minimal date range (7 days) for instant display
     const fetchInitialData = async () => {
         setLoadError(null);
         setLoading(true);
         try {
-        const { data: { user } } = await supabase.auth.getUser();
+        const user = await dedupeAuthGetUser();
         if (!user) {
             setLoadError(t('stuSched.notLoggedIn'));
             return;
         }
 
-        const selectedStudentId = typeof window !== 'undefined'
-            ? localStorage.getItem(ACTIVE_STUDENT_PROFILE_KEY)
-            : null;
-        let { data: studentRows, error: rpcError } = await supabase.rpc('get_student_profiles', {
-            p_user_id: user.id,
-            p_student_id: selectedStudentId || null,
-        });
-        if (rpcError) {
-            console.error('[StudentSchedule] get_student_profiles', rpcError);
-            setLoadError(t('stuSched.profileLoadFailed'));
-            return;
+        const urlStud = isParentRoute
+            ? (searchParams.get('studentId') ??
+                (typeof window !== 'undefined'
+                    ? new URL(window.location.href).searchParams.get('studentId')
+                    : null) ??
+                '')
+            : '';
+        const lsStud =
+            typeof window !== 'undefined' ? localStorage.getItem(ACTIVE_STUDENT_PROFILE_KEY) : null;
+        const dedupeKey = `sched:${user.id}:${isParentRoute ? `p:${urlStud}` : `s:${lsStud ?? 'x'}`}`;
+
+        await dedupeAsync(dedupeKey, async () => {
+        setTutorOrgIsSchool(false);
+        let st: any = null;
+
+        // Parent mode: resolve the active child once (auto-pick first linked
+        // child if none in URL) and verify the parent-student link in a
+        // single round-trip. We keep the parent-profile RPC cached locally to
+        // avoid the previous double round-trip.
+        let resolvedParentStudentId = parentBookingStudentId;
+        let parentProfileId: string | null = null;
+        if (isParentRoute) {
+            const { data: parentId, error: parentErr } = await supabase
+                .rpc('get_parent_profile_id_by_user_id', { p_user_id: user.id });
+            if (parentErr) console.warn('[StudentSchedule] parent profile rpc failed:', parentErr);
+            parentProfileId = (parentId ?? null) as string | null;
+            if (!parentProfileId) {
+                navigate('/parent', { replace: true });
+                return;
+            }
+
+            if (!resolvedParentStudentId) {
+                const { data: links } = await supabase
+                    .from('parent_students')
+                    .select('student_id')
+                    .eq('parent_id', parentProfileId)
+                    .limit(1);
+                const firstChildId = links?.[0]?.student_id ?? null;
+                if (!firstChildId) {
+                    navigate('/parent', { replace: true });
+                    return;
+                }
+                resolvedParentStudentId = firstChildId;
+                if (typeof window !== 'undefined') {
+                    const url = new URL(window.location.href);
+                    url.searchParams.set('studentId', firstChildId);
+                    window.history.replaceState(null, '', url.toString());
+                }
+            }
         }
 
-        let st = studentRows?.[0];
-        if (!st && selectedStudentId) {
-            const { data: fallbackRows } = await supabase.rpc('get_student_profiles', {
-                p_user_id: user.id,
-                p_student_id: null,
-            });
-            st = fallbackRows?.[0];
-            if (st && typeof window !== 'undefined') {
-                localStorage.setItem(ACTIVE_STUDENT_PROFILE_KEY, st.id);
+        if (resolvedParentStudentId) {
+            // Verify the parent-student link AND fetch the student row in
+            // parallel; both queries are RLS-protected to the linked parent.
+            const [linkRes, stRowRes] = await Promise.all([
+                supabase
+                    .from('parent_students')
+                    .select('id')
+                    .eq('parent_id', parentProfileId!)
+                    .eq('student_id', resolvedParentStudentId)
+                    .maybeSingle(),
+                supabase
+                    .from('students')
+                    .select('*')
+                    .eq('id', resolvedParentStudentId)
+                    .maybeSingle(),
+            ]);
+            if (!linkRes.data) {
+                setLoadError(t('stuSched.profileNotFound'));
+                return;
+            }
+            if (stRowRes.error || !stRowRes.data) {
+                console.error('[StudentSchedule] parent student load', stRowRes.error);
+                setLoadError(t('stuSched.profileLoadFailed'));
+                return;
+            }
+            st = stRowRes.data as Record<string, unknown>;
+        } else {
+            const selectedStudentId = typeof window !== 'undefined'
+                ? localStorage.getItem(ACTIVE_STUDENT_PROFILE_KEY)
+                : null;
+            let { data: studentRows, error: rpcError } = await rpcGetStudentProfilesDeduped(
+                user.id,
+                selectedStudentId || null,
+            );
+            if (rpcError) {
+                console.error('[StudentSchedule] get_student_profiles', rpcError);
+                setLoadError(t('stuSched.profileLoadFailed'));
+                return;
+            }
+
+            st = studentRows?.[0] ?? null;
+            if (!st && selectedStudentId) {
+                const { data: fallbackRows } = await rpcGetStudentProfilesDeduped(user.id, null);
+                st = fallbackRows?.[0] ?? null;
+                if (st && typeof window !== 'undefined') {
+                    localStorage.setItem(ACTIVE_STUDENT_PROFILE_KEY, st.id);
+                }
+            }
+            if (!st) {
+                setLoadError(t('stuSched.profileNotFound'));
+                return;
             }
         }
         if (!st) {
@@ -359,41 +579,68 @@ export default function StudentSchedule() {
 
         const studentGrade = parseStudentGrade(st.grade);
 
-        const [tutorProfile, subs, individualPricing, availabilityRes, packageRes, sessionsRes] = await Promise.all([
-            supabase.from('profiles').select('cancellation_hours, cancellation_fee_percent, min_booking_hours, break_between_lessons, payment_timing, payment_deadline_hours, organization_id, has_active_license, personal_meeting_link').eq('id', st.tutor_id).single(),
+        const [tutorProfile, subs, individualPricing, availabilityRes, sessionsRes] = await Promise.all([
+            supabase.from('profiles').select('full_name, email, phone, cancellation_hours, cancellation_fee_percent, min_booking_hours, break_between_lessons, payment_timing, payment_deadline_hours, organization_id, has_active_license, personal_meeting_link').eq('id', st.tutor_id).single(),
             supabase.from('subjects').select('*').eq('tutor_id', st.tutor_id).order('name'),
             supabase
                 .from('student_individual_pricing')
-                .select('*')
+                .select('subject_id, price, duration_minutes')
                 .eq('student_id', st.id)
                 .eq('tutor_id', st.tutor_id),
             supabase.from('availability').select('*').eq('tutor_id', st.tutor_id),
             supabase
-                .from('lesson_packages')
-                .select('id, subject_id, available_lessons, reserved_lessons, total_lessons')
-                .eq('student_id', st.id)
-                .eq('active', true)
-                .eq('paid', true)
-                .gt('available_lessons', 0)
-                .order('created_at', { ascending: false }),
-            supabase.from('sessions').select('*, subjects(is_group, max_students, name)')
+                .from('sessions')
+                .select(PARENT_SCHEDULE_SESSION_COLS)
                 .eq('tutor_id', st.tutor_id)
                 .eq('student_id', st.id)
                 .gte('start_time', past)
-                .lte('start_time', future),
+                .lte('start_time', future)
+                .order('start_time', { ascending: true })
+                .limit(600),
         ]);
+
+        if (individualPricing.error) {
+            console.warn(
+                '[StudentSchedule] student_individual_pricing',
+                individualPricing.error.code,
+                individualPricing.error.message,
+            );
+        }
 
         // Process tutor profile data
         if (tutorProfile.data) {
-            setTutorPersonalMeetingLink((tutorProfile.data as any).personal_meeting_link || '');
-            setCancellationHours(tutorProfile.data.cancellation_hours ?? 24);
-            setCancellationFeePercent(tutorProfile.data.cancellation_fee_percent ?? 0);
-            const rawMinBooking = tutorProfile.data.min_booking_hours ?? 1;
-            const rawPaymentDeadline = tutorProfile.data.payment_deadline_hours ?? 24;
+            const td = tutorProfile.data as Record<string, unknown>;
+            setTutorPersonalMeetingLink((td.personal_meeting_link as string) || '');
+            setTutorModalContact({
+                full_name: (td.full_name as string) ?? null,
+                email: (td.email as string) ?? null,
+                phone: (td.phone as string) ?? null,
+            });
+            setCancellationHours((td.cancellation_hours as number) ?? 24);
+            setCancellationFeePercent((td.cancellation_fee_percent as number) ?? 0);
+            const rawMinBooking = (td.min_booking_hours as number) ?? 1;
+            const rawPaymentDeadline = (td.payment_deadline_hours as number) ?? 24;
             setMinBookingHours(rawMinBooking);
-            setBreakBetweenLessons(tutorProfile.data.break_between_lessons ?? 0);
-            setPaymentTiming(tutorProfile.data.payment_timing ?? 'before_lesson');
+            setBreakBetweenLessons((td.break_between_lessons as number) ?? 0);
+            setPaymentTiming((td.payment_timing as 'before_lesson' | 'after_lesson') ?? 'before_lesson');
             setPaymentDeadlineHours(rawPaymentDeadline);
+        }
+
+        {
+            let tutorOrgSchoolResolved =
+                String((st as { tutor_organization_entity_type?: string }).tutor_organization_entity_type ?? '')
+                    .trim() === 'school';
+            const orgId =
+                tutorProfile.data && (tutorProfile.data as { organization_id?: string | null }).organization_id;
+            if (!tutorOrgSchoolResolved && orgId) {
+                const { data: oe } = await supabase
+                    .from('organizations')
+                    .select('entity_type')
+                    .eq('id', orgId)
+                    .maybeSingle();
+                tutorOrgSchoolResolved = oe?.entity_type === 'school';
+            }
+            setTutorOrgIsSchool(tutorOrgSchoolResolved);
         }
 
         // Filter subjects by student grade
@@ -445,6 +692,7 @@ export default function StudentSchedule() {
         });
 
         // Hide availability from unlicensed tutors in orgs that use license system
+        let tutorFrozenByLicense = false;
         if (tutorProfile.data?.organization_id && tutorProfile.data?.has_active_license === false) {
             const { data: orgRow } = await supabase
                 .from('organizations')
@@ -453,28 +701,47 @@ export default function StudentSchedule() {
                 .single();
             if ((Number(orgRow?.tutor_license_count) || 0) > 0) {
                 filteredAvailability = [];
+                tutorFrozenByLicense = true;
             }
         }
 
         setAvailability(filteredAvailability);
-        setActivePackages((packageRes.data || []) as LessonPackageSummary[]);
 
-        const mySessionsData = sessionsRes.data || [];
-        const otherSessionsData = await fetchOccupiedSlotsViaApi({
-            tutorId: st.tutor_id,
-            studentId: st.id,
-            startISO: past,
-            endISO: future,
-        });
+        const pkgDeduped = await fetchStudentActiveLessonPackagesDeduped(supabase, st.id);
+        setActivePackages(
+            pkgDeduped.map(
+                (p): LessonPackageSummary => ({
+                    id: p.id,
+                    subject_id: p.subject_id || '',
+                    available_lessons: Number(p.available_lessons || 0),
+                    reserved_lessons: Number(p.reserved_lessons || 0),
+                    total_lessons: Number(p.total_lessons || 0),
+                }),
+            ),
+        );
 
-        // Debug logging for group lessons
-        const groupSessions = mySessionsData.filter((s: any) => s.subjects?.is_group === true);
-        if (groupSessions.length > 0) {
-            console.log(`[StudentSchedule] Found ${groupSessions.length} group lesson(s) for student:`, groupSessions);
+        let mySessionsData: ExistingSession[] = [];
+        if (sessionsRes.error) {
+            console.warn('[StudentSchedule] sessions (initial)', sessionsRes.error.code, sessionsRes.error.message);
+        } else {
+            mySessionsData = await enrichScheduleSessionsWithSubjects(
+                supabase,
+                (sessionsRes.data || []) as Record<string, unknown>[],
+            );
         }
 
         setExistingSessions(mySessionsData);
-        setOccupiedSlots(otherSessionsData);
+        if (tutorFrozenByLicense) {
+            setOccupiedSlots([]);
+        } else {
+            setOccupiedSlots([]);
+            void fetchOccupiedSlotsDeduped({
+                tutorId: st.tutor_id,
+                studentId: st.id,
+                startISO: past,
+                endISO: future,
+            }).then((slots) => setOccupiedSlots(slots ?? []));
+        }
 
         // Mark initial range as loaded (30 days ago to 7 days ahead)
         setLoadedRanges([{ start: addDays(new Date(), -30), end: addDays(new Date(), 7) }]);
@@ -486,6 +753,7 @@ export default function StudentSchedule() {
             const monthEnd = endOfMonth(new Date());
             fetchDateRange(monthStart, monthEnd);
         }, 500);
+        });
         } catch (e) {
             console.error('[StudentSchedule] fetchInitialData', e);
             setLoadError(t('stuSched.calendarError'));
@@ -512,28 +780,48 @@ export default function StudentSchedule() {
         const future = endDate.toISOString();
 
         try {
-            // Fetch all sessions for the new range
-            const sessionsRes = await supabase.from('sessions').select('*, subjects(is_group, max_students, name)')
+            const sessionsRes = await supabase
+                .from('sessions')
+                .select(PARENT_SCHEDULE_SESSION_COLS)
                 .eq('tutor_id', tutorId)
                 .eq('student_id', studentId)
                 .gte('start_time', past)
-                .lte('start_time', future);
+                .lte('start_time', future)
+                .order('start_time', { ascending: true })
+                .limit(600);
 
-            const myNewSessions = sessionsRes.data || [];
-            const otherNewSessions = await fetchOccupiedSlotsViaApi({
-                tutorId,
-                studentId,
-                startISO: past,
-                endISO: future,
-            });
-
-            // Debug logging for group lessons
-            const groupSessions = myNewSessions.filter((s: any) => s.subjects?.is_group === true);
-            if (groupSessions.length > 0) {
-                console.log(`[StudentSchedule] Found ${groupSessions.length} group lesson(s) in date range:`, groupSessions);
+            let myNewSessions: ExistingSession[] = [];
+            if (sessionsRes.error) {
+                console.warn('[StudentSchedule] sessions (range)', sessionsRes.error.code, sessionsRes.error.message);
+            } else {
+                myNewSessions = await enrichScheduleSessionsWithSubjects(
+                    supabase,
+                    (sessionsRes.data || []) as Record<string, unknown>[],
+                );
+            }
+            // If tutor is frozen by org license, don't reveal their busy slots to the student.
+            let tutorFrozenByLicense = false;
+            try {
+                const { data: tutorProf } = await supabase
+                    .from('profiles')
+                    .select('organization_id, has_active_license')
+                    .eq('id', tutorId)
+                    .maybeSingle();
+                const orgId = (tutorProf as any)?.organization_id as string | null | undefined;
+                const hasActiveLicense = (tutorProf as any)?.has_active_license !== false;
+                if (orgId && !hasActiveLicense) {
+                    const { data: org } = await supabase
+                        .from('organizations')
+                        .select('tutor_license_count')
+                        .eq('id', orgId)
+                        .maybeSingle();
+                    tutorFrozenByLicense = (Number((org as any)?.tutor_license_count) || 0) > 0;
+                }
+            } catch {
+                // ignore
             }
 
-            // Merge with existing data (avoid duplicates)
+            // Merge own sessions first; užimti slotai — fone (API dažnai lėčiausias žingsnis)
             setExistingSessions(prev => {
                 const merged = [...prev];
                 myNewSessions.forEach(newSession => {
@@ -544,15 +832,24 @@ export default function StudentSchedule() {
                 return merged;
             });
 
-            setOccupiedSlots(prev => {
-                const merged = [...prev];
-                otherNewSessions.forEach((newSlot: any) => {
-                    if (!merged.some(s => s.id === newSlot.id)) {
-                        merged.push(newSlot);
-                    }
+            if (!tutorFrozenByLicense) {
+                void fetchOccupiedSlotsDeduped({
+                    tutorId,
+                    studentId,
+                    startISO: past,
+                    endISO: future,
+                }).then((otherNewSessions) => {
+                    setOccupiedSlots(prev => {
+                        const merged = [...prev];
+                        (otherNewSessions || []).forEach((newSlot: { id?: string }) => {
+                            if (newSlot.id && !merged.some(s => s.id === newSlot.id)) {
+                                merged.push(newSlot as (typeof merged)[number]);
+                            }
+                        });
+                        return merged;
+                    });
                 });
-                return merged;
-            });
+            }
 
             // Add this range to loaded ranges
             setLoadedRanges(prev => [...prev, { start: startDate, end: endDate }]);
@@ -816,6 +1113,32 @@ export default function StudentSchedule() {
             return;
         }
 
+        // Organization tutor license gating: if the tutor is unlicensed and org uses licenses, block booking.
+        try {
+            const { data: tutorProf } = await supabase
+                .from('profiles')
+                .select('organization_id, has_active_license')
+                .eq('id', tutorId)
+                .maybeSingle();
+            const orgId = (tutorProf as any)?.organization_id as string | null | undefined;
+            const hasActiveLicense = (tutorProf as any)?.has_active_license !== false;
+            if (orgId && !hasActiveLicense) {
+                const { data: org } = await supabase
+                    .from('organizations')
+                    .select('tutor_license_count')
+                    .eq('id', orgId)
+                    .maybeSingle();
+                const orgUsesLicenses = (Number((org as any)?.tutor_license_count) || 0) > 0;
+                if (orgUsesLicenses) {
+                    alert(t('stuSched.tutorNotLicensed'));
+                    setSaving(false);
+                    return;
+                }
+            }
+        } catch {
+            // If this check fails, fall through to normal booking attempt.
+        }
+
         const { data: sessionData, error } = await supabase.from('sessions').insert([{
             tutor_id: tutorId,
             student_id: studentId,
@@ -902,7 +1225,7 @@ export default function StudentSchedule() {
             // Run in background: tutor email, Google sync, parent checkout+email, then refresh data
             (async () => {
                 if (tutorProfile?.email) {
-                    const hidePaymentStatus = Boolean(tutorProfile.organization_id);
+                    const organizationTutor = Boolean(tutorProfile.organization_id);
                     sendEmail({
                         type: 'booking_notification',
                         to: tutorProfile.email,
@@ -912,7 +1235,9 @@ export default function StudentSchedule() {
                             date: format(selectedTime, 'yyyy-MM-dd'),
                             time: format(selectedTime, 'HH:mm'),
                             paymentStatus: usesPackage ? 'paid' : 'pending',
-                            hidePaymentStatus,
+                            organizationTutor,
+                            /** @deprecated Prefer organizationTutor — kept for older API payloads. */
+                            hidePaymentStatus: organizationTutor,
                             sessionId: sessionData.id,
                         },
                     });
@@ -1043,10 +1368,15 @@ export default function StudentSchedule() {
         setFetchingStripe(true);
         setRedirectingToStripe(true);
         try {
+            const payerEmailTrim = studentPayerEmail?.trim() || '';
+            const body: { sessionId: string; payerEmail?: string } = { sessionId };
+            if (studentPaymentPayer === 'parent' && payerEmailTrim) {
+                body.payerEmail = payerEmailTrim;
+            }
             const res = await fetch('/api/stripe-checkout', {
                 method: 'POST',
                 headers: await authHeaders(),
-                body: JSON.stringify({ sessionId }),
+                body: JSON.stringify(body),
             });
             const json = await res.json().catch(() => ({ error: t('stuSched.stripeError') }));
             if (json.creditFullyCovered) {
@@ -1157,10 +1487,43 @@ export default function StudentSchedule() {
     };
 
 
+    // Auto-scroll the calendar's time grid to the earliest tutor-availability
+    // hour. This avoids opening the calendar at 00:00 while still allowing the
+    // user to scroll up/down through the full 24h range.
+    const scrollToTime = useMemo<Date>(() => {
+        if (!availability || availability.length === 0) {
+            return new Date(0, 0, 0, 8, 0, 0);
+        }
+        let earliestMin = 24 * 60;
+        availability.forEach((a) => {
+            const [sh, sm] = (a.start_time || '00:00').split(':').map((v) => parseInt(v, 10));
+            const startMin = (Number.isFinite(sh) ? sh : 0) * 60 + (Number.isFinite(sm) ? sm : 0);
+            if (startMin < earliestMin) earliestMin = startMin;
+        });
+        if (earliestMin === 24 * 60) return new Date(0, 0, 0, 8, 0, 0);
+        // Subtract 30 minutes so the earliest free slot is comfortably visible.
+        const targetMin = Math.max(0, earliestMin - 30);
+        const h = Math.floor(targetMin / 60);
+        const m = targetMin % 60;
+        return new Date(0, 0, 0, h, m, 0);
+    }, [availability]);
+
+    const RoleLayout = ({ children: layoutChildren }: { children: ReactNode }) => {
+        if (isParentRoute) {
+            return <ParentLayout>{layoutChildren}</ParentLayout>;
+        }
+        return <StudentLayout>{layoutChildren}</StudentLayout>;
+    };
+
     return (
         <>
-            <StudentLayout>
-                <div className="px-4 pt-6 pb-6 h-[calc(100vh-96px)] flex flex-col">
+            <RoleLayout>
+                <div className={cn(
+                    "px-4 pt-6 pb-6 flex flex-col",
+                    // In parent mode the layout uses flex flex-col, so we just
+                    // grow to fill the remaining space (no double scrollbar).
+                    isParentRoute ? "flex-1 min-h-0" : "h-[calc(100vh-96px)]"
+                )}>
                     <div className="mb-4">
                         <h1 className="text-2xl font-black text-gray-900 mb-1">Rezervacijos kalendorius</h1>
                         <p className="text-gray-400 text-sm">{t('stuSched.selectFreeTime')}</p>
@@ -1200,7 +1563,7 @@ export default function StudentSchedule() {
                             <Button
                                 type="button"
                                 className="rounded-xl bg-amber-600 hover:bg-amber-700 text-white shrink-0"
-                                onClick={() => navigate('/student/sessions')}
+                                onClick={() => navigate(isParentRoute ? '/parent/invoices' : parentSessionsPath)}
                             >
                                 {t('stuSched.payBtn')}
                             </Button>
@@ -1261,8 +1624,12 @@ export default function StudentSchedule() {
                                     date={currentDate}
                                     onNavigate={(date) => handleNavigate(date)}
                                     onView={(view) => { setCurrentView(view); handleNavigate(currentDate, view); }}
-                                    min={new Date(0, 0, 0, 7, 0, 0)}
-                                    max={new Date(0, 0, 0, 22, 0, 0)}
+                                    // Show the full 24h range so users can scroll up/down to any hour…
+                                    min={new Date(0, 0, 0, 0, 0, 0)}
+                                    max={new Date(0, 0, 0, 23, 45, 0)}
+                                    // …and auto-scroll the time grid to the earliest available hour
+                                    // so we don't open the calendar at midnight by default.
+                                    scrollToTime={scrollToTime}
                                     culture="lt"
                                     style={{ height: '100%' }}
                                     eventPropGetter={eventStyleGetter}
@@ -1577,19 +1944,53 @@ export default function StudentSchedule() {
                     </DialogContent>
                 </Dialog>
 
-                {/* My Session Details Modal */}
+                {/* Parent: identical lesson detail modal to ParentDashboard */}
+                {isParentRoute ? (
+                    <ParentLessonDetailModal
+                        open={isMySessionModalOpen}
+                        onOpenChange={setIsMySessionModalOpen}
+                        stripePayerEmail={studentPayerEmail ?? ''}
+                        session={
+                            mySessionData
+                                ? {
+                                    id: mySessionData.id,
+                                    start_time: mySessionData.start_time,
+                                    end_time: mySessionData.end_time,
+                                    status: mySessionData.status,
+                                    topic: mySessionData.topic ?? null,
+                                    subjectName: mySessionData.subjects?.name ?? null,
+                                    paid: !!mySessionData.paid,
+                                    payment_status: mySessionData.payment_status,
+                                    price:
+                                        mySessionData.price != null ? Number(mySessionData.price) : null,
+                                    meeting_link: mySessionData.meeting_link ?? null,
+                                    tutor_comment: mySessionData.tutor_comment ?? null,
+                                    show_comment_to_student: !!mySessionData.show_comment_to_student,
+                                    isGroupSubject: mySessionData.subjects?.is_group === true,
+                                }
+                                : null
+                        }
+                        childName={studentName}
+                        childId={studentId}
+                        tutorPolicy={parentLessonTutorPolicy}
+                        now={new Date()}
+                        navigate={navigate}
+                        t={t}
+                        dateFnsLocale={dateFnsLocale}
+                    />
+                ) : (
                 <Dialog open={isMySessionModalOpen} onOpenChange={setIsMySessionModalOpen}>
                     <DialogContent className="w-[95vw] sm:max-w-[440px] max-h-[90vh] overflow-y-auto">
                         <DialogHeader>
                             <DialogTitle className="flex items-center gap-2">
                                 <CalendarDays className="w-5 h-5 text-violet-600" />
-                                Pamokos informacija
+                                {t('studentDash.sessionInfo')}
                             </DialogTitle>
                         </DialogHeader>
                         <div className="space-y-4 py-3">
                             <div>
                                 <div className="flex items-center gap-2 mb-2">
-                                    <p className="text-xl font-black text-gray-900 leading-tight">{mySessionData?.topic || 'Pamoka'}</p>
+                                    <p className="text-xl font-black text-gray-900 leading-tight">{mySessionData?.subjects?.name || mySessionData?.topic || t('common.lesson')}</p>
                                     {mySessionData?.subjects?.is_group && (
                                         <span className="bg-violet-100 text-violet-700 px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1">
                                             <Users className="w-3.5 h-3.5" />
@@ -1609,10 +2010,10 @@ export default function StudentSchedule() {
                                 </div>
                             </div>
 
-                            {studentPaymentPayer !== 'parent' && (
+                            {(studentPaymentPayer !== 'parent' || isParentRoute) && (
                                 <div className="grid grid-cols-2 gap-3 text-sm">
                                     <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
-                                        <p className="text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">Kaina</p>
+                                        <p className="text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">{t('studentDash.priceLabel')}</p>
                                         <p className="font-bold text-gray-900">€{mySessionData?.price ?? '–'}</p>
                                         {mySessionData?.status === 'active' && !mySessionData.paid && mySessionData.price != null && (() => {
                                             const { creditApplied, remaining } = lessonCreditBreakdown(mySessionData.price);
@@ -1625,7 +2026,7 @@ export default function StudentSchedule() {
                                                     )}
                                                     <p>
                                                         {remaining > 0
-                                                            ? t('stuSched.cardTotal', { amount: formatCustomerChargeEur(remaining) })
+                                                            ? t('stuSched.cardTotal', { amount: formatLessonStripeChargeEur(remaining, tutorOrgIsSchool) })
                                                             : t('stuSched.creditCoversFullLesson')}
                                                     </p>
                                                 </div>
@@ -1633,16 +2034,15 @@ export default function StudentSchedule() {
                                         })()}
                                     </div>
                                     <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100 flex flex-col items-center justify-center">
-                                        <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wider">Statusas</p>
+                                        <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wider">{t('studentDash.statusLabel')}</p>
                                         <StatusBadge status={mySessionData?.status || ''} paymentStatus={mySessionData?.payment_status} paid={mySessionData?.paid} endTime={mySessionData?.end_time} />
                                     </div>
                                 </div>
                             )}
 
-                            {/* Tutor comment (visible only if marked "show to student") */}
                             {mySessionData?.show_comment_to_student && mySessionData?.tutor_comment && (
                                 <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-100">
-                                    <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wider mb-1">Korepetitoriaus komentaras</p>
+                                    <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wider mb-1">{t('studentDash.tutorComment')}</p>
                                     <div className="text-sm text-indigo-900 whitespace-pre-wrap">{mySessionData.tutor_comment}</div>
                                 </div>
                             )}
@@ -1654,11 +2054,11 @@ export default function StudentSchedule() {
                                     rel="noreferrer"
                                     className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-indigo-50 text-indigo-600 font-bold hover:bg-indigo-100 transition-colors border border-indigo-100"
                                 >
-                                    🔗 Prisijungti prie pamokos
+                                    {t('studentDash.joinMeeting')}
                                 </a>
                             )}
 
-                            {mySessionData?.status === 'active' && !mySessionData.paid && studentPaymentPayer !== 'parent' && (() => {
+                            {mySessionData?.status === 'active' && !mySessionData.paid && (studentPaymentPayer !== 'parent' || isParentRoute) && (() => {
                                 const { remaining } = lessonCreditBreakdown(mySessionData.price);
                                 return (
                                     <button
@@ -1667,12 +2067,12 @@ export default function StudentSchedule() {
                                         className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
                                     >
                                         {fetchingStripe
-                                            ? <><Loader2 className="w-4 h-4 animate-spin" /> Jungiamasi...</>
+                                            ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('common.loading')}</>
                                             : (
                                                 <>
                                                     <CreditCard className="w-4 h-4" />
                                                     {remaining > 0
-                                                        ? `${t('stuSched.payStripe')} — €${formatCustomerChargeEur(remaining)}`
+                                                        ? `${t('stuSched.payStripe')} — €${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}`
                                                         : `${t('stuSched.payStripe')} — ${t('stuSess.payWithCredit')}`}
                                                 </>
                                             )}
@@ -1680,24 +2080,23 @@ export default function StudentSchedule() {
                                 );
                             })()}
 
-                            {/* Reschedule and Cancel buttons for active sessions */}
                             {mySessionData?.status === 'active' && mySessionData.start_time && isAfter(new Date(mySessionData.start_time), new Date()) && (
                                 <div className="grid grid-cols-2 gap-3">
                                     <Button
                                         variant="outline"
                                         onClick={() => {
                                             setIsMySessionModalOpen(false);
-                                            navigate('/student/sessions', { state: { sessionId: mySessionData.id, flow: 'reschedule', returnTo: '/student/schedule' } });
+                                            navigate(parentSessionsPath, { state: { sessionId: mySessionData.id, flow: 'reschedule', returnTo: scheduleReturnPath } });
                                         }}
                                         className="rounded-xl border-indigo-200 text-indigo-600 hover:bg-indigo-50"
                                     >
-                                        📅 Perkelti
+                                        {t('studentDash.reschedule')}
                                     </Button>
                                     <Button
                                         variant="outline"
                                         onClick={() => {
                                             setIsMySessionModalOpen(false);
-                                            navigate('/student/sessions', { state: { sessionId: mySessionData.id, flow: 'cancel' } });
+                                            navigate(parentSessionsPath, { state: { sessionId: mySessionData.id, flow: 'cancel' } });
                                         }}
                                         className="rounded-xl border-red-200 text-red-600 hover:bg-red-50"
                                     >
@@ -1707,14 +2106,15 @@ export default function StudentSchedule() {
                             )}
                         </div>
                         <DialogFooter>
-                            <Button variant="outline" onClick={() => { setIsMySessionModalOpen(false); navigate('/student/sessions'); }} className="rounded-xl">
+                            <Button variant="outline" onClick={() => { setIsMySessionModalOpen(false); navigate(parentSessionsPath); }} className="rounded-xl">
                                 {t('stuSched.viewAll')}
                             </Button>
                         </DialogFooter>
                     </DialogContent>
                 </Dialog>
+                )}
 
-            </StudentLayout>
+            </RoleLayout>
 
             {/* Stripe redirect overlay */}
             {redirectingToStripe && (
@@ -1754,7 +2154,7 @@ export default function StudentSchedule() {
                                             <p>
                                                 {remaining > 0 ? (
                                                     <>
-                                                        <span className="font-medium">{t('stuSched.cardPayTotal')}</span> €{formatCustomerChargeEur(remaining)}
+                                                        <span className="font-medium">{t('stuSched.cardPayTotal')}</span> €{formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}
                                                     </>
                                                 ) : (
                                                     <span className="font-medium text-emerald-800">{t('stuSched.creditCoversFullLesson')}</span>
@@ -1772,7 +2172,7 @@ export default function StudentSchedule() {
                             </div>
                         )}
 
-                        {studentPaymentPayer === 'parent' ? (
+                        {studentPaymentPayer === 'parent' && !isParentRoute ? (
                             <div className="flex items-start gap-3 p-4 bg-blue-50 border border-blue-200 rounded-xl">
                                 <Info className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
                                 <p className="text-sm text-blue-800">
@@ -1783,28 +2183,44 @@ export default function StudentSchedule() {
                                             : <>{t('stuSched.payerNoEmail')}</>}
                                 </p>
                             </div>
+                        ) : studentPaymentPayer === 'parent' && isParentRoute && !studentPayerEmail?.trim() ? (
+                            <div className="flex items-start gap-3 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+                                <Info className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                                <p className="text-sm text-blue-800">{t('stuSched.payerNoEmail')}</p>
+                            </div>
                         ) : (
-                            <button
-                                onClick={() => pendingPaymentSession && handleGoToStripe(pendingPaymentSession.id)}
-                                disabled={fetchingStripe}
-                                className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
-                            >
-                                {fetchingStripe
-                                    ? <><Loader2 className="w-4 h-4 animate-spin" /> Jungiamasi...</>
-                                    : (
+                            <>
+                                {studentPaymentPayer === 'parent' && isParentRoute && studentPayerEmail?.trim() ? (
+                                    <div className="flex items-start gap-3 p-3 bg-violet-50 border border-violet-100 rounded-xl">
+                                        <Info className="w-5 h-5 text-violet-600 flex-shrink-0 mt-0.5" />
+                                        <p className="text-sm text-violet-900">{t('stuSched.parentBookingPayNowHint')}</p>
+                                    </div>
+                                ) : null}
+                                <button
+                                    type="button"
+                                    onClick={() => pendingPaymentSession && handleGoToStripe(pendingPaymentSession.id)}
+                                    disabled={fetchingStripe}
+                                    className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
+                                >
+                                    {fetchingStripe ? (
+                                        <>
+                                            <Loader2 className="w-4 h-4 animate-spin" /> Jungiamasi...
+                                        </>
+                                    ) : (
                                         <>
                                             <CreditCard className="w-4 h-4" />
                                             {pendingPaymentSession?.price != null
                                                 ? (() => {
                                                     const { remaining } = lessonCreditBreakdown(pendingPaymentSession.price);
                                                     return remaining > 0
-                                                        ? `${t('stuSched.payStripe')} — €${formatCustomerChargeEur(remaining)}`
+                                                        ? `${t('stuSched.payStripe')} — €${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}`
                                                         : `${t('stuSched.payStripe')} — ${t('stuSess.payWithCredit')}`;
                                                 })()
                                                 : t('stuSched.payStripe')}
                                         </>
                                     )}
-                            </button>
+                                </button>
+                            </>
                         )}
                     </div>
                     <DialogFooter>

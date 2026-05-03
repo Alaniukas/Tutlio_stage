@@ -1,5 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
+import { DateInput } from '@/components/ui/date-input';
+import { MonthFilterInput } from '@/components/ui/month-filter-input';
 import { supabase } from '@/lib/supabase';
 import { getCached, setCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
@@ -18,6 +20,7 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 
 interface Invoice {
   id: string;
@@ -28,6 +31,8 @@ interface Invoice {
   status: 'issued' | 'paid' | 'cancelled';
   issued_by_user_id: string;
   created_at: string;
+  billing_batch_id?: string | null;
+  billing_batches?: { paid: boolean } | null;
 }
 
 export default function CompanyInvoices() {
@@ -43,7 +48,15 @@ export default function CompanyInvoices() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  /** yyyy-MM or '' = visi mėnesiai */
+  const [invoiceMonth, setInvoiceMonth] = useState<string>('');
+  const [invoicePeriodMode, setInvoicePeriodMode] = useState<'month' | 'range'>('month');
+  const [invoiceRangeStart, setInvoiceRangeStart] = useState('');
+  const [invoiceRangeEnd, setInvoiceRangeEnd] = useState('');
+  const [buyerKindFilter, setBuyerKindFilter] = useState<'all' | 'payer' | 'org'>('all');
+  const [orgBuyerNames, setOrgBuyerNames] = useState<Set<string>>(new Set());
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [downloadingAllList, setDownloadingAllList] = useState(false);
   const [tutors, setTutors] = useState<{ id: string; full_name: string }[]>(
     ic?.tutors ?? []
   );
@@ -51,6 +64,9 @@ export default function CompanyInvoices() {
   const [selectedTutorIds, setSelectedTutorIds] = useState<Set<string>>(new Set());
   const [tutorPeriodStart, setTutorPeriodStart] = useState(format(new Date(new Date().getFullYear(), new Date().getMonth(), 1), 'yyyy-MM-dd'));
   const [tutorPeriodEnd, setTutorPeriodEnd] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [tutorPeriodMode, setTutorPeriodMode] = useState<'month' | 'range'>('range');
+  /** yyyy-MM, naudojama kai tutorPeriodMode === 'month' */
+  const [tutorMonth, setTutorMonth] = useState('');
   const [generatingForTutors, setGeneratingForTutors] = useState(false);
   const [lastGeneratedInvoiceIds, setLastGeneratedInvoiceIds] = useState<string[]>([]);
   const [downloadingBundle, setDownloadingBundle] = useState(false);
@@ -60,6 +76,18 @@ export default function CompanyInvoices() {
   const [loadingTutorSessions, setLoadingTutorSessions] = useState(false);
   const [invoiceIssuerMode, setInvoiceIssuerMode] = useState<string>('both');
   const [checkingAlreadyIssued, setCheckingAlreadyIssued] = useState(false);
+
+  const tutorEffectiveRange = useMemo(() => {
+    if (tutorPeriodMode === 'month' && tutorMonth && /^\d{4}-\d{2}$/.test(tutorMonth)) {
+      const [yStr, mStr] = tutorMonth.split('-');
+      const y = parseInt(yStr, 10);
+      const m = parseInt(mStr, 10);
+      const start = `${y}-${String(m).padStart(2, '0')}-01`;
+      const endStr = format(new Date(y, m, 0), 'yyyy-MM-dd');
+      return { start, end: endStr };
+    }
+    return { start: tutorPeriodStart, end: tutorPeriodEnd };
+  }, [tutorPeriodMode, tutorMonth, tutorPeriodStart, tutorPeriodEnd]);
 
   const loadData = useCallback(async () => {
     if (!getCached('company_invoices')) setLoading(true);
@@ -86,41 +114,50 @@ export default function CompanyInvoices() {
 
     const orgIdVal = adminRow.organization_id;
 
-    const { data: adminIds } = await supabase
-      .from('organization_admins')
-      .select('user_id')
-      .eq('organization_id', orgIdVal);
-    const adminSet = new Set((adminIds || []).map((a: { user_id: string }) => a.user_id));
-
-    const { data: tutorData } = await supabase
-      .from('profiles')
-      .select('id, full_name')
-      .eq('organization_id', orgIdVal);
-    const { data: linkedStudents } = await supabase
-      .from('students')
-      .select('linked_user_id')
-      .eq('organization_id', orgIdVal)
-      .not('linked_user_id', 'is', null);
-    const linkedStudentUserIds = new Set(
-      (linkedStudents || [])
-        .map((s: any) => s.linked_user_id)
-        .filter((id: string | null | undefined): id is string => Boolean(id)),
-    );
-    const tutorsList = (tutorData || []).filter(
-      (tu: { id: string }) => !adminSet.has(tu.id) && !linkedStudentUserIds.has(tu.id),
+    const tutorsList = await getOrgVisibleTutors(
+      supabase as any,
+      orgIdVal,
+      'id, full_name, email',
     );
 
-    const { data: orgRow } = await supabase.from('organizations').select('invoice_issuer_mode').eq('id', orgIdVal).single();
+    const { data: orgRow } = await supabase
+      .from('organizations')
+      .select('invoice_issuer_mode, name')
+      .eq('id', orgIdVal)
+      .single();
     if (orgRow?.invoice_issuer_mode) setInvoiceIssuerMode(orgRow.invoice_issuer_mode);
+
+    const { data: orgInvProf } = await supabase
+      .from('invoice_profiles')
+      .select('business_name')
+      .eq('organization_id', orgIdVal)
+      .maybeSingle();
+
+    const buyerNameSet = new Set<string>();
+    for (const raw of [(orgRow as { name?: string } | null)?.name, orgInvProf?.business_name]) {
+      const n = (raw || '').trim().toLowerCase();
+      if (n) buyerNameSet.add(n);
+    }
+    setOrgBuyerNames(buyerNameSet);
 
     let query = supabase
       .from('invoices')
-      .select('*')
+      .select('*, billing_batches(paid)')
       .eq('organization_id', orgIdVal)
       .order('created_at', { ascending: false });
 
     if (statusFilter !== 'all') {
       query = query.eq('status', statusFilter);
+    }
+
+    if (invoiceMonth && /^\d{4}-\d{2}$/.test(invoiceMonth)) {
+      const [yStr, mStr] = invoiceMonth.split('-');
+      const y = parseInt(yStr, 10);
+      const m = parseInt(mStr, 10);
+      const start = `${y}-${String(m).padStart(2, '0')}-01`;
+      const endD = new Date(y, m, 0);
+      const endStr = format(endD, 'yyyy-MM-dd');
+      query = query.gte('issue_date', start).lte('issue_date', endStr);
     }
 
     const { data } = await query;
@@ -135,7 +172,7 @@ export default function CompanyInvoices() {
       tutors: tutorsList,
     });
     setLoading(false);
-  }, [statusFilter]);
+  }, [statusFilter, invoicePeriodMode, invoiceMonth, invoiceRangeStart, invoiceRangeEnd]);
 
   useEffect(() => {
     // Always refresh in background; cache is only for quick initial paint.
@@ -150,8 +187,8 @@ export default function CompanyInvoices() {
       .from('sessions')
       .select('tutor_id, price, status, paid, payment_status')
       .in('tutor_id', tutorIds)
-      .gte('start_time', tutorPeriodStart)
-      .lte('start_time', tutorPeriodEnd + 'T23:59:59')
+      .gte('start_time', tutorEffectiveRange.start)
+      .lte('start_time', tutorEffectiveRange.end + 'T23:59:59')
       .neq('status', 'cancelled');
     const map: Record<string, { count: number; total: number }> = {};
     for (const s of sessions || []) {
@@ -163,7 +200,7 @@ export default function CompanyInvoices() {
     }
     setTutorSessions(map);
     setLoadingTutorSessions(false);
-  }, [orgId, tutors, tutorPeriodStart, tutorPeriodEnd]);
+  }, [orgId, tutors, tutorEffectiveRange.start, tutorEffectiveRange.end]);
 
   useEffect(() => {
     if (activeTab === 'tutors') void loadTutorSessions();
@@ -189,8 +226,8 @@ export default function CompanyInvoices() {
             headers: await authHeaders(),
             body: JSON.stringify({
               tutorId,
-              periodStart: tutorPeriodStart,
-              periodEnd: tutorPeriodEnd,
+              periodStart: tutorEffectiveRange.start,
+              periodEnd: tutorEffectiveRange.end,
               groupingType: 'single',
               isOrgTutor: true,
               precheckOnly: true,
@@ -215,7 +252,70 @@ export default function CompanyInvoices() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, selectedTutorIds, tutorPeriodStart, tutorPeriodEnd]);
+  }, [activeTab, selectedTutorIds, tutorEffectiveRange.start, tutorEffectiveRange.end]);
+
+  const filteredInvoices = useMemo(() => {
+    return invoices.filter((inv) => {
+      const issueDate = String(inv.issue_date || '').slice(0, 10);
+      if (invoicePeriodMode === 'month' && invoiceMonth && /^\d{4}-\d{2}$/.test(invoiceMonth)) {
+        const [yStr, mStr] = invoiceMonth.split('-');
+        const y = parseInt(yStr, 10);
+        const m = parseInt(mStr, 10);
+        const monthStart = `${y}-${String(m).padStart(2, '0')}-01`;
+        const monthEnd = format(new Date(y, m, 0), 'yyyy-MM-dd');
+        if (issueDate < monthStart || issueDate > monthEnd) return false;
+      } else if (
+        invoicePeriodMode === 'range' &&
+        invoiceRangeStart &&
+        invoiceRangeEnd &&
+        /^\d{4}-\d{2}-\d{2}$/.test(invoiceRangeStart) &&
+        /^\d{4}-\d{2}-\d{2}$/.test(invoiceRangeEnd)
+      ) {
+        const a = invoiceRangeStart <= invoiceRangeEnd ? invoiceRangeStart : invoiceRangeEnd;
+        const b = invoiceRangeStart <= invoiceRangeEnd ? invoiceRangeEnd : invoiceRangeStart;
+        if (issueDate < a || issueDate > b) return false;
+      }
+
+      const bn = String((inv.buyer_snapshot as { name?: string } | undefined)?.name || '')
+        .trim()
+        .toLowerCase();
+      const isOrgBuyer = orgBuyerNames.has(bn);
+      if (buyerKindFilter === 'org') return isOrgBuyer;
+      if (buyerKindFilter === 'payer') return !isOrgBuyer;
+      return true;
+    });
+  }, [
+    invoices,
+    buyerKindFilter,
+    orgBuyerNames,
+    invoicePeriodMode,
+    invoiceMonth,
+    invoiceRangeStart,
+    invoiceRangeEnd,
+  ]);
+
+  const handleDownloadAllVisible = async () => {
+    if (filteredInvoices.length === 0) return;
+    setDownloadingAllList(true);
+    try {
+      const headers = await authHeaders();
+      for (const inv of filteredInvoices) {
+        const res = await fetch(`/api/invoice-pdf?id=${inv.id}`, { headers });
+        if (!res.ok) continue;
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const safeName = (inv.invoice_number || inv.id).replace(/[/\\?%*:|"<>]/g, '-');
+        a.download = `${safeName}.pdf`;
+        a.click();
+        URL.revokeObjectURL(url);
+        await new Promise((r) => setTimeout(r, 350));
+      }
+    } finally {
+      setDownloadingAllList(false);
+    }
+  };
 
   const handleDownloadPdf = async (invoiceId: string) => {
     setDownloadingId(invoiceId);
@@ -254,7 +354,7 @@ export default function CompanyInvoices() {
   return (
     <>
       <div className="max-w-5xl mx-auto space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
               <FileText className="w-6 h-6 text-indigo-600" />
@@ -313,18 +413,98 @@ export default function CompanyInvoices() {
         {activeTab === 'tutors' && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-4">
             <h2 className="text-lg font-semibold text-gray-900">{t('invoices.tutorEarnings')}</h2>
-            <div className="flex gap-3 items-end flex-wrap">
-              <div>
-                <label className="text-xs text-gray-500 block mb-1">{t('invoices.periodFrom')}</label>
-                <input type="date" value={tutorPeriodStart} onChange={e => setTutorPeriodStart(e.target.value)} className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm" />
+            <div className="space-y-2">
+              <span className="text-xs text-gray-500 block">{t('invoices.periodFilterLabel')}</span>
+              <div className="flex flex-wrap gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTutorPeriodMode('month');
+                    if (!tutorMonth && /^\d{4}-\d{2}-\d{2}$/.test(tutorPeriodStart)) {
+                      setTutorMonth(tutorPeriodStart.slice(0, 7));
+                    }
+                  }}
+                  className={cn(
+                    'px-2.5 py-1 rounded-lg text-xs font-medium transition-colors',
+                    tutorPeriodMode === 'month'
+                      ? 'bg-indigo-100 text-indigo-800'
+                      : 'bg-gray-50 text-gray-600 hover:bg-gray-100',
+                  )}
+                >
+                  {t('invoices.periodModeMonth')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTutorPeriodMode('range');
+                    if (tutorMonth && /^\d{4}-\d{2}$/.test(tutorMonth)) {
+                      const [yStr, mStr] = tutorMonth.split('-');
+                      const y = parseInt(yStr, 10);
+                      const m = parseInt(mStr, 10);
+                      setTutorPeriodStart(`${y}-${String(m).padStart(2, '0')}-01`);
+                      setTutorPeriodEnd(format(new Date(y, m, 0), 'yyyy-MM-dd'));
+                    }
+                  }}
+                  className={cn(
+                    'px-2.5 py-1 rounded-lg text-xs font-medium transition-colors',
+                    tutorPeriodMode === 'range'
+                      ? 'bg-indigo-100 text-indigo-800'
+                      : 'bg-gray-50 text-gray-600 hover:bg-gray-100',
+                  )}
+                >
+                  {t('invoices.periodModeRange')}
+                </button>
               </div>
-              <div>
-                <label className="text-xs text-gray-500 block mb-1">{t('invoices.periodTo')}</label>
-                <input type="date" value={tutorPeriodEnd} onChange={e => setTutorPeriodEnd(e.target.value)} className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm" />
+              <div className="flex gap-3 items-end flex-wrap">
+                {tutorPeriodMode === 'month' ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <MonthFilterInput value={tutorMonth} onChange={setTutorMonth} />
+                    {tutorMonth ? (
+                      <button
+                        type="button"
+                        className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+                        onClick={() => setTutorMonth('')}
+                      >
+                        {t('invoices.allMonths')}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      <label className="text-xs text-gray-500 block mb-1">{t('invoices.periodFrom')}</label>
+                      <DateInput
+                        value={tutorPeriodStart}
+                        onChange={(e) => setTutorPeriodStart(e.target.value)}
+                        className="h-9 min-w-[10.5rem] rounded-lg border-amber-200/80 hover:border-amber-300/90"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500 block mb-1">{t('invoices.periodTo')}</label>
+                      <DateInput
+                        value={tutorPeriodEnd}
+                        onChange={(e) => setTutorPeriodEnd(e.target.value)}
+                        min={tutorPeriodStart || undefined}
+                        className="h-9 min-w-[10.5rem] rounded-lg border-amber-200/80 hover:border-amber-300/90"
+                      />
+                    </div>
+                  </>
+                )}
+                <button
+                  type="button"
+                  className="text-xs font-medium text-gray-600 hover:text-gray-900 underline-offset-2 hover:underline h-9 flex items-end pb-1"
+                  onClick={() => {
+                    setTutorMonth('');
+                    setTutorPeriodStart(format(new Date(new Date().getFullYear(), new Date().getMonth(), 1), 'yyyy-MM-dd'));
+                    setTutorPeriodEnd(format(new Date(), 'yyyy-MM-dd'));
+                  }}
+                >
+                  {t('invoices.clearPeriod')}
+                </button>
+                <Button variant="outline" size="sm" className="rounded-lg" onClick={() => void loadTutorSessions()}>
+                  {loadingTutorSessions ? <Loader2 className="w-4 h-4 animate-spin" /> : t('invoices.refreshBtn')}
+                </Button>
               </div>
-              <Button variant="outline" size="sm" className="rounded-lg" onClick={() => void loadTutorSessions()}>
-                {loadingTutorSessions ? <Loader2 className="w-4 h-4 animate-spin" /> : t('invoices.refreshBtn')}
-              </Button>
             </div>
 
             {loadingTutorSessions ? (
@@ -388,8 +568,8 @@ export default function CompanyInvoices() {
                           headers: await authHeaders(),
                           body: JSON.stringify({
                             tutorId,
-                            periodStart: tutorPeriodStart,
-                            periodEnd: tutorPeriodEnd,
+                            periodStart: tutorEffectiveRange.start,
+                            periodEnd: tutorEffectiveRange.end,
                             groupingType: 'single',
                             isOrgTutor: true,
                             precheckOnly: true,
@@ -415,8 +595,8 @@ export default function CompanyInvoices() {
                           headers: await authHeaders(),
                           body: JSON.stringify({
                             tutorId,
-                            periodStart: tutorPeriodStart,
-                            periodEnd: tutorPeriodEnd,
+                            periodStart: tutorEffectiveRange.start,
+                            periodEnd: tutorEffectiveRange.end,
                             groupingType: 'single',
                             isOrgTutor: true,
                           }),
@@ -457,7 +637,7 @@ export default function CompanyInvoices() {
             {alreadyIssuedTutors.length > 0 && (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mt-2">
                 <p className="text-sm text-amber-800 font-medium">
-                  {t('invoices.alreadyIssuedForPeriod', { from: tutorPeriodStart, to: tutorPeriodEnd })}
+                  {t('invoices.alreadyIssuedForPeriod', { from: tutorEffectiveRange.start, to: tutorEffectiveRange.end })}
                 </p>
                 <p className="text-xs text-amber-700 mt-1">
                   {alreadyIssuedTutors
@@ -504,15 +684,16 @@ export default function CompanyInvoices() {
 
         {activeTab === 'invoices' && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4">
             <h2 className="text-lg font-semibold text-gray-900">{t('invoices.list')}</h2>
-            <div className="flex gap-1.5 sm:gap-2 overflow-x-auto pb-1 sm:pb-0">
+            <div className="flex flex-wrap gap-2">
               {['all', 'issued', 'paid', 'cancelled'].map((status) => (
                 <button
                   key={status}
+                  type="button"
                   onClick={() => setStatusFilter(status)}
                   className={cn(
-                    'px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0',
+                    'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
                     statusFilter === status
                       ? 'bg-indigo-100 text-indigo-700'
                       : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
@@ -524,6 +705,148 @@ export default function CompanyInvoices() {
             </div>
           </div>
 
+          <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end lg:justify-between mb-4 pb-4 border-b border-gray-100">
+            <div className="flex flex-col sm:flex-row flex-wrap gap-4">
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">{t('invoices.periodFilterLabel')}</label>
+                <div className="flex flex-wrap gap-1 mb-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInvoicePeriodMode('month');
+                      if (!invoiceMonth && invoiceRangeStart && /^\d{4}-\d{2}-\d{2}$/.test(invoiceRangeStart)) {
+                        setInvoiceMonth(invoiceRangeStart.slice(0, 7));
+                      }
+                    }}
+                    className={cn(
+                      'px-2.5 py-1 rounded-lg text-xs font-medium transition-colors',
+                      invoicePeriodMode === 'month'
+                        ? 'bg-indigo-100 text-indigo-800'
+                        : 'bg-gray-50 text-gray-600 hover:bg-gray-100',
+                    )}
+                  >
+                    {t('invoices.periodModeMonth')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInvoicePeriodMode('range');
+                      if (invoiceMonth && /^\d{4}-\d{2}$/.test(invoiceMonth)) {
+                        const [yStr, mStr] = invoiceMonth.split('-');
+                        const y = parseInt(yStr, 10);
+                        const m = parseInt(mStr, 10);
+                        setInvoiceRangeStart(`${y}-${String(m).padStart(2, '0')}-01`);
+                        setInvoiceRangeEnd(format(new Date(y, m, 0), 'yyyy-MM-dd'));
+                      }
+                    }}
+                    className={cn(
+                      'px-2.5 py-1 rounded-lg text-xs font-medium transition-colors',
+                      invoicePeriodMode === 'range'
+                        ? 'bg-indigo-100 text-indigo-800'
+                        : 'bg-gray-50 text-gray-600 hover:bg-gray-100',
+                    )}
+                  >
+                    {t('invoices.periodModeRange')}
+                  </button>
+                </div>
+                {invoicePeriodMode === 'month' ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <MonthFilterInput value={invoiceMonth} onChange={setInvoiceMonth} />
+                    {invoiceMonth ? (
+                      <button
+                        type="button"
+                        className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+                        onClick={() => setInvoiceMonth('')}
+                      >
+                        {t('invoices.allMonths')}
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-gray-600 hover:text-gray-900 underline-offset-2 hover:underline"
+                      onClick={() => {
+                        setInvoiceMonth('');
+                        setInvoiceRangeStart('');
+                        setInvoiceRangeEnd('');
+                      }}
+                    >
+                      {t('invoices.clearPeriod')}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div>
+                      <span className="text-xs text-gray-500 block mb-1">{t('invoices.periodFrom')}</span>
+                      <DateInput
+                        value={invoiceRangeStart}
+                        onChange={(e) => setInvoiceRangeStart(e.target.value)}
+                        className="h-9 min-w-[10.5rem] rounded-lg border-gray-200"
+                      />
+                    </div>
+                    <div>
+                      <span className="text-xs text-gray-500 block mb-1">{t('invoices.periodTo')}</span>
+                      <DateInput
+                        value={invoiceRangeEnd}
+                        onChange={(e) => setInvoiceRangeEnd(e.target.value)}
+                        min={invoiceRangeStart || undefined}
+                        className="h-9 min-w-[10.5rem] rounded-lg border-gray-200"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-gray-600 hover:text-gray-900 underline-offset-2 hover:underline pb-2"
+                      onClick={() => {
+                        setInvoiceMonth('');
+                        setInvoiceRangeStart('');
+                        setInvoiceRangeEnd('');
+                      }}
+                    >
+                      {t('invoices.clearPeriod')}
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">{t('invoices.buyerKindLabel')}</label>
+                <div className="flex flex-wrap gap-1">
+                  {(['all', 'payer', 'org'] as const).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => setBuyerKindFilter(k)}
+                      className={cn(
+                        'px-2.5 py-1 rounded-lg text-xs font-medium transition-colors',
+                        buyerKindFilter === k
+                          ? 'bg-amber-100 text-amber-900'
+                          : 'bg-gray-50 text-gray-600 hover:bg-gray-100',
+                      )}
+                    >
+                      {k === 'all'
+                        ? t('invoices.buyerKindAll')
+                        : k === 'payer'
+                          ? t('invoices.buyerKindPayer')
+                          : t('invoices.buyerKindOrg')}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-xl gap-2 shrink-0"
+              disabled={downloadingAllList || filteredInvoices.length === 0}
+              onClick={() => void handleDownloadAllVisible()}
+            >
+              {downloadingAllList ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Download className="w-4 h-4" />
+              )}
+              {t('invoices.downloadAllFiltered', { count: String(filteredInvoices.length) })}
+            </Button>
+          </div>
+
           {loading ? (
             <div className="flex justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
@@ -533,32 +856,51 @@ export default function CompanyInvoices() {
               <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
               <p className="text-gray-500">{t('invoices.empty')}</p>
             </div>
+          ) : filteredInvoices.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-gray-500 text-sm">{t('invoices.emptyAfterFilter')}</p>
+            </div>
           ) : (
             <div className="space-y-2">
-              {invoices.map((inv) => {
+              {filteredInvoices.map((inv) => {
                 const tutorName = tutors.find(tu => tu.id === inv.issued_by_user_id)?.full_name;
+                const buyerNm = String((inv.buyer_snapshot as { name?: string } | undefined)?.name || '')
+                  .trim()
+                  .toLowerCase();
+                const isOrgBuyer = orgBuyerNames.has(buyerNm);
                 return (
                   <div
                     key={inv.id}
-                    className="flex items-center justify-between gap-2 p-3 sm:p-4 border border-gray-200 rounded-xl hover:border-gray-300 transition-colors"
+                    className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:border-gray-300 transition-colors"
                   >
-                    <div className="flex items-center gap-3 sm:gap-4 min-w-0">
-                      <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-indigo-50 flex items-center justify-center flex-shrink-0">
-                        <FileText className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-600" />
+                    <div className="flex items-center gap-4 min-w-0">
+                      <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center flex-shrink-0">
+                        <FileText className="w-5 h-5 text-indigo-600" />
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-semibold text-gray-900 text-sm">{inv.invoice_number}</span>
                           {statusBadge(inv.status)}
+                          <span
+                            className={cn(
+                              'px-2 py-0.5 rounded-full text-[10px] font-medium',
+                              isOrgBuyer ? 'bg-slate-100 text-slate-700' : 'bg-emerald-50 text-emerald-800',
+                            )}
+                          >
+                            {isOrgBuyer ? t('invoices.badgeOrgInvoice') : t('invoices.badgePayerInvoice')}
+                          </span>
                         </div>
                         <p className="text-xs text-gray-500 truncate">
-                          {(inv.buyer_snapshot as any)?.name || '-'}
+                          {(inv.buyer_snapshot as { name?: string })?.name || '-'}
                           {tutorName && <> {'\u00B7'} {tutorName}</>}
                           {' \u00B7 '}
                           {format(new Date(inv.issue_date), 'yyyy-MM-dd')}
                           {' \u00B7 '}
                           {'\u20AC'}{Number(inv.total_amount).toFixed(2)}
                         </p>
+                        {inv.status === 'issued' && inv.billing_batch_id && inv.billing_batches && !inv.billing_batches.paid && (
+                          <p className="text-xs text-amber-700 mt-0.5">{t('invoices.checkoutPendingSubtitle')}</p>
+                        )}
                       </div>
                     </div>
                     <Button

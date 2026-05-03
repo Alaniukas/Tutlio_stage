@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
-import { Check, ArrowRight, GraduationCap, AlertCircle, Eye, EyeOff, ChevronLeft, User, Users, Mail, Phone, Info } from 'lucide-react';
+import { Check, ArrowRight, GraduationCap, AlertCircle, Eye, EyeOff, ChevronLeft, User, Users, Mail, Phone } from 'lucide-react';
 import { formatLithuanianPhone, validateLithuanianPhone } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/lib/i18n';
@@ -23,6 +23,22 @@ interface StudentData {
     tutor_cancellation_hours?: number | null;
     tutor_cancellation_fee_percent?: number | null;
     tutor?: { full_name: string };
+    organization_entity_type?: string | null;
+}
+
+/** Parent/guardian data from DB is trustworthy for onboarding UI when formatted phone validates */
+function schoolParentPayerCompleteFromInvite(
+    isSchool: boolean,
+    name: string,
+    email: string,
+    phoneRaw: string,
+): boolean {
+    if (!isSchool) return false;
+    const n = name.trim();
+    const e = email.trim();
+    const p = formatLithuanianPhone((phoneRaw || '').trim());
+    if (!n || !e || !p.trim()) return false;
+    return validateLithuanianPhone(p);
 }
 
 interface Subject {
@@ -94,11 +110,10 @@ export default function StudentOnboarding() {
     const [payerEmail, setPayerEmail] = useState('');
     const [payerPhone, setPayerPhone] = useState('');
 
+    /** Non-school: whether to create payer as parent + send parent portal invite */
     const [wantsParentAccount, setWantsParentAccount] = useState(false);
-    const [parentRegEmail, setParentRegEmail] = useState('');
-    const [parentRegSent, setParentRegSent] = useState(false);
-    const [parentRegError, setParentRegError] = useState<string | null>(null);
-    const [parentRegSubmitting, setParentRegSubmitting] = useState(false);
+    /** After registration: parent invite email outcome */
+    const [parentInviteOutcome, setParentInviteOutcome] = useState<'idle' | 'sending' | 'sent' | 'failed' | 'skipped'>('idle');
 
     const [password, setPassword] = useState('');
     const [passwordConfirm, setPasswordConfirm] = useState('');
@@ -109,6 +124,17 @@ export default function StudentOnboarding() {
     const [cancellationHours, setCancellationHours] = useState(24);
     const [cancellationFeePercent, setCancellationFeePercent] = useState(0);
     const [isSchoolInvite, setIsSchoolInvite] = useState(false);
+
+    const schoolInviteParentLocked = useMemo(
+        () =>
+            schoolParentPayerCompleteFromInvite(
+                isSchoolInvite,
+                payerName,
+                payerEmail,
+                payerPhone,
+            ),
+        [isSchoolInvite, payerName, payerEmail, payerPhone],
+    );
 
     const calculateAgeFromDate = (dateValue?: string | null): string => {
         if (!dateValue) return '';
@@ -127,14 +153,19 @@ export default function StudentOnboarding() {
 
     const fetchStudent = async () => {
         setLoading(true);
-        const { data: studentRows, error } = await supabase
-            .rpc('get_student_by_invite_code', { p_invite_code: inviteCode?.toUpperCase() });
+        setError(null);
+        try {
+            const { data: studentRows, error } = await supabase
+                .rpc('get_student_by_invite_code', { p_invite_code: inviteCode?.toUpperCase() });
 
-        const data = studentRows?.[0] ?? null;
+            const data = studentRows?.[0] ?? null;
 
-        if (error || !data) {
-            setError(t('onboard.invalidCode'));
-        } else {
+            if (error || !data) {
+                setError(t('onboard.invalidCode'));
+                setStudentData(null);
+                return;
+            }
+
             if (data.linked_user_id) {
                 navigate('/login');
                 return;
@@ -144,15 +175,8 @@ export default function StudentOnboarding() {
                 ? { full_name: data.tutor_full_name }
                 : null;
 
-            let isSchoolOrg = false;
-            if (data.organization_id) {
-                const { data: orgRow } = await supabase
-                    .from('organizations')
-                    .select('entity_type')
-                    .eq('id', data.organization_id)
-                    .maybeSingle();
-                isSchoolOrg = orgRow?.entity_type === 'school';
-            }
+            const orgType = String((data as { organization_entity_type?: string }).organization_entity_type || '').trim();
+            const isSchoolOrg = orgType === 'school';
 
             setStudentData({ ...data, tutor: tutorProfile ?? undefined });
             setEmail(data.email || '');
@@ -161,8 +185,7 @@ export default function StudentOnboarding() {
             setPayerType(isSchoolOrg ? 'parent' : 'self');
             setPayerName(isSchoolOrg ? (data.payer_name || '') : '');
             setPayerEmail(isSchoolOrg ? (data.payer_email || '') : '');
-            setPayerPhone(isSchoolOrg ? (data.payer_phone || '') : '');
-            setParentRegEmail(isSchoolOrg ? (data.payer_email || '') : '');
+            setPayerPhone(isSchoolOrg ? formatLithuanianPhone(data.payer_phone || '') : '');
             setAge(calculateAgeFromDate(data.child_birth_date));
 
             if (data.tutor_id) {
@@ -178,8 +201,13 @@ export default function StudentOnboarding() {
             } else {
                 setSubjects([]);
             }
+        } catch (e) {
+            console.error('[StudentOnboarding] fetchStudent failed:', e);
+            setError(t('common.error'));
+            setStudentData(null);
+        } finally {
+            setLoading(false);
         }
-        setLoading(false);
     };
 
     const handleVerify = () => {
@@ -193,12 +221,13 @@ export default function StudentOnboarding() {
 
     const handleProfile = () => {
         if (!grade) { setError(t('onboard.selectGrade')); return; }
-        const effectivePayerType = isSchoolInvite ? 'parent' : payerType;
-        if (effectivePayerType === 'parent') {
+        const effectivePayerType = isSchoolInvite || wantsParentAccount ? 'parent' : 'self';
+        if (effectivePayerType === 'parent' && !schoolInviteParentLocked) {
             if (!payerName.trim()) { setError(t('onboard.parentNameReq')); return; }
             if (!payerEmail.trim()) { setError(t('onboard.parentEmailReq')); return; }
             if (!payerPhone.trim()) { setError(t('onboard.parentPhoneReq')); return; }
-            if (!validateLithuanianPhone(payerPhone)) { setError(t('onboard.parentPhoneFormat')); return; }
+            const pNorm = formatLithuanianPhone(payerPhone);
+            if (!validateLithuanianPhone(pNorm)) { setError(t('onboard.parentPhoneFormat')); return; }
         }
         setError(null);
         setStep('account');
@@ -216,7 +245,7 @@ export default function StudentOnboarding() {
         setError(null);
 
         const acceptedAt = new Date().toISOString();
-        const effectivePayerType = isSchoolInvite ? 'parent' : payerType;
+        const effectivePayerType = isSchoolInvite || wantsParentAccount ? 'parent' : 'self';
 
         const apiRes = await fetch('/api/register-student', {
             method: 'POST',
@@ -245,8 +274,45 @@ export default function StudentOnboarding() {
             return;
         }
 
+        // Finish onboarding immediately; parent invite can be created in background.
         setStep('done');
         setSubmitting(false);
+
+        // School org: parent invite is sent when admin adds the student — avoid duplicate emails here.
+        if (isSchoolInvite) {
+            setParentInviteOutcome('skipped');
+            return;
+        }
+
+        if (effectivePayerType !== 'parent') {
+            setParentInviteOutcome('skipped');
+            return;
+        }
+
+        if (!payerEmail.trim()) {
+            setParentInviteOutcome('failed');
+            return;
+        }
+
+        setParentInviteOutcome('sending');
+        (async () => {
+            try {
+                const inv = await fetch('/api/create-parent-invite', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        parentEmail: payerEmail.trim(),
+                        studentId: studentData.id,
+                        parentName: payerName.trim() || undefined,
+                        parentPhone: payerPhone.trim() || undefined,
+                        source: 'student_self',
+                    }),
+                });
+                setParentInviteOutcome(inv.ok ? 'sent' : 'failed');
+            } catch {
+                setParentInviteOutcome('failed');
+            }
+        })();
     };
 
     if (loading) {
@@ -391,34 +457,59 @@ export default function StudentOnboarding() {
                                 {!isSchoolInvite && (
                                     <>
                                         <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                                            {t('onboard.whoPays')} <span className="text-red-500">*</span>
+                                            {locale === 'en' ? 'Parent account on Tutlio?' : 'Ar norite tėvų paskyros Tutlio?'} <span className="text-red-500">*</span>
                                         </label>
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-                                            {(['self', 'parent'] as const).map((v) => (
-                                                <button
-                                                    key={v}
-                                                    type="button"
-                                                    onClick={() => setPayerType(v)}
-                                                    className={cn(
-                                                        'flex flex-col items-center gap-2 p-4 rounded-2xl border-2 text-center transition-all',
-                                                        payerType === v ? 'border-violet-500 bg-violet-50' : 'border-gray-200 bg-gray-50 hover:border-violet-300'
-                                                    )}
-                                                >
-                                                    {v === 'self'
-                                                        ? <User className="w-5 h-5 text-gray-600" />
-                                                        : <Users className="w-5 h-5 text-gray-600" />}
-                                                    <span className="text-sm font-semibold text-gray-900">{v === 'self' ? t('onboard.self') : t('onboard.parent')}</span>
-                                                    <span className="text-xs text-gray-500 leading-tight">{v === 'self' ? t('onboard.selfDesc') : t('onboard.parentDesc')}</span>
-                                                </button>
-                                            ))}
+                                            <button
+                                                type="button"
+                                                onClick={() => { setWantsParentAccount(true); setError(null); }}
+                                                className={cn(
+                                                    'flex flex-col items-center gap-2 p-4 rounded-2xl border-2 text-center transition-all',
+                                                    wantsParentAccount ? 'border-violet-500 bg-violet-50' : 'border-gray-200 bg-gray-50 hover:border-violet-300'
+                                                )}
+                                            >
+                                                <Users className="w-5 h-5 text-gray-600" />
+                                                <span className="text-sm font-semibold text-gray-900">{locale === 'en' ? 'Yes' : 'Taip'}</span>
+                                                <span className="text-xs text-gray-500 leading-tight">
+                                                    {locale === 'en' ? 'Parents pay and get their own login' : 'Tėvai moka ir gauna atskirą prisijungimą'}
+                                                </span>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setWantsParentAccount(false);
+                                                    setPayerType('self');
+                                                    setPayerName('');
+                                                    setPayerEmail('');
+                                                    setPayerPhone('');
+                                                    setError(null);
+                                                }}
+                                                className={cn(
+                                                    'flex flex-col items-center gap-2 p-4 rounded-2xl border-2 text-center transition-all',
+                                                    !wantsParentAccount ? 'border-violet-500 bg-violet-50' : 'border-gray-200 bg-gray-50 hover:border-violet-300'
+                                                )}
+                                            >
+                                                <User className="w-5 h-5 text-gray-600" />
+                                                <span className="text-sm font-semibold text-gray-900">{locale === 'en' ? 'No' : 'Ne'}</span>
+                                                <span className="text-xs text-gray-500 leading-tight">
+                                                    {locale === 'en' ? 'I book and pay myself' : 'Pats registruojuosi ir moku'}
+                                                </span>
+                                            </button>
                                         </div>
+                                        {wantsParentAccount && (
+                                            <p className="text-xs text-violet-800 bg-violet-50 border border-violet-100 rounded-xl px-3 py-2 mb-2">
+                                                {locale === 'en'
+                                                    ? 'Payer will be set to parent/guardian. We will email them a link and code to register.'
+                                                    : 'Mokėtojas bus nurodytas kaip tėvai / globėjai. Jiems bus išsiųstas el. laiškas su nuoroda ir kodu.'}
+                                            </p>
+                                        )}
                                     </>
                                 )}
 
-                                {(isSchoolInvite || payerType === 'parent') && (
+                                {(isSchoolInvite || wantsParentAccount) && !schoolInviteParentLocked && (
                                     <div className="space-y-3 pt-2 border-t border-gray-100">
                                         <p className="text-xs text-gray-500 pt-2">
-                                            {isSchoolInvite ? 'Tėvų duomenys (užpildyta mokyklos)' : t('onboard.parentInfo')}
+                                            {isSchoolInvite ? 'Tėvų duomenys (užpildykite)' : t('onboard.parentInfo')}
                                         </p>
                                         <div>
                                             <label className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
@@ -566,77 +657,36 @@ export default function StudentOnboarding() {
                             </div>
                         </div>
 
-                        {/* Parent account registration */}
-                        {!parentRegSent ? (
-                            <div className="border border-gray-200 rounded-xl p-4 mb-4 text-left">
-                                <div className="flex items-center gap-3 mb-3">
-                                    <Users className="w-5 h-5 text-violet-600" />
-                                    <h3 className="text-sm font-bold text-gray-900">{t('onboard.parentAccountTitle')}</h3>
-                                </div>
-                                {!wantsParentAccount ? (
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setWantsParentAccount(true);
-                                            if ((isSchoolInvite || payerType === 'parent') && payerEmail) setParentRegEmail(payerEmail);
-                                        }}
-                                        className="w-full py-2.5 rounded-xl bg-violet-50 text-violet-700 font-medium text-sm hover:bg-violet-100 transition-colors"
-                                    >
-                                        {t('onboard.createParentAccount')}
-                                    </button>
+                        {(parentInviteOutcome === 'sending' || parentInviteOutcome === 'sent' || parentInviteOutcome === 'failed') && (
+                            <div
+                                className={`rounded-xl p-4 mb-4 text-left text-sm ${
+                                    parentInviteOutcome === 'sent'
+                                        ? 'bg-green-50 border border-green-200 text-green-800'
+                                        : parentInviteOutcome === 'sending'
+                                            ? 'bg-violet-50 border border-violet-200 text-violet-900'
+                                        : 'bg-amber-50 border border-amber-200 text-amber-900'
+                                }`}
+                            >
+                                {parentInviteOutcome === 'sent' ? (
+                                    <>
+                                        <Check className="w-4 h-4 inline mr-1" />
+                                        {t('onboard.parentInviteSent', { email: payerEmail.trim() })}
+                                    </>
+                                ) : parentInviteOutcome === 'sending' ? (
+                                    <>
+                                        <div className="w-4 h-4 inline-block mr-2 align-[-2px] border-2 border-violet-300 border-t-violet-700 rounded-full animate-spin" />
+                                        {locale === 'en'
+                                            ? 'Sending invite to parents…'
+                                            : 'Siunčiamas kvietimas tėvams…'}
+                                    </>
                                 ) : (
-                                    <div className="space-y-3">
-                                        <p className="text-xs text-gray-500">{t('onboard.parentAccountDesc')}</p>
-                                        <div>
-                                            <label className="text-xs text-gray-500 font-medium">{t('onboard.parentAccountEmail')}</label>
-                                            <input
-                                                type="email"
-                                                value={parentRegEmail}
-                                                onChange={(e) => setParentRegEmail(e.target.value)}
-                                                className="w-full mt-1 rounded-xl border border-gray-200 px-3 py-2 text-sm"
-                                                placeholder="tevas@email.com"
-                                            />
-                                        </div>
-                                        {parentRegError && <p className="text-red-500 text-xs">{parentRegError}</p>}
-                                        <button
-                                            type="button"
-                                            disabled={parentRegSubmitting || !parentRegEmail.trim()}
-                                            onClick={async () => {
-                                                setParentRegSubmitting(true);
-                                                setParentRegError(null);
-                                                try {
-                                                    const resp = await fetch('/api/create-parent-invite', {
-                                                        method: 'POST',
-                                                        headers: { 'Content-Type': 'application/json' },
-                                                        body: JSON.stringify({
-                                                            parentEmail: parentRegEmail.trim(),
-                                                            studentId: studentData?.id,
-                                                            parentName: payerType === 'parent' ? payerName : undefined,
-                                                        }),
-                                                    });
-                                                    if (!resp.ok) {
-                                                        const err = await resp.json().catch(() => ({ error: 'Failed' }));
-                                                        setParentRegError(err.error || 'Failed to send invite');
-                                                    } else {
-                                                        setParentRegSent(true);
-                                                    }
-                                                } catch {
-                                                    setParentRegError(t('common.error'));
-                                                } finally {
-                                                    setParentRegSubmitting(false);
-                                                }
-                                            }}
-                                            className="w-full py-2.5 rounded-xl bg-violet-600 text-white font-medium text-sm hover:bg-violet-700 transition-colors disabled:opacity-50"
-                                        >
-                                            {parentRegSubmitting ? t('common.loading') : t('onboard.sendParentInvite')}
-                                        </button>
-                                    </div>
+                                    <>
+                                        <AlertCircle className="w-4 h-4 inline mr-1" />
+                                        {locale === 'en'
+                                            ? 'Could not send parent invite email. You can ask your tutor to resend it from the school panel.'
+                                            : 'Nepavyko automatiškai išsiųsti kvietimo tėvams. Kreipkitės į korepetitorių arba mokyklą – jie gali išsiųsti pakartotinai.'}
+                                    </>
                                 )}
-                            </div>
-                        ) : (
-                            <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-4 text-left text-sm text-green-800">
-                                <Check className="w-4 h-4 inline mr-1" />
-                                {t('onboard.parentInviteSent', { email: parentRegEmail })}
                             </div>
                         )}
 

@@ -42,7 +42,8 @@ import {
 } from '@/lib/studentPaymentModel';
 import StudentPaymentModelSection from '@/components/StudentPaymentModelSection';
 import SendInvoiceModal from '@/components/SendInvoiceModal';
-import { shouldShowPayerContactSection } from '@/lib/orgContactVisibility';
+import { pickStudentContactsForTutorEmail, shouldShowPayerContactSection } from '@/lib/orgContactVisibility';
+import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 
 interface Student {
   id: string;
@@ -169,6 +170,7 @@ export default function CompanyStudents() {
   const [customCancellationFee, setCustomCancellationFee] = useState(0);
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [sendingInviteNow, setSendingInviteNow] = useState(false);
+  const [sendingParentInvites, setSendingParentInvites] = useState(false);
 
   // Past sessions for student modal (fetched by student_id when modal opens — reliable vs org-wide cache/timing)
   const [modalRecentSessions, setModalRecentSessions] = useState<Session[]>([]);
@@ -219,6 +221,7 @@ export default function CompanyStudents() {
   const [pkgPrice, setPkgPrice] = useState(0);
   const [pkgExpiresAt, setPkgExpiresAt] = useState('');
   const [pkgSending, setPkgSending] = useState(false);
+  const [pkgAttachSalesInvoice, setPkgAttachSalesInvoice] = useState(true);
   const [deactivatingPackageId, setDeactivatingPackageId] = useState<string | null>(null);
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
   const [studentSearch, setStudentSearch] = useState('');
@@ -429,7 +432,7 @@ export default function CompanyStudents() {
           .order('created_at', { ascending: false }),
         supabase
           .from('subjects')
-          .select('id, name, color, price')
+          .select('id, name, color, price, duration_minutes')
           .eq('tutor_id', selectedStudent.tutor_id)
           .order('name'),
       ]);
@@ -553,61 +556,28 @@ export default function CompanyStudents() {
     }
     setOrgId(adminRow.organization_id);
 
-    const { data: adminUsers } = await supabase
-      .from('organization_admins')
-      .select('user_id')
-      .eq('organization_id', adminRow.organization_id);
-    const adminIds = new Set((adminUsers || []).map((a: { user_id: string }) => a.user_id));
-
-    const { data: profilesList } = await supabase
-      .from('profiles')
-      .select('id, full_name')
-      .eq('organization_id', adminRow.organization_id)
-      .order('full_name');
-
-    const tutorsList = (profilesList || []).filter((t) => !adminIds.has(t.id));
+    const tutorsList = await getOrgVisibleTutors(
+      supabase as any,
+      adminRow.organization_id,
+      'id, full_name, email',
+    );
 
     setTutors(tutorsList);
 
-    // Fetch students directly (RLS now allows org admin access)
-    const tutorIds = (tutorsList || []).map((t) => t.id);
-    let fetchedStudents: Student[] = [];
-
-    const fetchPromises: Promise<any>[] = [];
-
-    if (tutorIds.length > 0) {
-      fetchPromises.push(
-        supabase
-          .from('students')
-          .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
-          .in('tutor_id', tutorIds)
-          .order('created_at', { ascending: false })
-      );
+    // Fetch ALL org students, regardless of where the tutor profile lives.
+    const { data: fetchedStudents, error: studentsErr } = await supabase
+      .from('students')
+      .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
+      .eq('organization_id', adminRow.organization_id)
+      .order('created_at', { ascending: false });
+    if (studentsErr) {
+      console.error('Error fetching students:', studentsErr);
+      setStudents([]);
+    } else {
+      setStudents((fetchedStudents || []) as any);
     }
 
-    if (adminRow.organization_id) {
-      fetchPromises.push(
-        supabase
-          .from('students')
-          .select('*, linked_user_id')
-          .is('tutor_id', null)
-          .eq('organization_id', adminRow.organization_id)
-          .order('created_at', { ascending: false })
-      );
-    }
-
-    const results = await Promise.all(fetchPromises);
-    for (const res of results) {
-      if (res.error) {
-        console.error('Error fetching students:', res.error);
-      } else if (res.data) {
-        fetchedStudents = fetchedStudents.concat(res.data);
-      }
-    }
-    fetchedStudents.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-    setStudents(fetchedStudents);
-
-    setCache('company_students', { students: fetchedStudents, tutors: tutorsList });
+    setCache('company_students', { students: (fetchedStudents || []) as any, tutors: tutorsList });
     setLoading(false);
   };
 
@@ -653,6 +623,7 @@ export default function CompanyStudents() {
           totalLessons: pkgLessons,
           pricePerLesson: pkgPrice,
           ...(pkgExpiresAt ? { expiresAt: pkgExpiresAt } : {}),
+          attachSalesInvoice: pkgAttachSalesInvoice,
         }),
       });
       if (!response.ok) {
@@ -840,6 +811,30 @@ export default function CompanyStudents() {
       return;
     }
 
+    let effectiveOrgId: string | null = orgId;
+    if (isSchoolView) {
+      const { data: authUserRes } = await supabase.auth.getUser();
+      const uid = authUserRes?.user?.id;
+      if (!uid) {
+        setToastMessage({ message: t('compStu.orgResolveNeedLogin'), type: 'error' });
+        return;
+      }
+      const { data: adminRows } = await supabase
+        .from('organization_admins')
+        .select('organization_id')
+        .eq('user_id', uid);
+      const ids = (adminRows || []).map((r) => r.organization_id).filter(Boolean) as string[];
+      if (ids.length === 0) {
+        setToastMessage({ message: t('compStu.orgResolveNoAdmin'), type: 'error' });
+        return;
+      }
+      if (orgId && ids.includes(orgId)) {
+        effectiveOrgId = orgId;
+      } else {
+        effectiveOrgId = ids[0];
+      }
+    }
+
     setSaving(true);
     const inserted: { id: string; tutor_id: string | null; invite_code: string }[] = [];
     const primaryParent = {
@@ -883,7 +878,7 @@ export default function CompanyStudents() {
           student_city: newStudent.student_city?.trim() || null,
           child_birth_date: newStudent.child_birth_date?.trim() || null,
           invite_code: inviteCode,
-          ...(orgId ? { organization_id: orgId } : {}),
+          ...(effectiveOrgId ? { organization_id: effectiveOrgId } : {}),
         })
         .select('id, tutor_id, invite_code')
         .single();
@@ -919,6 +914,36 @@ export default function CompanyStudents() {
     }
 
     let emailOk = true;
+    let schoolParentInvitesOk = true;
+    let parentInviteFailureDetail = '';
+    if (isSchoolView && inserted.length > 0) {
+      try {
+        const headers = await authHeaders();
+        for (const row of inserted) {
+          const invRes = await fetch('/api/parent-create-invites-for-student', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ studentId: row.id }),
+          });
+          const invJson = (await invRes.json().catch(() => ({}))) as {
+            success?: boolean;
+            error?: string;
+            results?: Array<{ ok?: boolean; error?: string; email?: string }>;
+          };
+          if (!invRes.ok || invJson.success === false) {
+            schoolParentInvitesOk = false;
+            const fromResults = Array.isArray(invJson.results)
+              ? invJson.results.find((r) => r && r.ok === false)?.error
+              : undefined;
+            const hint = invJson.error || fromResults || `HTTP ${invRes.status}`;
+            if (!parentInviteFailureDetail) parentInviteFailureDetail = hint;
+          }
+        }
+      } catch {
+        schoolParentInvitesOk = false;
+      }
+    }
+
     const shouldSendInviteOnCreate = !isSchoolView;
     if (shouldSendInviteOnCreate && newStudent.email?.trim()) {
       for (const row of inserted) {
@@ -943,6 +968,7 @@ export default function CompanyStudents() {
       const { data: orgRow } = await supabase.from('organizations').select('features').eq('id', orgId).single();
       const feat = orgRow?.features as Record<string, unknown> | null;
       if (feat?.notify_tutors_on_student_assign) {
+        const contactPayload = pickStudentContactsForTutorEmail(newStudent, feat);
         for (const row of inserted) {
           if (!row.tutor_id) continue;
           const { data: tutorProfile } = await supabase.from('profiles').select('email, full_name').eq('id', row.tutor_id).single();
@@ -950,18 +976,29 @@ export default function CompanyStudents() {
             void sendEmail({
               type: 'tutor_student_assigned',
               to: tutorProfile.email,
-              data: { tutorName: tutorProfile.full_name, studentName: newStudent.full_name, studentEmail: newStudent.email },
+              data: { tutorName: tutorProfile.full_name, studentName: newStudent.full_name, ...contactPayload },
             });
           }
         }
       }
     }
 
-    setToastMessage({
-      message: shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk
+    const toastType: 'success' | 'error' =
+      shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk
+        ? 'error'
+        : isSchoolView && !schoolParentInvitesOk
+          ? 'error'
+          : 'success';
+    const toastMessage =
+      shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk
         ? t('compStu.emailSendFailed')
-        : t('compStu.studentAdded'),
-      type: shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk ? 'error' : 'success',
+        : isSchoolView && !schoolParentInvitesOk
+          ? `${t('compStu.parentInviteEmailFailed')}${parentInviteFailureDetail ? ` (${parentInviteFailureDetail})` : ''}`
+          : t('compStu.studentAdded');
+
+    setToastMessage({
+      message: toastMessage,
+      type: toastType,
     });
     setIsDialogOpen(false);
     setNewStudent({
@@ -1099,6 +1136,9 @@ export default function CompanyStudents() {
     setToastMessage({ message: t('compStu.commentSaved'), type: 'success' });
     invalidateCache('company_contracts');
     fetchData();
+    if (isSchoolView) {
+      void sendParentPortalInvites(selectedStudent.id, true);
+    }
   };
 
   const handleDetachStudent = async (id: string) => {
@@ -1131,6 +1171,33 @@ export default function CompanyStudents() {
       fetchData();
     } else {
       setToastMessage({ message: t('compStu.errorPrefix', { msg: error.message }), type: 'error' });
+    }
+  };
+
+  const sendParentPortalInvites = async (studentId: string, showToast: boolean) => {
+    setSendingParentInvites(true);
+    try {
+      const res = await fetch('/api/parent-create-invites-for-student', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ studentId }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (showToast) {
+        if (!res.ok) {
+          setToastMessage({ message: (json as { error?: string }).error || t('compStu.errorPrefix', { msg: '' }), type: 'error' });
+        } else {
+          const n = (json as { sent?: number }).sent ?? 0;
+          setToastMessage({
+            message: n > 0 ? `Tėvų kvietimai išsiųsti: ${n}` : 'Nėra tėvų el. paštų arba kvietimai jau sukurti.',
+            type: n > 0 ? 'success' : 'error',
+          });
+        }
+      }
+    } catch {
+      if (showToast) setToastMessage({ message: t('common.error'), type: 'error' });
+    } finally {
+      setSendingParentInvites(false);
     }
   };
 
@@ -2067,16 +2134,28 @@ export default function CompanyStudents() {
                     )}
                     <div className="pt-1 flex items-center gap-2 flex-wrap">
                       {isSchoolView && (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="h-7 px-2.5 text-[11px]"
-                          disabled={sendingInviteNow}
-                          onClick={() => void handleSendInviteNow()}
-                        >
-                          {sendingInviteNow ? t('compStu.sendingNow') : t('compStu.sendInviteNow')}
-                        </Button>
+                        <>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2.5 text-[11px]"
+                            disabled={sendingInviteNow}
+                            onClick={() => void handleSendInviteNow()}
+                          >
+                            {sendingInviteNow ? t('compStu.sendingNow') : t('compStu.sendInviteNow')}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2.5 text-[11px]"
+                            disabled={sendingParentInvites || !selectedStudent}
+                            onClick={() => selectedStudent && void sendParentPortalInvites(selectedStudent.id, true)}
+                          >
+                            {sendingParentInvites ? t('common.loading') : t('parent.resendInvites')}
+                          </Button>
+                        </>
                       )}
                       {selectedStudent.linked_user_id ? (
                         <span className="inline-flex items-center gap-1 text-green-700 bg-green-50 border border-green-200 rounded-md px-2 py-1 text-xs">
@@ -2261,12 +2340,13 @@ export default function CompanyStudents() {
                                 const { data: orgRow } = await supabase.from('organizations').select('features').eq('id', orgId).single();
                                 const feat = orgRow?.features as Record<string, unknown> | null;
                                 if (feat?.notify_tutors_on_student_assign) {
+                                  const contactPayload = pickStudentContactsForTutorEmail(selectedStudent, feat);
                                   const { data: tutorProfile } = await supabase.from('profiles').select('email, full_name').eq('id', addingTutorId).single();
                                   if (tutorProfile?.email) {
                                     void sendEmail({
                                       type: 'tutor_student_assigned',
                                       to: tutorProfile.email,
-                                      data: { tutorName: tutorProfile.full_name, studentName: selectedStudent.full_name, studentEmail: selectedStudent.email },
+                                      data: { tutorName: tutorProfile.full_name, studentName: selectedStudent.full_name, ...contactPayload },
                                     });
                                   }
                                 }
@@ -2279,7 +2359,11 @@ export default function CompanyStudents() {
                         </Button>
                       </div>
                       <p className="text-[11px] text-gray-500 mt-2">
-                        {t('compStu.addTutorHint')}
+                        {selectedStudentGroup.some((r) => !r.tutor_id)
+                          ? t('compStu.addTutorHintFirstSlot')
+                          : selectedStudent?.linked_user_id
+                            ? t('compStu.addTutorHintExtraAccount')
+                            : t('compStu.addTutorHintExtraPending')}
                       </p>
                     </div>
                   </div>
@@ -2666,7 +2750,10 @@ export default function CompanyStudents() {
                     </h4>
                     {paymentActions.canSendPackage && (
                     <Button size="sm" variant="outline" className="gap-1.5 rounded-xl text-xs border-violet-200 text-violet-700 hover:bg-violet-50"
-                      onClick={() => setSendPackageOpen(v => !v)}>
+                      onClick={() => setSendPackageOpen((v) => {
+                        if (!v) setPkgAttachSalesInvoice(true);
+                        return !v;
+                      })}>
                       <Package className="w-3.5 h-3.5" />
                       {sendPackageOpen ? t('compStu.cancelBtn') : t('compStu.sendPackage')}
                     </Button>
@@ -2690,9 +2777,16 @@ export default function CompanyStudents() {
                             <SelectContent>
                               {packageSubjects.map(s => (
                                 <SelectItem key={s.id} value={s.id}>
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: s.color }} />
-                                    {s.name}
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
+                                    <span className="truncate text-left">
+                                      {t('compStu.packageSubjectOption', {
+                                        name: s.name,
+                                        tutor: selectedStudent.tutor?.full_name || '—',
+                                        minutes: String(s.duration_minutes ?? 60),
+                                        price: Number(s.price ?? 0).toFixed(2),
+                                      })}
+                                    </span>
                                   </div>
                                 </SelectItem>
                               ))}
@@ -2727,13 +2821,36 @@ export default function CompanyStudents() {
                           </Button>
                         </div>
                       </div>
+                      <label className="flex items-start gap-2 cursor-pointer text-xs text-violet-900">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 w-3.5 h-3.5 rounded border-violet-300 text-violet-600"
+                          checked={pkgAttachSalesInvoice}
+                          onChange={(e) => setPkgAttachSalesInvoice(e.target.checked)}
+                        />
+                        <span>
+                          <span className="font-medium">{t('invoices.includeSfInEmail')}</span>
+                          <span className="block text-[11px] text-violet-600 font-normal mt-0.5">{t('invoices.includeSfInEmailHint')}</span>
+                        </span>
+                      </label>
                       <p className="text-[11px] text-violet-500">{t('package.validUntilHint')}</p>
                       <p className="text-xs text-violet-600">
                         {t('compStu.stripePaymentHint')}
                       </p>
-                      {pkgSubjectId && pkgLessons > 0 && (
+                          {pkgSubjectId && pkgLessons > 0 && (
                         <p className="text-xs font-medium text-violet-800">
-                          {packageSubjects.find((s) => s.id === pkgSubjectId)?.name || '—'}:{' '}
+                          {(() => {
+                            const s = packageSubjects.find((x) => x.id === pkgSubjectId);
+                            return s
+                              ? t('compStu.packageSubjectOption', {
+                                  name: s.name,
+                                  tutor: selectedStudent.tutor?.full_name || '—',
+                                  minutes: String(s.duration_minutes ?? 60),
+                                  price: Number(s.price ?? 0).toFixed(2),
+                                })
+                              : '—';
+                          })()}
+                          {' · '}
                           {pkgLessons}{' '}
                           {pkgLessons === 1
                             ? t('package.lessonUnit1')

@@ -5,6 +5,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
+import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
 
 // Stripe/platform fee helpers inlined (same as create-package-checkout) — ./_lib imports have caused Vercel bundle/runtime failures.
 const STRIPE_FEE_PERCENT = 0.015;
@@ -75,14 +76,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const tutor = session.profiles as any;
         const student = session.students as any;
 
-        // 2. Determine which Stripe account to charge (org or individual tutor)
+        // 2. Determine which Stripe account to charge (org or individual tutor).
+        /** School-type orgs: payer pays lesson price exactly; fees absorbed via application_fee on Connect. */
+        let useSchoolOrgAbsorbedFees = false;
         let stripeAccountId: string | null = null;
         let ownerName = tutor?.full_name || 'Korepetitorius';
 
         if (tutor?.organization_id) {
             const { data: org } = await supabase
                 .from('organizations')
-                .select('stripe_account_id, stripe_onboarding_complete, name')
+                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type')
                 .eq('id', tutor.organization_id)
                 .single();
 
@@ -91,6 +94,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
             stripeAccountId = org.stripe_account_id;
             ownerName = org.name || ownerName;
+            useSchoolOrgAbsorbedFees = (org as { entity_type?: string }).entity_type === 'school';
         } else {
             if (!tutor?.stripe_onboarding_complete) {
                 return res.status(400).json({ error: 'Tutor Stripe account is not connected.' });
@@ -128,9 +132,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return res.status(200).json({ creditFullyCovered: true, creditApplied: creditToApply });
         }
 
-        const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur);
-        const transferToConnectedCents = baseCents;
-
         // Store pending credit amount on session (deducted from balance after payment confirmation)
         if (creditToApply > 0) {
             await supabase
@@ -150,52 +151,101 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ? `Vėlyvo atšaukimo bauda – ${ownerName}`
             : `Pamoka – ${ownerName}${creditNote}`;
 
-        // 5. Checkout on platform account: transfer to org/tutor Connect only for the lesson amount.
-        const checkoutSession = await stripe.checkout.sessions.create({
-            mode: 'payment',
-            customer_email: customerEmail,
-            payment_method_types: ['card'],
-            line_items: [
-                {
-                    price_data: {
-                        currency: 'eur',
-                        product_data: {
-                            name: itemName,
-                            description: itemDesc,
+        // 5. Checkout — school org Connect: single line item + application_fee; else legacy two-line payer gross-up.
+        let checkoutSession;
+        if (useSchoolOrgAbsorbedFees) {
+            const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(basePriceEur);
+            const applicationFeeCents = chargeCents - transferToSchoolCents;
+            if (chargeCents < 50 || applicationFeeCents < 1 || applicationFeeCents >= chargeCents) {
+                return res.status(400).json({
+                    error: 'Netinkama suma mokėjimo sesijai (per mažai arba suma sugadinta po kreditų).',
+                });
+            }
+            checkoutSession = await stripe.checkout.sessions.create({
+                mode: 'payment',
+                customer_email: customerEmail,
+                payment_method_types: ['card'],
+                line_items: [
+                    {
+                        price_data: {
+                            currency: 'eur',
+                            product_data: {
+                                name: itemName,
+                                description: itemDesc,
+                            },
+                            unit_amount: chargeCents,
                         },
-                        unit_amount: baseCents,
+                        quantity: 1,
                     },
-                    quantity: 1,
+                ],
+                payment_intent_data: {
+                    application_fee_amount: applicationFeeCents,
+                    transfer_data: {
+                        destination: stripeAccountId as string,
+                    },
+                    metadata: {
+                        tutlio_session_id: sessionId,
+                        is_penalty_payment: isPenaltyPayment ? 'true' : 'false',
+                        tutlio_school_org_absorbed: 'true',
+                    },
                 },
-                {
-                    price_data: {
-                        currency: 'eur',
-                        product_data: {
-                            name: 'Platformos administravimo mokestis',
-                            description: 'Platform administration and payment processing fee',
+                metadata: {
+                    tutlio_session_id: sessionId,
+                    is_penalty_payment: isPenaltyPayment ? 'true' : 'false',
+                    tutlio_school_org_absorbed: 'true',
+                },
+                success_url: `${APP_URL}/stripe-success?tutlio_session=${sessionId}&checkout_session={CHECKOUT_SESSION_ID}`,
+                cancel_url: `${APP_URL}/student/sessions`,
+            });
+        } else {
+            const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur);
+            const transferToConnectedCents = baseCents;
+            checkoutSession = await stripe.checkout.sessions.create({
+                mode: 'payment',
+                customer_email: customerEmail,
+                payment_method_types: ['card'],
+                line_items: [
+                    {
+                        price_data: {
+                            currency: 'eur',
+                            product_data: {
+                                name: itemName,
+                                description: itemDesc,
+                            },
+                            unit_amount: baseCents,
                         },
-                        unit_amount: feesCents,
+                        quantity: 1,
                     },
-                    quantity: 1,
-                },
-            ],
-            payment_intent_data: {
-                transfer_data: {
-                    destination: stripeAccountId,
-                    amount: transferToConnectedCents,
+                    {
+                        price_data: {
+                            currency: 'eur',
+                            product_data: {
+                                name: 'Platformos administravimo mokestis',
+                                description: 'Platform administration and payment processing fee',
+                            },
+                            unit_amount: feesCents,
+                        },
+                        quantity: 1,
+                    },
+                ],
+                payment_intent_data: {
+                    transfer_data: {
+                        destination: stripeAccountId,
+                        amount: transferToConnectedCents,
+                    },
+                    metadata: {
+                        tutlio_session_id: sessionId,
+                        is_penalty_payment: isPenaltyPayment ? 'true' : 'false',
+                    },
                 },
                 metadata: {
                     tutlio_session_id: sessionId,
                     is_penalty_payment: isPenaltyPayment ? 'true' : 'false',
                 },
-            },
-            metadata: {
-                tutlio_session_id: sessionId,
-                is_penalty_payment: isPenaltyPayment ? 'true' : 'false',
-            },
-            success_url: `${APP_URL}/stripe-success?tutlio_session=${sessionId}&checkout_session={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${APP_URL}/student/sessions`,
-        });
+                success_url: `${APP_URL}/stripe-success?tutlio_session=${sessionId}&checkout_session={CHECKOUT_SESSION_ID}`,
+                cancel_url: `${APP_URL}/student/sessions`,
+            });
+        }
 
         // 6. Save the Stripe session ID on the lesson
         await supabase

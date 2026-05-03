@@ -1,4 +1,4 @@
-import { format, parseISO, getDay, addWeeks, isBefore } from 'date-fns';
+import { format, parseISO, getDay, addWeeks, addDays, addMonths, isBefore } from 'date-fns';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sendEmail } from '@/lib/email';
 import { authHeaders } from '@/lib/apiHelpers';
@@ -268,6 +268,10 @@ export interface OrgAdminCreateSessionInput {
   createMeetingLink: string;
   createIsRecurring: boolean;
   createRecurringEndDate: string;
+  /** Same as tutor Calendar: weekly | biweekly | monthly */
+  createRecurringFrequency?: 'weekly' | 'biweekly' | 'monthly';
+  /** JS getDay() values (0=Sun..6=Sat); ignored when frequency is monthly */
+  createRecurringWeekdays?: number[];
   createIsPaid: boolean;
   createPrice: number;
   createTutorComment: string;
@@ -294,6 +298,8 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     createMeetingLink,
     createIsRecurring,
     createRecurringEndDate,
+    createRecurringFrequency = 'weekly',
+    createRecurringWeekdays = [],
     createIsPaid,
     createPrice,
     createTutorComment,
@@ -360,6 +366,9 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     if (isBefore(parseISO(createRecurringEndDate), startDate)) {
       throw new Error('"Repeat until" date must not be earlier than the first lesson.');
     }
+    if (createRecurringFrequency !== 'monthly' && createRecurringWeekdays.length === 0) {
+      throw new Error('Pasirinkite bent vieną savaitės dieną.');
+    }
   }
 
   const durationMs = endDate.getTime() - startDate.getTime();
@@ -375,60 +384,98 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
   };
 
   if (createIsRecurring && createRecurringEndDate) {
-    const recurringTemplates: { id: string; student_id: string }[] = [];
-    for (const studentId of studentIdsToCreate) {
-      const pricing = individualPricing.find(
-        row => row.student_id === studentId && row.subject_id === createSubjectId
-      );
-      const studentPrice = pricing?.price ?? tutorSubjPrice?.price ?? subj.price ?? createPrice;
-      const { data: template, error: tErr } = await supabase
-        .from('recurring_individual_sessions')
-        .insert({
-          tutor_id: createTutorId,
-          student_id: studentId,
-          subject_id: createSubjectId || null,
-          day_of_week: getDay(startDate),
-          start_time: format(startDate, 'HH:mm:ss'),
-          end_time: format(endDate, 'HH:mm:ss'),
-          start_date: format(startDate, 'yyyy-MM-dd'),
-          end_date: createRecurringEndDate,
-          meeting_link: createMeetingLink || null,
-          topic: createTopic || null,
-          price: studentPrice,
-          active: true,
-        })
-        .select('id, student_id')
-        .single();
-      if (tErr) throw new Error(tErr.message);
-      if (template) recurringTemplates.push(template);
+    const freq = createRecurringFrequency;
+    const daysToCreate =
+      freq !== 'monthly' && createRecurringWeekdays.length > 0
+        ? createRecurringWeekdays
+        : [getDay(startDate)];
+    const timeStr = format(startDate, 'HH:mm:ss');
+    const endTimeStr = format(endDate, 'HH:mm:ss');
+
+    type RecurringTpl = { id: string; student_id: string; firstOccurrence: Date };
+    const recurringTemplates: RecurringTpl[] = [];
+
+    for (const dayOfWeek of daysToCreate) {
+      let firstOccurrence = new Date(startDate);
+      const startDow = firstOccurrence.getDay();
+      if (startDow !== dayOfWeek) {
+        const diff = (dayOfWeek - startDow + 7) % 7;
+        firstOccurrence = addDays(firstOccurrence, diff);
+      }
+
+      for (const studentId of studentIdsToCreate) {
+        const pricing = individualPricing.find(
+          row => row.student_id === studentId && row.subject_id === createSubjectId,
+        );
+        const studentPrice = pricing?.price ?? tutorSubjPrice?.price ?? subj.price ?? createPrice;
+        const { data: template, error: tErr } = await supabase
+          .from('recurring_individual_sessions')
+          .insert({
+            tutor_id: createTutorId,
+            student_id: studentId,
+            subject_id: createSubjectId || null,
+            day_of_week: dayOfWeek,
+            start_time: timeStr,
+            end_time: endTimeStr,
+            start_date: format(firstOccurrence, 'yyyy-MM-dd'),
+            end_date: createRecurringEndDate,
+            meeting_link: createMeetingLink || null,
+            topic: createTopic || null,
+            price: studentPrice,
+            active: true,
+          })
+          .select('id, student_id')
+          .single();
+        if (tErr) throw new Error(tErr.message);
+        if (template) {
+          recurringTemplates.push({
+            id: template.id,
+            student_id: template.student_id,
+            firstOccurrence,
+          });
+        }
+      }
     }
 
     const packagesByStudent = new Map<string, any>();
     if (!createIsPaid && createSubjectId) {
-      for (const template of recurringTemplates) {
+      const uniqueStudentIds = [...new Set(recurringTemplates.map(t => t.student_id))];
+      for (const sid of uniqueStudentIds) {
         const { data: packages } = await supabase
           .from('lesson_packages')
           .select('*')
-          .eq('student_id', template.student_id)
+          .eq('student_id', sid)
           .eq('subject_id', createSubjectId)
           .eq('active', true)
           .eq('paid', true)
           .gt('available_lessons', 0)
           .order('created_at', { ascending: true })
           .limit(1);
-        if (packages?.[0]) packagesByStudent.set(template.student_id, packages[0]);
+        if (packages?.[0]) packagesByStudent.set(sid, packages[0]);
       }
     }
 
     const sessionsRows: Record<string, unknown>[] = [];
     const packagesUsage = new Map<string, number>();
-    let current = new Date(startDate);
     const endLimit = parseISO(createRecurringEndDate);
-    while (!isBefore(endLimit, current)) {
-      const sessionEnd = new Date(current.getTime() + durationMs);
-      for (const template of recurringTemplates) {
+
+    const advanceCurrent = (d: Date): Date => {
+      switch (freq) {
+        case 'biweekly':
+          return addWeeks(d, 2);
+        case 'monthly':
+          return addMonths(d, 1);
+        default:
+          return addWeeks(d, 1);
+      }
+    };
+
+    for (const template of recurringTemplates) {
+      let current = new Date(template.firstOccurrence);
+      while (!isBefore(endLimit, current)) {
+        const sessionEnd = new Date(current.getTime() + durationMs);
         const pricing = individualPricing.find(
-          row => row.student_id === template.student_id && row.subject_id === createSubjectId
+          row => row.student_id === template.student_id && row.subject_id === createSubjectId,
         );
         const studentPrice = pricing?.price ?? tutorSubjPrice?.price ?? subj.price ?? createPrice;
         let sessionPaid = createIsPaid;
@@ -465,8 +512,8 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
           created_by_role: 'org_admin',
           available_spots: subj.is_group ? subj.max_students : null,
         });
+        current = advanceCurrent(current);
       }
-      current = addWeeks(current, 1);
     }
 
     if (sessionsRows.length === 0) throw new Error('Failed to generate lessons.');

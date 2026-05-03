@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/lib/supabase';
 import { authHeaders } from '@/lib/apiHelpers';
+import { Checkbox } from '@/components/ui/checkbox';
 import { CircleHelp, Loader2, Package } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 
@@ -61,8 +62,15 @@ export default function SendPackageModal({
   const [isIndividualTutor, setIsIndividualTutor] = useState(false);
   const [isManualOnlyPlan, setIsManualOnlyPlan] = useState(false);
   const [expiresAt, setExpiresAt] = useState('');
+  /** Stripe: attach S.F. PDF to payment email (default on) */
+  const [attachSalesInvoice, setAttachSalesInvoice] = useState(true);
 
-  useEffect(() => { if (isOpen) fetchSubjects(); }, [isOpen]);
+  useEffect(() => {
+    if (isOpen) {
+      setAttachSalesInvoice(true);
+      void fetchSubjects();
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (subjects.length > 0 && !selectedSubjectId) {
@@ -162,6 +170,7 @@ export default function SendPackageModal({
           totalLessons,
           pricePerLesson,
           ...(expiresAt ? { expiresAt } : {}),
+          ...(!isManual ? { attachSalesInvoice } : {}),
         }),
         signal: controller.signal,
       });
@@ -336,6 +345,20 @@ export default function SendPackageModal({
                     <span className="text-violet-500">{t('package.includingFeesNote')}</span>
                   </p>
                 </div>
+              )}
+
+              {!isManual && (
+                <label className="flex items-start gap-3 cursor-pointer rounded-xl border border-violet-100 bg-white/80 px-3 py-2.5">
+                  <Checkbox
+                    className="mt-0.5"
+                    checked={attachSalesInvoice}
+                    onChange={(e) => setAttachSalesInvoice(e.target.checked)}
+                  />
+                  <span className="text-sm text-gray-800">
+                    <span className="font-medium">{t('invoices.includeSfInEmail')}</span>
+                    <span className="block text-xs text-gray-500 mt-0.5">{t('invoices.includeSfInEmailHint')}</span>
+                  </span>
+                </label>
               )}
 
               {error && (

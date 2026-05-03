@@ -39,6 +39,7 @@ export default function SendInvoiceModal({
   const [previewMode, setPreviewMode] = useState(false);
   /** When many lessons per payer, list starts collapsed; key = payer email */
   const [payerLessonListOpen, setPayerLessonListOpen] = useState<Record<string, boolean>>({});
+  const [includeSalesInvoice, setIncludeSalesInvoice] = useState(true);
 
   useEffect(() => {
     if (isOpen) {
@@ -161,6 +162,7 @@ export default function SendInvoiceModal({
           periodEndDate,
           paymentDeadlineDays,
           sessionIds,
+          includeSalesInvoice,
         }),
       });
       let result: any;
@@ -363,6 +365,19 @@ export default function SendInvoiceModal({
                   <p className="text-sm text-red-700">{error}</p>
                 </div>
               )}
+
+              <label className="flex items-start gap-3 cursor-pointer rounded-xl border border-gray-200 bg-gray-50/80 px-3 py-2.5">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 w-4 h-4 rounded border-gray-300 text-indigo-600"
+                  checked={includeSalesInvoice}
+                  onChange={(e) => setIncludeSalesInvoice(e.target.checked)}
+                />
+                <span className="text-sm text-gray-800">
+                  <span className="font-medium">{t('invoices.includeSfInEmail')}</span>
+                  <span className="block text-xs text-gray-500 mt-0.5">{t('invoices.includeSfInEmailHint')}</span>
+                </span>
+              </label>
 
               <div className="flex gap-2">
                 <Button

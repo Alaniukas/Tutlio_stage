@@ -6,6 +6,7 @@
 
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
+import { isOrgTutor } from './_lib/isOrgTutor.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -65,7 +66,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const tz = 'Europe/Vilnius';
         const dateStr = startTime.toLocaleDateString('lt-LT', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: tz });
         const timeStr = startTime.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit', timeZone: tz });
-        const data = { date: dateStr, time: timeStr, topic: session.topic, duration: durationMinutes, price: session.price, meetingLink: session.meeting_link };
+        const baseData = { date: dateStr, time: timeStr, topic: session.topic, duration: durationMinutes, price: session.price, meetingLink: session.meeting_link };
 
         if (reminderStudentHours > 0 && !session.reminder_student_sent && diffHours <= reminderStudentHours && diffHours >= 0 && student?.email) {
           try {
@@ -75,7 +76,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               body: JSON.stringify({
                 type: 'session_reminder',
                 to: student.email,
-                data: { ...data, recipientName: student.full_name, otherName: tutor?.full_name, isTutor: false },
+                data: { ...baseData, recipientName: student.full_name, otherName: tutor?.full_name, isTutor: false },
               }),
             });
             if (resp.ok) {
@@ -101,7 +102,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 type: 'session_reminder_payer',
                 to: payerEmail,
                 data: {
-                  ...data,
+                  ...baseData,
                   recipientName: payerName || undefined,
                   studentName: student?.full_name || 'Mokinys',
                   tutorName: tutor?.full_name || 'Korepetitorius',
@@ -121,13 +122,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         if (reminderTutorHours > 0 && !session.reminder_tutor_sent && diffHours <= reminderTutorHours && diffHours >= 0 && tutor?.email) {
           try {
+            const tutorReminderCore = {
+              date: dateStr,
+              time: timeStr,
+              topic: session.topic,
+              duration: durationMinutes,
+              meetingLink: session.meeting_link,
+            };
+            const tutorReminderData = isOrgTutor(tutor.organization_id)
+              ? tutorReminderCore
+              : { ...tutorReminderCore, price: session.price };
             const resp = await fetch(`${API_URL}/api/send-email`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
               body: JSON.stringify({
                 type: 'session_reminder',
                 to: tutor.email,
-                data: { ...data, recipientName: tutor.full_name, otherName: student?.full_name, isTutor: true },
+                data: {
+                  ...tutorReminderData,
+                  recipientName: tutor.full_name,
+                  otherName: student?.full_name,
+                  isTutor: true,
+                },
               }),
             });
             if (resp.ok) {

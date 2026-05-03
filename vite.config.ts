@@ -1,5 +1,6 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import type { IncomingMessage } from 'node:http';
 import path from 'path';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
@@ -21,22 +22,9 @@ export default defineConfig({
         scope: '/',
         start_url: '/',
         icons: [
-          {
-            src: 'pwa-192x192.png',
-            sizes: '192x192',
-            type: 'image/png',
-          },
-          {
-            src: 'pwa-512x512.png',
-            sizes: '512x512',
-            type: 'image/png',
-          },
-          {
-            src: 'pwa-512x512.png',
-            sizes: '512x512',
-            type: 'image/png',
-            purpose: 'maskable',
-          },
+          { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' },
+          { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png' },
+          { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
       workbox: {
@@ -48,10 +36,7 @@ export default defineConfig({
           {
             urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
             handler: 'NetworkFirst',
-            options: {
-              cacheName: 'supabase-api',
-              expiration: { maxEntries: 50, maxAgeSeconds: 300 },
-            },
+            options: { cacheName: 'supabase-api', expiration: { maxEntries: 50, maxAgeSeconds: 300 } },
           },
         ],
       },
@@ -66,9 +51,19 @@ export default defineConfig({
     port: 3000,
     host: '0.0.0.0',
     proxy: {
+      // Keep browser Host (e.g. localhost:3000) so API redirects use the Vite origin, not :3002.
       '/api': {
         target: 'http://localhost:3002',
-        changeOrigin: true,
+        changeOrigin: false,
+        configure(proxy) {
+          proxy.on('proxyReq', (proxyReq, incoming: IncomingMessage) => {
+            const h = incoming.headers.host;
+            if (typeof h === 'string' && h.trim()) {
+              proxyReq.setHeader('x-forwarded-host', h.trim());
+              proxyReq.setHeader('x-forwarded-proto', 'http');
+            }
+          });
+        },
       },
     },
   },

@@ -1,3 +1,30 @@
+/**
+ * Same lesson offer for one tutor (name + duration + price).
+ * Used to block duplicate rows regardless of colour / meeting link / grades.
+ */
+export function subjectTutorLessonKey(p: {
+  name: string;
+  duration_minutes: number;
+  price: unknown;
+}): string {
+  return `${String(p.name).trim().toLowerCase()}|${Number(p.duration_minutes)}|${Number(p.price)}`;
+}
+
+export function tutorSubjectsContainLessonDuplicate<
+  T extends { id?: string; name: string; duration_minutes: number; price: unknown },
+>(
+  rows: readonly T[],
+  candidate: { name: string; duration_minutes: number; price: unknown },
+  excludeId?: string
+): boolean {
+  const k = subjectTutorLessonKey(candidate);
+  for (const row of rows) {
+    if (excludeId && row.id === excludeId) continue;
+    if (subjectTutorLessonKey(row) === k) return true;
+  }
+  return false;
+}
+
 /** Canonical key for a subject (invitations, UI, DB) — colour always lowercase, numbers normalised. */
 
 export function subjectPresetKey(p: {

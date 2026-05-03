@@ -2,20 +2,18 @@ import { useState, useEffect, useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { DateInput } from '@/components/ui/date-input';
+import { TimeInput } from '@/components/ui/time-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/lib/supabase';
 import { Loader2, Search, CalendarDays } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 import { format, addDays, startOfDay, endOfDay } from 'date-fns';
 
-interface FindTutorModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  orgId: string | null;
-}
-
-interface TutorSlot {
+export interface TutorSlotPick {
   tutorId: string;
+  subjectId: string;
   tutorName: string;
   subjectName: string;
   price: number;
@@ -23,7 +21,17 @@ interface TutorSlot {
   end: Date;
 }
 
-export default function FindTutorModal({ isOpen, onClose, orgId }: FindTutorModalProps) {
+interface FindTutorModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  orgId: string | null;
+  /** Paspaudus rezultatą – uždaryti paiešką ir atidaryti užsakymą (pvz. org tvarkaraštyje) */
+  onPickSlot?: (slot: TutorSlotPick) => void;
+}
+
+type TutorSlot = TutorSlotPick;
+
+export default function FindTutorModal({ isOpen, onClose, orgId, onPickSlot }: FindTutorModalProps) {
   const { t } = useTranslation();
   const [subjects, setSubjects] = useState<{ id: string; name: string; price: number; tutor_id: string }[]>([]);
   const [selectedSubjectName, setSelectedSubjectName] = useState('');
@@ -41,21 +49,34 @@ export default function FindTutorModal({ isOpen, onClose, orgId }: FindTutorModa
     (async () => {
       const { data: adminUsers } = await supabase.from('organization_admins').select('user_id').eq('organization_id', orgId);
       const adminIds = new Set((adminUsers || []).map((a: any) => a.user_id));
-      const { data: profiles } = await supabase.from('profiles').select('id, full_name, has_active_license').eq('organization_id', orgId);
+      const { data: profiles } = await supabase.from('profiles').select('id, full_name, email, has_active_license').eq('organization_id', orgId);
       const { data: linkedStudents } = await supabase
         .from('students')
-        .select('linked_user_id')
-        .eq('organization_id', orgId)
-        .not('linked_user_id', 'is', null);
+        .select('linked_user_id, email')
+        .eq('organization_id', orgId);
       const linkedStudentUserIds = new Set(
         (linkedStudents || [])
           .map((s: any) => s.linked_user_id)
           .filter((id: string | null | undefined): id is string => Boolean(id)),
       );
-      const { data: orgRow } = await supabase.from('organizations').select('tutor_license_count').eq('id', orgId).single();
-      const orgUsesLicenses = (Number(orgRow?.tutor_license_count) || 0) > 0;
+      const linkedStudentEmails = new Set(
+        (linkedStudents || [])
+          .map((s: any) => String(s.email || '').trim().toLowerCase())
+          .filter((email: string) => email.length > 0),
+      );
+      const { data: orgRow } = await supabase
+        .from('organizations')
+        .select('tutor_license_count, tutor_limit')
+        .eq('id', orgId)
+        .single();
+      const orgUsesLicenses =
+        Math.max(Number(orgRow?.tutor_license_count) || 0, Number(orgRow?.tutor_limit) || 0) > 0;
       const tutorList = (profiles || []).filter(
-        (p: any) => !adminIds.has(p.id) && !linkedStudentUserIds.has(p.id) && (!orgUsesLicenses || p.has_active_license !== false),
+        (p: any) =>
+          !adminIds.has(p.id) &&
+          !linkedStudentUserIds.has(p.id) &&
+          !linkedStudentEmails.has(String(p.email || '').trim().toLowerCase()) &&
+          (!orgUsesLicenses || p.has_active_license !== false),
       );
       const map: Record<string, string> = {};
       tutorList.forEach((t: any) => { map[t.id] = t.full_name; });
@@ -104,10 +125,10 @@ export default function FindTutorModal({ isOpen, onClose, orgId }: FindTutorModa
     const matchingSubjects = selectedSubjectName
       ? subjects.filter(s => s.name === selectedSubjectName)
       : subjects;
-    const tutorSubjectMap: Record<string, { name: string; price: number }[]> = {};
+    const tutorSubjectMap: Record<string, { id: string; name: string; price: number }[]> = {};
     for (const s of matchingSubjects) {
       if (!tutorSubjectMap[s.tutor_id]) tutorSubjectMap[s.tutor_id] = [];
-      tutorSubjectMap[s.tutor_id].push({ name: s.name, price: s.price });
+      tutorSubjectMap[s.tutor_id].push({ id: s.id, name: s.name, price: s.price });
     }
 
     const slots: TutorSlot[] = [];
@@ -141,6 +162,7 @@ export default function FindTutorModal({ isOpen, onClose, orgId }: FindTutorModa
         for (const sub of tutorSubs) {
           slots.push({
             tutorId: avail.tutor_id,
+            subjectId: sub.id,
             tutorName: tutors[avail.tutor_id] || '—',
             subjectName: sub.name,
             price: sub.price,
@@ -179,24 +201,47 @@ export default function FindTutorModal({ isOpen, onClose, orgId }: FindTutorModa
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <div>
+            <div className="space-y-1.5">
               <Label className="text-xs">{t('findLesson.dateFrom')}</Label>
-              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="w-full rounded-xl border border-gray-200 px-3 py-1.5 text-sm" />
+              <DateInput
+                value={dateFrom}
+                onChange={e => setDateFrom(e.target.value)}
+                max={dateTo}
+                className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+              />
             </div>
-            <div>
+            <div className="space-y-1.5">
               <Label className="text-xs">{t('findLesson.dateTo')}</Label>
-              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-full rounded-xl border border-gray-200 px-3 py-1.5 text-sm" />
+              <DateInput
+                value={dateTo}
+                onChange={e => setDateTo(e.target.value)}
+                min={dateFrom}
+                className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+              />
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
+          <div
+            className="grid grid-cols-2 gap-3 rounded-xl border border-indigo-100 bg-indigo-50/40 p-3"
+            onWheel={(e) => e.stopPropagation()}
+          >
+            <div className="space-y-1.5 min-w-0">
               <Label className="text-xs">{t('findLesson.timeFrom')}</Label>
-              <input type="time" value={timeFrom} onChange={e => setTimeFrom(e.target.value)} className="w-full rounded-xl border border-gray-200 px-3 py-1.5 text-sm" />
+              <TimeInput
+                value={timeFrom}
+                onChange={setTimeFrom}
+                minuteStep={1}
+                className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+              />
             </div>
-            <div>
+            <div className="space-y-1.5 min-w-0">
               <Label className="text-xs">{t('findLesson.timeTo')}</Label>
-              <input type="time" value={timeTo} onChange={e => setTimeTo(e.target.value)} className="w-full rounded-xl border border-gray-200 px-3 py-1.5 text-sm" />
+              <TimeInput
+                value={timeTo}
+                onChange={setTimeTo}
+                minuteStep={1}
+                className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+              />
             </div>
           </div>
 
@@ -214,15 +259,35 @@ export default function FindTutorModal({ isOpen, onClose, orgId }: FindTutorModa
 
           {results.length > 0 && (
             <div className="space-y-2 max-h-[300px] overflow-y-auto">
-              {results.map((slot, i) => (
-                <div key={i} className="flex items-center justify-between p-3 border border-gray-200 rounded-xl hover:border-indigo-200 transition-colors">
+              {onPickSlot && (
+                <p className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-2.5 py-1.5">
+                  {t('findLesson.tapToBook')}
+                </p>
+              )}
+              {results.map((slot) => (
+                <button
+                  key={`${slot.tutorId}-${slot.subjectId}-${slot.start.getTime()}`}
+                  type="button"
+                  disabled={!onPickSlot}
+                  onClick={() => {
+                    if (!onPickSlot) return;
+                    onPickSlot(slot);
+                    onClose();
+                  }}
+                  className={cn(
+                    'w-full flex items-center justify-between p-3 border border-gray-200 rounded-xl text-left transition-colors',
+                    onPickSlot
+                      ? 'hover:border-indigo-400 hover:bg-indigo-50/50 cursor-pointer'
+                      : 'opacity-90 cursor-default',
+                  )}
+                >
                   <div>
                     <p className="text-sm font-medium text-gray-900">{slot.tutorName}</p>
                     <p className="text-xs text-gray-500">
                       {slot.subjectName} &middot; {format(slot.start, 'MMM d, HH:mm')}–{format(slot.end, 'HH:mm')} &middot; €{slot.price}
                     </p>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           )}

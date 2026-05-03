@@ -12,8 +12,9 @@ import {
   anyOrgLessonEdit,
   type OrgLessonEditScope,
 } from '@/lib/orgTutorLessonEdit';
-import { subjectPresetKey } from '@/lib/subjectPresetDedupe';
+import { subjectPresetKey, subjectTutorLessonKey, tutorSubjectsContainLessonDuplicate } from '@/lib/subjectPresetDedupe';
 import { removeOrgSubjectTemplatesMatchingPreset } from '@/lib/orgSubjectTemplateCleanup';
+import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import {
   Dialog,
   DialogContent,
@@ -215,29 +216,10 @@ export default function CompanySettings() {
       setLessonEditScope(nextLessonEditScope);
     }
 
-    // Fetch org tutors (excluding admins)
-    const { data: adminUsers } = await supabase
-      .from('organization_admins')
-      .select('user_id')
-      .eq('organization_id', adminRow.organization_id);
-    const adminIds = new Set((adminUsers || []).map((a: any) => a.user_id));
-
-    const { data: tutorData } = await supabase
-      .from('profiles')
-      .select('id, full_name')
-      .eq('organization_id', adminRow.organization_id);
-    const { data: linkedStudents } = await supabase
-      .from('students')
-      .select('linked_user_id')
-      .eq('organization_id', adminRow.organization_id)
-      .not('linked_user_id', 'is', null);
-    const linkedStudentUserIds = new Set(
-      (linkedStudents || [])
-        .map((s: any) => s.linked_user_id)
-        .filter((id: string | null | undefined): id is string => Boolean(id)),
-    );
-    const tutorList = (tutorData || []).filter(
-      (t: any) => !adminIds.has(t.id) && !linkedStudentUserIds.has(t.id),
+    const tutorList = await getOrgVisibleTutors(
+      supabase as any,
+      adminRow.organization_id,
+      'id, full_name, email',
     );
     setOrgTutors(tutorList);
 
@@ -375,11 +357,8 @@ export default function CompanySettings() {
       is_group: subject.is_group || false,
       max_students: subject.max_students || null,
     });
-    // Pre-select ALL tutors who already teach this subject (by name)
-    const tutorIdsForSubject = subjects
-      .filter((s) => !s.isOrgTemplate && s.name === subject.name)
-      .map((s) => s.tutor_id);
-    setSelectedTutorIds(tutorIdsForSubject);
+    // Edit this row only — do not pre-select every tutor with the same name (that caused accidental deletes/duplicates).
+    setSelectedTutorIds([subject.tutor_id]);
     setIsSubjectDialogOpen(true);
   };
 
@@ -414,21 +393,14 @@ export default function CompanySettings() {
       const idx = templates.findIndex((t) => t.id === editingSubject.id);
 
       if (selectedTutorIds.length > 0) {
-        const presetKey = subjectPresetKey({ ...subjectData, color: subjectData.color });
-        const existingKeys = new Set(
+        const lessonK = subjectTutorLessonKey(subjectData);
+        const existingLessonKeys = new Set(
           subjects
             .filter((s) => !s.isOrgTemplate && selectedTutorIds.includes(s.tutor_id))
-            .map((s) =>
-              `${s.tutor_id}|${subjectPresetKey({
-                name: s.name,
-                duration_minutes: s.duration_minutes,
-                price: s.price,
-                color: s.color,
-              })}`
-            )
+            .map((s) => `${s.tutor_id}|${subjectTutorLessonKey(s)}`)
         );
         const toInsertTutorIds = selectedTutorIds.filter(
-          (tid) => !existingKeys.has(`${tid}|${presetKey}`)
+          (tid) => !existingLessonKeys.has(`${tid}|${lessonK}`)
         );
         if (toInsertTutorIds.length > 0) {
           const { error: insErr } = await supabase
@@ -461,30 +433,34 @@ export default function CompanySettings() {
     }
 
     if (editingSubject && !editingSubject.isOrgTemplate) {
-      // Get all existing subject records with the same name
-      const existingForName = subjects.filter((s) => !s.isOrgTemplate && s.name === editingSubject.name);
-      const existingTutorIds = new Set(existingForName.map((s) => s.tutor_id));
-      const selectedSet = new Set(selectedTutorIds);
+      if (selectedTutorIds.length !== 1) {
+        alert(t('compSet.subjectEditNeedOneTutor'));
+        setSavingSubject(false);
+        return;
+      }
+      const newTutorId = selectedTutorIds[0];
 
-      const { price: _price, duration_minutes: _dur, ...structuralData } = subjectData;
-
-      const toUpdate = existingForName.filter((s) => selectedSet.has(s.tutor_id));
-      for (const s of toUpdate) {
-        await supabase.from('subjects').update(structuralData).eq('id', s.id);
+      const conflictingPeers = subjects.filter(
+        (s) => !s.isOrgTemplate && s.tutor_id === newTutorId && s.id !== editingSubject.id
+      );
+      if (tutorSubjectsContainLessonDuplicate(conflictingPeers, subjectData)) {
+        alert(t('compSet.subjectDuplicateForTutor'));
+        setSavingSubject(false);
+        return;
       }
 
-      const toInsert = selectedTutorIds.filter((tid) => !existingTutorIds.has(tid));
-      if (toInsert.length > 0) {
-        const { error: insErr } = await supabase
-          .from('subjects')
-          .insert(toInsert.map((tutorId) => ({ ...subjectData, tutor_id: tutorId })));
-        if (!insErr && orgId) await removeOrgSubjectTemplatesMatchingPreset(orgId, subjectData);
+      const { error: updErr } = await supabase
+        .from('subjects')
+        .update({ ...subjectData, tutor_id: newTutorId })
+        .eq('id', editingSubject.id);
+
+      if (updErr) {
+        alert(t('compSet.errorPrefix', { msg: updErr.message }));
+        setSavingSubject(false);
+        return;
       }
 
-      const toDelete = existingForName.filter((s) => !selectedSet.has(s.tutor_id));
-      for (const s of toDelete) {
-        await supabase.from('subjects').delete().eq('id', s.id);
-      }
+      if (orgId) await removeOrgSubjectTemplatesMatchingPreset(orgId, subjectData);
 
       setIsSubjectDialogOpen(false);
       fetchSettings();
@@ -510,7 +486,16 @@ export default function CompanySettings() {
       return;
     }
 
-    const inserts = selectedTutorIds.map((tutorId) => ({ ...subjectData, tutor_id: tutorId }));
+    const lessonK = subjectTutorLessonKey(subjectData);
+    const existingRows = subjects.filter((s) => !s.isOrgTemplate && selectedTutorIds.includes(s.tutor_id));
+    const occupied = new Set(existingRows.map((s) => `${s.tutor_id}|${subjectTutorLessonKey(s)}`));
+    const tutorIdsToInsert = selectedTutorIds.filter((tid) => !occupied.has(`${tid}|${lessonK}`));
+    if (tutorIdsToInsert.length === 0) {
+      alert(t('compSet.subjectDuplicateForTutor'));
+      setSavingSubject(false);
+      return;
+    }
+    const inserts = tutorIdsToInsert.map((tutorId) => ({ ...subjectData, tutor_id: tutorId }));
     const { error } = await supabase.from('subjects').insert(inserts);
     if (!error) {
       if (orgId) await removeOrgSubjectTemplatesMatchingPreset(orgId, subjectData);
@@ -591,29 +576,12 @@ export default function CompanySettings() {
       return;
     }
 
-    const { data: adminUsers } = await supabase
-      .from('organization_admins')
-      .select('user_id')
-      .eq('organization_id', orgId);
-    const adminIds = new Set((adminUsers || []).map((a: { user_id: string }) => a.user_id));
-
-    const { data: orgProfiles } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('organization_id', orgId);
-    const { data: linkedStudentsForSave } = await supabase
-      .from('students')
-      .select('linked_user_id')
-      .eq('organization_id', orgId)
-      .not('linked_user_id', 'is', null);
-    const linkedStudentUserIdsForSave = new Set(
-      (linkedStudentsForSave || [])
-        .map((s: any) => s.linked_user_id)
-        .filter((id: string | null | undefined): id is string => Boolean(id)),
+    const tutorRows = await getOrgVisibleTutors(
+      supabase as any,
+      orgId,
+      'id, email',
     );
-    const tutorIds = (orgProfiles || [])
-      .map((p: { id: string }) => p.id)
-      .filter((id: string) => !adminIds.has(id) && !linkedStudentUserIdsForSave.has(id));
+    const tutorIds = tutorRows.map((p) => p.id);
 
     if (tutorIds.length > 0) {
       const { error: tutorsUpdateError } = await supabase
@@ -865,7 +833,7 @@ export default function CompanySettings() {
 
           {/* Subject Management Section */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+            <div className="flex items-center justify-between mb-4">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
                   <BookOpen className="w-5 h-5 text-emerald-600" /> {t('compSet.subjectManagement')}
@@ -874,7 +842,7 @@ export default function CompanySettings() {
                   {t('compSet.subjectManagementDesc')}
                 </p>
               </div>
-              <Button onClick={openAddSubjectDialog} size="sm" className="gap-2 rounded-xl flex-shrink-0">
+              <Button onClick={openAddSubjectDialog} size="sm" className="gap-2 rounded-xl">
                 <Plus className="w-4 h-4" /> {t('compSet.addSubject')}
               </Button>
             </div>

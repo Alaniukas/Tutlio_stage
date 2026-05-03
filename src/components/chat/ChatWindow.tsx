@@ -11,6 +11,7 @@ import {
 } from '@/hooks/useChat';
 import type { Conversation } from '@/hooks/useChat';
 import { useUser } from '@/contexts/UserContext';
+import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { supabase } from '@/lib/supabase';
 import MessageBubble from './MessageBubble';
 import type { SenderRole } from './MessageBubble';
@@ -27,6 +28,7 @@ interface ChatWindowProps {
 export default function ChatWindow({ conversation, onBack, onMessageSent, participantNames, participantRoles }: ChatWindowProps) {
   const { t } = useTranslation();
   const { user } = useUser();
+  const orgPolicy = useOrgTutorPolicy();
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -169,11 +171,17 @@ export default function ChatWindow({ conversation, onBack, onMessageSent, partic
 
   const handleSend = async () => {
     if (!conversation || !text.trim() || sending) return;
+    const blockedByLicense =
+      orgPolicy.isOrgTutor && orgPolicy.orgUsesLicenses && orgPolicy.hasActiveLicense === false;
+    if (blockedByLicense) return;
     setSending(true);
     const result = await sendMessage(conversation.conversation_id, text.trim());
     if (result) {
       setText('');
       onMessageSent?.();
+    } else {
+      console.warn('[ChatWindow] sendMessage returned null');
+      window.alert(t('chat.failedToSend'));
     }
     setSending(false);
   };
@@ -190,13 +198,14 @@ export default function ChatWindow({ conversation, onBack, onMessageSent, partic
     setUploading(true);
     const result = await uploadChatFile(conversation.conversation_id, file);
     if (result) {
-      await sendMessage(
+      const sent = await sendMessage(
         conversation.conversation_id,
         '',
         'file',
         { storage_path: result.path, file_name: file.name, file_size: file.size },
       );
-      onMessageSent?.();
+      if (sent) onMessageSent?.();
+      else window.alert(t('chat.failedToSend'));
     }
     setUploading(false);
   };
@@ -416,6 +425,12 @@ export default function ChatWindow({ conversation, onBack, onMessageSent, partic
 
       {/* Input */}
       <div className="px-4 py-3 border-t border-gray-100 bg-white flex-shrink-0">
+        {orgPolicy.isOrgTutor && orgPolicy.orgUsesLicenses && orgPolicy.hasActiveLicense === false && (
+          <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+            <p className="text-sm font-semibold text-amber-900">{t('cal.licenseFrozenTitle')}</p>
+            <p className="text-xs text-amber-800 mt-0.5">{t('cal.licenseFrozenDesc')}</p>
+          </div>
+        )}
         <div className="flex items-end gap-2">
           <ChatFileUpload onFileSelect={handleFileSelect} uploading={uploading} />
           <textarea
@@ -427,10 +442,15 @@ export default function ChatWindow({ conversation, onBack, onMessageSent, partic
             rows={1}
             className="flex-1 resize-none text-sm px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300 max-h-32"
             style={{ minHeight: '40px' }}
+            disabled={orgPolicy.isOrgTutor && orgPolicy.orgUsesLicenses && orgPolicy.hasActiveLicense === false}
           />
           <button
             onClick={handleSend}
-            disabled={!text.trim() || sending}
+            disabled={
+              !text.trim() ||
+              sending ||
+              (orgPolicy.isOrgTutor && orgPolicy.orgUsesLicenses && orgPolicy.hasActiveLicense === false)
+            }
             className={cn(
               'p-2.5 rounded-xl bg-indigo-600 text-white transition-all',
               text.trim() && !sending

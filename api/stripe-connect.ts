@@ -59,7 +59,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 accountId = account.id;
 
                 // Save account ID
-                await supabase.from(table).update({ stripe_account_id: accountId }).eq('id', entityId);
+                const { error: saveAcctErr } = await supabase
+                    .from(table)
+                    .update({ stripe_account_id: accountId })
+                    .eq('id', entityId);
+                if (saveAcctErr) {
+                    console.error('[stripe-connect] Failed to save stripe_account_id:', saveAcctErr);
+                    return res.status(500).json({ error: saveAcctErr.message || 'Could not save Stripe account' });
+                }
             }
 
             // Create account onboarding link
@@ -109,7 +116,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
 
             if (complete) {
-                await supabase.from(table).update({ stripe_onboarding_complete: true }).eq('id', entityId);
+                const { error: flagErr } = await supabase
+                    .from(table)
+                    .update({ stripe_onboarding_complete: true })
+                    .eq('id', entityId);
+                if (flagErr) console.error('[stripe-connect] onboarding flag:', flagErr);
             }
 
             return res.status(200).json({

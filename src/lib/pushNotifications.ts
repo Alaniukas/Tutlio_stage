@@ -35,7 +35,7 @@ export async function subscribeToPush(): Promise<PushSubscription | null> {
   let subscription = await registration.pushManager.getSubscription();
   if (!subscription) {
     subscription = await registration.pushManager.subscribe({
-      userVisibilityOnly: true,
+      userVisibleOnly: true,
       applicationServerKey: urlBase64ToUint8Array(vapidKey),
     });
   }

@@ -46,7 +46,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : '';
   const inferredAppUrl = host ? `${protoHeader || 'https'}://${host}` : '';
   const appUrl = process.env.APP_URL || process.env.VITE_APP_URL || inferredAppUrl || 'https://tutlio.lt';
-  const completionUrl = `${appUrl}/api/school-contract-complete?token=${encodeURIComponent(token)}`;
+  const completionUrl = `${appUrl.replace(/\/$/, '')}/school-contract-complete?token=${encodeURIComponent(token)}`;
   return res.status(200).json({ completionUrl });
 }
 

@@ -62,6 +62,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(409).json({ error: 'Student account already linked' });
     }
 
+    const submittedEmail = String(email).trim().toLowerCase();
+    const studentEmail = String(student.email || '').trim().toLowerCase();
+    const hasStudentEmail = studentEmail.length > 0;
+
+    if (hasStudentEmail && studentEmail !== submittedEmail) {
+      return res.status(400).json({ error: 'Email does not match student record' });
+    }
+
     const normalizedDbEmail = (student.email || '').trim().toLowerCase();
     const normalizedInputEmail = String(email).trim().toLowerCase();
     const emailChanged = normalizedDbEmail.length > 0 && normalizedDbEmail !== normalizedInputEmail;
@@ -105,7 +113,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     await supabase.from('students').update({
-      email,
+      email: hasStudentEmail ? student.email : submittedEmail,
       linked_user_id: authData.user.id,
       payment_payer: payerType || null,
       payer_name: payerType === 'parent' ? payerName : null,

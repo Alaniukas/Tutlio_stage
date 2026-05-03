@@ -6,7 +6,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatLithuanianPhone, validateLithuanianPhone } from '@/lib/utils';
-import { ensureTutorPresetSubjects } from '@/lib/ensureTutorPresetSubjects';
 import { Eye, EyeOff, Building2, AlertCircle } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 
@@ -14,6 +13,7 @@ export default function Register() {
   const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const orgToken = searchParams.get('org_token');
+  const normalizedOrgToken = orgToken?.trim().toUpperCase() || null;
   const subscriptionSuccess = searchParams.get('subscription_success');
   const checkoutSessionId = searchParams.get('session_id');
   const requestedPlan = searchParams.get('plan');
@@ -43,23 +43,26 @@ export default function Register() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!orgToken) return;
+    if (!normalizedOrgToken) return;
     const validateToken = async () => {
-      const { data } = await supabase
-        .rpc('validate_tutor_invite_token', { p_token: orgToken })
-        .maybeSingle();
+      const response = await fetch('/api/validate-tutor-invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: normalizedOrgToken }),
+      });
+      const data = response.ok ? await response.json().catch(() => null) : null;
 
-      if (!data || data.used) {
+      if (!data?.valid) {
         setOrgTokenValid(false);
       } else {
         setOrgTokenValid(true);
-        setOrgInviteId(data.id);
-        setOrgId(data.organization_id);
-        setOrgName(data.organization_name || null);
+        setOrgInviteId(data.inviteId || null);
+        setOrgId(data.organizationId || null);
+        setOrgName(data.orgName || null);
       }
     };
     validateToken();
-  }, [orgToken]);
+  }, [normalizedOrgToken]);
 
   useEffect(() => {
     if (subscriptionSuccess === 'true' && checkoutSessionId) {
@@ -79,7 +82,7 @@ export default function Register() {
       return;
     }
 
-    if (orgToken && !orgTokenValid) {
+    if (normalizedOrgToken && !orgTokenValid) {
       setError(t('register.invalidInviteError'));
       setLoading(false);
       return;
@@ -102,30 +105,58 @@ export default function Register() {
     const stripeCheckoutSessionId = sessionStorage.getItem('stripe_checkout_session_id');
 
     const appOrigin = import.meta.env.VITE_APP_URL || window.location.origin;
-    const emailRedirectTo = orgToken
-      ? `${appOrigin}/auth/callback`
-      : `${appOrigin}/registration/subscription`;
+    let authData: any = null;
 
-    const { data: authData, error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo,
-        data: {
-          full_name: fullName,
+    if (normalizedOrgToken) {
+      const inviteRegisterRes = await fetch('/api/register-tutor-invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          password,
+          fullName,
           phone,
-          accepted_privacy_policy_at: acceptedAt,
-          accepted_terms_at: acceptedAt,
-          ...(orgToken ? { org_token: orgToken } : {}),
-          ...(stripeCheckoutSessionId ? { stripe_checkout_session_id: stripeCheckoutSessionId } : {}),
-        },
-      },
-    });
+          orgToken: normalizedOrgToken,
+          acceptedAt,
+        }),
+      });
+      const inviteRegisterBody = await inviteRegisterRes.json().catch(() => ({}));
+      if (!inviteRegisterRes.ok) {
+        setError(inviteRegisterBody?.error || t('auth.registerError'));
+        setLoading(false);
+        return;
+      }
 
-    if (signUpError) {
-      setError(signUpError.message);
-      setLoading(false);
-      return;
+      const signInResult = await supabase.auth.signInWithPassword({ email, password });
+      if (signInResult.error || !signInResult.data.user) {
+        setError(signInResult.error?.message || t('auth.loginError'));
+        setLoading(false);
+        return;
+      }
+      authData = signInResult.data;
+    } else {
+      const emailRedirectTo = `${appOrigin}/registration/subscription`;
+      const signUpResult = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo,
+          data: {
+            full_name: fullName,
+            phone,
+            accepted_privacy_policy_at: acceptedAt,
+            accepted_terms_at: acceptedAt,
+            ...(stripeCheckoutSessionId ? { stripe_checkout_session_id: stripeCheckoutSessionId } : {}),
+          },
+        },
+      });
+
+      if (signUpResult.error) {
+        setError(signUpResult.error.message);
+        setLoading(false);
+        return;
+      }
+      authData = signUpResult.data;
     }
 
     if (authData.session && authData.user) {
@@ -164,32 +195,19 @@ export default function Register() {
         sessionStorage.removeItem('stripe_checkout_session_id');
       }
 
-      if (meta.org_token) {
-        const { data: invite, error: inviteError } = await supabase
-          .from('tutor_invites')
-          .select('id, organization_id, used, subjects_preset, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent')
-          .eq('token', meta.org_token)
-          .maybeSingle();
-
-        if (invite && !invite.used) {
-          profileData = {
-            ...profileData,
-            organization_id: invite.organization_id,
-            cancellation_hours: invite.cancellation_hours ?? 24,
-            cancellation_fee_percent: invite.cancellation_fee_percent ?? 0,
-            reminder_student_hours: invite.reminder_student_hours ?? 2,
-            reminder_tutor_hours: invite.reminder_tutor_hours ?? 2,
-            break_between_lessons: invite.break_between_lessons ?? 0,
-            min_booking_hours: invite.min_booking_hours ?? 1,
-            company_commission_percent: invite.company_commission_percent ?? 0,
-          };
-
-          await supabase
-            .from('tutor_invites')
-            .update({ used: true, used_by_profile_id: user.id })
-            .eq('id', invite.id);
-
-          await ensureTutorPresetSubjects(user.id, invite.subjects_preset as any);
+      if (meta.org_token && authData.session?.access_token) {
+        const metaOrgToken = String(meta.org_token).trim().toUpperCase();
+        const claimRes = await fetch('/api/claim-tutor-invite', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${authData.session.access_token}`,
+          },
+          body: JSON.stringify({ token: metaOrgToken }),
+        });
+        const claimData = claimRes.ok ? await claimRes.json().catch(() => null) : null;
+        if (claimData?.organizationId) {
+          profileData = { ...profileData, organization_id: claimData.organizationId };
         }
       }
 
@@ -240,7 +258,7 @@ export default function Register() {
         </CardHeader>
 
         <CardContent>
-          {orgToken && orgTokenValid === true && orgName && (
+          {normalizedOrgToken && orgTokenValid === true && orgName && (
             <div className="flex items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 mb-4">
               <Building2 className="w-5 h-5 text-indigo-600 flex-shrink-0" />
               <div>
@@ -249,7 +267,7 @@ export default function Register() {
               </div>
             </div>
           )}
-          {orgToken && orgTokenValid === false && (
+          {normalizedOrgToken && orgTokenValid === false && (
             <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3 mb-4 text-sm text-red-700">
               <AlertCircle className="w-4 h-4 flex-shrink-0" />
               {t('register.invalidInvite')}
@@ -309,7 +327,7 @@ export default function Register() {
             </div>
 
             {error && <p className="text-sm text-red-500">{error}</p>}
-            <Button type="submit" className="w-full" disabled={loading || (orgToken !== null && orgTokenValid === false)}>
+            <Button type="submit" className="w-full" disabled={loading || (normalizedOrgToken !== null && orgTokenValid === false)}>
               {loading ? t('common.registering') : t('common.register')}
             </Button>
           </form>

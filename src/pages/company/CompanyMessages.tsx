@@ -5,6 +5,7 @@ import { useConversations } from '@/hooks/useChat';
 import ConversationList from '@/components/chat/ConversationList';
 import ChatWindow from '@/components/chat/ChatWindow';
 import type { Conversation, MessageableStudent } from '@/hooks/useChat';
+import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { ChevronDown } from 'lucide-react';
 
 const ORG_CACHE_TTL = 300_000;
@@ -41,33 +42,23 @@ export default function CompanyMessages() {
 
     if (!adminRow) { setOrgLoading(false); return; }
 
-    const { data: adminUsers } = await supabase
-      .from('organization_admins')
-      .select('user_id')
-      .eq('organization_id', adminRow.organization_id);
-    const adminIds = new Set((adminUsers || []).map((a: any) => a.user_id));
-
-    const { data: tutors } = await supabase
-      .from('profiles')
-      .select('id, full_name, email')
-      .eq('organization_id', adminRow.organization_id);
-    const { data: linkedStudents } = await supabase
-      .from('students')
-      .select('linked_user_id')
-      .eq('organization_id', adminRow.organization_id)
-      .not('linked_user_id', 'is', null);
-    const linkedStudentUserIds = new Set(
-      (linkedStudents || [])
-        .map((s: any) => s.linked_user_id)
-        .filter((id: string | null | undefined): id is string => Boolean(id)),
+    const tutorList = await getOrgVisibleTutors(
+      supabase as any,
+      adminRow.organization_id,
+      'id, full_name, email',
     );
-
-    if (!tutors || tutors.length === 0) { setOrgLoading(false); return; }
-
-    const tutorList = tutors.filter((p) => !adminIds.has(p.id) && !linkedStudentUserIds.has(p.id));
+    if (tutorList.length === 0) { setOrgLoading(false); return; }
     setOrgTutors(tutorList.map((t) => ({ id: t.id, full_name: t.full_name ?? '' })));
     const tutorIdSet = new Set(tutorList.map((t) => t.id));
     const tutorIds = tutorList.map((t) => t.id);
+
+    // Pre-compute org admin user_ids so we can exclude them from the "student" slot
+    // when mapping each conversation to a tutor↔counterparty pair.
+    const { data: orgAdminRows } = await supabase
+      .from('organization_admins')
+      .select('user_id')
+      .eq('organization_id', adminRow.organization_id);
+    const adminIds = new Set<string>((orgAdminRows ?? []).map((r: any) => r.user_id).filter(Boolean));
 
     const { data: participantRows } = await supabase
       .from('chat_participants')
@@ -105,6 +96,11 @@ export default function CompanyMessages() {
       .select('linked_user_id, full_name, email')
       .in('linked_user_id', allUserIds);
 
+    const { data: parentRows } = await supabase
+      .from('parent_profiles')
+      .select('user_id, full_name, email')
+      .in('user_id', allUserIds);
+
     const nameMap = new Map<string, { name: string; email: string }>();
     (profiles ?? []).forEach((p) => nameMap.set(p.id, { name: p.full_name ?? '', email: p.email ?? '' }));
     (studentRows ?? []).forEach((s) => {
@@ -112,39 +108,67 @@ export default function CompanyMessages() {
         nameMap.set(s.linked_user_id, { name: s.full_name ?? '', email: s.email ?? '' });
       }
     });
+    (parentRows ?? []).forEach((p) => {
+      if (p.user_id && !nameMap.has(p.user_id)) {
+        nameMap.set(p.user_id, { name: p.full_name ?? '', email: p.email ?? '' });
+      }
+    });
+
+    const linkedStudentUserIds = new Set<string>(
+      (studentRows ?? [])
+        .map((s: any) => s.linked_user_id)
+        .filter((id: string | null | undefined): id is string => !!id),
+    );
+    const parentUserIds = new Set<string>(
+      (parentRows ?? [])
+        .map((p: any) => p.user_id)
+        .filter((id: string | null | undefined): id is string => !!id),
+    );
 
     const studentNamesSet = new Map<string, string>();
 
     const mapped: Conversation[] = convRows.map((c) => {
       const parts = (allParticipants ?? []).filter((p) => p.conversation_id === c.id);
       const tutorPart = parts.find((p) => tutorIdSet.has(p.user_id));
-      const studentPart = parts.find((p) => !tutorIdSet.has(p.user_id) && !adminIds.has(p.user_id));
+      const counterpartyPart = parts.find(
+        (p) => !tutorIdSet.has(p.user_id) && !adminIds.has(p.user_id),
+      );
       const other = parts.find((p) => p.user_id !== user.id) ?? parts[0];
 
       const tutorInfo = nameMap.get(tutorPart?.user_id ?? '') ?? { name: '-', email: '' };
-      const studentInfo = nameMap.get(studentPart?.user_id ?? '') ?? nameMap.get(other?.user_id ?? '') ?? { name: 'Unknown', email: '' };
+      const counterpartyId = counterpartyPart?.user_id ?? '';
+      const counterpartyInfo =
+        nameMap.get(counterpartyId) ??
+        nameMap.get(other?.user_id ?? '') ?? { name: 'Unknown', email: '' };
 
-      if (studentPart?.user_id) {
-        studentNamesSet.set(studentPart.user_id, studentInfo.name);
+      const isParent = parentUserIds.has(counterpartyId);
+      const isStudent = linkedStudentUserIds.has(counterpartyId);
+
+      if (isStudent) {
+        studentNamesSet.set(counterpartyId, counterpartyInfo.name);
       }
 
-      const displayName = `${tutorInfo.name} ↔ ${studentInfo.name}`;
+      const counterpartyLabel = isParent
+        ? `${counterpartyInfo.name} (${t('chat.roleParent')})`
+        : counterpartyInfo.name;
+      const displayName = `${tutorInfo.name} ↔ ${counterpartyLabel}`;
 
       return {
         conversation_id: c.id,
         last_message_at: c.last_message_at,
         other_user_id: other?.user_id ?? '',
         other_user_name: displayName,
-        other_user_email: studentInfo.email,
+        other_user_email: counterpartyInfo.email,
         last_message_content: null,
         last_message_type: null,
         last_message_sender_id: null,
         last_message_created_at: c.last_message_at,
         unread_count: 0,
         tutor_name: tutorInfo.name,
-        student_name: studentInfo.name,
+        student_name: counterpartyInfo.name,
         tutor_id: tutorPart?.user_id,
-        student_linked_id: studentPart?.user_id,
+        student_linked_id: isStudent ? counterpartyId : undefined,
+        other_party_kind: isParent ? 'parent' : isStudent ? 'student' : undefined,
       };
     });
 
@@ -195,7 +219,11 @@ export default function CompanyMessages() {
     if (viewMode !== 'org' || !active) return undefined;
     const map = new Map<string, string>();
     if (active.tutor_id) map.set(active.tutor_id, 'tutor');
-    if (active.student_linked_id) map.set(active.student_linked_id, 'student');
+    if (active.student_linked_id) {
+      map.set(active.student_linked_id, 'student');
+    } else if (active.other_party_kind === 'parent' && active.other_user_id) {
+      map.set(active.other_user_id, 'parent');
+    }
     return map.size > 0 ? map : undefined;
   }, [viewMode, active]);
 
@@ -211,7 +239,16 @@ export default function CompanyMessages() {
       last_message_sender_id: null,
       last_message_created_at: new Date().toISOString(),
       unread_count: 0,
-      other_party_kind: student.role === 'student' ? 'student' : student.role === 'tutor' ? 'tutor' : undefined,
+      other_party_kind:
+        student.role === 'student'
+          ? 'student'
+          : student.role === 'tutor'
+            ? 'tutor'
+            : student.role === 'org_admin'
+              ? 'org_admin'
+              : student.role === 'parent'
+                ? 'parent'
+                : undefined,
     };
     setActive(newConv);
     setMobileShowChat(true);
@@ -220,8 +257,8 @@ export default function CompanyMessages() {
 
   return (
     <>
-      <div className="flex-1 px-3 sm:px-6 py-4 sm:py-6">
-        <h1 className="text-2xl font-bold text-gray-900 mb-3 sm:mb-4">{t('chat.title')}</h1>
+      <div className="flex-1 p-6">
+        <h1 className="text-2xl font-bold text-gray-900 mb-4">{t('chat.title')}</h1>
 
         <div className="flex flex-wrap gap-2 mb-4">
           <button
@@ -269,7 +306,7 @@ export default function CompanyMessages() {
           )}
         </div>
 
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm flex isolate" style={{ height: 'calc(100dvh - 200px)' }}>
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm flex isolate" style={{ height: 'calc(100vh - 240px)' }}>
           <div className={`w-full lg:w-80 xl:w-96 border-r border-gray-100 flex-shrink-0 ${mobileShowChat ? 'hidden lg:flex lg:flex-col' : 'flex flex-col'}`}>
             <ConversationList
               conversations={conversations}

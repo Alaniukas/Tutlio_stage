@@ -3,11 +3,11 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import Layout from '@/components/Layout';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
-import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
 import { CreditCard, CheckCircle2, ExternalLink, Loader2, Clock, Euro, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import SendInvoiceModal from '@/components/SendInvoiceModal';
+import { tutorFinancePageProfileDeduped, dedupeAuthGetUser } from '@/lib/preload';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import OrgTutorFinanceSummary from '@/components/OrgTutorFinanceSummary';
 import TutorFinanceReport from '@/components/TutorFinanceReport';
@@ -31,9 +31,8 @@ export default function FinancePage() {
   const navigate = useNavigate();
   const orgPolicy = useOrgTutorPolicy();
   const stripeAutoVerifyRan = useRef(false);
-  const fc = getCached<any>('tutor_finance');
-  const [userId, setUserId] = useState<string | null>(fc?.userId ?? null);
-  const [profile, setProfile] = useState<FinanceProfile>(fc?.profile ?? {
+  const [userId, setUserId] = useState<string | null>(null);
+  const [profile, setProfile] = useState<FinanceProfile>({
     stripe_account_id: null,
     stripe_onboarding_complete: false,
     payment_timing: 'before_lesson',
@@ -44,8 +43,8 @@ export default function FinancePage() {
     restrict_booking_on_overdue: false,
     enable_per_student_payment_override: false,
   });
-  const [isSoloTutor, setIsSoloTutor] = useState(fc?.isSoloTutor ?? true);
-  const [loading, setLoading] = useState(!fc);
+  const [isSoloTutor, setIsSoloTutor] = useState(true);
+  const [loading, setLoading] = useState(true);
   const [stripeLoading, setStripeLoading] = useState(false);
   const [stripeError, setStripeError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -74,8 +73,6 @@ export default function FinancePage() {
         const json = await res.json();
         if (json.complete) {
           setProfile((p) => ({ ...p, stripe_onboarding_complete: true }));
-          invalidateCache('tutor_finance');
-          invalidateCache('tutor_dashboard');
           setSaved(true);
           setSavedMessage('stripe');
           setTimeout(() => {
@@ -117,25 +114,19 @@ export default function FinancePage() {
   ]);
 
   useEffect(() => {
-    if (!getCached('tutor_finance')) fetchData();
+    fetchData();
   }, []);
 
   const fetchData = async () => {
-    if (!getCached('tutor_finance')) setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
+    setLoading(true);
+    const user = await dedupeAuthGetUser();
     if (!user) {
       setLoading(false);
       return;
     }
     setUserId(user.id);
 
-    const { data: tutorData } = await supabase
-      .from('profiles')
-      .select(
-        'organization_id, stripe_account_id, stripe_onboarding_complete, payment_timing, payment_deadline_hours, min_booking_hours, enable_per_lesson, enable_monthly_billing, enable_prepaid_packages, restrict_booking_on_overdue, enable_per_student_payment_override',
-      )
-      .eq('id', user.id)
-      .single();
+    const { data: tutorData } = await tutorFinancePageProfileDeduped(user.id);
 
     setIsSoloTutor(!tutorData?.organization_id);
 
@@ -152,22 +143,6 @@ export default function FinancePage() {
     });
     setMinBookingHours(tutorData?.min_booking_hours ?? 24);
 
-    setCache('tutor_finance', {
-      userId: user.id, isSoloTutor: !tutorData?.organization_id,
-      profile: {
-        stripe_account_id: tutorData?.stripe_account_id || null,
-        stripe_onboarding_complete: tutorData?.stripe_onboarding_complete ?? false,
-        payment_timing: (tutorData?.payment_timing as 'before_lesson' | 'after_lesson') || 'before_lesson',
-        payment_deadline_hours: tutorData?.payment_deadline_hours ?? 24,
-        enable_per_lesson: tutorData?.enable_per_lesson ?? true,
-        enable_monthly_billing: tutorData?.enable_monthly_billing ?? false,
-        enable_prepaid_packages: tutorData?.enable_prepaid_packages ?? false,
-        restrict_booking_on_overdue: tutorData?.restrict_booking_on_overdue ?? false,
-        enable_per_student_payment_override: tutorData?.enable_per_student_payment_override ?? false,
-      },
-    });
-    invalidateCache('tutor_dashboard');
-    invalidateCache('tutor_calendar');
     setLoading(false);
   };
 
@@ -180,9 +155,6 @@ export default function FinancePage() {
       setSaveError(error.message || t('finance.saveFailed'));
       return false;
     }
-    invalidateCache('tutor_finance');
-    invalidateCache('tutor_dashboard');
-    invalidateCache('tutor_calendar');
     return true;
   };
 

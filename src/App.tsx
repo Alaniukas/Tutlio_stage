@@ -1,4 +1,5 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { lazy, Suspense } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { UserProvider } from '@/contexts/UserContext';
 import Login from '@/pages/Login';
 import AuthCallback from '@/pages/AuthCallback';
@@ -31,7 +32,7 @@ import CompanySessions from '@/pages/company/CompanySessions';
 import CompanyTvarkarastis from '@/pages/company/CompanyTvarkarastis';
 import CompanyStats from '@/pages/company/CompanyStats';
 import CompanySettings from '@/pages/company/CompanySettings';
-import CompanyContracts from '@/pages/company/CompanyContracts';
+const CompanyContracts = lazy(() => import('@/pages/company/CompanyContracts'));
 import CompanyFinanceHub from '@/pages/company/CompanyFinanceHub';
 import InvoicesPage from '@/pages/Invoices';
 
@@ -61,6 +62,7 @@ import ParentSessions from '@/pages/ParentSessions';
 import ParentInvoices from '@/pages/ParentInvoices';
 import ParentMessages from '@/pages/ParentMessages';
 import ParentRegister from '@/pages/ParentRegister';
+import SchoolContractComplete from '@/pages/SchoolContractComplete';
 import SupabaseAuthHashErrors from '@/components/SupabaseAuthHashErrors';
 
 function ProtectedWithUser() {
@@ -87,11 +89,38 @@ function ParentProtectedWithUser() {
   );
 }
 
+// Old parent booking URL (/parent/child/:studentId/schedule) is gone.
+// Redirect to the new parent calendar with the right child pre-selected.
+function ParentCalendarRedirect() {
+  const { studentId } = useParams<{ studentId: string }>();
+  const target = studentId ? `/parent/calendar?studentId=${encodeURIComponent(studentId)}` : '/parent/calendar';
+  return <Navigate to={target} replace />;
+}
+
+/** Legacy URLs like /parent/child/:uuid — preserve child in query for shared StudentSessions flows. */
+function ParentLegacyChildToLessonsRedirect() {
+  const { studentId } = useParams<{ studentId: string }>();
+  const target = studentId
+    ? `/parent/lessons?studentId=${encodeURIComponent(studentId)}`
+    : '/parent/lessons';
+  return <Navigate to={target} replace />;
+}
+
 function CompanyProtectedWithUser() {
   return (
     <UserProvider>
       <CompanyProtectedRoute />
     </UserProvider>
+  );
+}
+
+function CompanyContractsRoute() {
+  return (
+    <Suspense
+      fallback={<div className="flex min-h-[40vh] items-center justify-center p-6 text-gray-600">Kraunama…</div>}
+    >
+      <CompanyContracts />
+    </Suspense>
   );
 }
 
@@ -129,6 +158,7 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/tutor-subscribe" element={<Navigate to="/registration/subscription" replace />} />
         <Route path="/book/:inviteCode" element={<StudentOnboarding />} />
         <Route path="/parent-register" element={<ParentRegister />} />
+        <Route path="/school-contract-complete" element={<SchoolContractComplete />} />
         <Route path="/stripe-success" element={<StripeSuccess />} />
         <Route path="/package-success" element={<PackagePaymentSuccess />} />
         <Route path="/package-cancelled" element={<PackagePaymentCancelled />} />
@@ -162,9 +192,22 @@ export default function App({ basename }: { basename: string }) {
         {/* Parent routes */}
         <Route element={<ParentProtectedWithUser />}>
           <Route path="/parent" element={<ParentDashboard />} />
-          <Route path="/parent/child/:studentId" element={<ParentSessions />} />
+          {/* Parent calendar / booking — re-uses the StudentSchedule page so the
+              UI, modals and emails are 100% identical to the student-side flow.
+              StudentSchedule detects parent mode via studentId in the URL. */}
+          <Route path="/parent/calendar" element={<StudentSchedule />} />
+          <Route path="/parent/lessons" element={<StudentSessions />} />
+          {/* Legacy child routes – redirect everything booking-related to the parent calendar. */}
+          <Route
+            path="/parent/child/:studentId/schedule"
+            element={<ParentCalendarRedirect />}
+          />
+          <Route path="/parent/child/:studentId" element={<ParentLegacyChildToLessonsRedirect />} />
+          <Route path="/parent/child/:studentId/waitlist" element={<ParentLegacyChildToLessonsRedirect />} />
           <Route path="/parent/invoices" element={<ParentInvoices />} />
           <Route path="/parent/messages" element={<ParentMessages />} />
+          {/* Catch-all for /parent/* – stay inside the parent portal instead of bouncing to /login. */}
+          <Route path="/parent/*" element={<Navigate to="/parent" replace />} />
         </Route>
 
         {/* Platform owner admin */}
@@ -186,7 +229,7 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/company/instructions" element={<CompanyInstructions />} />
             <Route path="/company/settings" element={<CompanySettings />} />
             <Route path="/company/finance" element={<CompanyFinanceHub />} />
-            <Route path="/company/contracts" element={<CompanyContracts />} />
+            <Route path="/company/contracts" element={<CompanyContractsRoute />} />
 
             <Route path="/school" element={<CompanyDashboard />} />
             <Route path="/school/tutors" element={<CompanyTutors />} />
@@ -199,7 +242,7 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/school/instructions" element={<CompanyInstructions />} />
             <Route path="/school/settings" element={<CompanySettings />} />
             <Route path="/school/finance" element={<CompanyFinanceHub />} />
-            <Route path="/school/contracts" element={<CompanyContracts />} />
+            <Route path="/school/contracts" element={<CompanyContractsRoute />} />
           </Route>
         </Route>
 

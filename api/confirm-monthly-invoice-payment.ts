@@ -5,6 +5,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
+import { isOrgTutor } from './_lib/isOrgTutor.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 const supabase = createClient(
@@ -116,10 +117,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    try {
+      await supabase
+        .from('invoices')
+        .update({ status: 'paid' })
+        .eq('billing_batch_id', billingBatchId)
+        .eq('status', 'issued');
+    } catch (invErr) {
+      console.error('[confirm-monthly-invoice-payment] Error marking invoice as paid:', invErr);
+    }
+
     // 4) Collect emails (payer + tutor + student(s) if different)
     const { data: tutorProfile, error: tutorErr } = await supabase
       .from('profiles')
-      .select('id, full_name, email')
+      .select('id, full_name, email, organization_id')
       .eq('id', updatedBatch.tutor_id)
       .single();
 
@@ -175,7 +186,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (payerEmail && sp.email === payerEmail) continue;
       uniqueByEmail.set(sp.email, { email: sp.email, recipientName: sp.name });
     }
-    if (tutorEmail) uniqueByEmail.set(tutorEmail, { email: tutorEmail, recipientName: tutorName });
+    if (tutorEmail && !isOrgTutor(tutorProfile.organization_id)) {
+      uniqueByEmail.set(tutorEmail, { email: tutorEmail, recipientName: tutorName });
+    }
 
     // 5) Send emails
     const sessionsCount = (batchSessions || []).length || 0;

@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { supabase } from '@/lib/supabase';
+import { dedupeAuthGetUser } from '@/lib/preload';
 import { User } from '@supabase/supabase-js';
 import { buildPlatformPath } from '@/lib/platform';
 
@@ -10,6 +11,7 @@ interface UserProfile {
   stripe_account_id: string | null;
   google_calendar_connected: boolean;
   organization_id: string | null;
+  personal_meeting_link?: string | null;
   break_between_lessons?: number;
   min_booking_hours?: number;
   subscription_status?: string;
@@ -37,9 +39,9 @@ const UserContext = createContext<UserContextType>({
 
 export const useUser = () => useContext(UserContext);
 
-const PROFILE_SELECT_WITH_TRIAL = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, break_between_lessons, min_booking_hours, subscription_status, subscription_plan, manual_subscription_exempt, trial_ends_at, phone, stripe_onboarding_complete, preferred_locale';
-const PROFILE_SELECT_LEGACY = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, break_between_lessons, min_booking_hours, subscription_status, subscription_plan, manual_subscription_exempt, phone, stripe_onboarding_complete, preferred_locale';
-const PROFILE_SELECT_CORE = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, break_between_lessons, min_booking_hours, subscription_status, subscription_plan, manual_subscription_exempt, phone';
+const PROFILE_SELECT_WITH_TRIAL = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, personal_meeting_link, break_between_lessons, min_booking_hours, subscription_status, subscription_plan, manual_subscription_exempt, trial_ends_at, phone, stripe_onboarding_complete, preferred_locale';
+const PROFILE_SELECT_LEGACY = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, personal_meeting_link, break_between_lessons, min_booking_hours, subscription_status, subscription_plan, manual_subscription_exempt, phone, stripe_onboarding_complete, preferred_locale';
+const PROFILE_SELECT_CORE = 'id, full_name, email, stripe_account_id, google_calendar_connected, organization_id, personal_meeting_link, break_between_lessons, min_booking_hours, subscription_status, subscription_plan, manual_subscription_exempt, phone';
 
 export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -135,6 +137,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     // Initial auth check
     const initAuth = async () => {
+      let currentUser: User | null = null;
       try {
         const withTimeout = async <T,>(p: Promise<T>, ms: number): Promise<T> => {
           let t: any;
@@ -148,14 +151,24 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
           }
         };
 
-        const { data: { user: currentUser } } = await withTimeout(
-          supabase.auth.getUser(),
-          8000
-        );
+        try {
+          currentUser = await withTimeout(dedupeAuthGetUser(), 8000);
+        } catch (errFirst) {
+          const name = (errFirst as { name?: string })?.name;
+          if (name !== 'AbortError' && !(errFirst instanceof Error && errFirst.message === 'Auth init timeout')) {
+            console.warn('[UserContext] getUser dedupe failed, trying getSession:', errFirst);
+          }
+          try {
+            const { data: { session }, error } = await supabase.auth.getSession();
+            if (!error && session?.user) currentUser = session.user;
+          } catch (_) {
+            /* ignore */
+          }
+        }
+
         setUser(currentUser);
 
         if (currentUser) {
-          // Don't block UI on profile fetch.
           void fetchProfile(currentUser.id).then((profileData) => {
             if (profileData) setProfile(profileData);
           });
@@ -204,6 +217,20 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
           setUser(null);
           setProfile(null);
           sessionStorage.removeItem('tutlio_logout_intent');
+
+          // Clear any parent-profile caches so a future user does not
+          // accidentally inherit a stale "is-parent" verdict.
+          try {
+            const prefix = 'tutlio_parent_profile_id_for_';
+            const keys: string[] = [];
+            for (let i = 0; i < localStorage.length; i += 1) {
+              const k = localStorage.key(i);
+              if (k && k.startsWith(prefix)) keys.push(k);
+            }
+            keys.forEach((k) => localStorage.removeItem(k));
+          } catch {
+            /* ignore */
+          }
 
           const origin = window.location.origin;
           const path = window.location.pathname || '';

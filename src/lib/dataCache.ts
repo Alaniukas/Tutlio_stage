@@ -38,10 +38,10 @@ export function isCached(key: string): boolean {
 
 const inflightRequests = new Map<string, Promise<unknown>>();
 
-export function dedupeAsync<T>(key: string, fn: () => Promise<T>): Promise<T> {
+export function dedupeAsync<T>(key: string, fn: () => PromiseLike<T> | T): Promise<T> {
   const existing = inflightRequests.get(key) as Promise<T> | undefined;
   if (existing) return existing;
-  const promise = fn().finally(() => inflightRequests.delete(key));
+  const promise = Promise.resolve(fn()).finally(() => inflightRequests.delete(key)) as Promise<T>;
   inflightRequests.set(key, promise);
   return promise;
 }

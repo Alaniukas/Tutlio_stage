@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import Layout from '@/components/Layout';
 import { supabase } from '@/lib/supabase';
-import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
+import { getCached, setCache } from '@/lib/dataCache';
+import { tutorStudentsRowsDeduped } from '@/lib/preload';
 import { useUser } from '@/contexts/UserContext';
 import { authHeaders } from '@/lib/apiHelpers';
 import { Button } from '@/components/ui/button';
@@ -291,13 +292,12 @@ export default function StudentsPage() {
     checkIfOrgTutor();
   }, []);
 
+  // Refetch when tutor is available and when opening /students so cards are not stuck on stale tutor_students cache.
   useEffect(() => {
     if (!user?.id) return;
     if (location.pathname !== '/students') return;
-    if (!getCached('tutor_students')) {
-      void fetchStudents();
-      void fetchAllSessions();
-    }
+    void fetchStudents();
+    void fetchAllSessions();
   }, [user?.id, location.pathname]);
 
   useEffect(() => {
@@ -530,11 +530,7 @@ export default function StudentsPage() {
     if (!getCached('tutor_students')) setLoading(true);
     if (!user) { setLoading(false); return; }
 
-    const { data, error } = await supabase
-      .from('students')
-      .select('*, linked_user_id')
-      .eq('tutor_id', user.id)
-      .order('created_at', { ascending: false });
+    const { data, error } = await tutorStudentsRowsDeduped(user.id);
 
     if (error) {
       console.error('Error fetching students:', error);
@@ -583,8 +579,6 @@ export default function StudentsPage() {
       setStudents(withInvoiceBalance);
       setCache('tutor_students', { students: withInvoiceBalance });
     }
-    invalidateCache('tutor_dashboard');
-    invalidateCache('tutor_calendar');
     setLoading(false);
   };
 

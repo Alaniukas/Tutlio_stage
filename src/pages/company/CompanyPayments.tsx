@@ -115,7 +115,7 @@ export default function CompanyPayments() {
 
     const cData = cRes.data || [];
     const filtered = (iRes.data || []).filter((i: any) => i.contract?.organization_id === admin.organization_id && !i.contract?.archived_at);
-    setContracts(cData);
+    setContracts(cData as unknown as Contract[]);
     setInstallments(filtered);
     setCache(PAYMENTS_CACHE_KEY, { orgId: admin.organization_id, orgName: name, orgEmail: email, contracts: cData, installments: filtered });
     setLoading(false);
@@ -173,20 +173,25 @@ export default function CompanyPayments() {
         body: JSON.stringify({ installmentId: installment.id, returnPath: `${orgBasePath}/contracts` }),
       });
 
-      const json = await resp.json();
-      if (!resp.ok) {
-        setToast({ message: json.error || t('school.toastPaymentError'), type: 'error' });
-        setSendingId(null);
-        return;
-      }
+      const json = await resp.json().catch(() => ({}));
+      const paymentUrl = resp.ok && typeof json?.url === 'string' ? json.url : undefined;
+      const checkoutFailText = (() => {
+        if (paymentUrl) return undefined;
+        const raw =
+          (typeof json?.message === 'string' && json.message.trim()) ||
+          (typeof json?.error === 'string' && json.error) ||
+          `HTTP ${resp.status}`;
+        const code = typeof json?.code === 'string' ? json.code : '';
+        return code ? `${raw} (${code})` : raw;
+      })();
 
       const contract = installment.contract as any;
       const student = contract?.student;
       const recipient = student?.payer_email || student?.email;
 
-      if (recipient && json.url) {
+      if (recipient) {
         const totalInstallments = installments.filter((i) => i.contract_id === installment.contract_id).length;
-        await sendEmail({
+        const emailed = await sendEmail({
           type: 'school_installment_request',
           to: recipient,
           data: {
@@ -199,13 +204,25 @@ export default function CompanyPayments() {
             totalInstallments,
             amount: Number(installment.amount).toFixed(2),
             dueDate: new Date(installment.due_date).toLocaleDateString('lt-LT'),
-            paymentUrl: json.url,
+            ...(paymentUrl ? { paymentUrl } : {}),
           },
         });
-        setToast({ message: t('school.toastPaymentLinkSent'), type: 'success' });
-      } else {
-        window.open(json.url, '_blank');
+        if (!emailed) {
+          setToast({ message: t('school.toastInstallmentEmailFail'), type: 'error' });
+          setSendingId(null);
+          return;
+        }
+        setToast({
+          message: paymentUrl
+            ? t('school.toastPaymentLinkSent')
+            : `${t('school.toastInstallmentInfoSentNoCheckout')} (${checkoutFailText})`,
+          type: 'success',
+        });
+      } else if (paymentUrl) {
+        window.open(paymentUrl, '_blank');
         setToast({ message: t('school.toastCheckoutCreated'), type: 'success' });
+      } else {
+        setToast({ message: checkoutFailText || t('school.toastPaymentError'), type: 'error' });
       }
     } catch {
       setToast({ message: t('school.toastPaymentError'), type: 'error' });
@@ -338,7 +355,7 @@ export default function CompanyPayments() {
       </div>
 
       <Dialog open={scheduleOpen} onOpenChange={setScheduleOpen}>
-        <DialogContent className="w-[95vw] sm:max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{t('school.createScheduleTitle')}</DialogTitle>
           </DialogHeader>

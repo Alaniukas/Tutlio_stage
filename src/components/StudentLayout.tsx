@@ -1,7 +1,11 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { useEffect, useMemo, useState } from 'react';
-import { preloadStudentData } from '@/lib/preload';
+import { preloadStudentData, dedupeAuthGetUser, rpcGetStudentProfilesDeduped } from '@/lib/preload';
+import {
+    fetchStudentActiveLessonPackagesDeduped,
+    fetchSubjectNamesByIds,
+} from '@/lib/studentLessonPackagesLight';
 import { LayoutDashboard, BookOpen, CalendarDays, Clock, Settings, Info, Mail, GraduationCap, HelpCircle, MessageSquare } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import OrgSuspendedBanner from '@/components/OrgSuspendedBanner';
@@ -12,9 +16,11 @@ import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVis
 
 interface StudentLayoutProps {
     children: React.ReactNode;
+    /** Minimal shell: no student header / bottom nav (e.g. parent booking on behalf of child) */
+    embed?: boolean;
 }
 
-export default function StudentLayout({ children }: StudentLayoutProps) {
+export default function StudentLayout({ children, embed }: StudentLayoutProps) {
     const { t } = useTranslation();
     const chatUnreadTotal = useTotalChatUnread();
     usePushSubscription();
@@ -43,13 +49,10 @@ export default function StudentLayout({ children }: StudentLayoutProps) {
     useEffect(() => {
         const load = async () => {
             try {
-                const { data: { user } } = await supabase.auth.getUser();
+                const user = await dedupeAuthGetUser();
                 if (!user) return;
 
-                const { data: studentRows, error: rpcError } = await supabase.rpc('get_student_profiles', {
-                    p_user_id: user.id,
-                    p_student_id: null,
-                });
+                const { data: studentRows, error: rpcError } = await rpcGetStudentProfilesDeduped(user.id, null);
 
                 if (rpcError) {
                     console.error('[StudentLayout] Error fetching student info:', rpcError);
@@ -88,37 +91,59 @@ export default function StudentLayout({ children }: StudentLayoutProps) {
                     } else {
                         setTutor(null);
                     }
-
-                    try {
-                        const { data: packages, error: packagesError } = await supabase
-                            .from('lesson_packages')
-                            .select('total_lessons, available_lessons, subjects(name)')
-                            .eq('student_id', selectedStudentData.id)
-                            .eq('paid', true)
-                            .gt('available_lessons', 0);
-
-                        if (packagesError) {
-                            console.error('[StudentLayout] Error fetching packages:', packagesError);
-                        } else {
-                            const remaining = (packages || []).reduce((sum: number, p: any) => sum + (p.available_lessons || 0), 0);
-                            const total = (packages || []).reduce((sum: number, p: any) => sum + (p.total_lessons || 0), 0);
-                            const subjectName = packages?.length === 1 ? (packages[0] as any)?.subjects?.name : null;
-                            const label = subjectName
-                                ? `${subjectName}: ${remaining}/${total}`
-                                : t('studentLayout.lessonCount', { remaining, total });
-                            setPackageCountText(label);
-                        }
-                    } catch (pkgErr) {
-                        console.error('[StudentLayout] Error loading packages:', pkgErr);
-                    }
                 }
             } catch (err) {
                 console.error('[StudentLayout] Error in load:', err);
             }
         };
         load();
-        preloadStudentData();
     }, []);
+
+    /* Ant `/student/sessions` `StudentSessions` jau krauna paketus — nebekartoti to paties. Įeinant/išeinant iš šio kelio badge atnaujinamas. */
+    useEffect(() => {
+        if (location.pathname === '/student/sessions') return;
+        if (studentProfiles.length === 0) return;
+
+        const activeId =
+            typeof window !== 'undefined' ? localStorage.getItem(ACTIVE_STUDENT_PROFILE_KEY) : null;
+        const selected =
+            studentProfiles.find((row) => row.id === activeId) || studentProfiles[0];
+        if (!selected) return;
+
+        let cancelled = false;
+        void (async () => {
+            try {
+                const pkgs = await fetchStudentActiveLessonPackagesDeduped(supabase, selected.id);
+                if (cancelled) return;
+                const remaining = pkgs.reduce((sum, p) => sum + Number(p.available_lessons || 0), 0);
+                const total = pkgs.reduce((sum, p) => sum + Number(p.total_lessons || 0), 0);
+                let subjectName: string | null = null;
+                if (pkgs.length === 1 && pkgs[0].subject_id) {
+                    const nm = await fetchSubjectNamesByIds(supabase, [pkgs[0].subject_id]);
+                    if (cancelled) return;
+                    subjectName = nm[pkgs[0].subject_id] ?? null;
+                }
+                const label = subjectName
+                    ? `${subjectName}: ${remaining}/${total}`
+                    : t('studentLayout.lessonCount', { remaining, total });
+                setPackageCountText(label);
+            } catch (pkgErr) {
+                console.warn('[StudentLayout] Packages badge skipped:', pkgErr);
+                if (!cancelled) {
+                    setPackageCountText(t('studentLayout.lessonCount', { remaining: 0, total: 0 }));
+                }
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [location.pathname, studentProfiles, t]);
+
+    /** Avoid racing `preloadStudentData` with StudentSchedule / StudentSessions — they load the same RPCs and tables. */
+    useEffect(() => {
+        if (location.pathname !== '/student') return;
+        void preloadStudentData();
+    }, [location.pathname]);
 
     const handleProfileSwitch = (studentProfileId: string) => {
         if (typeof window !== 'undefined') {
@@ -129,6 +154,17 @@ export default function StudentLayout({ children }: StudentLayoutProps) {
     };
 
     const initials = studentName.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
+
+    if (embed) {
+        return (
+            <div className="min-h-screen bg-white flex flex-col relative overflow-x-hidden">
+                <OrgSuspendedBanner />
+                <main className="flex-1 relative z-10">
+                    {children}
+                </main>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen bg-white flex flex-col relative overflow-x-hidden">
@@ -169,9 +205,11 @@ export default function StudentLayout({ children }: StudentLayoutProps) {
                     </div>
                 </div>
                 <div className="flex items-center gap-3">
-                    <span className="hidden sm:inline-flex text-xs font-semibold text-violet-700 bg-violet-50 border border-violet-200 px-2.5 py-1 rounded-lg">
+                    {location.pathname !== '/student/sessions' && (
+                    <span className="hidden sm:inline-flex text-xs font-semibold text-indigo-700 bg-violet-50 border border-violet-200 px-2.5 py-1 rounded-lg">
                         {packageCountText}
                     </span>
+                    )}
                     <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-sm shadow-sm ring-2 ring-white">
                         {initials || '?'}
                     </div>

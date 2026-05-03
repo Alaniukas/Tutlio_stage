@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { syncSessionToGoogle } from './_lib/google-calendar.js';
+import { markInvoicesPaidForPackage } from './_lib/markPackageInvoicePaid.js';
 
 function getStripe() {
   return new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
@@ -85,6 +86,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     } catch (e) {
       console.error('[confirm-package-payment] Failed to update sessions for prepaid package:', e);
+    }
+
+    try {
+      await markInvoicesPaidForPackage(
+        supabase,
+        packageId,
+        (finalPackage as { manual_sales_invoice_id?: string | null }).manual_sales_invoice_id
+      );
+    } catch (e) {
+      console.error('[confirm-package-payment] mark invoices paid:', e);
     }
 
     // NOTE: Email sending is handled by stripe-webhook.ts to avoid duplicates.

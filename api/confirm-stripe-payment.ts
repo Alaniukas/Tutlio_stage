@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { syncSessionToGoogle } from './_lib/google-calendar.js';
+import { isOrgTutor } from './_lib/isOrgTutor.js';
 import { verifyRequestAuth } from './_lib/auth.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
@@ -98,7 +99,96 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         if (isPaid) {
-            // Update DB: paid + payment_status (required). stripe_checkout_session_id optional (column may not exist in all envs)
+            const meta = checkoutSession?.metadata || {};
+            const isPenaltyPayment = meta.is_penalty_payment === 'true';
+
+            const student = sessionData.students as any;
+            const tutor = sessionData.profiles as any;
+            const durationMs = new Date(sessionData.end_time).getTime() - new Date(sessionData.start_time).getTime();
+            const durationMinutes = Math.round(durationMs / 60000);
+            const sessionStart = new Date(sessionData.start_time);
+            const dateStr = sessionStart.toLocaleDateString('lt-LT', { year: 'numeric', month: '2-digit', day: '2-digit' });
+            const timeStr = sessionStart.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' });
+            const totalChargedEur =
+                checkoutSession?.amount_total != null ? checkoutSession.amount_total / 100 : undefined;
+            const sendEmailUrl = `${APP_URL}/api/send-email`;
+
+            // Late-cancellation penalty checkout: do NOT mark the lesson as paid (paid=true).
+            if (isPenaltyPayment) {
+                const paidAt = new Date().toISOString();
+                const { data: penaltyRow, error: penErr } = await supabase
+                    .from('sessions')
+                    .update({ cancellation_penalty_stripe_paid_at: paidAt })
+                    .eq('id', sessionId)
+                    .is('cancellation_penalty_stripe_paid_at', null)
+                    .select('tutor_id')
+                    .maybeSingle();
+
+                if (penErr) {
+                    console.error('[confirm-stripe-payment] Penalty timestamp update error', penErr);
+                    return res.status(500).json({
+                        error: 'Could not record penalty payment. If funds were charged – contact info@tutlio.lt.',
+                        details: penErr.message,
+                    });
+                }
+
+                if (!penaltyRow) {
+                    return res.status(200).json({ success: true, already_confirmed: true });
+                }
+
+                const emailData = {
+                    studentName: student.full_name,
+                    tutorName: tutor.full_name || 'Korepetitorius',
+                    date: dateStr,
+                    time: timeStr,
+                    subject: sessionData.topic,
+                    totalChargedEur,
+                    duration: durationMinutes,
+                };
+
+                const recipients = new Set<string>();
+                const pe = (student.payer_email || '').trim().toLowerCase();
+                const se = (student.email || '').trim().toLowerCase();
+                if (student.payment_payer === 'parent' && pe) recipients.add(student.payer_email.trim());
+                if (se) recipients.add(student.email.trim());
+                if (recipients.size === 0 && student.email) recipients.add(student.email);
+
+                for (const email of recipients) {
+                    try {
+                        await fetch(sendEmailUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
+                            body: JSON.stringify({
+                                type: 'penalty_payment_success',
+                                to: email,
+                                data: emailData,
+                            }),
+                        });
+                    } catch (e) {
+                        console.error('[confirm-stripe-payment] Penalty email failed', email, e);
+                    }
+                }
+
+                if (tutor?.email) {
+                    try {
+                        await fetch(sendEmailUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
+                            body: JSON.stringify({
+                                type: 'penalty_payment_tutor',
+                                to: tutor.email,
+                                data: emailData,
+                            }),
+                        });
+                    } catch (e) {
+                        console.error('[confirm-stripe-payment] Penalty tutor email failed', e);
+                    }
+                }
+
+                return res.status(200).json({ success: true, penalty: true });
+            }
+
+            // Normal lesson payment
             const updatePayload: Record<string, unknown> = { paid: true, payment_status: 'paid' };
             if (checkoutSessionId) updatePayload.stripe_checkout_session_id = checkoutSessionId;
 
@@ -113,8 +203,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
             if (updateErr) {
                 console.error('[confirm-stripe-payment] DB update error', updateErr);
-                // Turi sutapti su updatePayload — kitaip lieka paid=true be stripe_checkout_session_id
-                // ir vėlesnis refund per /api/cancel-penalty-resolution nebeveikia.
                 const { data: retryData, error: retryErr } = await supabase
                     .from('sessions')
                     .update(updatePayload)
@@ -133,12 +221,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 updatedSession = updateData;
             }
 
-            // Idempotency: concurrent webhook + StripeSuccess — only first update wins; skip duplicate emails
             if (!updatedSession) {
                 return res.status(200).json({ success: true, already_paid: true });
             }
 
-            // Deduct pending credit from student balance (set at checkout time)
             const creditApplied = Number((sessionData as any).credit_applied_amount || 0);
             if (creditApplied > 0) {
                 const studentRecord = sessionData.students as any;
@@ -149,7 +235,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     .eq('id', sessionData.student_id);
             }
 
-            // Sync this session to tutor's Google Calendar (reflect "paid" status in title/description)
             try {
                 const tutorId = (updatedSession as any)?.tutor_id || sessionData.tutor_id;
                 if (tutorId) {
@@ -158,21 +243,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             } catch (e) {
                 console.error('[confirm-stripe-payment] Failed to sync Google Calendar:', e);
             }
-
-            // Send notification emails
-            const student = sessionData.students as any;
-            const tutor = sessionData.profiles as any;
-
-            // Optional pricing details (we might not have subject cancellation info exactly without join, but we have tutor defaults)
-            const durationMs = new Date(sessionData.end_time).getTime() - new Date(sessionData.start_time).getTime();
-            const durationMinutes = Math.round(durationMs / 60000);
-
-            const sessionStart = new Date(sessionData.start_time);
-            const dateStr = sessionStart.toLocaleDateString('lt-LT', { year: 'numeric', month: '2-digit', day: '2-digit' });
-            const timeStr = sessionStart.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' });
-
-            const totalChargedEur =
-                checkoutSession?.amount_total != null ? checkoutSession.amount_total / 100 : undefined;
 
             const emailData = {
                 studentName: student.full_name,
@@ -188,9 +258,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 cancellationFeePercent: tutor.cancellation_fee_percent ?? 0,
             };
 
-            const sendEmailUrl = `${APP_URL}/api/send-email`;
-
-            // Payer gets payment_success; if payer is parent, student also gets one (so they know the lesson is paid)
             const recipients = new Set<string>();
             if (student.email) {
                 recipients.add(student.email);
@@ -199,7 +266,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 recipients.add(student.payer_email);
             }
 
-// Send confirmation to payer (parent or student) and optionally to student when parent paid
             for (const email of Array.from(recipients)) {
                 try {
                     await fetch(sendEmailUrl, {
@@ -216,11 +282,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 }
             }
 
-            // Org tutor: lesson confirmed + join link (not "payment received"); solo tutor: unchanged
             if (tutor?.email) {
                 try {
-                    const isOrgTutor = Boolean(tutorProfile?.organization_id);
-                    const tutorPayload = isOrgTutor
+                    const tutorPayload = isOrgTutor(tutorProfile?.organization_id)
                         ? {
                             type: 'lesson_confirmed_tutor',
                             to: tutor.email,

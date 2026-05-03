@@ -4,14 +4,15 @@ import Layout from '@/components/Layout';
 import TutorOnboarding from '@/components/TutorOnboarding';
 import SessionFiles from '@/components/SessionFiles';
 import { supabase } from '@/lib/supabase';
-import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
+import { getCached, setCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
 import { useUser } from '@/contexts/UserContext';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { sendEmail } from '@/lib/email';
-import { format, isAfter, isBefore, addDays, subDays } from 'date-fns';
+import { format, isAfter, isBefore, addDays, subDays, parseISO, startOfDay } from 'date-fns';
+import type { Locale as DateFnsLocale } from 'date-fns';
 import { useTranslation } from '@/lib/i18n';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import Toast from '@/components/Toast';
 import {
     CalendarDays,
@@ -27,6 +28,7 @@ import {
     CreditCard,
     UserX,
     RotateCcw,
+    X,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -35,10 +37,20 @@ import StatusBadge from '@/components/StatusBadge';
 import { DateTimeSpinner } from '@/components/TimeSpinner';
 import { Edit2 } from 'lucide-react';
 import { cancelSessionAndFillWaitlist } from '@/lib/lesson-actions';
+import {
+    tutorDashboardSessionsDeduped,
+    tutorDashboardOrgPackDeduped,
+    tutorPreloadProfileDeduped,
+    tutorRecentPaidLessonsDeduped,
+    tutorRecentPaidPackagesDeduped,
+    tutorRecentPaidInvoicesDeduped,
+    tutorStudentCountEstimatedDeduped,
+} from '@/lib/preload';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { formatContactForTutorView } from '@/lib/orgContactVisibility';
 import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
 import { buildNoShowSessionPatch, noShowWhenLabelLt, type NoShowWhen } from '@/lib/noShowWhen';
+import { useDismissibleDashboardItemIds } from '@/hooks/useDismissibleDashboardItemIds';
 
 interface Session {
     id: string;
@@ -85,14 +97,62 @@ interface RecentPayment {
 interface TutorUpdateItem {
     id: string;
     message: string;
+    detail?: string;
     tone: 'warning' | 'info';
     when?: string;
     sessionId?: string;
+    /** Open /calendar?date= for this YYYY-MM-DD (e.g. org admin added availability). */
+    calendarDate?: string;
+}
+
+function hmTime(sqlTime: string | null | undefined): string {
+    if (!sqlTime) return '';
+    const m = /^(\d{1,2}):(\d{2})/.exec(String(sqlTime));
+    if (!m) return String(sqlTime).slice(0, 5);
+    return `${m[1].padStart(2, '0')}:${m[2]}`;
+}
+
+function weekdayFromDow(dow: number, locale: DateFnsLocale): string {
+    const sun = parseISO('2024-01-07T12:00:00');
+    return format(addDays(sun, dow), 'EEEE', { locale });
+}
+
+function nextYmdForDow(dow: number): string {
+    const today = startOfDay(new Date());
+    const cur = today.getDay();
+    const add = (dow - cur + 7) % 7;
+    return format(addDays(today, add), 'yyyy-MM-dd');
 }
 
 export default function DashboardPage() {
     const { t, dateFnsLocale } = useTranslation();
+    const navigate = useNavigate();
+    const location = useLocation();
     const { profile } = useUser();
+    const updateRowsKey =
+        profile?.id && profile.organization_id ? `tutlio:v1:dash_org_update_rows:${profile.id}` : undefined;
+    const attentionRowsKey =
+        profile?.id && !profile.organization_id ? `tutlio:v1:dash_attention_rows:${profile.id}` : undefined;
+    const recentPaymentRowsKey =
+        profile?.id && !profile.organization_id ? `tutlio:v1:dash_recent_payment_rows:${profile.id}` : undefined;
+    const {
+        dismissedIds: dismissedUpdateRowIds,
+        dismiss: dismissUpdateRow,
+        restoreAll: restoreAllUpdateRows,
+        ready: updateRowsDismissReady,
+    } = useDismissibleDashboardItemIds(updateRowsKey);
+    const {
+        dismissedIds: dismissedAttentionRowIds,
+        dismiss: dismissAttentionRow,
+        restoreAll: restoreAllAttentionRows,
+        ready: attentionRowsDismissReady,
+    } = useDismissibleDashboardItemIds(attentionRowsKey);
+    const {
+        dismissedIds: dismissedRecentPaymentIds,
+        dismiss: dismissRecentPaymentRow,
+        restoreAll: restoreAllRecentPaymentRows,
+        ready: recentPaymentRowsDismissReady,
+    } = useDismissibleDashboardItemIds(recentPaymentRowsKey);
     const { contactVisibility } = useOrgFeatures();
     const [searchParams, setSearchParams] = useSearchParams();
     const dc = getCached<any>('tutor_dashboard');
@@ -112,23 +172,24 @@ export default function DashboardPage() {
     const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
     const [noShowPickerOpen, setNoShowPickerOpen] = useState(false);
     const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
-    const [currentUserId, setCurrentUserId] = useState(dc?.currentUserId ?? '');
-    const [isStripeConnected, setIsStripeConnected] = useState(dc?.isStripeConnected ?? false);
-    const [hasSubjects, setHasSubjects] = useState(dc?.hasSubjects ?? false);
-    const [orgTutorFallback, setOrgTutorFallback] = useState<boolean | null>(dc?.orgTutorFallback ?? null);
+    const [currentUserId, setCurrentUserId] = useState('');
+    const [isStripeConnected, setIsStripeConnected] = useState(false);
+    const [hasSubjects, setHasSubjects] = useState(false);
+    const [orgTutorFallback, setOrgTutorFallback] = useState<boolean | null>(null);
     const isOrgTutor: boolean | null = profile ? !!profile.organization_id : orgTutorFallback;
     const [isEditingTime, setIsEditingTime] = useState(false);
     const [editNewStartTime, setEditNewStartTime] = useState('');
 
+    // View comment (same as Calendar – add/edit without full edit)
     const [viewCommentText, setViewCommentText] = useState('');
     const [viewShowToStudent, setViewShowToStudent] = useState(false);
     const [forceTrialCommentVisibility, setForceTrialCommentVisibility] = useState(false);
     const [viewCommentSaving, setViewCommentSaving] = useState(false);
-    const [paymentTiming, setPaymentTiming] = useState<'before_lesson' | 'after_lesson'>(dc?.paymentTiming ?? 'before_lesson');
-    const [paymentDeadlineHours, setPaymentDeadlineHours] = useState<number | null>(dc?.paymentDeadlineHours ?? null);
-    const [recentPayments, setRecentPayments] = useState<RecentPayment[]>(dc?.recentPayments ?? []);
+    const [paymentTiming, setPaymentTiming] = useState<'before_lesson' | 'after_lesson'>('before_lesson');
+    const [paymentDeadlineHours, setPaymentDeadlineHours] = useState<number | null>(null);
+    const [recentPayments, setRecentPayments] = useState<RecentPayment[]>([]);
     const [showAllRecentPayments, setShowAllRecentPayments] = useState(false);
-    const [tutorUpdates, setTutorUpdates] = useState<TutorUpdateItem[]>(dc?.tutorUpdates ?? []);
+    const [tutorUpdates, setTutorUpdates] = useState<TutorUpdateItem[]>([]);
 
     // After successful Stripe payment redirect - update subscription, show success; clean URL after 300ms
     useEffect(() => {
@@ -153,19 +214,15 @@ export default function DashboardPage() {
     }, [searchParams, setSearchParams]);
 
     useEffect(() => {
-        if (!getCached('tutor_dashboard')) fetchData();
-    }, []);
+        if (location.pathname !== '/dashboard') return;
+        void fetchData();
+    }, [location.pathname]);
 
     useEffect(() => {
         if (!loading && tutorName) {
-            setCache('tutor_dashboard', {
-                sessions, studentCount, tutorName,
-                isStripeConnected, hasSubjects, orgTutorFallback,
-                paymentTiming, paymentDeadlineHours,
-                recentPayments, tutorUpdates, currentUserId,
-            });
+            setCache('tutor_dashboard', { sessions, studentCount, tutorName });
         }
-    }, [loading, sessions, studentCount, tutorName, isStripeConnected, hasSubjects, recentPayments, tutorUpdates]);
+    }, [loading, sessions, studentCount, tutorName]);
 
     useEffect(() => {
         let cancelled = false;
@@ -206,15 +263,19 @@ export default function DashboardPage() {
 
     const fetchData = async () => {
         if (!getCached('tutor_dashboard')) setLoading(true);
+        try {
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) { setLoading(false); return; }
+        if (!user) return;
 
         // OPTIMIZED: Use UserContext profile to avoid duplicate fetch
-        const { data: profileData } = await supabase
-            .from('profiles')
-            .select('full_name, organization_id, stripe_account_id, payment_timing, payment_deadline_hours, subscription_plan, manual_subscription_exempt')
-            .eq('id', user.id)
-            .single();
+        const profileRes = await tutorPreloadProfileDeduped(user.id);
+        const profileData = profileRes.data;
+        if (profileRes.error) {
+            console.error('[Dashboard] profile load:', profileRes.error.message);
+        }
+        if (!profileData) {
+            return;
+        }
         setTutorName(profileData?.full_name || user.email?.split('@')[0] || 'Korepetitorius');
         const isManualOnlyPlan =
             !profileData?.organization_id &&
@@ -224,39 +285,22 @@ export default function DashboardPage() {
         setPaymentDeadlineHours(profileData?.payment_deadline_hours ?? null);
         setOrgTutorFallback(!!profileData?.organization_id);
 
-        // OPTIMIZED: Add limit for safety and performance
-        const { data: sessionsData } = await supabase
-            .from('sessions')
-            .select('*, subjects(is_trial, name), student:students(full_name, email, phone, payer_email, payer_phone, grade)')
-            .eq('tutor_id', user.id)
-            .order('start_time', { ascending: true })
-            .limit(500);
-        setSessions(sessionsData || []);
+        const organizationId = profileData?.organization_id;
+        const sessionsPromise = tutorDashboardSessionsDeduped(user.id);
 
-        if (profileData?.organization_id) {
-            const [recentAvailRes, recentCreatedSessionsRes, orgFeatRes] = await Promise.all([
-                supabase
-                    .from('availability')
-                    .select('id, created_at')
-                    .eq('tutor_id', user.id)
-                    .eq('created_by_role', 'org_admin')
-                    .gte('created_at', subDays(new Date(), 7).toISOString())
-                    .order('created_at', { ascending: false })
-                    .limit(6),
-                supabase
-                    .from('sessions')
-                    .select('id, created_at, start_time')
-                    .eq('tutor_id', user.id)
-                    .eq('created_by_role', 'org_admin')
-                    .gte('created_at', subDays(new Date(), 7).toISOString())
-                    .order('created_at', { ascending: false })
-                    .limit(6),
-                supabase
-                    .from('organizations')
-                    .select('features')
-                    .eq('id', profileData.organization_id)
-                    .maybeSingle(),
-            ]);
+        const orgPackPromise = organizationId
+            ? tutorDashboardOrgPackDeduped(user.id, organizationId)
+            : Promise.resolve(null);
+
+        const [sessionsRes, orgPack] = await Promise.all([sessionsPromise, orgPackPromise]);
+        if (sessionsRes.error) {
+            console.error('[Dashboard] sessions load:', sessionsRes.error.code, sessionsRes.error.message);
+        }
+        const sessionsData = sessionsRes.error ? [] : (sessionsRes.data || []);
+        setSessions(sessionsData as unknown as Session[]);
+
+        if (organizationId && orgPack) {
+            const [recentAvailRes, recentCreatedSessionsRes, orgFeatRes] = orgPack;
 
             const orgFeat = orgFeatRes.data?.features;
             const orgFeatObj = orgFeat && typeof orgFeat === 'object' && !Array.isArray(orgFeat) ? (orgFeat as Record<string, unknown>) : {};
@@ -276,24 +320,57 @@ export default function DashboardPage() {
                     when: s.start_time,
                     sessionId: s.id,
                 })),
-                ...(recentCreatedSessionsRes.data || []).map((s: any) => ({
-                    id: `session_created_${s.id}`,
-                    tone: 'info' as const,
-                    message: t('dash.newSessionCreated'),
-                    when: s.created_at || s.start_time,
-                    sessionId: s.id as string,
-                })),
-                ...(recentAvailRes.data || []).map((a: any) => ({
-                    id: `availability_created_${a.id}`,
-                    tone: 'info' as const,
-                    message: t('dash.newSlotAdded'),
-                    when: a.created_at,
-                })),
+                ...(recentCreatedSessionsRes.data || []).map((s: any) => {
+                    const st = s.start_time as string;
+                    const studentName = (Array.isArray(s.student) ? s.student[0]?.full_name : s.student?.full_name) || '';
+                    const subName = (Array.isArray(s.subjects) ? s.subjects[0]?.name : s.subjects?.name) || '';
+                    const label = subName || (s.topic ? String(s.topic) : '');
+                    const whenStr = st ? format(parseISO(st), 'd MMM yyyy, HH:mm', { locale: dateFnsLocale }) : '';
+                    const detailParts = [whenStr, studentName, label].filter(Boolean);
+                    return {
+                        id: `session_created_${s.id}`,
+                        tone: 'info' as const,
+                        message: t('dash.newSessionCreated'),
+                        detail: detailParts.length > 0 ? detailParts.join(' · ') : undefined,
+                        when: s.created_at || s.start_time,
+                        sessionId: s.id as string,
+                    };
+                }),
+                ...(recentAvailRes.data || []).map((a: any) => {
+                    const tr = `${hmTime(a.start_time)}–${hmTime(a.end_time)}`;
+                    const recurring = a.is_recurring === true;
+                    let detail: string | undefined;
+                    let calendarDate: string | undefined;
+                    if (recurring && a.day_of_week != null) {
+                        const weekday = weekdayFromDow(Number(a.day_of_week), dateFnsLocale);
+                        const endPart = a.end_date ? t('dash.availRecurringEndPart', { date: String(a.end_date).slice(0, 10) }) : '';
+                        detail = t('dash.availDetailRecurring', { weekday, timeRange: tr, endPart });
+                        calendarDate = nextYmdForDow(Number(a.day_of_week));
+                    } else {
+                        const raw = (a.specific_date && String(a.specific_date).slice(0, 10)) || '';
+                        const dateLabel = raw
+                            ? format(parseISO(`${raw}T12:00:00`), 'd MMM yyyy', { locale: dateFnsLocale })
+                            : '';
+                        detail = dateLabel
+                            ? t('dash.availDetailOneTime', { date: dateLabel, timeRange: tr })
+                            : tr;
+                        calendarDate = raw || format(new Date(), 'yyyy-MM-dd');
+                    }
+                    return {
+                        id: `availability_created_${a.id}`,
+                        tone: 'info' as const,
+                        message: t('dash.newSlotAdded'),
+                        detail,
+                        when: a.created_at,
+                        calendarDate,
+                    };
+                }),
             ]
                 .sort((a, b) => new Date(b.when || 0).getTime() - new Date(a.when || 0).getTime())
                 .slice(0, 8);
 
             setTutorUpdates(updates);
+            setLoading(false);
         } else {
             setTutorUpdates([]);
         }
@@ -301,37 +378,14 @@ export default function DashboardPage() {
         // Aggregate latest payments from lesson payments + package payments + monthly invoice payments.
         // For org tutors we skip package/invoice queries entirely to avoid RLS 403 noise.
         try {
-            const paidLessonsRes = await supabase
-                .from('sessions')
-                .select('id, start_time, price, topic, lesson_package_id, student:students(full_name)')
-                .eq('tutor_id', user.id)
-                .eq('paid', true)
-                .is('lesson_package_id', null)
-                .is('payment_batch_id', null) // Exclude sessions paid via monthly invoice
-                .neq('status', 'cancelled')
-                .order('start_time', { ascending: false })
-                .limit(20);
+            const paidLessonsRes = await tutorRecentPaidLessonsDeduped(user.id);
 
             const isOrgTutorProfile = !!profileData?.organization_id;
             const [paidPackagesRes, paidInvoicesRes] = isOrgTutorProfile
                 ? [{ data: [], error: null } as any, { data: [], error: null } as any]
                 : await Promise.all([
-                    supabase
-                        .from('lesson_packages')
-                        .select('id, paid_at, total_price, total_lessons, students!student_id(full_name), subjects!subject_id(name)')
-                        .eq('tutor_id', user.id)
-                        .eq('paid', true)
-                        .not('paid_at', 'is', null)
-                        .order('paid_at', { ascending: false })
-                        .limit(20),
-                    supabase
-                        .from('billing_batches')
-                        .select('id, paid_at, total_amount, period_start_date, period_end_date, payer_name')
-                        .eq('tutor_id', user.id)
-                        .eq('paid', true)
-                        .not('paid_at', 'is', null)
-                        .order('paid_at', { ascending: false })
-                        .limit(20),
+                    tutorRecentPaidPackagesDeduped(user.id),
+                    tutorRecentPaidInvoicesDeduped(user.id),
                 ]);
 
             // Log any errors but don't block the page
@@ -376,11 +430,8 @@ export default function DashboardPage() {
         }
 
         // OPTIMIZED: Use 'estimated' count for better performance
-        const { count } = await supabase
-            .from('students')
-            .select('*', { count: 'estimated', head: true })
-            .eq('tutor_id', user.id);
-        setStudentCount(count || 0);
+        const studentCountRes = await tutorStudentCountEstimatedDeduped(user.id);
+        setStudentCount(studentCountRes.count ?? 0);
 
         setCurrentUserId(user.id);
 
@@ -405,9 +456,11 @@ export default function DashboardPage() {
                 setIsOnboardingOpen(false);
             }
         }
-
-        invalidateCache('tutor_calendar');
-        setLoading(false);
+        } catch (e) {
+            console.error('[Dashboard] fetchData failed', e);
+        } finally {
+            setLoading(false);
+        }
     };
 
     // Refresh recent payments quickly after Stripe webhook updates DB
@@ -415,36 +468,13 @@ export default function DashboardPage() {
         if (!currentUserId) return;
 
         try {
-            const paidLessonsRes = await supabase
-                .from('sessions')
-                .select('id, start_time, price, topic, lesson_package_id, student:students(full_name)')
-                .eq('tutor_id', currentUserId)
-                .eq('paid', true)
-                .is('lesson_package_id', null)
-                .is('payment_batch_id', null) // Exclude sessions paid via monthly invoice
-                .neq('status', 'cancelled')
-                .order('start_time', { ascending: false })
-                .limit(20);
+            const paidLessonsRes = await tutorRecentPaidLessonsDeduped(currentUserId);
 
             const [paidPackagesRes, paidInvoicesRes] = isOrgTutor === true
                 ? [{ data: [], error: null } as any, { data: [], error: null } as any]
                 : await Promise.all([
-                    supabase
-                        .from('lesson_packages')
-                        .select('id, paid_at, total_price, total_lessons, students!student_id(full_name), subjects!subject_id(name)')
-                        .eq('tutor_id', currentUserId)
-                        .eq('paid', true)
-                        .not('paid_at', 'is', null)
-                        .order('paid_at', { ascending: false })
-                        .limit(20),
-                    supabase
-                        .from('billing_batches')
-                        .select('id, paid_at, total_amount, period_start_date, period_end_date, payer_name')
-                        .eq('tutor_id', currentUserId)
-                        .eq('paid', true)
-                        .not('paid_at', 'is', null)
-                        .order('paid_at', { ascending: false })
-                        .limit(20),
+                    tutorRecentPaidPackagesDeduped(currentUserId),
+                    tutorRecentPaidInvoicesDeduped(currentUserId),
                 ]);
 
             if (paidLessonsRes.error) console.error('[Dashboard] Error fetching paid lessons (poll):', paidLessonsRes.error);
@@ -905,8 +935,11 @@ export default function DashboardPage() {
             return new Date(a.start_time).getTime() - new Date(b.start_time).getTime();
         });
 
-    const displayedOverdue = showAllOverdue ? overduePayments : overduePayments.slice(0, 5);
-    const displayedRecentPayments = showAllRecentPayments ? recentPayments : recentPayments.slice(0, 5);
+    const visibleOverduePayments = overduePayments.filter((s) => !dismissedAttentionRowIds.has(s.id));
+    const displayedOverdue = showAllOverdue ? visibleOverduePayments : visibleOverduePayments.slice(0, 5);
+    const visibleRecentPayments = recentPayments.filter((p) => !dismissedRecentPaymentIds.has(p.id));
+    const displayedRecentPayments = showAllRecentPayments ? visibleRecentPayments : visibleRecentPayments.slice(0, 5);
+    const visibleTutorUpdates = tutorUpdates.filter((u) => !dismissedUpdateRowIds.has(u.id));
 
     const cancelledSessionsAll = sessions
         .filter((s) => {
@@ -1143,45 +1176,105 @@ export default function DashboardPage() {
                               <AlertCircle className="w-5 h-5 text-indigo-500" />
                               <h2 className="text-lg font-bold text-gray-900">{t('dash.updates')}</h2>
                             </div>
-                            <span className="text-xs font-medium bg-indigo-100 text-indigo-700 px-2 py-1 rounded-md">
-                              {tutorUpdates.length}
-                            </span>
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs font-medium bg-indigo-100 text-indigo-700 px-2 py-1 rounded-md">
+                                {updateRowsDismissReady ? visibleTutorUpdates.length : tutorUpdates.length}
+                              </span>
+                            </div>
                           </div>
                           {tutorUpdates.length === 0 ? (
                             <p className="text-sm text-gray-400 text-center py-8">{t('dash.noUpdates')}</p>
+                          ) : updateRowsDismissReady && visibleTutorUpdates.length === 0 ? (
+                            <div className="text-center py-6 space-y-2">
+                              <p className="text-sm text-gray-500">{t('dash.allRowsHiddenHint')}</p>
+                              {updateRowsKey && (
+                                <button
+                                  type="button"
+                                  onClick={restoreAllUpdateRows}
+                                  className="text-sm text-indigo-600 hover:underline font-medium"
+                                >
+                                  {t('dash.restoreHiddenRows')}
+                                </button>
+                              )}
+                            </div>
                           ) : (
                             <div className="space-y-2">
-                              {tutorUpdates.map((u) => (
-                                <div
-                                  key={u.id}
-                                  role={u.sessionId ? 'button' : undefined}
-                                  tabIndex={u.sessionId ? 0 : undefined}
-                                  onClick={u.sessionId ? () => void openUpdateSessionModal(u.sessionId) : undefined}
-                                  onKeyDown={
-                                    u.sessionId
-                                      ? (e) => {
-                                            if (e.key === 'Enter' || e.key === ' ') {
-                                              e.preventDefault();
-                                              void openUpdateSessionModal(u.sessionId);
-                                            }
-                                          }
-                                      : undefined
+                              {visibleTutorUpdates.map((u) => {
+                                const openUpdate = () => {
+                                  if (u.sessionId) void openUpdateSessionModal(u.sessionId);
+                                  else if (u.calendarDate) {
+                                    navigate(`/calendar?date=${encodeURIComponent(u.calendarDate)}`);
                                   }
-                                  className={cn(
-                                    'p-3 rounded-xl border',
-                                    u.sessionId ? 'cursor-pointer hover:shadow-sm transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300' : '',
-                                    u.tone === 'warning' ? 'bg-amber-50 border-amber-200' : 'bg-indigo-50 border-indigo-100'
-                                  )}
-                                >
-                                  <p className="text-sm font-medium text-gray-900">{u.message}</p>
-                                  {u.when && (
-                                    <p className="text-xs text-gray-500 mt-1">
-                                      {format(new Date(u.when), "d MMM yyyy, HH:mm", { locale: dateFnsLocale })}
-                                    </p>
-                                  )}
-                                </div>
-                              ))}
+                                };
+                                const clickable = !!(u.sessionId || u.calendarDate);
+                                return (
+                                  <div
+                                    key={u.id}
+                                    className={cn(
+                                      'rounded-xl border flex gap-1 p-3',
+                                      u.tone === 'warning' ? 'bg-amber-50 border-amber-200' : 'bg-indigo-50 border-indigo-100'
+                                    )}
+                                  >
+                                    <div
+                                      role={clickable ? 'button' : undefined}
+                                      tabIndex={clickable ? 0 : undefined}
+                                      onClick={clickable ? openUpdate : undefined}
+                                      onKeyDown={
+                                        clickable
+                                          ? (e) => {
+                                                if (e.key === 'Enter' || e.key === ' ') {
+                                                    e.preventDefault();
+                                                    openUpdate();
+                                                }
+                                            }
+                                          : undefined
+                                      }
+                                      className={cn(
+                                        'min-w-0 flex-1',
+                                        clickable
+                                          ? 'cursor-pointer hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 rounded-lg'
+                                          : ''
+                                      )}
+                                    >
+                                      <p className="text-sm font-medium text-gray-900">{u.message}</p>
+                                      {u.detail && (
+                                        <p className="text-xs text-gray-700 mt-1 leading-snug">{u.detail}</p>
+                                      )}
+                                      {u.calendarDate && !u.sessionId && (
+                                        <p className="text-[11px] text-indigo-600 mt-1.5 font-medium">{t('dash.updateTapCalendar')}</p>
+                                      )}
+                                      {u.when && (
+                                        <p className="text-xs text-gray-500 mt-1">
+                                          {format(new Date(u.when), "d MMM yyyy, HH:mm", { locale: dateFnsLocale })}
+                                        </p>
+                                      )}
+                                    </div>
+                                    {updateRowsKey && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          dismissUpdateRow(u.id);
+                                        }}
+                                        className="p-1.5 h-fit rounded-lg text-gray-400 hover:text-gray-700 hover:bg-white/80 flex-shrink-0 self-start"
+                                        aria-label={t('dash.dismissRow')}
+                                      >
+                                        <X className="w-4 h-4" />
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
+                          )}
+                          {updateRowsDismissReady && updateRowsKey && dismissedUpdateRowIds.size > 0 && visibleTutorUpdates.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={restoreAllUpdateRows}
+                              className="mt-3 w-full text-center text-xs text-indigo-600 hover:underline font-medium"
+                            >
+                              {t('dash.restoreHiddenRows')}
+                            </button>
                           )}
                         </div>
                       </>
@@ -1300,16 +1393,19 @@ export default function DashboardPage() {
                                 <AlertCircle className="w-5 h-5 text-amber-500" />
                                 <h2 className="text-lg font-bold text-gray-900">{t('dash.needsAttention')}</h2>
                             </div>
+                            <div className="flex items-center gap-1">
                             {(() => {
                                 const setupIncomplete = isOrgTutor === false && (!isStripeConnected || !hasSubjects);
                                 const setupCount = setupIncomplete ? (!isStripeConnected ? 1 : 0) + (!hasSubjects ? 1 : 0) : 0;
-                                const attentionCount = overduePayments.length + setupCount;
+                                const listCount = attentionRowsDismissReady ? visibleOverduePayments.length : overduePayments.length;
+                                const attentionCount = listCount + setupCount;
                                 return (
                                     <span className="text-xs font-medium bg-amber-100 text-amber-700 px-2 py-1 rounded-md">
                                         {attentionCount} laukia
                                     </span>
                                 );
                             })()}
+                            </div>
                         </div>
 
                         {loading ? (
@@ -1372,6 +1468,19 @@ export default function DashboardPage() {
                                 <p className="text-sm font-medium">{t('dash.allDone')}</p>
                                 <p className="text-xs opacity-70 mt-1">{t('dash.noAttention')}</p>
                             </div>
+                        ) : attentionRowsDismissReady && visibleOverduePayments.length === 0 ? (
+                            <div className="flex-1 flex flex-col items-center justify-center py-8 text-center space-y-2">
+                                <p className="text-sm text-gray-500">{t('dash.allRowsHiddenHint')}</p>
+                                {attentionRowsKey && (
+                                    <button
+                                        type="button"
+                                        onClick={restoreAllAttentionRows}
+                                        className="text-sm text-indigo-600 hover:underline font-medium"
+                                    >
+                                        {t('dash.restoreHiddenRows')}
+                                    </button>
+                                )}
+                            </div>
                         ) : (
                             <div className="space-y-2 flex-1">
                                 {displayedOverdue.map((s) => {
@@ -1387,7 +1496,20 @@ export default function DashboardPage() {
                                     const remainingHours = Math.max(0, Math.floor(diffMs / 3600000));
 
                                     return (
-                                        <div key={s.id} onClick={() => { setSelectedSession(s); setIsModalOpen(true); }} className="flex items-center gap-3 p-3 rounded-xl border border-gray-100 hover:shadow-md transition-all cursor-pointer group">
+                                        <div key={s.id} className="flex items-center gap-1 p-3 rounded-xl border border-gray-100 hover:shadow-md transition-all group">
+                                            <div
+                                                role="button"
+                                                tabIndex={0}
+                                                onClick={() => { setSelectedSession(s); setIsModalOpen(true); }}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter' || e.key === ' ') {
+                                                        e.preventDefault();
+                                                        setSelectedSession(s);
+                                                        setIsModalOpen(true);
+                                                    }
+                                                }}
+                                                className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
+                                            >
                                             <div className={cn(
                                                 "w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition-colors",
                                                 isPendingConfirm ? "bg-amber-100 group-hover:bg-amber-200" : "bg-red-50 group-hover:bg-red-100"
@@ -1422,23 +1544,46 @@ export default function DashboardPage() {
                                                     )}
                                                 </p>
                                             </div>
+                                            </div>
+                                            {attentionRowsKey && (
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        dismissAttentionRow(s.id);
+                                                    }}
+                                                    className="p-1.5 h-fit rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 flex-shrink-0 self-center"
+                                                    aria-label={t('dash.dismissRow')}
+                                                >
+                                                    <X className="w-4 h-4" />
+                                                </button>
+                                            )}
                                         </div>
                                     );
                                 })}
-                                {!showAllOverdue && overduePayments.length > 5 && (
+                                {!showAllOverdue && visibleOverduePayments.length > 5 && (
                                     <button
                                         onClick={() => setShowAllOverdue(true)}
                                         className="w-full text-center text-sm text-indigo-600 font-medium py-2 hover:bg-gray-50 rounded-xl transition-colors"
                                     >
-                                        {t('dash.showMore', { count: String(overduePayments.length) })}
+                                        {t('dash.showMore', { count: String(visibleOverduePayments.length) })}
                                     </button>
                                 )}
-                                {showAllOverdue && overduePayments.length > 5 && (
+                                {showAllOverdue && visibleOverduePayments.length > 5 && (
                                     <button
                                         onClick={() => setShowAllOverdue(false)}
                                         className="w-full text-center text-sm text-gray-500 font-medium py-2 hover:bg-gray-50 rounded-xl transition-colors"
                                     >
                                         {t('dash.hide')}
+                                    </button>
+                                )}
+                                {attentionRowsDismissReady && attentionRowsKey && dismissedAttentionRowIds.size > 0 && visibleOverduePayments.length > 0 && (
+                                    <button
+                                        type="button"
+                                        onClick={restoreAllAttentionRows}
+                                        className="w-full text-center text-xs text-indigo-600 hover:underline font-medium pt-1"
+                                    >
+                                        {t('dash.restoreHiddenRows')}
                                     </button>
                                 )}
                             </div>
@@ -1468,31 +1613,65 @@ export default function DashboardPage() {
                                 <Wallet className="w-8 h-8 mx-auto mb-2 opacity-30" />
                                 <p className="text-sm">{t('dash.noPayments')}</p>
                             </div>
+                        ) : recentPaymentRowsDismissReady && visibleRecentPayments.length === 0 ? (
+                            <div className="text-center py-8 space-y-2">
+                                <p className="text-sm text-gray-500">{t('dash.allRowsHiddenHint')}</p>
+                                {recentPaymentRowsKey && (
+                                    <button
+                                        type="button"
+                                        onClick={restoreAllRecentPaymentRows}
+                                        className="text-sm text-indigo-600 hover:underline font-medium"
+                                    >
+                                        {t('dash.restoreHiddenRows')}
+                                    </button>
+                                )}
+                            </div>
                         ) : (
                             <div className="space-y-2">
                                 {displayedRecentPayments.map((p) => (
-                                    <div key={p.id} className="flex items-center justify-between gap-2 p-3 rounded-xl bg-green-50 border border-green-100">
-                                        <div className="flex items-center gap-3 min-w-0">
-                                            <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
-                                            <div className="min-w-0">
-                                                <p className="text-sm font-semibold text-gray-900 truncate">{p.title}</p>
-                                                <p className="text-xs text-gray-500 truncate">
-                                                    {p.subtitle}
-                                                    <span className="ml-1 text-[10px] uppercase text-green-700 font-semibold">
-                                                        · {p.type === 'lesson' ? t('dash.lesson') : p.type === 'package' ? t('dash.package') : t('dash.invoice')}
-                                                    </span>
-                                                </p>
+                                    <div key={p.id} className="flex items-center gap-1 p-3 rounded-xl bg-green-50 border border-green-100">
+                                        <div className="flex items-center justify-between flex-1 min-w-0 gap-2">
+                                            <div className="flex items-center gap-3 min-w-0">
+                                                <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
+                                                <div className="min-w-0">
+                                                    <p className="text-sm font-semibold text-gray-900 truncate">{p.title}</p>
+                                                    <p className="text-xs text-gray-500">
+                                                        {p.subtitle}
+                                                        <span className="ml-1 text-[10px] uppercase text-green-700 font-semibold">
+                                                            · {p.type === 'lesson' ? t('dash.lesson') : p.type === 'package' ? t('dash.package') : t('dash.invoice')}
+                                                        </span>
+                                                    </p>
+                                                </div>
                                             </div>
+                                            <span className="text-sm font-bold text-green-700 flex-shrink-0">+€{p.amount.toFixed(2)}</span>
                                         </div>
-                                        <span className="text-sm font-bold text-green-700 flex-shrink-0">+€{p.amount.toFixed(2)}</span>
+                                        {recentPaymentRowsKey && (
+                                            <button
+                                                type="button"
+                                                onClick={() => dismissRecentPaymentRow(p.id)}
+                                                className="p-1.5 h-fit rounded-lg text-gray-400 hover:text-gray-700 hover:bg-white/80 flex-shrink-0 self-center"
+                                                aria-label={t('dash.dismissRow')}
+                                            >
+                                                <X className="w-4 h-4" />
+                                            </button>
+                                        )}
                                     </div>
                                 ))}
-                                {recentPayments.length > 5 && (
+                                {visibleRecentPayments.length > 5 && (
                                     <button
                                         onClick={() => setShowAllRecentPayments((v) => !v)}
                                         className="w-full text-center text-sm text-indigo-600 font-medium py-2 hover:bg-gray-50 rounded-xl transition-colors"
                                     >
-                                        {showAllRecentPayments ? t('dash.showLess') : t('dash.showMore', { count: String(recentPayments.length) })}
+                                        {showAllRecentPayments ? t('dash.showLess') : t('dash.showMore', { count: String(visibleRecentPayments.length) })}
+                                    </button>
+                                )}
+                                {recentPaymentRowsDismissReady && recentPaymentRowsKey && dismissedRecentPaymentIds.size > 0 && visibleRecentPayments.length > 0 && (
+                                    <button
+                                        type="button"
+                                        onClick={restoreAllRecentPaymentRows}
+                                        className="w-full text-center text-xs text-indigo-600 hover:underline font-medium"
+                                    >
+                                        {t('dash.restoreHiddenRows')}
                                     </button>
                                 )}
                             </div>

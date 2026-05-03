@@ -11,6 +11,7 @@ import { Loader2, FileText, Calendar, Receipt, CalendarDays, FileStack, Building
 import { format, subDays } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { fetchPaidSalesInvoiceCandidates } from '@/lib/manualSalesInvoicePreview';
+import { fetchOrgTutorInvoicesDeduped } from '@/lib/fetchOrgTutorInvoicesDeduped';
 
 type GroupingType = 'per_payment' | 'per_week' | 'single';
 
@@ -140,15 +141,10 @@ export default function CreateInvoiceModal({
         const tutorId = tutorIdsForQuery[0];
         if (!tutorId) throw new Error(t('invoiceCreate.noSessions'));
 
-        const periodInvoiceResp = await fetch(
-          `/api/org-tutor-invoices?periodStart=${encodeURIComponent(periodStart)}&periodEnd=${encodeURIComponent(periodEnd)}`,
-          {
-            method: 'GET',
-            headers: await authHeaders(),
-          },
-        );
-        const periodInvoiceJson = await periodInvoiceResp.json().catch(() => ({}));
-        if (periodInvoiceResp.ok) {
+        const periodInvoiceKey = `periodStart=${encodeURIComponent(periodStart)}&periodEnd=${encodeURIComponent(periodEnd)}`;
+        const periodInvoiceRes = await fetchOrgTutorInvoicesDeduped(periodInvoiceKey);
+        if (periodInvoiceRes.ok) {
+          const periodInvoiceJson = periodInvoiceRes.data;
           const periodInvoices = (periodInvoiceJson.periodInvoices || []) as Array<{ invoice_number?: string; total_amount?: number }>;
           if (periodInvoices.length > 0) {
             const totalIssued = periodInvoices.reduce((sum, inv) => sum + Number(inv.total_amount || 0), 0);

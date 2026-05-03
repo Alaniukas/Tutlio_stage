@@ -14,7 +14,9 @@ function mapRpcRowsToConversations(data: unknown): Conversation[] {
   return raw.map((row) => {
     const kind = row.other_party_kind as string | undefined;
     const other_party_kind =
-      kind === 'student' || kind === 'tutor' || kind === 'org_admin' ? kind : undefined;
+      kind === 'student' || kind === 'tutor' || kind === 'org_admin' || kind === 'parent'
+        ? kind
+        : undefined;
     return {
       conversation_id: row.conversation_id as string,
       last_message_at: row.last_message_at as string,
@@ -33,15 +35,23 @@ function mapRpcRowsToConversations(data: unknown): Conversation[] {
   });
 }
 
+let inboxConversationsInflight: Promise<void> | null = null;
+
 async function fetchAndBroadcastConversations(): Promise<void> {
-  const { data, error: err } = await supabase.rpc('get_my_conversations');
-  if (err) {
-    console.error('[useChat] get_my_conversations:', err.message);
-    return;
-  }
-  const list = mapRpcRowsToConversations(data);
-  convCache = { data: list, ts: Date.now() };
-  convListeners.forEach((l) => l(list));
+  if (inboxConversationsInflight) return inboxConversationsInflight;
+  inboxConversationsInflight = (async () => {
+    const { data, error: err } = await supabase.rpc('get_my_conversations');
+    if (err) {
+      console.error('[useChat] get_my_conversations:', err.message);
+      return;
+    }
+    const list = mapRpcRowsToConversations(data);
+    convCache = { data: list, ts: Date.now() };
+    convListeners.forEach((l) => l(list));
+  })().finally(() => {
+    inboxConversationsInflight = null;
+  });
+  return inboxConversationsInflight;
 }
 
 let inboxBroadcastDebounce: ReturnType<typeof setTimeout> | null = null;
@@ -101,7 +111,7 @@ export interface Conversation {
   email_notify_enabled?: boolean;
   email_notify_delay_hours?: number;
   /** Counterparty role from get_my_conversations (when RPC returns it) */
-  other_party_kind?: 'student' | 'tutor' | 'org_admin';
+  other_party_kind?: 'student' | 'tutor' | 'org_admin' | 'parent';
 }
 
 export interface ChatMessage {
@@ -247,6 +257,33 @@ export async function sendMessage(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
+  // Org tutor license gating: allow read-only inbox for unlicensed org tutors.
+  try {
+    const { data: prof } = await supabase
+      .from('profiles')
+      .select('organization_id, has_active_license')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    const orgId = (prof as any)?.organization_id as string | null | undefined;
+    const hasActiveLicense = (prof as any)?.has_active_license !== false;
+
+    if (orgId && !hasActiveLicense) {
+      const { data: org } = await supabase
+        .from('organizations')
+        .select('tutor_license_count')
+        .eq('id', orgId)
+        .maybeSingle();
+      const orgUsesLicenses = (Number((org as any)?.tutor_license_count) || 0) > 0;
+      if (orgUsesLicenses) {
+        console.warn('[useChat] sendMessage blocked: org tutor not licensed');
+        return null;
+      }
+    }
+  } catch (e) {
+    // Non-critical: if the check fails, fall through to the normal send attempt.
+  }
+
   const { data, error } = await supabase
     .from('chat_messages')
     .insert({
@@ -363,7 +400,10 @@ export interface MessageableStudent {
   linked_user_id: string;
   full_name: string;
   email: string | null;
-  role?: 'student' | 'tutor';
+  role?: 'student' | 'tutor' | 'org_admin' | 'parent';
+  /** When role === 'parent', the names of the linked children (so the
+   *  contact picker can disambiguate "kieno tėvas"). */
+  child_names?: string[];
 }
 
 let msgStudentsCache: { data: MessageableStudent[]; ts: number } | null = null;
@@ -381,6 +421,111 @@ export function useMessageableStudents() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); return; }
 
+    // Detect if the caller is actually a parent. Otherwise, do NOT take the parent path,
+    // because tutors/admins also have RLS access to parent_students rows for students they
+    // can see, which would otherwise hijack the flow and replace their real contact list
+    // with a (mis)inferred parent list.
+    let isParentUser = false;
+    try {
+      const { data: parentProfileId } = await supabase.rpc('get_my_parent_profile_id');
+      isParentUser = !!parentProfileId;
+    } catch {
+      // If the helper RPC is unavailable, fall back to a direct query on parent_profiles
+      // (which has user_id = auth.uid() RLS).
+      try {
+        const { data: pp } = await supabase
+          .from('parent_profiles')
+          .select('id')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        isParentUser = !!pp?.id;
+      } catch {
+        isParentUser = false;
+      }
+    }
+
+    if (isParentUser) {
+      // Parent contacts: child tutors, org admins, and the parent's own linked children.
+      try {
+        const { data: contacts, error } = await supabase.rpc('get_parent_messageable_contacts');
+        if (!error && Array.isArray(contacts)) {
+          const list: MessageableStudent[] = contacts.map((c: any) => ({
+            student_id: c.user_id,
+            linked_user_id: c.user_id,
+            full_name: c.full_name ?? '',
+            email: c.email ?? null,
+            role:
+              c.role === 'org_admin'
+                ? 'org_admin'
+                : c.role === 'student'
+                  ? 'student'
+                  : 'tutor',
+          }));
+          setStudents(list);
+          msgStudentsCache = { data: list, ts: Date.now() };
+          setLoading(false);
+          return;
+        }
+      } catch (err) {
+        console.warn('[useChat] get_parent_messageable_contacts failed:', err);
+      }
+      // If the RPC failed completely, fall back to deriving from parent_students directly.
+      const { data: links } = await supabase
+        .from('parent_students')
+        .select('student_id, students(id, full_name, email, linked_user_id, tutor_id, profiles:tutor_id(id, full_name, email, organization_id))');
+      const tutorProfiles: Array<{ id: string; full_name: string | null; email: string | null; organization_id: string | null }> = [];
+      const childProfiles: Array<{ student_id: string; linked_user_id: string; full_name: string | null; email: string | null }> = [];
+      const orgIds = new Set<string>();
+      for (const link of links ?? []) {
+        const st = (link as any).students as any;
+        const prof = st?.profiles as any;
+        if (prof?.id && !tutorProfiles.some((p) => p.id === prof.id)) {
+          tutorProfiles.push({
+            id: prof.id,
+            full_name: prof.full_name ?? null,
+            email: prof.email ?? null,
+            organization_id: prof.organization_id ?? null,
+          });
+        }
+        if (prof?.organization_id) orgIds.add(prof.organization_id);
+        if (st?.linked_user_id && !childProfiles.some((c) => c.linked_user_id === st.linked_user_id)) {
+          childProfiles.push({
+            student_id: st.id,
+            linked_user_id: st.linked_user_id,
+            full_name: st.full_name ?? null,
+            email: st.email ?? null,
+          });
+        }
+      }
+      const list: MessageableStudent[] = [];
+      childProfiles.forEach((c) => {
+        if (c.linked_user_id !== user.id) {
+          list.push({
+            student_id: c.student_id,
+            linked_user_id: c.linked_user_id,
+            full_name: c.full_name ?? '',
+            email: c.email ?? null,
+            role: 'student',
+          });
+        }
+      });
+      tutorProfiles.forEach((p) => {
+        if (p.id !== user.id) {
+          list.push({
+            student_id: p.id,
+            linked_user_id: p.id,
+            full_name: p.full_name ?? '',
+            email: p.email ?? null,
+            role: 'tutor',
+          });
+        }
+      });
+      setStudents(list);
+      msgStudentsCache = { data: list, ts: Date.now() };
+      setLoading(false);
+      return;
+    }
+
     const { data: adminRow } = await supabase
       .from('organization_admins')
       .select('organization_id')
@@ -388,7 +533,7 @@ export function useMessageableStudents() {
       .maybeSingle();
 
     if (adminRow) {
-      const [{ data: admins }, { data: tutors }] = await Promise.all([
+      const [{ data: admins }, { data: tutors }, { data: linkedStudents }] = await Promise.all([
         supabase
           .from('organization_admins')
           .select('user_id')
@@ -397,19 +542,34 @@ export function useMessageableStudents() {
           .from('profiles')
           .select('id, full_name, email')
           .eq('organization_id', adminRow.organization_id),
+        supabase
+          .from('students')
+          .select('linked_user_id, email')
+          .eq('organization_id', adminRow.organization_id),
       ]);
 
       const adminIds = new Set((admins ?? []).map((a: any) => a.user_id));
-      const orgTutors = (tutors ?? []).filter((t: any) => !adminIds.has(t.id));
-      const tutorIds = orgTutors.map((t: any) => t.id);
-
-      const { data: studentData } = tutorIds.length > 0
-        ? await supabase
-            .from('students')
-            .select('id, linked_user_id, full_name, email')
-            .in('tutor_id', tutorIds)
-            .not('linked_user_id', 'is', null)
-        : { data: [] };
+      const linkedStudentUserIds = new Set(
+        (linkedStudents ?? [])
+          .map((s: any) => s.linked_user_id)
+          .filter((id: string | null | undefined): id is string => Boolean(id)),
+      );
+      const linkedStudentEmails = new Set(
+        (linkedStudents ?? [])
+          .map((s: any) => String(s.email || '').trim().toLowerCase())
+          .filter((email: string) => email.length > 0),
+      );
+      const orgTutors = (tutors ?? []).filter(
+        (t: any) =>
+          !adminIds.has(t.id) &&
+          !linkedStudentUserIds.has(t.id) &&
+          !linkedStudentEmails.has(String(t.email || '').trim().toLowerCase()),
+      );
+      const { data: studentData } = await supabase
+        .from('students')
+        .select('id, linked_user_id, full_name, email')
+        .eq('organization_id', adminRow.organization_id)
+        .not('linked_user_id', 'is', null);
 
       const result: MessageableStudent[] = [];
 
@@ -439,23 +599,197 @@ export function useMessageableStudents() {
         }
       }
 
+      // Org admin: also allow starting conversations with parents of students in this org.
+      // This enables admin -> parent initiation (and makes the UX symmetric with parent -> admin).
+      // Use a SECURITY DEFINER RPC instead of relying on parent_profiles RLS, which is too
+      // restrictive (it excludes parents whose child has no tutor assigned in the same org).
+      try {
+        const { data: parentRows, error: parentRpcErr } = await supabase.rpc(
+          'get_org_admin_messageable_parents',
+        );
+        if (!parentRpcErr && Array.isArray(parentRows)) {
+          // Aggregate children per parent so the picker can show "Parent · Vaikas A, B".
+          const parentByUserId = new Map<string, MessageableStudent>();
+          for (const row of parentRows as any[]) {
+            const parentUserId = row?.user_id as string | null | undefined;
+            if (!parentUserId) continue;
+            if (parentUserId === user.id) continue;
+            const childName: string | null =
+              typeof row?.student_name === 'string' && row.student_name.trim().length > 0
+                ? row.student_name.trim()
+                : null;
+            const existing = parentByUserId.get(parentUserId);
+            if (existing) {
+              if (childName && !(existing.child_names ?? []).includes(childName)) {
+                existing.child_names = [...(existing.child_names ?? []), childName];
+              }
+              continue;
+            }
+            parentByUserId.set(parentUserId, {
+              student_id: parentUserId,
+              linked_user_id: parentUserId,
+              full_name: row?.full_name ?? '',
+              email: row?.email ?? null,
+              role: 'parent',
+              child_names: childName ? [childName] : [],
+            });
+          }
+          for (const p of parentByUserId.values()) result.push(p);
+        } else if (parentRpcErr) {
+          console.warn('[useChat] get_org_admin_messageable_parents failed:', parentRpcErr);
+        }
+      } catch (err) {
+        console.warn('[useChat] get_org_admin_messageable_parents threw:', err);
+      }
+
       setStudents(result);
       msgStudentsCache = { data: result, ts: Date.now() };
     } else {
-      const { data } = await supabase
+      // Decide between STUDENT branch (linked_user_id = user.id) and TUTOR branch.
+      const { data: studentSelfRows } = await supabase
         .from('students')
-        .select('id, linked_user_id, full_name, email')
-        .eq('tutor_id', user.id)
-        .not('linked_user_id', 'is', null);
+        .select('id')
+        .eq('linked_user_id', user.id)
+        .limit(1);
 
-      const list = (data ?? []).map((s: any) => ({
-        student_id: s.id,
-        linked_user_id: s.linked_user_id,
-        full_name: s.full_name,
-        email: s.email,
-      }));
-      setStudents(list);
-      msgStudentsCache = { data: list, ts: Date.now() };
+      if (studentSelfRows && studentSelfRows.length > 0) {
+        // ── STUDENT branch ──
+        const list: MessageableStudent[] = [];
+        const seen = new Set<string>();
+
+        try {
+          const { data: contacts, error: rpcErr } = await supabase.rpc(
+            'get_student_messageable_contacts',
+          );
+          if (!rpcErr && Array.isArray(contacts)) {
+            for (const row of contacts as any[]) {
+              const uid = row?.user_id as string | null | undefined;
+              if (!uid || uid === user.id || seen.has(uid)) continue;
+              seen.add(uid);
+              const role: MessageableStudent['role'] =
+                row.role === 'tutor'
+                  ? 'tutor'
+                  : row.role === 'org_admin'
+                    ? 'org_admin'
+                    : row.role === 'parent'
+                      ? 'parent'
+                      : undefined;
+              list.push({
+                student_id: uid,
+                linked_user_id: uid,
+                full_name: row.full_name ?? '',
+                email: row.email ?? null,
+                role,
+              });
+            }
+          } else if (rpcErr) {
+            console.warn('[useChat] get_student_messageable_contacts failed:', rpcErr);
+          }
+        } catch (err) {
+          console.warn('[useChat] get_student_messageable_contacts threw:', err);
+        }
+
+        // Fallback: derive from `students` row directly if RPC was unavailable.
+        if (list.length === 0) {
+          const { data: stRow } = await supabase
+            .from('students')
+            .select('id, tutor_id, profiles:tutor_id(id, full_name, email)')
+            .eq('linked_user_id', user.id)
+            .maybeSingle();
+          const tp = (stRow as any)?.profiles as any;
+          if (tp?.id && tp.id !== user.id) {
+            list.push({
+              student_id: tp.id,
+              linked_user_id: tp.id,
+              full_name: tp.full_name ?? '',
+              email: tp.email ?? null,
+              role: 'tutor',
+            });
+          }
+        }
+
+        setStudents(list);
+        msgStudentsCache = { data: list, ts: Date.now() };
+      } else {
+        // ── TUTOR branch (individual tutor or org tutor) ──
+        const { data } = await supabase
+          .from('students')
+          .select('id, linked_user_id, full_name, email')
+          .eq('tutor_id', user.id)
+          .not('linked_user_id', 'is', null);
+
+        const list: MessageableStudent[] = (data ?? []).map((s: any) => ({
+          student_id: s.id,
+          linked_user_id: s.linked_user_id,
+          full_name: s.full_name,
+          email: s.email,
+          role: 'student',
+        }));
+
+        // Tutors can also message the parents of their students.
+        try {
+          const { data: parents, error: parentsErr } = await supabase.rpc(
+            'get_tutor_messageable_parents',
+          );
+          if (!parentsErr && Array.isArray(parents)) {
+            // Aggregate children per parent so the picker can show "Parent · Vaikas A, B".
+            const parentByUserId = new Map<string, MessageableStudent>();
+            for (const p of parents as any[]) {
+              const pid = p?.user_id as string | null | undefined;
+              if (!pid || pid === user.id) continue;
+              const childName: string | null =
+                typeof p?.student_name === 'string' && p.student_name.trim().length > 0
+                  ? p.student_name.trim()
+                  : null;
+              const existing = parentByUserId.get(pid);
+              if (existing) {
+                if (childName && !(existing.child_names ?? []).includes(childName)) {
+                  existing.child_names = [...(existing.child_names ?? []), childName];
+                }
+                continue;
+              }
+              parentByUserId.set(pid, {
+                student_id: pid,
+                linked_user_id: pid,
+                full_name: p.full_name ?? '',
+                email: p.email ?? null,
+                role: 'parent',
+                child_names: childName ? [childName] : [],
+              });
+            }
+            for (const p of parentByUserId.values()) list.push(p);
+          }
+        } catch (err) {
+          console.warn('[useChat] get_tutor_messageable_parents failed:', err);
+        }
+
+        // Org tutors should also be able to message admins of their organization.
+        try {
+          const { data: admins, error: adminsErr } = await supabase.rpc(
+            'get_tutor_messageable_admins',
+          );
+          if (!adminsErr && Array.isArray(admins)) {
+            const seenAdmins = new Set<string>();
+            for (const a of admins as any[]) {
+              const aid = a?.user_id as string | null | undefined;
+              if (!aid || aid === user.id || seenAdmins.has(aid)) continue;
+              seenAdmins.add(aid);
+              list.push({
+                student_id: aid,
+                linked_user_id: aid,
+                full_name: a.full_name ?? '',
+                email: a.email ?? null,
+                role: 'org_admin',
+              });
+            }
+          }
+        } catch (err) {
+          console.warn('[useChat] get_tutor_messageable_admins failed:', err);
+        }
+
+        setStudents(list);
+        msgStudentsCache = { data: list, ts: Date.now() };
+      }
     }
 
     setLoading(false);

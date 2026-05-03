@@ -3,10 +3,9 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase, setRememberMe } from '@/lib/supabase';
 import { getPasswordResetRedirectTo } from '@/lib/auth-redirects';
 import { hasActiveSubscription, tutorHasPlatformSubscriptionAccess } from '@/lib/subscription';
-import { ensureTutorPresetSubjects } from '@/lib/ensureTutorPresetSubjects';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { AlertCircle, ArrowLeft, ArrowRight, GraduationCap, BookOpen, ChevronRight, Sparkles, Building2 } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, GraduationCap, BookOpen, ChevronRight, Sparkles, Building2, Users } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 
 // ─── SVG Illustrations ────────────────────────────────────────────────────────
@@ -76,7 +75,7 @@ function StudentIllustration() {
 
 // ─── Main Component ────────────────────────────────────────────────────────────
 
-type Role = null | 'tutor' | 'student';
+type Role = null | 'tutor' | 'student' | 'parent';
 type StudentMode = null | 'register' | 'login';
 type TutorMode = null | 'login';
 
@@ -90,8 +89,10 @@ function fallbackNameFromEmail(email?: string | null): string {
 
 function isStudentAuthUser(user: { user_metadata?: any } | null | undefined): boolean {
   const role = String(user?.user_metadata?.role || '').trim().toLowerCase();
+  const appRole = String((user as any)?.app_metadata?.role || '').trim().toLowerCase();
   const studentId = String(user?.user_metadata?.student_id || '').trim();
-  return role === 'student' || studentId.length > 0;
+  const appStudentId = String((user as any)?.app_metadata?.student_id || '').trim();
+  return role === 'student' || appRole === 'student' || studentId.length > 0 || appStudentId.length > 0;
 }
 
 function messageForAuthHashError(code: string, detailEnc: string | null): string {
@@ -110,7 +111,7 @@ function messageForAuthHashError(code: string, detailEnc: string | null): string
 }
 
 export default function Login() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [role, setRole] = useState<Role>(null);
   const [studentMode, setStudentMode] = useState<StudentMode>(null);
   const [tutorMode, setTutorMode] = useState<TutorMode>(null);
@@ -133,6 +134,29 @@ export default function Login() {
   const [tutorOrgCode, setTutorOrgCode] = useState('');
   const [tutorOrgCodeMode, setTutorOrgCodeMode] = useState(false);
   const [tutorOrgCodeError, setTutorOrgCodeError] = useState<string | null>(null);
+
+  const claimOrgInvite = async (tokenRaw: string, accessToken?: string | null): Promise<{ organizationId?: string }> => {
+    const token = String(tokenRaw || '').trim().toUpperCase();
+    if (!token) return {};
+
+    let bearer = accessToken || null;
+    if (!bearer) {
+      const { data: { session } } = await supabase.auth.getSession();
+      bearer = session?.access_token || null;
+    }
+    if (!bearer) return {};
+
+    const response = await fetch('/api/claim-tutor-invite', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${bearer}`,
+      },
+      body: JSON.stringify({ token }),
+    });
+    if (!response.ok) return {};
+    return (await response.json().catch(() => ({}))) || {};
+  };
   const [authHashBanner, setAuthHashBanner] = useState<string | null>(null);
 
   const navigate = useNavigate();
@@ -182,9 +206,13 @@ export default function Login() {
     }
     if (orgAdmin) { navigate('/company'); return true; }
 
-    const { data: parentProfile } = await supabase
-      .from('parent_profiles').select('id').eq('user_id', user.id).maybeSingle();
-    if (parentProfile) { navigate('/parent'); return true; }
+    // Parent: use SECURITY DEFINER RPC to avoid RLS recursion on parent_profiles.
+    const { data: parentProfileId, error: parentErr } = await supabase
+      .rpc('get_parent_profile_id_by_user_id', { p_user_id: user.id });
+    if (parentErr) {
+      console.warn('[Login] redirectByRole parent profile lookup failed:', parentErr);
+    }
+    if (parentProfileId) { navigate('/parent'); return true; }
 
     const { data: studentRows } = await supabase
       .rpc('get_student_by_user_id', { p_user_id: user.id });
@@ -219,36 +247,9 @@ export default function Login() {
     }
 
     const meta = user.user_metadata || {};
-    if (meta.org_token && !profile?.organization_id) {
-      const { data: invite } = await supabase
-        .from('tutor_invites')
-        .select('id, organization_id, used, subjects_preset, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent')
-        .eq('token', meta.org_token)
-        .maybeSingle();
-
-      if (invite) {
-        const profileData = {
-          id: user.id,
-          full_name: profile ? undefined : meta.full_name,
-          phone: profile ? undefined : (meta.phone || ''),
-          email: user.email,
-          organization_id: invite.organization_id,
-          cancellation_hours: invite.cancellation_hours ?? 24,
-          cancellation_fee_percent: invite.cancellation_fee_percent ?? 0,
-          reminder_student_hours: invite.reminder_student_hours ?? 2,
-          reminder_tutor_hours: invite.reminder_tutor_hours ?? 2,
-          break_between_lessons: invite.break_between_lessons ?? 0,
-          min_booking_hours: invite.min_booking_hours ?? 1,
-          company_commission_percent: invite.company_commission_percent ?? 0,
-        };
-        await supabase.from('profiles').upsert(profileData);
-        if (!invite.used) {
-          await supabase
-            .from('tutor_invites')
-            .update({ used: true, used_by_profile_id: user.id })
-            .eq('id', invite.id);
-          await ensureTutorPresetSubjects(user.id, invite.subjects_preset as any);
-        }
+    if (meta.org_token) {
+      const claimResult = await claimOrgInvite(meta.org_token as string, session.access_token);
+      if (claimResult.organizationId) {
         const { data: updated } = await supabase
           .from('profiles').select('id, organization_id, subscription_status, manual_subscription_exempt').eq('id', user.id).maybeSingle();
         profile = updated;
@@ -381,6 +382,23 @@ export default function Login() {
         return;
       }
 
+      if (role === 'parent') {
+        const { data: parentProfileId, error: parentErr } = await supabase
+          .rpc('get_parent_profile_id_by_user_id', { p_user_id: data.user.id });
+        if (parentErr) {
+          console.warn('[Login] parent_profiles lookup failed during login:', parentErr);
+        }
+        if (parentProfileId) {
+          setLoading(false);
+          navigate('/parent');
+          return;
+        }
+        await supabase.auth.signOut();
+        setError(t('login.noParentFound'));
+        setLoading(false);
+        return;
+      }
+
       if (role === 'student') {
         // Use RPC function to bypass RLS
         const { data: studentRows } = await supabase
@@ -424,42 +442,17 @@ export default function Login() {
           console.warn('[Login] Tutor profile lookup failed:', tutorError);
         }
 
+        // Check org_token in metadata to link to organization even if profile exists (or create one)
         const meta = data.user?.user_metadata || {};
+        console.log('🔍 SIGNUP FLOW - USER METADATA:', meta);
+        console.log('🔍 SIGNUP FLOW - ORG TOKEN FROM METADATA:', meta.org_token);
 
         if (meta.org_token) {
-          const { data: invite, error: inviteError } = await supabase
-            .from('tutor_invites')
-            .select('id, organization_id, used, subjects_preset, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent')
-            .eq('token', meta.org_token)
-            .maybeSingle();
-
-          if (invite) {
-            const profileData = {
-              id: data.user.id,
-              full_name: tutorData ? undefined : meta.full_name,
-              phone: tutorData ? undefined : (meta.phone || ''),
-              email: data.user.email,
-              organization_id: invite.organization_id,
-              cancellation_hours: invite.cancellation_hours ?? 24,
-              cancellation_fee_percent: invite.cancellation_fee_percent ?? 0,
-              reminder_student_hours: invite.reminder_student_hours ?? 2,
-              reminder_tutor_hours: invite.reminder_tutor_hours ?? 2,
-              break_between_lessons: invite.break_between_lessons ?? 0,
-              min_booking_hours: invite.min_booking_hours ?? 1,
-              company_commission_percent: invite.company_commission_percent ?? 0,
-            };
-            const { error: upsertError } = await supabase.from('profiles').upsert(profileData);
-            if (upsertError) {
-              console.error('[Login] Profile upsert error:', upsertError);
-            }
-            if (!invite.used) {
-              await supabase
-                .from('tutor_invites')
-                .update({ used: true, used_by_profile_id: data.user.id })
-                .eq('id', invite.id);
-              await ensureTutorPresetSubjects(data.user.id, invite.subjects_preset as any);
-            }
-
+          const metaOrgToken = String(meta.org_token).trim().toUpperCase();
+          console.log('🔍 SIGNUP FLOW - SEARCHING FOR INVITE WITH TOKEN:', metaOrgToken);
+          const claimResult = await claimOrgInvite(metaOrgToken, data.session?.access_token);
+          console.log('🔍 SIGNUP FLOW - CLAIM RESULT:', claimResult);
+          if (claimResult.organizationId) {
             const { data: updated } = await supabase
               .from('profiles').select('id').eq('id', data.user.id).maybeSingle();
             tutorData = updated;
@@ -585,7 +578,7 @@ export default function Login() {
       setTutorOrgCodeError(t('login.codeNotFound'));
       return;
     }
-    if (data.used) {
+    if ((data as any).used) {
       setTutorOrgCodeError(t('login.codeAlreadyUsed'));
       return;
     }
@@ -605,18 +598,28 @@ export default function Login() {
     setResetSent(false);
   };
 
+  const backToStudentGroup = () => {
+    setRole('student');
+    setStudentMode(null);
+    setError(null);
+    setInviteError(null);
+    setIsForgotPassword(false);
+    setResetSent(false);
+  };
+
   return (
     <div className="min-h-screen flex">
       {/* ── Left Column: Marketing/Image Sidebar ────────────────────────────── */}
-      <div className="hidden lg:block w-1/2 relative bg-[#0f172a] overflow-hidden">
+      <div className="hidden lg:block w-1/2 relative bg-indigo-950 overflow-hidden">
         <div className="absolute inset-0 z-0">
+          {/* Associative photo from Unsplash */}
           <img
             src="https://images.unsplash.com/photo-1522202176988-66273c2fd55f?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80"
             alt="Students studying"
-            className="w-full h-full object-cover opacity-40"
+            className="w-full h-full object-cover opacity-50 mix-blend-overlay"
           />
         </div>
-        <div className="absolute inset-0 bg-gradient-to-br from-[#0f172a]/85 to-[#1e1b4b]/85 z-10" />
+        <div className="absolute inset-0 bg-gradient-to-br from-indigo-900/80 to-violet-900/80 z-10" />
 
         <div className="relative z-20 flex flex-col justify-between p-12 h-full text-white">
           <Link to="/" className="flex items-center gap-2 hover:bg-white/20 transition-all w-fit text-sm font-medium bg-white/10 px-5 py-2.5 rounded-full backdrop-blur border border-white/10">
@@ -625,26 +628,28 @@ export default function Login() {
           </Link>
 
           <div className="max-w-xl space-y-6">
-            <h1 className="font-display text-5xl font-bold leading-tight tracking-tight">{t('login.heroTitle')}</h1>
-            <p className="text-gray-300 text-xl leading-relaxed font-light">
+            <h1 className="text-5xl font-bold leading-tight tracking-tight">{t('login.heroTitle')}</h1>
+            <p className="text-indigo-200 text-xl leading-relaxed font-light">
               {t('login.heroDesc')}
             </p>
           </div>
 
-          <div className="text-sm text-gray-500 font-medium">
+          <div className="text-sm text-indigo-300 font-medium">
             {t('login.copyright', { year: String(new Date().getFullYear()) })}
           </div>
         </div>
       </div>
 
       {/* ── Right Column: Forms ─────────────────────────────────────────────── */}
-      <div className="w-full lg:w-1/2 bg-gradient-to-b from-[#f5f5f3] via-[#f0efed] to-[#eae9e6] flex flex-col items-center justify-start lg:justify-center px-4 py-8 lg:py-4 relative">
+      <div className="w-full lg:w-1/2 bg-gradient-to-br from-indigo-950 via-indigo-900 to-violet-900 flex flex-col items-center justify-start lg:justify-center px-4 py-8 lg:py-4 relative">
 
-        <div className="absolute top-[5%] left-1/2 -translate-x-1/2 w-[600px] h-[400px] bg-white/40 rounded-full blur-[100px] pointer-events-none" />
+        {/* Decorative blobs */}
+        <div className="absolute top-0 left-0 w-96 h-96 bg-indigo-600/20 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 right-0 w-80 h-80 bg-violet-600/20 rounded-full blur-3xl pointer-events-none" />
 
-        {/* Mobile back link */}
+        {/* Mobile back link – part of normal flow so it's always visible */}
         <div className="w-full max-w-md mb-4 lg:hidden relative z-10">
-          <Link to="/" className="flex items-center gap-2 hover:bg-gray-200/60 transition-all w-fit text-sm font-medium text-gray-600 bg-white/60 px-4 py-2 rounded-full backdrop-blur border border-gray-200/60">
+          <Link to="/" className="flex items-center gap-2 hover:bg-white/20 transition-all w-fit text-sm font-medium bg-white/10 px-4 py-2 rounded-full backdrop-blur border border-white/10 text-white">
             <ArrowLeft className="w-4 h-4" />
             {t('common.back')}
           </Link>
@@ -653,15 +658,15 @@ export default function Login() {
         <div className="relative w-full max-w-md z-10">
           {/* Logo */}
           <div className="text-center mb-8">
-            <div className="w-14 h-14 rounded-2xl bg-gray-900 flex items-center justify-center mx-auto mb-3 shadow-lg">
+            <div className="w-14 h-14 rounded-2xl bg-white/10 backdrop-blur border border-white/20 flex items-center justify-center mx-auto mb-3 shadow-xl">
               <GraduationCap className="w-7 h-7 text-white" />
             </div>
-            <h1 className="font-display text-2xl font-bold text-gray-900 tracking-tight">Tutlio</h1>
-            <p className="text-gray-500 text-sm mt-1">{t('login.welcomeBack')}</p>
+            <h1 className="text-2xl font-bold text-white tracking-tight">Tutlio</h1>
+            <p className="text-indigo-300 text-sm mt-1">{t('login.welcomeBack')}</p>
           </div>
 
           {authHashBanner && (
-            <div className="flex items-start gap-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 mb-2">
+            <div className="flex items-start gap-2 text-sm text-amber-100 bg-amber-800/40 border border-amber-700/50 rounded-xl px-3 py-2.5 mb-2">
               <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
               <span>{authHashBanner}</span>
             </div>
@@ -673,58 +678,64 @@ export default function Login() {
               className="space-y-3"
               key="selection"
             >
-              <p className="text-center text-gray-500 text-sm font-medium mb-5">
+              <p className="text-center text-white/70 text-sm font-medium mb-5">
                 {t('login.chooseRole')}
               </p>
 
-              {/* Company admin */}
+              {/* Company admin — separate company login page */}
               <button
                 type="button"
                 onClick={() => navigate('/company/login')}
-                className="group w-full bg-white hover:bg-white border border-gray-100 hover:border-gray-200 hover:shadow-md rounded-2xl p-5 text-left transition-all duration-200 flex items-center gap-5 shadow-sm"
+                className="group w-full bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 hover:border-emerald-400/40 rounded-2xl p-5 text-left transition-all duration-200 flex items-center gap-5"
               >
-                <div className="w-24 h-18 flex-shrink-0 flex items-center justify-center">
-                  <div className="w-[88px] h-[72px] rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center">
-                    <Building2 className="w-12 h-12 text-emerald-500" />
+                <div className="w-24 h-18 flex-shrink-0 flex items-center justify-center opacity-95">
+                  <div className="w-[88px] h-[72px] rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center">
+                    <Building2 className="w-12 h-12 text-emerald-200" />
                   </div>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-gray-900 font-semibold text-base">{t('login.companyAdmin')}</p>
-                  <p className="text-gray-500 text-sm mt-0.5">{t('login.companyAdminDesc')}</p>
+                  <p className="text-white font-semibold text-base">{t('login.companyAdmin')}</p>
+                  <p className="text-indigo-300 text-sm mt-0.5">{t('login.companyAdminDesc')}</p>
                 </div>
-                <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-gray-500 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
+                <ChevronRight className="w-5 h-5 text-white/40 group-hover:text-white/80 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
               </button>
 
               {/* Tutor card */}
               <button
                 type="button"
                 onClick={() => setRole('tutor')}
-                className="group w-full bg-white hover:bg-white border border-gray-100 hover:border-gray-200 hover:shadow-md rounded-2xl p-5 text-left transition-all duration-200 flex items-center gap-5 shadow-sm"
+                className="group w-full bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 hover:border-white/40 rounded-2xl p-5 text-left transition-all duration-200 flex items-center gap-5"
               >
                 <div className="w-24 h-18 flex-shrink-0 opacity-90">
                   <TutorIllustration />
                 </div>
                 <div className="flex-1">
-                  <p className="text-gray-900 font-semibold text-base">{t('common.tutor')}</p>
-                  <p className="text-gray-500 text-sm mt-0.5">{t('login.tutorDesc')}</p>
+                  <p className="text-white font-semibold text-base">{t('common.tutor')}</p>
+                  <p className="text-indigo-300 text-sm mt-0.5">{t('login.tutorDesc')}</p>
                 </div>
-                <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-gray-500 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
+                <ChevronRight className="w-5 h-5 text-white/40 group-hover:text-white/80 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
               </button>
 
               {/* Student card */}
               <button
                 type="button"
                 onClick={() => setRole('student')}
-                className="group w-full bg-white hover:bg-white border border-gray-100 hover:border-gray-200 hover:shadow-md rounded-2xl p-5 text-left transition-all duration-200 flex items-center gap-5 shadow-sm"
+                className="group w-full bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 hover:border-white/40 rounded-2xl p-5 text-left transition-all duration-200 flex items-center gap-5"
               >
                 <div className="w-24 h-18 flex-shrink-0 opacity-90">
                   <StudentIllustration />
                 </div>
                 <div className="flex-1">
-                  <p className="text-gray-900 font-semibold text-base">{t('common.student')}</p>
-                  <p className="text-gray-500 text-sm mt-0.5">{t('login.studentDesc')}</p>
+                  <p className="text-white font-semibold text-base">
+                    {locale === 'lt' ? 'Mokiniai / Tėvai' : 'Students / Parents'}
+                  </p>
+                  <p className="text-indigo-300 text-sm mt-0.5">
+                    {locale === 'lt'
+                      ? 'Prisijunkite kaip mokinys arba kaip tėvai'
+                      : 'Login as a student or as a parent'}
+                  </p>
                 </div>
-                <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-gray-500 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
+                <ChevronRight className="w-5 h-5 text-white/40 group-hover:text-white/80 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
               </button>
             </div>
           )}
@@ -735,12 +746,13 @@ export default function Login() {
               key="tutor-choice"
               className="bg-white rounded-2xl shadow-2xl overflow-hidden"
             >
-              <div className="bg-gray-900 px-6 pt-6 pb-3 flex items-end gap-4">
+              {/* Illustration header */}
+              <div className="bg-gradient-to-br from-indigo-500 to-indigo-700 px-6 pt-6 pb-3 flex items-end gap-4">
                 <div className="w-28 h-20 flex-shrink-0 drop-shadow-lg">
                   <TutorIllustration />
                 </div>
                 <div className="pb-2">
-                  <p className="text-gray-400 text-xs font-medium uppercase tracking-wider">{t('login.choose')}</p>
+                  <p className="text-white/80 text-xs font-medium uppercase tracking-wider">{t('login.choose')}</p>
                   <h2 className="text-white text-xl font-bold leading-tight">{t('common.tutor')}</h2>
                 </div>
               </div>
@@ -748,6 +760,7 @@ export default function Login() {
               <div className="p-6 space-y-3">
                 <p className="text-sm text-gray-500 mb-4">{t('login.haveAccountOrNew')}</p>
 
+                {/* New Tutor - Subscribe */}
                 <Link
                   to="/register"
                   className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-indigo-300 hover:bg-indigo-50 transition-all text-left"
@@ -768,7 +781,7 @@ export default function Login() {
                   className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-indigo-300 hover:bg-indigo-50 transition-all text-left"
                 >
                   <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center flex-shrink-0">
-                    <ArrowRight className="w-5 h-5 text-indigo-600" />
+                    <ArrowRight className="w-5 h-5 text-violet-600" />
                   </div>
                   <div>
                     <p className="font-semibold text-gray-900 text-sm">{t('common.login')}</p>
@@ -797,12 +810,13 @@ export default function Login() {
               key="tutor-form"
               className="bg-white rounded-2xl shadow-2xl overflow-hidden"
             >
-              <div className="bg-gray-900 px-6 pt-6 pb-3 flex items-end gap-4">
+              {/* Illustration header */}
+              <div className="bg-gradient-to-br from-indigo-500 to-indigo-700 px-6 pt-6 pb-3 flex items-end gap-4">
                 <div className="w-28 h-20 flex-shrink-0 drop-shadow-lg">
                   <TutorIllustration />
                 </div>
                 <div className="pb-2">
-                  <p className="text-gray-400 text-xs font-medium uppercase tracking-wider">{t('login.loginLabel')}</p>
+                  <p className="text-white/80 text-xs font-medium uppercase tracking-wider">{t('login.loginLabel')}</p>
                   <h2 className="text-white text-xl font-bold leading-tight">{t('common.tutor')}</h2>
                 </div>
               </div>
@@ -969,15 +983,146 @@ export default function Login() {
             </div>
           )}
 
+          {/* ── STEP 2c: Parent login (same auth as student/tutor) ─────────────── */}
+          {role === 'parent' && (
+            <div key="parent-form" className="bg-white rounded-2xl shadow-2xl overflow-hidden">
+              <div className="bg-gradient-to-br from-fuchsia-600 to-violet-700 px-6 pt-6 pb-3 flex items-end gap-4">
+                <div className="w-28 h-20 flex-shrink-0 flex items-center justify-center">
+                  <Users className="w-16 h-16 text-white/90 drop-shadow-lg" />
+                </div>
+                <div className="pb-2">
+                  <p className="text-white/80 text-xs font-medium uppercase tracking-wider">{t('login.loginLabel')}</p>
+                  <h2 className="text-white text-xl font-bold leading-tight">{t('login.parentRole')}</h2>
+                </div>
+              </div>
+              <div className="p-6 space-y-4">
+                <p className="text-sm text-gray-600">
+                  {t('login.parentNoAccount')}{' '}
+                  <Link to="/parent-register" className="text-violet-600 font-medium hover:underline">
+                    {t('login.parentRegisterLink')}
+                  </Link>
+                </p>
+                {isForgotPassword ? (
+                  <form onSubmit={handleForgotPassword} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="p-email" className="text-sm font-medium text-gray-700">{t('common.email')}</Label>
+                      <Input
+                        id="p-email"
+                        type="email"
+                        placeholder="vardas@pavyzdys.lt"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        required
+                        className="rounded-xl border-gray-200"
+                      />
+                    </div>
+                    {error && (
+                      <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 rounded-xl px-3 py-2">
+                        <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                        {error}
+                      </div>
+                    )}
+                    {resetSent && (
+                      <div className="text-sm text-green-700 bg-green-50 rounded-xl px-4 py-3 font-medium border border-green-200">
+                        {t('login.resetLinkSent', { email })}
+                      </div>
+                    )}
+                    {!resetSent && (
+                      <button type="submit" disabled={loading}
+                        className="w-full py-2.5 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                        {loading ? t('common.sending') : t('login.sendResetLink')}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => { setIsForgotPassword(false); setResetSent(false); setError(null); }}
+                      className="w-full text-sm text-gray-500 hover:text-violet-600 transition-colors mt-2"
+                    >
+                      {t('login.backToLogin')}
+                    </button>
+                  </form>
+                ) : (
+                  <form onSubmit={handleLogin} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="p-email2" className="text-sm font-medium text-gray-700">{t('common.email')}</Label>
+                      <Input
+                        id="p-email2"
+                        type="email"
+                        placeholder="vardas@pavyzdys.lt"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        required
+                        className="rounded-xl border-gray-200"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="p-password" className="text-sm font-medium text-gray-700">{t('common.password')}</Label>
+                        <button
+                          type="button"
+                          onClick={() => { setIsForgotPassword(true); setError(null); }}
+                          className="text-sm text-violet-600 hover:underline font-medium"
+                        >
+                          {t('login.forgotPassword')}
+                        </button>
+                      </div>
+                      <Input
+                        id="p-password"
+                        type="password"
+                        placeholder="••••••••"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                        className="rounded-xl border-gray-200"
+                      />
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={rememberMe}
+                        onChange={(e) => setRememberMeState(e.target.checked)}
+                        className="rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                      />
+                      <span>{t('login.rememberMe')}</span>
+                    </label>
+                    {error && (
+                      <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 rounded-xl px-3 py-2">
+                        <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                        {error}
+                      </div>
+                    )}
+                    <button type="submit" disabled={loading}
+                      className="w-full py-2.5 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                      {loading ? t('common.connecting') : t('common.login')}
+                    </button>
+                  </form>
+                )}
+                <button type="button" onClick={reset}
+                  className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-700 transition-colors mt-2">
+                  <ArrowLeft className="w-3.5 h-3.5" /> {t('common.back')}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={backToStudentGroup}
+                  className="w-full text-sm text-violet-600 font-medium hover:underline"
+                >
+                  {locale === 'lt' ? 'Atgal į Mokiniai / Tėvai' : 'Back to Students / Parents'}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* ── STEP 2b: Student section ──────────────────────────────────────── */}
           {role === 'student' && (
             <div key="student-form" className="bg-white rounded-2xl shadow-2xl overflow-hidden">
-              <div className="bg-gray-900 px-6 pt-6 pb-3 flex items-end gap-4">
+              {/* Illustration header */}
+              <div className="bg-gradient-to-br from-violet-500 to-violet-700 px-6 pt-6 pb-3 flex items-end gap-4">
                 <div className="w-28 h-20 flex-shrink-0 drop-shadow-lg">
                   <StudentIllustration />
                 </div>
                 <div className="pb-2">
-                  <p className="text-gray-400 text-xs font-medium uppercase tracking-wider">
+                  <p className="text-white/80 text-xs font-medium uppercase tracking-wider">
                     {studentMode === 'login' ? t('login.loginLabel') : studentMode === 'register' ? t('login.registrationLabel') : t('login.choose')}
                   </p>
                   <h2 className="text-white text-xl font-bold leading-tight">{t('common.student')}</h2>
@@ -992,10 +1137,10 @@ export default function Login() {
                     <button
                       type="button"
                       onClick={() => setStudentMode('login')}
-                      className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-indigo-300 hover:bg-indigo-50 transition-all text-left"
+                      className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-violet-300 hover:bg-violet-50 transition-all text-left"
                     >
-                      <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center flex-shrink-0">
-                        <ArrowRight className="w-5 h-5 text-indigo-600" />
+                      <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center flex-shrink-0">
+                        <ArrowRight className="w-5 h-5 text-violet-600" />
                       </div>
                       <div>
                         <p className="font-semibold text-gray-900 text-sm">{t('common.login')}</p>
@@ -1005,7 +1150,7 @@ export default function Login() {
                     <button
                       type="button"
                       onClick={() => setStudentMode('register')}
-                      className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-indigo-300 hover:bg-indigo-50 transition-all text-left"
+                      className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-violet-300 hover:bg-violet-50 transition-all text-left"
                     >
                       <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center flex-shrink-0">
                         <BookOpen className="w-5 h-5 text-indigo-600" />
@@ -1013,6 +1158,24 @@ export default function Login() {
                       <div>
                         <p className="font-semibold text-gray-900 text-sm">{t('login.registerWithCode')}</p>
                         <p className="text-xs text-gray-400">{t('login.hasInviteCode')}</p>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setRole('parent')}
+                      className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-fuchsia-300 hover:bg-fuchsia-50 transition-all text-left"
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-fuchsia-100 flex items-center justify-center flex-shrink-0">
+                        <Users className="w-5 h-5 text-fuchsia-600" />
+                      </div>
+                      <div>
+                        <p className="font-semibold text-gray-900 text-sm">
+                          {locale === 'lt' ? 'Tėvų prisijungimas' : 'Parent login'}
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          {locale === 'lt' ? 'Prisijunkite kaip tėvai / globėjai' : 'Login as a parent / guardian'}
+                        </p>
                       </div>
                     </button>
                   </div>
@@ -1050,14 +1213,14 @@ export default function Login() {
                       )}
                       {!resetSent && (
                         <button type="submit" disabled={loading}
-                          className="w-full py-2.5 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                          className="w-full py-2.5 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors">
                           {loading ? t('common.sending') : t('login.sendResetLink')}
                         </button>
                       )}
                       <button
                         type="button"
                         onClick={() => { setIsForgotPassword(false); setResetSent(false); setError(null); }}
-                        className="w-full text-sm text-gray-500 hover:text-indigo-600 transition-colors mt-2"
+                        className="w-full text-sm text-gray-500 hover:text-violet-600 transition-colors mt-2"
                       >
                         {t('login.backToLogin')}
                       </button>
@@ -1082,7 +1245,7 @@ export default function Login() {
                           <button
                             type="button"
                             onClick={() => { setIsForgotPassword(true); setError(null); }}
-                            className="text-sm text-indigo-600 hover:underline font-medium"
+                            className="text-sm text-violet-600 hover:underline font-medium"
                           >
                             {t('login.forgotPassword')}
                           </button>
@@ -1107,7 +1270,7 @@ export default function Login() {
                           type="checkbox"
                           checked={rememberMe}
                           onChange={(e) => setRememberMeState(e.target.checked)}
-                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                          className="rounded border-gray-300 text-violet-600 focus:ring-violet-500"
                         />
                         <span>{t('login.rememberMe')}</span>
                       </label>
@@ -1118,7 +1281,7 @@ export default function Login() {
                         </div>
                       )}
                       <button type="submit" disabled={loading}
-                        className="w-full py-2.5 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                        className="w-full py-2.5 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors">
                         {loading ? t('common.connecting') : t('common.login')}
                       </button>
                     </form>
@@ -1147,7 +1310,7 @@ export default function Login() {
                       </div>
                     )}
                     <button type="submit" disabled={inviteLoading || !inviteCode.trim()}
-                      className="w-full py-2.5 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
+                      className="w-full py-2.5 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
                       {inviteLoading ? t('login.checking') : (<><BookOpen className="w-4 h-4" /> {t('login.continue')}</>)}
                     </button>
                   </form>
@@ -1161,13 +1324,13 @@ export default function Login() {
                   </button>
                   {studentMode === 'register' && (
                     <button type="button" onClick={() => setStudentMode('login')}
-                      className="text-sm text-indigo-600 hover:underline font-medium">
+                      className="text-sm text-violet-600 hover:underline font-medium">
                       {t('login.alreadyHaveAccount')}
                     </button>
                   )}
                   {studentMode === 'login' && (
                     <button type="button" onClick={() => setStudentMode('register')}
-                      className="text-sm text-indigo-600 hover:underline font-medium">
+                      className="text-sm text-violet-600 hover:underline font-medium">
                       {t('login.registerWithCode')}
                     </button>
                   )}

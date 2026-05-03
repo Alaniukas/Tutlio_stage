@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import {
+  orgSuspensionRowDeduped,
+  rpcGetStudentByUserIdDeduped,
+  tutorProfileOrgIdDeduped,
+} from '@/lib/preload';
 import { useUser } from '@/contexts/UserContext';
 
 export interface OrgAccessState {
@@ -49,16 +53,12 @@ export function useOrgAccess(): OrgAccessState {
       };
 
       if (profile?.organization_id) {
-        const { data: org } = await supabase
-          .from('organizations')
-          .select('status, features')
-          .eq('id', profile.organization_id)
-          .maybeSingle();
+        const { data: org } = await orgSuspensionRowDeduped(profile.organization_id);
         applyOrg(profile.organization_id, org);
         return;
       }
 
-      const { data: studentRows, error } = await supabase.rpc('get_student_by_user_id', { p_user_id: user.id });
+      const { data: studentRows, error } = await rpcGetStudentByUserIdDeduped(user.id);
       if (error || !studentRows?.length) {
         applyOrg(null, null);
         return;
@@ -70,17 +70,13 @@ export function useOrgAccess(): OrgAccessState {
         return;
       }
 
-      const { data: prof } = await supabase.from('profiles').select('organization_id').eq('id', tutorId).maybeSingle();
+      const { data: prof } = await tutorProfileOrgIdDeduped(tutorId);
       if (!prof?.organization_id) {
         applyOrg(null, null);
         return;
       }
 
-      const { data: org } = await supabase
-        .from('organizations')
-        .select('status, features')
-        .eq('id', prof.organization_id)
-        .maybeSingle();
+      const { data: org } = await orgSuspensionRowDeduped(prof.organization_id);
 
       applyOrg(prof.organization_id, org);
     };

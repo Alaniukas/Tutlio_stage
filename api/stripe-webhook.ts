@@ -3,7 +3,9 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { tryIssueSalesInvoiceForStripePackage } from './_lib/issuePackageSalesInvoice.js';
+import { markInvoicesPaidForPackage } from './_lib/markPackageInvoicePaid.js';
 import { syncSessionToGoogle } from './_lib/google-calendar.js';
+import { isOrgTutor } from './_lib/isOrgTutor.js';
 
 const getStripe = () => {
     const key = process.env.STRIPE_SECRET_KEY;
@@ -360,7 +362,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     // Resolve tutor separately to avoid brittle relationship-name dependency in lesson_packages select.
                     const { data: tutor } = await supabase
                         .from('profiles')
-                        .select('full_name, email')
+                        .select('full_name, email, organization_id')
                         .eq('id', (updatedPackage as any).tutor_id)
                         .maybeSingle();
 
@@ -378,7 +380,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             recipientName: student.full_name,
                         });
                     }
-                    if (tutor?.email) {
+                    if (tutor?.email && !isOrgTutor(tutor.organization_id)) {
                         recipientPairs.push({
                             email: tutor.email,
                             recipientName: tutor.full_name || 'Korepetitoriau',
@@ -407,16 +409,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
                     console.log(`[stripe-webhook] Package ${packageId} activated successfully`);
 
-                    // Mark any pre-payment invoices for this package as 'paid'
                     try {
-                        const { data: invLineItems } = await supabase
-                            .from('invoice_line_items')
-                            .select('invoice_id, session_ids')
-                            .contains('session_ids', [packageId]);
-                        if (invLineItems?.length) {
-                            const invoiceIds = [...new Set(invLineItems.map(li => li.invoice_id))];
-                            await supabase.from('invoices').update({ status: 'paid' }).in('id', invoiceIds).eq('status', 'issued');
-                        }
+                        await markInvoicesPaidForPackage(
+                            supabase,
+                            packageId,
+                            (updatedPackage as { manual_sales_invoice_id?: string | null }).manual_sales_invoice_id
+                        );
                     } catch (invErr) {
                         console.error('[stripe-webhook] Error updating invoice status:', invErr);
                     }
@@ -428,6 +426,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     }
                 } else {
                     console.log(`[stripe-webhook] Package ${packageId} was already paid, skipping duplicate email`);
+                    try {
+                        const { data: pkgRow } = await supabase
+                            .from('lesson_packages')
+                            .select('manual_sales_invoice_id')
+                            .eq('id', packageId)
+                            .maybeSingle();
+                        await markInvoicesPaidForPackage(supabase, packageId, pkgRow?.manual_sales_invoice_id);
+                    } catch (invErr) {
+                        console.error('[stripe-webhook] Error marking package invoice paid (already-paid path):', invErr);
+                    }
                 }
 
                 // If there are pre-created sessions tied to this package (e.g. trial lessons),
@@ -462,7 +470,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     })
                     .eq('id', batchId)
                     .eq('paid', false) // idempotency: send emails only once
-                    .select('*, profiles!billing_batches_tutor_id_fkey(full_name, email)')
+                    .select('*, profiles!billing_batches_tutor_id_fkey(full_name, email, organization_id)')
                     .single();
 
                 if (updateErr) {
@@ -521,8 +529,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             }
                         }
                     }
-                    if (tutorEmail) {
-                        // Ensure tutor gets the same paid info.
+                    if (tutorEmail && !isOrgTutor(tutor?.organization_id)) {
                         recipientPairs.push({ email: tutorEmail, recipientName: tutorName });
                     }
 
@@ -553,6 +560,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     }
 
                     await Promise.all(emailPromises);
+
+                    try {
+                        await supabase
+                            .from('invoices')
+                            .update({ status: 'paid' })
+                            .eq('billing_batch_id', batchId)
+                            .eq('status', 'issued');
+                    } catch (invPaidErr) {
+                        console.error('[stripe-webhook] Error marking batch invoice as paid:', invPaidErr);
+                    }
 
                     console.log(`[stripe-webhook] Billing batch ${batchId} marked as paid successfully`);
                 }
@@ -608,97 +625,150 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     if (!dbSession) {
                         console.error('[stripe-webhook] Lesson session not found:', sessionId);
                     } else {
-                        // Idempotent update: only succeeds (returns data) on the first call
-                        const { data: updated, error: updateErr } = await supabase
-                            .from('sessions')
-                            .update({ paid: true, payment_status: 'paid', stripe_checkout_session_id: session.id })
-                            .eq('id', sessionId)
-                            .eq('paid', false)
-                            .select('tutor_id')
-                            .maybeSingle();
+                        const isPenaltyPayment = session.metadata?.is_penalty_payment === 'true';
 
-                        if (updateErr) {
-                            console.error('[stripe-webhook] Error updating lesson session:', updateErr);
-                        } else if (updated) {
-                            syncSessionToGoogle(sessionId, (updated as any).tutor_id || (dbSession as any).tutor_id).catch(() => {});
-                            const student = (dbSession as any).students;
-                            const tutor = (dbSession as any).profiles;
+                        const student = (dbSession as any).students;
+                        const tutor = (dbSession as any).profiles;
+                        const sessionStart = new Date((dbSession as any).start_time);
+                        const dateStr = sessionStart.toLocaleDateString('lt-LT', { year: 'numeric', month: '2-digit', day: '2-digit' });
+                        const timeStr = sessionStart.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' });
+                        const durationMinutes = Math.round(
+                            (new Date((dbSession as any).end_time).getTime() - sessionStart.getTime()) / 60000
+                        );
+                        const amountTotal = (session as Stripe.Checkout.Session).amount_total;
 
-                            const sessionStart = new Date((dbSession as any).start_time);
-                            const dateStr = sessionStart.toLocaleDateString('lt-LT', { year: 'numeric', month: '2-digit', day: '2-digit' });
-                            const timeStr = sessionStart.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' });
-                            const durationMinutes = Math.round(
-                                (new Date((dbSession as any).end_time).getTime() - sessionStart.getTime()) / 60000
-                            );
+                        const sendEmailUrl = `${APP_URL}/api/send-email`;
 
-                            const amountTotal = (session as Stripe.Checkout.Session).amount_total;
-                            const emailData = {
-                                studentName: student.full_name,
-                                tutorName: tutor.full_name || 'Korepetitorius',
-                                date: dateStr,
-                                time: timeStr,
-                                subject: (dbSession as any).topic,
-                                price: (dbSession as any).price,
-                                lessonPriceEur: (dbSession as any).price,
-                                totalChargedEur: amountTotal != null ? amountTotal / 100 : undefined,
-                                duration: durationMinutes,
-                                cancellationHours: tutor.cancellation_hours ?? 24,
-                                cancellationFeePercent: tutor.cancellation_fee_percent ?? 0,
-                            };
+                        if (isPenaltyPayment) {
+                            const paidAt = new Date().toISOString();
+                            const { data: penaltyFirst, error: penErr } = await supabase
+                                .from('sessions')
+                                .update({ cancellation_penalty_stripe_paid_at: paidAt })
+                                .eq('id', sessionId)
+                                .is('cancellation_penalty_stripe_paid_at', null)
+                                .select('id')
+                                .maybeSingle();
 
-                            const sendEmailUrl = `${APP_URL}/api/send-email`;
+                            if (penErr) {
+                                console.error('[stripe-webhook] Penalty timestamp error:', penErr);
+                            } else if (penaltyFirst) {
+                                const emailData = {
+                                    studentName: student.full_name,
+                                    tutorName: tutor.full_name || 'Korepetitorius',
+                                    date: dateStr,
+                                    time: timeStr,
+                                    subject: (dbSession as any).topic,
+                                    totalChargedEur: amountTotal != null ? amountTotal / 100 : undefined,
+                                    duration: durationMinutes,
+                                };
+                                const recipients = new Set<string>();
+                                const pe = (student.payer_email || '').trim().toLowerCase();
+                                const se = (student.email || '').trim().toLowerCase();
+                                if (student.payment_payer === 'parent' && pe) recipients.add(student.payer_email.trim());
+                                if (se) recipients.add(student.email.trim());
+                                if (recipients.size === 0 && student.email) recipients.add(student.email);
 
-                            const recipients = new Set<string>();
-                            if (student.email) recipients.add(student.email);
-                            if (student.payment_payer === 'parent' && student.payer_email) {
-                                recipients.add(student.payer_email);
+                                for (const email of recipients) {
+                                    await fetch(sendEmailUrl, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
+                                        body: JSON.stringify({ type: 'penalty_payment_success', to: email, data: emailData }),
+                                    }).catch(e => console.error('[stripe-webhook] Penalty student/parent email:', e));
+                                }
+                                if (tutor?.email) {
+                                    await fetch(sendEmailUrl, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
+                                        body: JSON.stringify({
+                                            type: 'penalty_payment_tutor',
+                                            to: tutor.email,
+                                            data: emailData,
+                                        }),
+                                    }).catch(e => console.error('[stripe-webhook] Penalty tutor email:', e));
+                                }
+                                console.log(`[stripe-webhook] Late-cancel penalty recorded for session ${sessionId}`);
+                            } else {
+                                console.log(`[stripe-webhook] Penalty session ${sessionId} already recorded, skipping emails`);
                             }
-
-                            for (const email of Array.from(recipients)) {
-                                await fetch(sendEmailUrl, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
-                                    body: JSON.stringify({ type: 'payment_success', to: email, data: emailData }),
-                                }).catch(e => console.error('[stripe-webhook] Error sending lesson payment email:', e));
-                            }
-
-                            if (tutor?.email) {
-                                const isOrgTutor = Boolean(tutor.organization_id);
-                                const tutorPayload = isOrgTutor
-                                    ? {
-                                        type: 'lesson_confirmed_tutor',
-                                        to: tutor.email,
-                                        data: {
-                                            studentName: student.full_name,
-                                            tutorName: tutor.full_name || 'Korepetitorius',
-                                            date: dateStr,
-                                            time: timeStr,
-                                            subject: (dbSession as any).topic,
-                                            meetingLink: (dbSession as any).meeting_link || '',
-                                        },
-                                    }
-                                    : {
-                                        type: 'payment_received_tutor',
-                                        to: tutor.email,
-                                        data: {
-                                            studentName: student.full_name,
-                                            tutorName: tutor.full_name || 'Korepetitorius',
-                                            date: dateStr,
-                                            time: timeStr,
-                                            subject: (dbSession as any).topic,
-                                            price: (dbSession as any).price,
-                                        },
-                                    };
-                                await fetch(sendEmailUrl, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
-                                    body: JSON.stringify(tutorPayload),
-                                }).catch(e => console.error('[stripe-webhook] Error sending tutor email:', e));
-                            }
-
-                            console.log(`[stripe-webhook] Lesson session ${sessionId} confirmed and emails sent`);
                         } else {
-                            console.log(`[stripe-webhook] Lesson session ${sessionId} was already paid, skipping duplicate emails`);
+                            const { data: updated, error: updateErr } = await supabase
+                                .from('sessions')
+                                .update({ paid: true, payment_status: 'paid', stripe_checkout_session_id: session.id })
+                                .eq('id', sessionId)
+                                .eq('paid', false)
+                                .select('tutor_id')
+                                .maybeSingle();
+
+                            if (updateErr) {
+                                console.error('[stripe-webhook] Error updating lesson session:', updateErr);
+                            } else if (updated) {
+                                syncSessionToGoogle(sessionId, (updated as any).tutor_id || (dbSession as any).tutor_id).catch(() => {});
+
+                                const emailData = {
+                                    studentName: student.full_name,
+                                    tutorName: tutor.full_name || 'Korepetitorius',
+                                    date: dateStr,
+                                    time: timeStr,
+                                    subject: (dbSession as any).topic,
+                                    price: (dbSession as any).price,
+                                    lessonPriceEur: (dbSession as any).price,
+                                    totalChargedEur: amountTotal != null ? amountTotal / 100 : undefined,
+                                    duration: durationMinutes,
+                                    cancellationHours: tutor.cancellation_hours ?? 24,
+                                    cancellationFeePercent: tutor.cancellation_fee_percent ?? 0,
+                                };
+
+                                const recipients = new Set<string>();
+                                if (student.email) recipients.add(student.email);
+                                if (student.payment_payer === 'parent' && student.payer_email) {
+                                    recipients.add(student.payer_email);
+                                }
+
+                                for (const email of Array.from(recipients)) {
+                                    await fetch(sendEmailUrl, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
+                                        body: JSON.stringify({ type: 'payment_success', to: email, data: emailData }),
+                                    }).catch(e => console.error('[stripe-webhook] Error sending lesson payment email:', e));
+                                }
+
+                                if (tutor?.email) {
+                                    const tutorPayload = isOrgTutor(tutor.organization_id)
+                                        ? {
+                                            type: 'lesson_confirmed_tutor',
+                                            to: tutor.email,
+                                            data: {
+                                                studentName: student.full_name,
+                                                tutorName: tutor.full_name || 'Korepetitorius',
+                                                date: dateStr,
+                                                time: timeStr,
+                                                subject: (dbSession as any).topic,
+                                                meetingLink: (dbSession as any).meeting_link || '',
+                                            },
+                                        }
+                                        : {
+                                            type: 'payment_received_tutor',
+                                            to: tutor.email,
+                                            data: {
+                                                studentName: student.full_name,
+                                                tutorName: tutor.full_name || 'Korepetitorius',
+                                                date: dateStr,
+                                                time: timeStr,
+                                                subject: (dbSession as any).topic,
+                                                price: (dbSession as any).price,
+                                            },
+                                        };
+                                    await fetch(sendEmailUrl, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
+                                        body: JSON.stringify(tutorPayload),
+                                    }).catch(e => console.error('[stripe-webhook] Error sending tutor email:', e));
+                                }
+
+                                console.log(`[stripe-webhook] Lesson session ${sessionId} confirmed and emails sent`);
+                            } else {
+                                console.log(`[stripe-webhook] Lesson session ${sessionId} was already paid, skipping duplicate emails`);
+                            }
                         }
                     }
                 }

@@ -6,6 +6,21 @@ function asString(v: unknown): string | null {
   return typeof v === 'string' && v.trim().length > 0 ? v.trim() : null;
 }
 
+function collectSessionIdsFromLineItems(
+  lineItems: { invoice_id?: string; session_ids?: unknown }[] | null,
+): Map<string, string[]> {
+  const lineItemsByInvoice = new Map<string, string[]>();
+  for (const li of lineItems || []) {
+    const invId = (li as any).invoice_id as string | undefined;
+    if (!invId) continue;
+    const raw = (li as any).session_ids;
+    const arr = Array.isArray(raw) ? raw.map(String).filter(Boolean) : [];
+    const prev = lineItemsByInvoice.get(invId) || [];
+    lineItemsByInvoice.set(invId, [...prev, ...arr]);
+  }
+  return lineItemsByInvoice;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -14,12 +29,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const supabase = createClient(
     process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
   );
 
   const tutorId = auth.userId;
   const periodStart = asString(req.query.periodStart);
   const periodEnd = asString(req.query.periodEnd);
+  const hasPeriod = !!(periodStart && periodEnd);
 
   try {
     const { data: tutorProfile } = await supabase
@@ -37,24 +53,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq('organization_id', orgId);
     const adminIds = new Set((adminRows || []).map((r: any) => r.user_id));
 
-    // Tutor session ids for matching invoices (all-time for list, period-filtered for duplicates).
-    let sessionIdsQuery = supabase
-      .from('sessions')
-      .select('id')
-      .eq('tutor_id', tutorId)
-      .neq('status', 'cancelled')
-      .neq('status', 'no_show');
-
-    if (periodStart) sessionIdsQuery = sessionIdsQuery.gte('start_time', `${periodStart}T00:00:00`);
-    if (periodEnd) sessionIdsQuery = sessionIdsQuery.lte('start_time', `${periodEnd}T23:59:59`);
-
-    const { data: tutorSessions } = await sessionIdsQuery.limit(10000);
-    const tutorSessionIds = new Set((tutorSessions || []).map((s: any) => s.id));
-
-    // Org invoices include admin-issued org_tutor invoices and own invoices.
     let orgInvoicesQuery = supabase
       .from('invoices')
-      .select('id, invoice_number, issue_date, period_start, period_end, buyer_snapshot, total_amount, status, grouping_type, pdf_storage_path, issued_by_user_id, created_at, organization_id')
+      .select(
+        'id, invoice_number, issue_date, period_start, period_end, buyer_snapshot, total_amount, status, grouping_type, pdf_storage_path, issued_by_user_id, created_at, organization_id',
+      )
       .eq('organization_id', orgId)
       .neq('status', 'cancelled')
       .order('created_at', { ascending: false })
@@ -67,31 +70,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const invoiceIds = (orgInvoices || []).map((i: any) => i.id);
 
     let lineItemsByInvoice = new Map<string, string[]>();
+    let tutorOwnedSessionIds = new Set<string>();
+
     if (invoiceIds.length > 0) {
       const { data: lineItems } = await supabase
         .from('invoice_line_items')
         .select('invoice_id, session_ids')
         .in('invoice_id', invoiceIds);
-      for (const li of lineItems || []) {
-        const arr = Array.isArray((li as any).session_ids) ? ((li as any).session_ids as string[]) : [];
-        const prev = lineItemsByInvoice.get((li as any).invoice_id) || [];
-        lineItemsByInvoice.set((li as any).invoice_id, [...prev, ...arr]);
+
+      lineItemsByInvoice = collectSessionIdsFromLineItems(lineItems || []);
+
+      if (hasPeriod) {
+        const { data: tutorSessions } = await supabase
+          .from('sessions')
+          .select('id')
+          .eq('tutor_id', tutorId)
+          .neq('status', 'cancelled')
+          .neq('status', 'no_show')
+          .gte('start_time', `${periodStart}T00:00:00`)
+          .lte('start_time', `${periodEnd}T23:59:59`)
+          .limit(5000);
+        tutorOwnedSessionIds = new Set((tutorSessions || []).map((s: any) => s.id));
+      } else {
+        const referenced = new Set<string>();
+        for (const ids of lineItemsByInvoice.values()) ids.forEach((id) => referenced.add(id));
+
+        const unique = [...referenced];
+        const chunkSize = 500;
+        for (let i = 0; i < unique.length; i += chunkSize) {
+          const chunk = unique.slice(i, i + chunkSize);
+          const { data: owned } = await supabase.from('sessions').select('id').eq('tutor_id', tutorId).in('id', chunk);
+          for (const row of owned || []) tutorOwnedSessionIds.add((row as any).id);
+        }
       }
     }
 
     const relevantOrgInvoices = (orgInvoices || []).filter((inv: any) => {
       if (inv.issued_by_user_id === tutorId) return true;
       const ids = lineItemsByInvoice.get(inv.id) || [];
-      return ids.some((sid) => tutorSessionIds.has(sid));
+      return ids.some((sid) => tutorOwnedSessionIds.has(sid));
     });
 
     const issuerIds = Array.from(new Set(relevantOrgInvoices.map((i: any) => i.issued_by_user_id).filter(Boolean)));
     let issuerNameMap: Record<string, string> = {};
     if (issuerIds.length > 0) {
-      const { data: issuers } = await supabase
-        .from('profiles')
-        .select('id, full_name')
-        .in('id', issuerIds);
+      const { data: issuers } = await supabase.from('profiles').select('id, full_name').in('id', issuerIds);
       for (const i of issuers || []) issuerNameMap[(i as any).id] = (i as any).full_name || '—';
     }
 
@@ -110,4 +133,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: err?.message || 'Internal Server Error' });
   }
 }
-

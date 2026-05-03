@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import StudentLayout from '@/components/StudentLayout';
+import ParentLayout from '@/components/ParentLayout';
 import StatusBadge from '@/components/StatusBadge';
 import { supabase } from '@/lib/supabase';
-import { getCached, setCache } from '@/lib/dataCache';
+import { getCached, setCache, dedupeAsync } from '@/lib/dataCache';
 import { sendEmail } from '@/lib/email';
 import { authHeaders } from '@/lib/apiHelpers';
 import { format, isAfter, differenceInHours, addDays, getDay } from 'date-fns';
@@ -11,11 +12,16 @@ import { Clock, CheckCircle, XCircle, CalendarDays, RefreshCw, ShieldAlert, List
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import SessionFiles from '@/components/SessionFiles';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { DateInput } from '@/components/ui/date-input';
+import { Label } from '@/components/ui/label';
 import { cn, normalizeUrl } from '@/lib/utils';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
-import { formatCustomerChargeEur } from '@/lib/stripeLessonPricing';
+import { formatLessonStripeChargeEur } from '@/lib/stripeLessonPricing';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
+import { dedupeAuthGetUser } from '@/lib/preload';
+import { fetchStudentActiveLessonPackagesDeduped, fetchSubjectNamesByIds } from '@/lib/studentLessonPackagesLight';
 
 interface Session {
     id: string;
@@ -30,7 +36,7 @@ interface Session {
     tutor_comment?: string | null;
     show_comment_to_student?: boolean;
     subject_id?: string | null;
-    subjects?: { is_group?: boolean; max_students?: number } | null;
+    subjects?: { is_group?: boolean; max_students?: number; name?: string } | null;
     lesson_package_id?: string | null;
     is_late_cancelled?: boolean;
     cancellation_penalty_amount?: number | null;
@@ -69,16 +75,34 @@ export default function StudentSessions() {
     const { t, dateFnsLocale } = useTranslation();
     const location = useLocation();
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const isParentLessonsRoute = location.pathname === '/parent/lessons';
+    const urlParentStudentId = isParentLessonsRoute ? searchParams.get('studentId') : null;
+    const sessionsCacheKey = isParentLessonsRoute
+        ? urlParentStudentId
+            ? `parent_lessons_${urlParentStudentId}`
+            : null
+        : 'student_sessions';
+    const ssCache = sessionsCacheKey ? getCached<any>(sessionsCacheKey) : null;
     const navStateConsumed = useRef(false);
     const invoiceSuccessHandledRef = useRef(false);
     const returnToRef = useRef<string | null>(null);
-    const ssCache = getCached<any>('student_sessions');
     const [sessions, setSessions] = useState<Session[]>(ssCache?.sessions ?? []);
     const [waitlistEntries, setWaitlistEntries] = useState<WaitlistEntry[]>(ssCache?.waitlist ?? []);
     const [loading, setLoading] = useState(!ssCache);
+    /** When Supabase times out or errors — avoid showing “no lessons” as if data were empty. */
+    const [sessionsFetchError, setSessionsFetchError] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<'lessons' | 'files'>('lessons');
-    const [sessionFiles, setSessionFiles] = useState<{ name: string; sessionTopic: string; sessionDate: string; url: string }[]>([]);
+    const [sessionFiles, setSessionFiles] = useState<
+        { name: string; sessionId: string; sessionTopic: string; subjectName: string | null; sessionDate: string; url: string }[]
+    >([]);
     const [loadingFiles, setLoadingFiles] = useState(false);
+    const [filesSessionFilter, setFilesSessionFilter] = useState<'all' | string>('all');
+    const [filesDateFrom, setFilesDateFrom] = useState('');
+    const [filesDateTo, setFilesDateTo] = useState('');
+    const [lessonsSubjectFilter, setLessonsSubjectFilter] = useState<'all' | string>('all');
+    const [lessonsDateFrom, setLessonsDateFrom] = useState('');
+    const [lessonsDateTo, setLessonsDateTo] = useState('');
     const [filter, setFilter] = useState<'all' | 'upcoming' | 'past' | 'paid' | 'unpaid' | 'cancelled'>('all');
     const [selectedSession, setSelectedSession] = useState<Session | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -113,21 +137,87 @@ export default function StudentSessions() {
     const [studentPaymentModel, setStudentPaymentModel] = useState<string | null>(null);
     const [manualPaymentsOnly, setManualPaymentsOnly] = useState(false);
     const [creditBalance, setCreditBalance] = useState(0);
+    const [tutorOrgIsSchool, setTutorOrgIsSchool] = useState(false);
     const [activePackages, setActivePackages] = useState<PackageSummary[]>([]);
     const [showAllSessions, setShowAllSessions] = useState(false);
     const [invoicePaidSuccessOpen, setInvoicePaidSuccessOpen] = useState(false);
     const [invoicePaidSuccessLoading, setInvoicePaidSuccessLoading] = useState(false);
+    /** When parent manages several children — header picker. */
+    const [parentChildOptions, setParentChildOptions] = useState<Array<{ id: string; fullName: string }>>([]);
+    /** Cuts duplicate `parent_students` round-trips (e.g. React StrictMode + URL sync). */
+    const parentStudentLinksCacheRef = useRef<{
+        userId: string;
+        expiresAt: number;
+        pairs: Array<{ id: string; fullName: string }>;
+    } | null>(null);
+    /** After syncing default `studentId` into URL, React re-runs the effect once — skip redundant full reload. */
+    const skipNextParentDuplicateFetchRef = useRef(false);
+    /** Dismiss stale secondary results when a newer Pamokų fetch starts. */
+    const sessionsSecondaryGenRef = useRef(0);
+    /** Clears packages/waitlist when the resolved student differs from last successful Pamokų load. */
+    const sessionsLoadedStudentIdRef = useRef<string | null>(null);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
     const now = new Date();
 
-    useEffect(() => { if (!getCached('student_sessions')) fetchSessions(); }, []);
-    useEffect(() => { setShowAllSessions(false); }, [filter]);
+    /** Parent: only re-fetch when path or ?studentId= changes (avoids extra runs from irrelevant search noise). */
+    const parentLessonsFetchKey = isParentLessonsRoute ? (urlParentStudentId ?? '') : '';
+    const studentSessionsSearchKey = !isParentLessonsRoute ? searchParams.toString() : '';
+    useEffect(() => {
+        void fetchSessions();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- stable keys derived above
+    }, [location.pathname, parentLessonsFetchKey, studentSessionsSearchKey]);
+    useEffect(() => { setShowAllSessions(false); }, [filter, lessonsSubjectFilter, lessonsDateFrom, lessonsDateTo]);
+
+    const lessonSubjectOptions = useMemo(() => {
+        const byId = new Map<string, string>();
+        for (const s of sessions) {
+            const id = s.subject_id;
+            if (!id) continue;
+            if (!byId.has(id)) {
+                byId.set(id, s.subjects?.name || s.topic || t('stuSess.filesLessonUntitled'));
+            }
+        }
+        const opts = [...byId.entries()]
+            .map(([id, name]) => ({ id, name }))
+            .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+        if (sessions.some((s) => !s.subject_id)) {
+            opts.push({ id: '__no_subject__', name: t('stuSess.lessonsFilterNoSubject') });
+        }
+        return opts;
+    }, [sessions, t]);
+
+    useEffect(() => {
+        if (lessonsSubjectFilter === 'all') return;
+        if (lessonsSubjectFilter === '__no_subject__') {
+            if (!sessions.some((s) => !s.subject_id)) setLessonsSubjectFilter('all');
+            return;
+        }
+        if (!sessions.some((s) => s.subject_id === lessonsSubjectFilter)) setLessonsSubjectFilter('all');
+    }, [sessions, lessonsSubjectFilter]);
+
+    const sessionsAfterSubjectDate = useMemo(() => {
+        return sessions.filter((s) => {
+            const d = format(new Date(s.start_time), 'yyyy-MM-dd');
+            if (lessonsDateFrom && d < lessonsDateFrom) return false;
+            if (lessonsDateTo && d > lessonsDateTo) return false;
+            if (lessonsSubjectFilter === 'all') return true;
+            if (lessonsSubjectFilter === '__no_subject__') return !s.subject_id;
+            return s.subject_id === lessonsSubjectFilter;
+        });
+    }, [sessions, lessonsDateFrom, lessonsDateTo, lessonsSubjectFilter]);
 
     useEffect(() => {
       if (activeTab !== 'files' || sessions.length === 0) return;
       setLoadingFiles(true);
       (async () => {
-        const files: { name: string; sessionTopic: string; sessionDate: string; url: string }[] = [];
+        const files: {
+          name: string;
+          sessionId: string;
+          sessionTopic: string;
+          subjectName: string | null;
+          sessionDate: string;
+          url: string;
+        }[] = [];
         for (const session of sessions) {
           const folder = `${session.id}/`;
           const { data: fileList } = await supabase.storage.from('session-files').list(folder);
@@ -136,7 +226,9 @@ export default function StudentSessions() {
               const { data: urlData } = await supabase.storage.from('session-files').createSignedUrl(`${folder}${f.name}`, 3600);
               files.push({
                 name: f.name,
+                sessionId: session.id,
                 sessionTopic: session.topic || '—',
+                subjectName: session.subjects?.name ?? null,
                 sessionDate: format(new Date(session.start_time), 'yyyy-MM-dd'),
                 url: urlData?.signedUrl || '',
               });
@@ -147,6 +239,29 @@ export default function StudentSessions() {
         setLoadingFiles(false);
       })();
     }, [activeTab, sessions]);
+
+    useEffect(() => {
+      if (filesSessionFilter === 'all') return;
+      const ids = new Set(sessionFiles.map((f) => f.sessionId));
+      if (!ids.has(filesSessionFilter)) setFilesSessionFilter('all');
+    }, [sessionFiles, filesSessionFilter]);
+
+    const fileSessionsForPicker = useMemo(() => {
+      const ids = [...new Set(sessionFiles.map((f) => f.sessionId))];
+      return ids
+        .map((id) => sessions.find((s) => s.id === id))
+        .filter((s): s is Session => Boolean(s))
+        .sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime());
+    }, [sessionFiles, sessions]);
+
+    const filteredSessionFiles = useMemo(() => {
+      return sessionFiles.filter((f) => {
+        if (filesSessionFilter !== 'all' && f.sessionId !== filesSessionFilter) return false;
+        if (filesDateFrom && f.sessionDate < filesDateFrom) return false;
+        if (filesDateTo && f.sessionDate > filesDateTo) return false;
+        return true;
+      });
+    }, [sessionFiles, filesSessionFilter, filesDateFrom, filesDateTo]);
 
     // After monthly invoice payment from Stripe success_url
     useEffect(() => {
@@ -249,6 +364,16 @@ export default function StudentSessions() {
             }
             if (penaltyAmount && penaltyAmount > 0) {
                 body.penaltyAmount = penaltyAmount;
+                try {
+                    const returnPath = isParentLessonsRoute
+                        ? (urlParentStudentId
+                            ? `/parent/lessons?studentId=${encodeURIComponent(urlParentStudentId)}`
+                            : '/parent/lessons')
+                        : '/student/sessions';
+                    localStorage.setItem('stripe_penalty_success_return', returnPath);
+                } catch {
+                    /* ignore */
+                }
             }
             const res = await fetch('/api/stripe-checkout', {
                 method: 'POST',
@@ -312,19 +437,101 @@ export default function StudentSessions() {
     }, [sessions]);
 
     const fetchSessions = async () => {
-        if (!getCached('student_sessions')) setLoading(true);
-        const { data: { user } } = await supabase.auth.getUser();
+        if (isParentLessonsRoute && skipNextParentDuplicateFetchRef.current) {
+            skipNextParentDuplicateFetchRef.current = false;
+            return;
+        }
+        const cacheMiss =
+            !sessionsCacheKey ||
+            !getCached(sessionsCacheKey);
+        if (cacheMiss) setLoading(true);
+        const user = await dedupeAuthGetUser();
         if (!user) {
             setLoading(false);
             return;
         }
 
+        const parentStudentFromUrl = isParentLessonsRoute
+            ? (urlParentStudentId ??
+                (typeof window !== 'undefined'
+                    ? new URL(window.location.href).searchParams.get('studentId')
+                    : null) ??
+                '')
+            : '';
+        const lsStudent =
+            typeof window !== 'undefined' ? localStorage.getItem(ACTIVE_STUDENT_PROFILE_KEY) : null;
+        const dedupeKey = `sessions:${user.id}:${isParentLessonsRoute ? `p:${parentStudentFromUrl}` : `s:${lsStudent ?? 'none'}`}`;
+
+        await dedupeAsync(dedupeKey, async () => {
+        setTutorOrgIsSchool(false);
+        setSessionsFetchError(null);
+        /** When fixing URL (?studentId=) we still fetch using this id in-flight; defer navigation until success. */
+        let parentUrlSyncStudentId: string | null = null;
+
         const selectedStudentId = typeof window !== 'undefined'
             ? localStorage.getItem(ACTIVE_STUDENT_PROFILE_KEY)
             : null;
+
+        /** First `get_student_profiles` argument: explicit child UUID for parents. */
+        let profileStudentArg: string | null = selectedStudentId;
+
+        if (isParentLessonsRoute) {
+            const nowMs = Date.now();
+            const LINKS_TTL_MS = 45_000;
+            let pairs: Array<{ id: string; fullName: string }> = [];
+            const cached = parentStudentLinksCacheRef.current;
+            if (cached && cached.userId === user.id && cached.expiresAt > nowMs) {
+                pairs = cached.pairs;
+            } else {
+                const { data: linkRows, error: linkErr } = await supabase
+                    .from('parent_students')
+                    .select('student_id, students(id, full_name)');
+
+                if (linkErr) {
+                    console.error('[StudentSessions] parent_students', linkErr);
+                    setParentChildOptions([]);
+                    setLoading(false);
+                    return;
+                }
+
+                pairs = (linkRows ?? [])
+                    .map((row: Record<string, unknown>) => ({
+                        id: row.student_id as string,
+                        fullName: String((row.students as { full_name?: string } | null)?.full_name ?? '').trim(),
+                    }))
+                    .filter((p) => p.id);
+
+                pairs.sort((a, b) => a.fullName.localeCompare(b.fullName, undefined, { sensitivity: 'base' }));
+                parentStudentLinksCacheRef.current = {
+                    userId: user.id,
+                    expiresAt: nowMs + LINKS_TTL_MS,
+                    pairs,
+                };
+            }
+
+            if (pairs.length === 0) {
+                setParentChildOptions([]);
+                setLoading(false);
+                return;
+            }
+
+            setParentChildOptions(pairs);
+
+            const picked =
+                urlParentStudentId && pairs.some((p) => p.id === urlParentStudentId)
+                    ? urlParentStudentId
+                    : pairs[0].id;
+
+            if (!urlParentStudentId || urlParentStudentId !== picked) {
+                parentUrlSyncStudentId = picked;
+            }
+
+            profileStudentArg = picked;
+        }
+
         let { data: studentRows, error: rpcError } = await supabase.rpc('get_student_profiles', {
             p_user_id: user.id,
-            p_student_id: selectedStudentId || null,
+            p_student_id: profileStudentArg,
         });
         if (rpcError) {
             console.error('[StudentSessions] get_student_profiles', rpcError);
@@ -333,7 +540,8 @@ export default function StudentSessions() {
         }
 
         let st = studentRows?.[0];
-        if (!st && selectedStudentId) {
+
+        if (!isParentLessonsRoute && !st && selectedStudentId) {
             const { data: fallbackRows, error: fallbackError } = await supabase.rpc('get_student_profiles', {
                 p_user_id: user.id,
                 p_student_id: null,
@@ -348,7 +556,9 @@ export default function StudentSessions() {
                 localStorage.setItem(ACTIVE_STUDENT_PROFILE_KEY, st.id);
             }
         }
+
         if (!st) {
+            setTutorOrgIsSchool(false);
             setLoading(false);
             return;
         }
@@ -365,74 +575,199 @@ export default function StudentSessions() {
         setMinBookingHours(st.tutor_min_booking_hours ?? 1);
         setTutorName(st.tutor_full_name || '');
         if (st.tutor_id) {
-            const { data: vis } = await supabase.rpc(
-                'get_tutor_contact_visibility_for_student',
-                { p_tutor_id: st.tutor_id }
-            );
-            const cv = parseOrgContactVisibility((vis as Record<string, unknown>) || null);
-            const masked = maskTutorContact(st.tutor_email, cv.studentSeesTutorEmail);
-            setTutorEmail(masked === '—' ? null : masked);
+            if (isParentLessonsRoute) {
+                setTutorEmail(st.tutor_email ?? null);
+            } else {
+                const { data: vis } = await supabase.rpc(
+                    'get_tutor_contact_visibility_for_student',
+                    { p_tutor_id: st.tutor_id },
+                );
+                const cv = parseOrgContactVisibility((vis as Record<string, unknown>) || null);
+                const masked = maskTutorContact(st.tutor_email, cv.studentSeesTutorEmail);
+                setTutorEmail(masked === '—' ? null : masked);
+            }
         } else {
             setTutorEmail(null);
         }
         setStudentPaymentModel(st.payment_model || null);
         setCreditBalance(Number(st.credit_balance || 0));
-        if (st.tutor_id) {
-            const { data: tutorSub } = await supabase
-                .from('profiles')
-                .select('subscription_plan, manual_subscription_exempt')
-                .eq('id', st.tutor_id)
-                .maybeSingle();
-            setManualPaymentsOnly(
-                tutorSub?.subscription_plan === 'subscription_only' || tutorSub?.manual_subscription_exempt === true
-            );
-        } else {
-            setManualPaymentsOnly(false);
-        }
-
+        setTutorOrgIsSchool(String((st as { tutor_organization_entity_type?: string }).tutor_organization_entity_type ?? '').trim() === 'school');
         // OPTIMIZED: Limit sessions to recent past + future (6 months range)
         const sixMonthsAgo = new Date();
         sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
 
-        const [sessionsRes, packageRes, waitlistRes] = await Promise.all([
+        const tutorManualPromise =
+            st.tutor_id
+                ? supabase
+                      .from('profiles')
+                      .select('subscription_plan, manual_subscription_exempt')
+                      .eq('id', st.tutor_id)
+                      .maybeSingle()
+                : Promise.resolve({ data: null });
+
+        /** Narrow columns + no nested embed — `*, subjects(...)` pegged Postgres/RLS (statement timeouts). */
+        const SESSION_LIST_COLUMNS =
+            'id,start_time,end_time,status,paid,price,topic,meeting_link,payment_status,tutor_comment,show_comment_to_student,subject_id,lesson_package_id,is_late_cancelled,cancellation_penalty_amount,penalty_resolution,cancelled_by,no_show_when';
+
+        const secondaryGen = ++sessionsSecondaryGenRef.current;
+
+        const [tutorManualRes, sessionsRes] = await Promise.all([
+            tutorManualPromise,
             supabase
                 .from('sessions')
-                .select('*, subjects(is_group, max_students)')
+                .select(SESSION_LIST_COLUMNS)
                 .eq('student_id', st.id)
                 .gte('start_time', sixMonthsAgo.toISOString())
-                .order('start_time', { ascending: true }),
-            supabase
-                .from('lesson_packages')
-                .select('id, available_lessons, total_lessons, expires_at, subjects(name)')
-                .eq('student_id', st.id)
-                .eq('active', true)
-                .eq('paid', true)
-                .limit(20)
-                .gt('available_lessons', 0),
-            supabase
-                .from('waitlists')
-                .select('id, notes, session:sessions(start_time, end_time, topic, price)')
-                .eq('student_id', st.id)
-                .order('created_at', { ascending: true }),
+                .order('start_time', { ascending: true })
+                .limit(600),
         ]);
-        const fetchedSessions = sessionsRes.data || [];
-        const fetchedWaitlist = (waitlistRes.data || []) as unknown as WaitlistEntry[];
-        setSessions(fetchedSessions);
-        const nowTs = Date.now();
-        const visiblePackages = ((packageRes.data || []) as unknown as PackageSummary[]).filter((pkg) => {
-            if (!pkg.expires_at) return true;
-            const ts = new Date(pkg.expires_at).getTime();
-            return !Number.isNaN(ts) && ts > nowTs;
-        });
-        setActivePackages(visiblePackages);
-        setWaitlistEntries(fetchedWaitlist);
+        const tutorSub = tutorManualRes.data as
+            | { subscription_plan?: string | null; manual_subscription_exempt?: boolean | null }
+            | null
+            | undefined;
+        setManualPaymentsOnly(
+            tutorSub?.subscription_plan === 'subscription_only' || tutorSub?.manual_subscription_exempt === true,
+        );
 
-        setCache('student_sessions', { sessions: fetchedSessions, waitlist: fetchedWaitlist });
-        const dash = getCached<{ student?: unknown; sessions?: Session[] }>('student_dashboard');
-        if (dash?.student) {
-            setCache('student_dashboard', { ...dash, sessions: fetchedSessions });
+        if (sessionsRes.error) {
+            console.warn('[StudentSessions] sessions load:', sessionsRes.error.code, sessionsRes.error.message);
         }
+        let combinedErr: string | null = null;
+        if (sessionsRes.error) {
+            const code = sessionsRes.error.code || '';
+            const msg = sessionsRes.error.message || '';
+            combinedErr =
+                code === '57014'
+                    ? t('stuSess.sessionsTimeout')
+                    : t('stuSess.sessionsFetchErrorDetail', { message: `${code ? `${code}: ` : ''}${msg}`.trim() || t('stuSess.unknownError') });
+            setSessionsFetchError(combinedErr);
+            setSessions([]);
+            setWaitlistEntries([]);
+            setLoading(false);
+            if (parentUrlSyncStudentId) {
+                skipNextParentDuplicateFetchRef.current = true;
+                navigate(`/parent/lessons?studentId=${encodeURIComponent(parentUrlSyncStudentId)}`, { replace: true });
+            }
+            return;
+        }
+        const sessionRows = (sessionsRes.data || []) as Record<string, unknown>[];
+        const subjectIdsForSessions = [...new Set(sessionRows.map((r) => r.subject_id).filter(Boolean) as string[])];
+        let subjectMeta: Record<string, { name: string; is_group?: boolean; max_students?: number | null }> =
+            {};
+        if (subjectIdsForSessions.length > 0) {
+            const { data: subs, error: subErr } = await supabase
+                .from('subjects')
+                .select('id,name,is_group,max_students')
+                .in('id', subjectIdsForSessions);
+            if (subErr) {
+                console.warn('[StudentSessions] subjects load:', subErr.code, subErr.message);
+            } else {
+                for (const s of subs ?? []) {
+                    const row = s as { id: string; name: string; is_group?: boolean; max_students?: number | null };
+                    subjectMeta[row.id] = {
+                        name: row.name,
+                        is_group: row.is_group ?? undefined,
+                        max_students: row.max_students,
+                    };
+                }
+            }
+        }
+        const fetchedSessions: Session[] = sessionRows.map((row) => {
+            const sid = row.subject_id as string | null | undefined;
+            const sm = sid ? subjectMeta[sid] : undefined;
+            return {
+                ...(row as unknown as Session),
+                subjects: sm
+                    ? { name: sm.name, is_group: sm.is_group, max_students: sm.max_students ?? undefined }
+                    : null,
+            };
+        });
+        const currentStudentIdForFetch = st.id;
+        setSessions(fetchedSessions);
+        if (sessionsLoadedStudentIdRef.current !== currentStudentIdForFetch) {
+            setWaitlistEntries([]);
+            setActivePackages([]);
+        }
+        sessionsLoadedStudentIdRef.current = currentStudentIdForFetch;
+
+        const storeCacheKey = isParentLessonsRoute ? `parent_lessons_${st.id}` : 'student_sessions';
+        setCache(storeCacheKey, { sessions: fetchedSessions, waitlist: [] });
+        if (!isParentLessonsRoute) {
+            const dash = getCached<{ student?: unknown; sessions?: Session[] }>('student_dashboard');
+            if (dash?.student) {
+                setCache('student_dashboard', { ...dash, sessions: fetchedSessions });
+            }
+        }
+
         setLoading(false);
+        if (parentUrlSyncStudentId) {
+            skipNextParentDuplicateFetchRef.current = true;
+            navigate(`/parent/lessons?studentId=${encodeURIComponent(parentUrlSyncStudentId)}`, { replace: true });
+        }
+
+        void (async () => {
+            try {
+                const [lightPkgs, waitlistRes] = await Promise.all([
+                    fetchStudentActiveLessonPackagesDeduped(supabase, st.id),
+                    supabase.from('waitlists').select('id, notes').eq('student_id', st.id).order('created_at', {
+                        ascending: true,
+                    }),
+                ]);
+                if (sessionsSecondaryGenRef.current !== secondaryGen) return;
+                if (waitlistRes.error) {
+                    console.warn(
+                        '[StudentSessions] waitlists load:',
+                        waitlistRes.error.code,
+                        waitlistRes.error.message,
+                    );
+                }
+                const fetchedWaitlist = (waitlistRes.data || []) as unknown as WaitlistEntry[];
+                setWaitlistEntries(fetchedWaitlist);
+                setCache(storeCacheKey, { sessions: fetchedSessions, waitlist: fetchedWaitlist });
+
+                const nowTs = Date.now();
+                const quickPackages: PackageSummary[] = lightPkgs
+                    .filter((pkg) => {
+                        if (!pkg.expires_at) return true;
+                        const ts = new Date(pkg.expires_at).getTime();
+                        return !Number.isNaN(ts) && ts > nowTs;
+                    })
+                    .map((pkg) => ({
+                        id: pkg.id,
+                        available_lessons: Number(pkg.available_lessons ?? 0),
+                        total_lessons: Number(pkg.total_lessons ?? 0),
+                        expires_at: pkg.expires_at,
+                        subjects: null,
+                    }));
+                setActivePackages(quickPackages);
+
+                const subjectIdsForPkgs = [
+                    ...new Set(lightPkgs.map((p) => p.subject_id).filter(Boolean) as string[]),
+                ];
+                const subjectNameMap = await fetchSubjectNamesByIds(supabase, subjectIdsForPkgs);
+                if (sessionsSecondaryGenRef.current !== secondaryGen) return;
+                const visiblePackages: PackageSummary[] = lightPkgs
+                    .filter((pkg) => {
+                        if (!pkg.expires_at) return true;
+                        const ts = new Date(pkg.expires_at).getTime();
+                        return !Number.isNaN(ts) && ts > nowTs;
+                    })
+                    .map((pkg) => ({
+                        id: pkg.id,
+                        available_lessons: Number(pkg.available_lessons ?? 0),
+                        total_lessons: Number(pkg.total_lessons ?? 0),
+                        expires_at: pkg.expires_at,
+                        subjects:
+                            pkg.subject_id && subjectNameMap[pkg.subject_id]
+                                ? { name: subjectNameMap[pkg.subject_id] }
+                                : null,
+                    }));
+                setActivePackages(visiblePackages);
+            } catch (e) {
+                console.warn('[StudentSessions] secondary load (packages/waitlist):', e);
+            }
+        })();
+        });
     };
 
     const isLateCancellation = (session: Session) => {
@@ -708,7 +1043,7 @@ export default function StudentSessions() {
     };
 
     const filtered = (() => {
-        const base = sessions.filter(s => {
+        const base = sessionsAfterSubjectDate.filter(s => {
             if (filter === 'upcoming') return isAfter(new Date(s.end_time), now) && s.status === 'active';
             if (filter === 'past') return !isAfter(new Date(s.end_time), now) && s.status !== 'cancelled';
             if (filter === 'paid') return s.paid === true && s.status === 'active';
@@ -725,8 +1060,10 @@ export default function StudentSessions() {
     })();
     const displayedSessions = showAllSessions ? filtered : filtered.slice(0, 3);
 
+    const LessonsLayout = isParentLessonsRoute ? ParentLayout : StudentLayout;
+
     return (
-        <StudentLayout>
+        <LessonsLayout>
             <Dialog open={invoicePaidSuccessOpen} onOpenChange={setInvoicePaidSuccessOpen}>
                 <DialogContent>
                     <DialogHeader>
@@ -756,14 +1093,50 @@ export default function StudentSessions() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
-            <div className="px-4 pt-6">
-                <h1 className="text-2xl font-black text-gray-900 mb-1">Pamokos</h1>
-                <p className="text-gray-400 text-sm mb-5">{t('stuSess.allSessions')}</p>
+            <div className={`px-4 pt-6${isParentLessonsRoute ? ' pb-28' : ''}`}>
+                <h1 className="text-2xl font-black text-gray-900 mb-1">
+                    {isParentLessonsRoute ? (t('parent.sessionsTitle') || 'Pamokos') : 'Pamokos'}
+                </h1>
+                <p className="text-gray-400 text-sm mb-3">{t('stuSess.allSessions')}</p>
+
+                {isParentLessonsRoute && parentChildOptions.length > 1 && (
+                    <div className="mb-5">
+                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                            {t('parent.children')}
+                        </p>
+                        <select
+                            value={urlParentStudentId ?? parentChildOptions[0]?.id ?? ''}
+                            onChange={(e) => navigate(`/parent/lessons?studentId=${e.target.value}`)}
+                            className="w-full h-11 rounded-xl border border-gray-200 bg-white px-3 text-sm font-medium text-gray-800"
+                        >
+                            {parentChildOptions.map((c) => (
+                                <option key={c.id} value={c.id}>
+                                    {c.fullName || c.id}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                )}
 
                 {noTutorAssigned && (
                     <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-6 text-center">
                         <p className="text-base font-semibold text-amber-800 mb-1">{t('stuSess.noTutorAssigned')}</p>
                         <p className="text-sm text-amber-700">{t('stuSess.noTutorAssignedDesc')}</p>
+                    </div>
+                )}
+
+                {sessionsFetchError && !loading && (
+                    <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                        <p className="font-semibold mb-1">{t('stuSess.sessionsLoadFailedTitle')}</p>
+                        <p className="text-red-700">{sessionsFetchError}</p>
+                        <p className="text-xs text-red-600/90 mt-2">{t('stuSess.sessionsLoadFailedHint')}</p>
+                        <button
+                            type="button"
+                            className="mt-3 text-sm font-bold text-red-800 underline"
+                            onClick={() => void fetchSessions()}
+                        >
+                            {t('stuSess.retryLoad')}
+                        </button>
                     </div>
                 )}
 
@@ -793,25 +1166,143 @@ export default function StudentSessions() {
                                 <p className="text-gray-500">{t('files.noFilesTutor')}</p>
                             </div>
                         ) : (
-                            sessionFiles.map((f, i) => (
-                                <a
-                                    key={i}
-                                    href={f.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="flex items-center gap-3 p-3 border border-gray-200 rounded-xl hover:border-indigo-200 transition-colors"
-                                >
-                                    <FileText className="w-5 h-5 text-indigo-500 flex-shrink-0" />
-                                    <div className="min-w-0 flex-1">
-                                        <p className="text-sm font-medium text-gray-900 truncate">{f.name}</p>
-                                        <p className="text-xs text-gray-500">{f.sessionDate} &middot; {f.sessionTopic}</p>
+                            <>
+                                <div className="rounded-2xl border border-gray-200 bg-gray-50/80 p-4 space-y-3">
+                                    <div>
+                                        <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide block mb-1.5">
+                                            {t('stuSess.filesFilterLesson')}
+                                        </label>
+                                        <Select
+                                            value={filesSessionFilter}
+                                            onValueChange={(v) => setFilesSessionFilter(v)}
+                                        >
+                                            <SelectTrigger className="rounded-xl border-gray-200 bg-white h-10 text-sm">
+                                                <SelectValue placeholder={t('stuSess.filesFilterAll')} />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all">{t('stuSess.filesFilterAll')}</SelectItem>
+                                                {fileSessionsForPicker.map((s) => (
+                                                    <SelectItem key={s.id} value={s.id}>
+                                                        {format(new Date(s.start_time), 'P', { locale: dateFnsLocale })}
+                                                        {' · '}
+                                                        {s.subjects?.name || s.topic || t('stuSess.filesLessonUntitled')}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
                                     </div>
-                                </a>
-                            ))
+                                    <div>
+                                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                                            {t('stuSess.filesFilterPeriod')}
+                                        </p>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="space-y-1.5">
+                                                <Label className="text-xs font-semibold text-gray-700 flex items-center gap-1">
+                                                    <CalendarDays className="w-4 h-4" />
+                                                    {t('stuSess.filesFilterFrom')}
+                                                </Label>
+                                                <DateInput
+                                                    value={filesDateFrom}
+                                                    onChange={(e) => setFilesDateFrom(e.target.value)}
+                                                    max={filesDateTo || undefined}
+                                                    className="mt-0 rounded-lg w-full text-sm"
+                                                />
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                <Label className="text-xs font-semibold text-gray-700 flex items-center gap-1">
+                                                    <CalendarDays className="w-4 h-4" />
+                                                    {t('stuSess.filesFilterTo')}
+                                                </Label>
+                                                <DateInput
+                                                    value={filesDateTo}
+                                                    onChange={(e) => setFilesDateTo(e.target.value)}
+                                                    min={filesDateFrom || undefined}
+                                                    className="mt-0 rounded-lg w-full text-sm"
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                {filteredSessionFiles.length === 0 ? (
+                                    <div className="text-center py-10 rounded-xl border border-dashed border-gray-200 bg-white">
+                                        <p className="text-sm text-gray-500">{t('stuSess.filesNoMatch')}</p>
+                                    </div>
+                                ) : (
+                                    filteredSessionFiles.map((f) => (
+                                        <a
+                                            key={`${f.sessionId}-${f.name}`}
+                                            href={f.url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="flex items-center gap-3 p-3 border border-gray-200 rounded-xl hover:border-indigo-200 transition-colors bg-white"
+                                        >
+                                            <FileText className="w-5 h-5 text-indigo-500 flex-shrink-0" />
+                                            <div className="min-w-0 flex-1">
+                                                <p className="text-sm font-medium text-gray-900 truncate">{f.name}</p>
+                                                <p className="text-xs text-gray-500">
+                                                    {f.sessionDate} &middot; {f.subjectName || f.sessionTopic}
+                                                </p>
+                                            </div>
+                                        </a>
+                                    ))
+                                )}
+                            </>
                         )}
                     </div>
                 ) : (
                 <>
+
+                <div className="rounded-2xl border border-gray-200 bg-gray-50/80 p-4 space-y-3 mb-5">
+                    <div>
+                        <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide block mb-1.5">
+                            {t('stuSess.lessonsFilterSubject')}
+                        </label>
+                        <Select value={lessonsSubjectFilter} onValueChange={(v) => setLessonsSubjectFilter(v)}>
+                            <SelectTrigger className="rounded-xl border-gray-200 bg-white h-10 text-sm">
+                                <SelectValue placeholder={t('stuSess.lessonsFilterAllSubjects')} />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">{t('stuSess.lessonsFilterAllSubjects')}</SelectItem>
+                                {lessonSubjectOptions.map((o) => (
+                                    <SelectItem key={o.id} value={o.id}>
+                                        {o.name}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div>
+                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                            {t('stuSess.filesFilterPeriod')}
+                        </p>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1.5">
+                                <Label className="text-xs font-semibold text-gray-700 flex items-center gap-1">
+                                    <CalendarDays className="w-4 h-4" />
+                                    {t('stuSess.filesFilterFrom')}
+                                </Label>
+                                <DateInput
+                                    value={lessonsDateFrom}
+                                    onChange={(e) => setLessonsDateFrom(e.target.value)}
+                                    max={lessonsDateTo || undefined}
+                                    className="mt-0 rounded-lg w-full text-sm"
+                                />
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label className="text-xs font-semibold text-gray-700 flex items-center gap-1">
+                                    <CalendarDays className="w-4 h-4" />
+                                    {t('stuSess.filesFilterTo')}
+                                </Label>
+                                <DateInput
+                                    value={lessonsDateTo}
+                                    onChange={(e) => setLessonsDateTo(e.target.value)}
+                                    min={lessonsDateFrom || undefined}
+                                    className="mt-0 rounded-lg w-full text-sm"
+                                />
+                            </div>
+                        </div>
+                    </div>
+                </div>
 
                 {/* Filter pills */}
                 <div className="flex gap-2 mb-5 overflow-x-auto pb-1 scrollbar-hide">
@@ -917,6 +1408,11 @@ export default function StudentSessions() {
 
                 {loading ? (
                     <div className="space-y-3">{[1, 2, 3, 4].map(i => <div key={i} className="h-20 bg-white rounded-3xl animate-pulse" />)}</div>
+                ) : !loading && sessions.length > 0 && filtered.length === 0 ? (
+                    <div className="text-center py-16 rounded-xl border border-dashed border-gray-200 bg-white">
+                        <CalendarDays className="w-12 h-12 text-gray-200 mx-auto mb-3" />
+                        <p className="text-gray-500 font-semibold">{t('stuSess.lessonsNoMatch')}</p>
+                    </div>
                 ) : filtered.length === 0 ? (
                     <div className="text-center py-16">
                         <CalendarDays className="w-12 h-12 text-gray-200 mx-auto mb-3" />
@@ -1035,7 +1531,7 @@ export default function StudentSessions() {
                                     <p className="font-bold text-gray-900">€{selectedSession?.price ?? '–'}</p>
                                     {selectedSession?.status === 'active' && !selectedSession.paid && selectedSession.price != null && (
                                         <p className="text-[11px] text-gray-500 mt-1 leading-snug">
-                                            {t('stuSess.stripeChargeNote', { amount: formatCustomerChargeEur(selectedSession.price) })}
+                                            {t('stuSess.stripeChargeNote', { amount: formatLessonStripeChargeEur(selectedSession.price, tutorOrgIsSchool) })}
                                         </p>
                                     )}
                                 </div>
@@ -1109,7 +1605,7 @@ export default function StudentSessions() {
                                         ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
                                         : creditBalance >= (selectedSession.price || 0) && (selectedSession.price || 0) > 0
                                             ? <><CreditCard className="w-4 h-4" /> {t('stuSess.payWithCredit')}</>
-                                            : <><CreditCard className="w-4 h-4" /> {t('stuSess.payStripe', { amount: formatCustomerChargeEur(Math.max(0, (selectedSession.price || 0) - creditBalance)) })}</>
+                                            : <><CreditCard className="w-4 h-4" /> {t('stuSess.payStripe', { amount: formatLessonStripeChargeEur(Math.max(0, (selectedSession.price || 0) - creditBalance), tutorOrgIsSchool) })}</>
                                     }
                                 </button>
                             </div>
@@ -1540,6 +2036,6 @@ export default function StudentSessions() {
                     )}
                 </DialogContent>
             </Dialog>
-        </StudentLayout>
+        </LessonsLayout>
     );
 }

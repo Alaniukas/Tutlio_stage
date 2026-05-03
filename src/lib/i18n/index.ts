@@ -5,7 +5,7 @@ import type { Locale as DateFnsLocale } from 'date-fns';
 export { t, detectLocaleFromHost, isValidLocale, SUPPORTED_LOCALES, LOCALE_LABELS, LOCALE_NAMES } from './core';
 export type { Locale } from './core';
 import type { Locale } from './core';
-import { isValidLocale } from './core';
+import { isValidLocale, t as coreTranslate } from './core';
 import { stripPlatformPrefix } from '@/lib/platform';
 
 const LOCALE_STORAGE_KEY = 'tutlio_locale';
@@ -101,5 +101,17 @@ export const I18nContext = createContext<I18nContextValue>({
 });
 
 export function useTranslation() {
-  return useContext(I18nContext);
+  const ctx = useContext(I18nContext);
+
+  // Defensive fallback: if provider is temporarily missing/broken, still translate from dictionaries.
+  const safeT = (key: string, params?: Record<string, string | number>) => {
+    const translated = ctx.t(key, params);
+    if (translated !== key) return translated;
+    return coreTranslate(ctx.locale, key, params);
+  };
+
+  return {
+    ...ctx,
+    t: safeT,
+  };
 }

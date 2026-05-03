@@ -18,7 +18,7 @@ function Calendar({
 }: CalendarProps) {
   const { dateFnsLocale } = useTranslation();
   const now = new Date();
-  const defaultStartMonth = new Date(1950, 0);
+  const defaultStartMonth = new Date(1900, 0);
   const defaultEndMonth = new Date(now.getFullYear() + 5, 11);
 
   return (

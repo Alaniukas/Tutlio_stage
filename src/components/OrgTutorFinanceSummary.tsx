@@ -1,6 +1,8 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { authHeaders } from '@/lib/apiHelpers';
+import { dedupeAuthGetUser } from '@/lib/preload';
+import { fetchOrgTutorInvoicesDeduped } from '@/lib/fetchOrgTutorInvoicesDeduped';
 import {
   Euro,
   TrendingUp,
@@ -92,7 +94,7 @@ export default function OrgTutorFinanceSummary() {
     let cancelled = false;
 
     const load = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await dedupeAuthGetUser();
       if (!user) return;
       setCurrentUserId(user.id);
 
@@ -130,7 +132,7 @@ export default function OrgTutorFinanceSummary() {
 
       const { count, error } = await supabase
         .from('sessions')
-        .select('*', { count: 'exact', head: true })
+        .select('*', { count: 'estimated', head: true })
         .eq('tutor_id', user.id)
         .neq('status', 'cancelled')
         .neq('status', 'no_show')
@@ -156,22 +158,18 @@ export default function OrgTutorFinanceSummary() {
   }, [month, periodMode, rangeStart, rangeEnd, policyLoading]);
 
   const fetchInvoices = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await dedupeAuthGetUser();
     if (!user) return;
     setCurrentUserId(user.id);
 
     setInvoicesLoading(true);
     try {
-      const response = await fetch('/api/org-tutor-invoices', {
-        method: 'GET',
-        headers: await authHeaders(),
-      });
-      const json = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        console.error('[OrgTutorFinanceSummary] invoices fetch:', json);
+      const r = await fetchOrgTutorInvoicesDeduped('');
+      if (!r.ok) {
+        console.error('[OrgTutorFinanceSummary] invoices fetch:', r.data);
         setInvoices([]);
       } else {
-        setInvoices((json.invoices || []) as Invoice[]);
+        setInvoices((r.data.invoices || []) as Invoice[]);
       }
     } catch (error) {
       console.error('[OrgTutorFinanceSummary] invoices fetch error:', error);

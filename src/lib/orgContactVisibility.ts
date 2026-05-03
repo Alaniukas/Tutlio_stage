@@ -64,6 +64,28 @@ function normEmailLocal(v: string | null | undefined): string {
 }
 
 /** Show payer contacts only when the student is managed by parents and their contact info differs from the student. */
+/**
+ * Email fields for tutor notifications — only values the org allows tutors to see
+ * (same rules as Students table for org tutors).
+ */
+export function pickStudentContactsForTutorEmail(
+  student: {
+    email?: string | null;
+    phone?: string | null;
+    payer_email?: string | null;
+    payer_phone?: string | null;
+  },
+  features: Record<string, unknown> | null | undefined,
+): { studentEmail?: string; studentPhone?: string } {
+  const cv = parseOrgContactVisibility(features);
+  const emailLine = formatContactForTutorView(student.email, student.payer_email, cv.tutorSeesStudentEmail);
+  const phoneLine = formatContactForTutorView(student.phone, student.payer_phone, cv.tutorSeesStudentPhone);
+  const out: { studentEmail?: string; studentPhone?: string } = {};
+  if (emailLine !== '—') out.studentEmail = emailLine;
+  if (phoneLine !== '—') out.studentPhone = phoneLine;
+  return out;
+}
+
 export function shouldShowPayerContactSection(student: {
   payment_payer?: string | null;
   email?: string | null;

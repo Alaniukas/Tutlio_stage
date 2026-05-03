@@ -1,6 +1,7 @@
 // GET /api/admin-organizations — list orgs + counts
 // GET /api/admin-organizations?id=<uuid> — one org + tutors + students
 // PATCH /api/admin-organizations?id=<uuid> — tutor_limit, status, features (merge)
+// POST /api/admin-organizations?id=<uuid> — actions (e.g. archive tutor)
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { timingSafeEqual } from 'crypto';
@@ -79,13 +80,40 @@ async function getOrgTutorProfileIdsForData(
   return Array.from(ids);
 }
 
+async function getOrgStudentProfileExclusions(
+  supabase: any,
+  organizationId: string
+): Promise<{ ids: Set<string>; emails: Set<string> }> {
+  const { data: students } = await supabase
+    .from('students')
+    .select('linked_user_id, email')
+    .eq('organization_id', organizationId);
+
+  const ids = new Set<string>();
+  const emails = new Set<string>();
+  for (const s of students || []) {
+    const linkedId = typeof (s as any).linked_user_id === 'string' ? (s as any).linked_user_id : '';
+    const emailRaw = String((s as any).email || '').trim().toLowerCase();
+    if (linkedId) ids.add(linkedId);
+    if (emailRaw) emails.add(emailRaw);
+  }
+
+  return { ids, emails };
+}
+
 async function computeOrgStats(
   supabase: any,
   organizationId: string,
   adminIds: Set<string>
 ) {
-  const { data: tutorRows } = await supabase.from('profiles').select('id').eq('organization_id', organizationId);
-  const tutorIdsNonAdmin = (tutorRows || []).filter((r: { id: string }) => !adminIds.has(r.id)).map((r: { id: string }) => r.id);
+  const { data: tutorRows } = await supabase.from('profiles').select('id, email').eq('organization_id', organizationId);
+  const { ids: studentProfileIds, emails: studentEmails } = await getOrgStudentProfileExclusions(supabase, organizationId);
+  const tutorIdsNonAdmin = (tutorRows || [])
+    .filter((r: { id: string; email?: string | null }) => {
+      const email = String(r.email || '').trim().toLowerCase();
+      return !adminIds.has(r.id) && !studentProfileIds.has(r.id) && !studentEmails.has(email);
+    })
+    .map((r: { id: string }) => r.id);
   const tutorCount = tutorIdsNonAdmin.length;
 
   const allProfileIds = await getOrgTutorProfileIdsForData(supabase, organizationId);
@@ -150,39 +178,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!idParam) {
         const { data: orgs, error } = await supabase
           .from('organizations')
-          .select('id, name, email, tutor_limit, status, features, created_at')
+          .select('id, name, email, tutor_limit, tutor_license_count, status, features, created_at')
           .order('created_at', { ascending: false });
 
         if (error) return res.status(500).json({ error: error.message });
 
-        const out = await Promise.all(
-          (orgs || []).map(async (org) => {
-            const { data: adminRows } = await supabase
-              .from('organization_admins')
-              .select('user_id')
-              .eq('organization_id', org.id);
-            const adminIds = new Set<string>((adminRows || []).map((a: { user_id: string }) => a.user_id));
-
-            const stats = await computeOrgStats(supabase, org.id, adminIds);
-
-            return {
-              ...org,
-              ...stats,
-            };
-          })
-        );
+        // Keep list endpoint fast: heavy stats are computed in the detail endpoint.
+        const out = (orgs || []).map((org) => ({
+          ...org,
+          tutor_license_count: Math.max(Number((org as any).tutor_license_count) || 0, Number((org as any).tutor_limit) || 0),
+          tutor_count: 0,
+          student_count: 0,
+          lessons_occurred: null,
+          paid_revenue_eur: 0,
+          platform_fee_2pct_eur: 0,
+        }));
 
         return res.status(200).json({ organizations: out });
       }
 
       const { data: org, error: orgErr } = await supabase
         .from('organizations')
-        .select('id, name, email, tutor_limit, status, features, created_at')
+        .select('id, name, email, tutor_limit, tutor_license_count, status, features, created_at')
         .eq('id', idParam)
         .maybeSingle();
 
       if (orgErr) return res.status(500).json({ error: orgErr.message });
       if (!org) return res.status(404).json({ error: 'Organization not found' });
+
+      (org as any).tutor_license_count = Math.max(
+        Number((org as any).tutor_license_count) || 0,
+        Number((org as any).tutor_limit) || 0
+      );
 
       const { data: adminRows } = await supabase
         .from('organization_admins')
@@ -195,8 +222,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .select('id, full_name, email, phone')
         .eq('organization_id', idParam)
         .order('full_name');
-
-      const tutors = (allProfiles || []).filter((t) => !adminIds.has(t.id));
+      const { ids: studentProfileIds, emails: studentEmails } = await getOrgStudentProfileExclusions(supabase, idParam);
+      const tutors = (allProfiles || []).filter((t) => {
+        const email = String((t as any).email || '').trim().toLowerCase();
+        return !adminIds.has(t.id) && !studentProfileIds.has(t.id) && !studentEmails.has(email);
+      });
 
       type StudRow = { id: string; full_name: string; email: string | null; tutor_id: string };
       let students: StudRow[] = [];
@@ -237,21 +267,146 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .order('created_at', { ascending: false })
         .limit(50);
 
+      const archivedTutorsMap = new Map<string, { id: string; full_name: string | null; email: string | null }>();
+      for (const a of auditRows || []) {
+        if (a.action !== 'organization.archive_tutor') continue;
+        const details = (a.details || {}) as Record<string, unknown>;
+        const tutorId = typeof details.tutor_id === 'string' ? details.tutor_id : '';
+        if (!tutorId || archivedTutorsMap.has(tutorId)) continue;
+        archivedTutorsMap.set(tutorId, {
+          id: tutorId,
+          full_name: typeof details.tutor_name === 'string' ? details.tutor_name : null,
+          email: typeof details.tutor_email === 'string' ? details.tutor_email : null,
+        });
+      }
+
+      const archivedTutors = Array.from(archivedTutorsMap.values());
+
       return res.status(200).json({
         organization: org,
         tutors,
+        archived_tutors: archivedTutors,
         students,
         stats,
         audit: auditRows || [],
       });
     }
 
-    if (req.method === 'PATCH') {
+    if (req.method === 'POST') {
+      if (!idParam) return res.status(400).json({ error: 'Missing id query param' });
+      const body = (typeof req.body === 'object' && req.body) || {};
+      const action = typeof body.action === 'string' ? body.action : '';
+
+      if (action === 'archive_tutor') {
+        const tutorId = typeof body.tutor_id === 'string' ? body.tutor_id : '';
+        if (!tutorId) return res.status(400).json({ error: 'Missing tutor_id' });
+
+        const { data: tutorProfile, error: tutorErr } = await supabase
+          .from('profiles')
+          .select('id, organization_id, full_name, email')
+          .eq('id', tutorId)
+          .maybeSingle();
+        if (tutorErr) return res.status(500).json({ error: tutorErr.message });
+        if (!tutorProfile) return res.status(404).json({ error: 'Tutor not found' });
+        if (tutorProfile.organization_id !== idParam) {
+          return res.status(400).json({ error: 'Tutor does not belong to this organization' });
+        }
+
+        const { data: affectedStudents } = await supabase
+          .from('students')
+          .select('id')
+          .eq('organization_id', idParam)
+          .eq('tutor_id', tutorId);
+
+        await supabase
+          .from('students')
+          .update({ tutor_id: null })
+          .eq('organization_id', idParam)
+          .eq('tutor_id', tutorId);
+
+        const { error: detachErr } = await supabase
+          .from('profiles')
+          .update({ organization_id: null })
+          .eq('id', tutorId);
+        if (detachErr) return res.status(500).json({ error: detachErr.message });
+
+        await insertAudit(supabase, 'organization.archive_tutor', idParam, {
+          tutor_id: tutorId,
+          tutor_name: tutorProfile.full_name,
+          tutor_email: tutorProfile.email,
+          detached_student_ids: (affectedStudents || []).map((s: { id: string }) => s.id),
+        });
+
+        return res.status(200).json({ success: true });
+      }
+
+      if (action === 'unarchive_tutor') {
+        const tutorId = typeof body.tutor_id === 'string' ? body.tutor_id : '';
+        if (!tutorId) return res.status(400).json({ error: 'Missing tutor_id' });
+
+        const { data: tutorProfile, error: tutorErr } = await supabase
+          .from('profiles')
+          .select('id, organization_id, full_name, email')
+          .eq('id', tutorId)
+          .maybeSingle();
+        if (tutorErr) return res.status(500).json({ error: tutorErr.message });
+        if (!tutorProfile) return res.status(404).json({ error: 'Tutor not found' });
+
+        const { data: archiveAuditRows, error: auditErr } = await supabase
+          .from('platform_admin_audit')
+          .select('id, details, created_at')
+          .eq('organization_id', idParam)
+          .eq('action', 'organization.archive_tutor')
+          .order('created_at', { ascending: false })
+          .limit(100);
+        if (auditErr) return res.status(500).json({ error: auditErr.message });
+
+        const archiveEntry = (archiveAuditRows || []).find((r: any) => {
+          const details = (r.details || {}) as Record<string, unknown>;
+          return typeof details.tutor_id === 'string' && details.tutor_id === tutorId;
+        });
+        if (!archiveEntry) {
+          return res.status(404).json({ error: 'Archive entry not found for this tutor in this organization' });
+        }
+
+        const details = (archiveEntry.details || {}) as Record<string, unknown>;
+        const detachedIdsRaw = Array.isArray(details.detached_student_ids) ? details.detached_student_ids : [];
+        const detachedStudentIds = detachedIdsRaw.filter((v): v is string => typeof v === 'string');
+
+        const { error: attachErr } = await supabase
+          .from('profiles')
+          .update({ organization_id: idParam })
+          .eq('id', tutorId);
+        if (attachErr) return res.status(500).json({ error: attachErr.message });
+
+        if (detachedStudentIds.length > 0) {
+          await supabase
+            .from('students')
+            .update({ tutor_id: tutorId })
+            .eq('organization_id', idParam)
+            .is('tutor_id', null)
+            .in('id', detachedStudentIds);
+        }
+
+        await insertAudit(supabase, 'organization.unarchive_tutor', idParam, {
+          tutor_id: tutorId,
+          tutor_name: tutorProfile.full_name,
+          tutor_email: tutorProfile.email,
+          restored_student_ids: detachedStudentIds,
+        });
+
+        return res.status(200).json({ success: true });
+      }
+
+      return res.status(400).json({ error: 'Unknown action' });
+    }
+
+  if (req.method === 'PATCH') {
       if (!idParam) return res.status(400).json({ error: 'Missing id query param' });
 
       const { data: before, error: beforeErr } = await supabase
         .from('organizations')
-        .select('id, name, email, tutor_limit, status, features')
+        .select('id, name, email, tutor_limit, tutor_license_count, status, features')
         .eq('id', idParam)
         .maybeSingle();
 
@@ -260,6 +415,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const body = (typeof req.body === 'object' && req.body) || {};
       const tutor_limit = typeof body.tutor_limit === 'number' ? body.tutor_limit : undefined;
+      const tutor_license_count =
+        typeof body.tutor_license_count === 'number' ? body.tutor_license_count : undefined;
       const status = body.status === 'active' || body.status === 'suspended' ? body.status : undefined;
       let features: Record<string, unknown> | undefined;
       if (body.features !== undefined) {
@@ -275,6 +432,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (tutor_limit < 1 || tutor_limit > 10000) return res.status(400).json({ error: 'tutor_limit out of range' });
         patch.tutor_limit = tutor_limit;
       }
+      if (tutor_license_count !== undefined) {
+        if (tutor_license_count < 0 || tutor_license_count > 10000) {
+          return res.status(400).json({ error: 'tutor_license_count out of range' });
+        }
+        patch.tutor_license_count = tutor_license_count;
+      }
       if (status !== undefined) patch.status = status;
       if (features !== undefined) patch.features = features;
 
@@ -286,7 +449,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .from('organizations')
         .update(patch as any)
         .eq('id', idParam)
-        .select('id, name, email, tutor_limit, status, features')
+        .select('id, name, email, tutor_limit, tutor_license_count, status, features')
         .single();
 
       if (updErr) return res.status(500).json({ error: updErr.message });

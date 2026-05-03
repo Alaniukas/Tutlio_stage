@@ -6,6 +6,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
+import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
 import { generateInvoicePdf, type InvoicePdfData } from './_lib/invoicePdf.js';
 
 // Stripe/platform fee helpers (inlined to avoid _lib import issues on Vercel)
@@ -40,13 +41,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const auth = await verifyRequestAuth(req);
     if (!auth) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { tutorId, periodStartDate, periodEndDate, paymentDeadlineDays, sessionIds } = req.body as {
+    const { tutorId, periodStartDate, periodEndDate, paymentDeadlineDays, sessionIds, includeSalesInvoice } = req.body as {
         tutorId: string;
         periodStartDate: string; // YYYY-MM-DD
         periodEndDate: string;   // YYYY-MM-DD
         paymentDeadlineDays: number;
         sessionIds: string[];
+        /** Default true: issue S.F. and attach PDF to payer email when invoice profile exists */
+        includeSalesInvoice?: boolean;
     };
+    const shouldIncludeSalesInvoice = includeSalesInvoice !== false;
 
     if (!tutorId || !periodStartDate || !periodEndDate || !paymentDeadlineDays || !sessionIds?.length) {
         return res.status(400).json({ error: 'Missing required fields' });
@@ -126,11 +130,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // 4. Determine Stripe account (org or tutor)
         let stripeAccountId: string | null = null;
         let ownerName = tutor.full_name || 'Korepetitorius';
+        let useSchoolOrgAbsorbedFees = false;
 
         if (tutor.organization_id) {
             const { data: org } = await supabase
                 .from('organizations')
-                .select('stripe_account_id, stripe_onboarding_complete, name')
+                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type')
                 .eq('id', tutor.organization_id)
                 .single();
 
@@ -139,6 +144,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
             stripeAccountId = org.stripe_account_id;
             ownerName = org.name || ownerName;
+            useSchoolOrgAbsorbedFees = (org as { entity_type?: string }).entity_type === 'school';
         } else {
             if (!tutor.stripe_onboarding_complete) {
                 return res.status(400).json({ error: 'Tutor Stripe account is not connected' });
@@ -158,19 +164,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const student = firstSession.students as any;
             const payerName = student.payer_name || student.full_name;
 
-            // Calculate total (per lesson – same fee logic as stripe-checkout)
             const totalLessonPrice = payerSessions.reduce((sum, s) => sum + (s.price || 0), 0);
             const lessonCount = payerSessions.length;
-            let baseCents = 0;
-            let feesCents = 0;
-            for (const s of payerSessions) {
-                const b = lessonCheckoutBreakdownCents(Number(s.price) || 0);
-                baseCents += b.baseCents;
-                feesCents += b.feesCents;
-            }
-            const totalCents = baseCents + feesCents;
-            const totalWithFeesEur = totalCents / 100;
-            const transferToConnectedCents = baseCents;
 
             // Calculate payment deadline
             const paymentDeadlineDate = new Date();
@@ -228,52 +223,108 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const periodText = `${startDate.toLocaleDateString('lt-LT')} - ${endDate.toLocaleDateString('lt-LT')}`;
 
             let checkoutSession: Stripe.Checkout.Session;
+            let payerCheckoutTotalEur: number;
             try {
-                checkoutSession = await stripe.checkout.sessions.create({
-                    mode: 'payment',
-                    customer_email: payerEmail,
-                    payment_method_types: ['card'],
-                    line_items: [
-                        {
-                            price_data: {
-                                currency: 'eur',
-                                product_data: {
-                                    name: `Pamokos (${lessonCount}) – ${periodText}`,
-                                    description: `Invoice – ${ownerName}`,
+                if (useSchoolOrgAbsorbedFees) {
+                    const { chargeCents, transferToSchoolCents } =
+                        schoolInstallmentCheckoutCents(totalLessonPrice);
+                    const applicationFeeCents = chargeCents - transferToSchoolCents;
+                    if (chargeCents < 50 || applicationFeeCents < 1 || applicationFeeCents >= chargeCents) {
+                        throw new Error('Netinkamas mėnesinės sąskaitos sumų skaidymas');
+                    }
+                    checkoutSession = await stripe.checkout.sessions.create({
+                        mode: 'payment',
+                        customer_email: payerEmail,
+                        payment_method_types: ['card'],
+                        line_items: [
+                            {
+                                price_data: {
+                                    currency: 'eur',
+                                    product_data: {
+                                        name: `Pamokos (${lessonCount}) – ${periodText}`,
+                                        description: `Invoice – ${ownerName}`,
+                                    },
+                                    unit_amount: chargeCents,
                                 },
-                                unit_amount: baseCents,
+                                quantity: 1,
                             },
-                            quantity: 1,
+                        ],
+                        payment_intent_data: {
+                            application_fee_amount: applicationFeeCents,
+                            transfer_data: {
+                                destination: stripeAccountId as string,
+                            },
+                            metadata: {
+                                tutlio_billing_batch_id: billingBatch.id,
+                                tutor_id: tutorId,
+                                tutlio_school_org_absorbed: 'true',
+                            },
                         },
-                        {
-                            price_data: {
-                                currency: 'eur',
-                                product_data: {
-                                    name: 'Platformos administravimo mokestis',
-                                    description: 'Platform administration and payment processing fee',
+                        metadata: {
+                            tutlio_billing_batch_id: billingBatch.id,
+                            tutor_id: tutorId,
+                            tutlio_school_org_absorbed: 'true',
+                        },
+                        success_url: `${APP_URL}/student/sessions?invoice_paid=true&billing_batch_id=${billingBatch.id}&session_id={CHECKOUT_SESSION_ID}`,
+                        cancel_url: `${APP_URL}/student/sessions`,
+                    });
+                    payerCheckoutTotalEur = totalLessonPrice;
+                } else {
+                    let baseCents = 0;
+                    let feesCents = 0;
+                    for (const s of payerSessions) {
+                        const b = lessonCheckoutBreakdownCents(Number(s.price) || 0);
+                        baseCents += b.baseCents;
+                        feesCents += b.feesCents;
+                    }
+                    const transferToConnectedCents = baseCents;
+                    checkoutSession = await stripe.checkout.sessions.create({
+                        mode: 'payment',
+                        customer_email: payerEmail,
+                        payment_method_types: ['card'],
+                        line_items: [
+                            {
+                                price_data: {
+                                    currency: 'eur',
+                                    product_data: {
+                                        name: `Pamokos (${lessonCount}) – ${periodText}`,
+                                        description: `Invoice – ${ownerName}`,
+                                    },
+                                    unit_amount: baseCents,
                                 },
-                                unit_amount: feesCents,
+                                quantity: 1,
                             },
-                            quantity: 1,
-                        },
-                    ],
-                    payment_intent_data: {
-                        transfer_data: {
-                            destination: stripeAccountId,
-                            amount: transferToConnectedCents,
+                            {
+                                price_data: {
+                                    currency: 'eur',
+                                    product_data: {
+                                        name: 'Platformos administravimo mokestis',
+                                        description: 'Platform administration and payment processing fee',
+                                    },
+                                    unit_amount: feesCents,
+                                },
+                                quantity: 1,
+                            },
+                        ],
+                        payment_intent_data: {
+                            transfer_data: {
+                                destination: stripeAccountId,
+                                amount: transferToConnectedCents,
+                            },
+                            metadata: {
+                                tutlio_billing_batch_id: billingBatch.id,
+                                tutor_id: tutorId,
+                            },
                         },
                         metadata: {
                             tutlio_billing_batch_id: billingBatch.id,
                             tutor_id: tutorId,
                         },
-                    },
-                    metadata: {
-                        tutlio_billing_batch_id: billingBatch.id,
-                        tutor_id: tutorId,
-                    },
-                    success_url: `${APP_URL}/student/sessions?invoice_paid=true&billing_batch_id=${billingBatch.id}&session_id={CHECKOUT_SESSION_ID}`,
-                    cancel_url: `${APP_URL}/student/sessions`,
-                });
+                        success_url: `${APP_URL}/student/sessions?invoice_paid=true&billing_batch_id=${billingBatch.id}&session_id={CHECKOUT_SESSION_ID}`,
+                        cancel_url: `${APP_URL}/student/sessions`,
+                    });
+                    payerCheckoutTotalEur = (baseCents + feesCents) / 100;
+                }
             } catch (stripeErr: any) {
                 console.error(`[create-monthly-invoice] Stripe checkout failed for ${payerEmail}, rolling back batch ${billingBatch.id}:`, stripeErr);
                 await supabase.from('sessions').update({ payment_batch_id: null }).in('id', sessionIdsForBatch);
@@ -291,14 +342,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             // Auto-generate S.F. if invoice profile exists (before email so PDF can be attached)
             let sfPdfBase64: string | null = null;
             let sfInvoiceNumber: string | null = null;
-            try {
-                const sfResult = await autoGenerateSF(tutorId, billingBatch.id, periodStartDate, periodEndDate, payerSessions, payerName, payerEmail, tutor);
-                if (sfResult) {
-                    sfPdfBase64 = sfResult.pdfBase64 ?? null;
-                    sfInvoiceNumber = sfResult.invoiceNumber ?? null;
+            if (shouldIncludeSalesInvoice) {
+                try {
+                    const sfResult = await autoGenerateSF(tutorId, billingBatch.id, periodStartDate, periodEndDate, payerSessions, payerName, payerEmail, tutor);
+                    if (sfResult) {
+                        sfPdfBase64 = sfResult.pdfBase64 ?? null;
+                        sfInvoiceNumber = sfResult.invoiceNumber ?? null;
+                    }
+                } catch (sfErr) {
+                    console.error('[create-monthly-invoice] S.F. auto-generation failed (non-blocking):', sfErr);
                 }
-            } catch (sfErr) {
-                console.error('[create-monthly-invoice] S.F. auto-generation failed (non-blocking):', sfErr);
             }
 
             // Prepare session details for email
@@ -325,7 +378,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             tutorName: ownerName,
                             periodText,
                             sessions: sessionsForEmail,
-                            totalAmount: totalWithFeesEur.toFixed(2),
+                            totalAmount: payerCheckoutTotalEur.toFixed(2),
                             paymentDeadline: paymentDeadlineDate.toLocaleDateString('lt-LT', {
                                 year: 'numeric',
                                 month: '2-digit',

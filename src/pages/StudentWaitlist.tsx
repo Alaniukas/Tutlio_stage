@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
+import { useNavigate, useMatch } from 'react-router-dom';
 import StudentLayout from '@/components/StudentLayout';
 import { supabase } from '@/lib/supabase';
-import { getCached, setCache } from '@/lib/dataCache';
 import { format } from 'date-fns';
-import { Clock, X, Info, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
+import { Clock, X, Info, Sparkles, ChevronDown, ChevronUp, ChevronLeft } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -33,9 +33,11 @@ function parseNotes(notes: string | null): ParsedNotes | null {
 
 export default function StudentWaitlist() {
     const { t, dateFnsLocale } = useTranslation();
-    const swc = getCached<any>('student_waitlist');
-    const [entries, setEntries] = useState<WaitlistEntry[]>(swc?.entries ?? []);
-    const [loading, setLoading] = useState(!swc);
+    const navigate = useNavigate();
+    const parentWaitlistStudentId = useMatch('/parent/child/:studentId/waitlist')?.params.studentId ?? '';
+    const parentSessionsPath = parentWaitlistStudentId ? `/parent/child/${parentWaitlistStudentId}` : '/student';
+    const [entries, setEntries] = useState<WaitlistEntry[]>([]);
+    const [loading, setLoading] = useState(true);
     const [selectedEntry, setSelectedEntry] = useState<WaitlistEntry | null>(null);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
 
@@ -48,42 +50,64 @@ export default function StudentWaitlist() {
         if (typeof window !== 'undefined') localStorage.setItem(WAITLIST_TIP_KEY, '1');
     };
 
-    useEffect(() => { if (!getCached('student_waitlist')) fetchData(); }, []);
+    useEffect(() => { void fetchData(); }, [parentWaitlistStudentId]);
 
     const fetchData = async () => {
-        if (!getCached('student_waitlist')) setLoading(true);
+        setLoading(true);
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) { setLoading(false); return; }
 
-        const selectedStudentId = typeof window !== 'undefined'
-            ? localStorage.getItem(ACTIVE_STUDENT_PROFILE_KEY)
-            : null;
-        let { data: studentRows, error: rpcError } = await supabase.rpc('get_student_profiles', {
-            p_user_id: user.id,
-            p_student_id: selectedStudentId || null,
-        });
-        if (rpcError) { console.error('[StudentWaitlist] get_student_profiles', rpcError); setLoading(false); return; }
-        let st = studentRows?.[0];
-        if (!st && selectedStudentId) {
-            const { data: fallbackRows, error: fallbackError } = await supabase.rpc('get_student_profiles', {
+        let studentIdForWaitlists: string | null = null;
+
+        if (parentWaitlistStudentId) {
+            const { data: parentId, error: parentErr } = await supabase
+                .rpc('get_parent_profile_id_by_user_id', { p_user_id: user.id });
+            if (parentErr) console.warn('[StudentWaitlist] parent profile rpc failed:', parentErr);
+            if (!parentId) { setLoading(false); return; }
+            const { data: link } = await supabase
+                .from('parent_students')
+                .select('id')
+                .eq('parent_id', parentId)
+                .eq('student_id', parentWaitlistStudentId)
+                .maybeSingle();
+            if (!link) { setLoading(false); return; }
+            studentIdForWaitlists = parentWaitlistStudentId;
+        } else {
+            const selectedStudentId = typeof window !== 'undefined'
+                ? localStorage.getItem(ACTIVE_STUDENT_PROFILE_KEY)
+                : null;
+            let { data: studentRows, error: rpcError } = await supabase.rpc('get_student_profiles', {
                 p_user_id: user.id,
-                p_student_id: null,
+                p_student_id: selectedStudentId || null,
             });
-            if (fallbackError) { console.error('[StudentWaitlist] get_student_profiles fallback', fallbackError); setLoading(false); return; }
-            st = fallbackRows?.[0];
-            if (st && typeof window !== 'undefined') {
-                localStorage.setItem(ACTIVE_STUDENT_PROFILE_KEY, st.id);
+            if (rpcError) { console.error('[StudentWaitlist] get_student_profiles', rpcError); setLoading(false); return; }
+            let st = studentRows?.[0];
+            if (!st && selectedStudentId) {
+                const { data: fallbackRows, error: fallbackError } = await supabase.rpc('get_student_profiles', {
+                    p_user_id: user.id,
+                    p_student_id: null,
+                });
+                if (fallbackError) { console.error('[StudentWaitlist] get_student_profiles fallback', fallbackError); setLoading(false); return; }
+                st = fallbackRows?.[0];
+                if (st && typeof window !== 'undefined') {
+                    localStorage.setItem(ACTIVE_STUDENT_PROFILE_KEY, st.id);
+                }
             }
+            if (!st) { setLoading(false); return; }
+            studentIdForWaitlists = st.id;
         }
-        if (!st) { setLoading(false); return; }
+
+        if (!studentIdForWaitlists) {
+            setLoading(false);
+            return;
+        }
 
         const { data } = await supabase
             .from('waitlists')
             .select('*, session:sessions(start_time, end_time, topic, price)')
-            .eq('student_id', st.id)
+            .eq('student_id', studentIdForWaitlists)
             .order('created_at', { ascending: false });
         setEntries(data || []);
-        setCache('student_waitlist', { entries: data || [] });
         setLoading(false);
     };
 
@@ -94,7 +118,16 @@ export default function StudentWaitlist() {
     };
 
     return (
-        <StudentLayout>
+        <StudentLayout embed={!!parentWaitlistStudentId}>
+            {parentWaitlistStudentId ? (
+                <div className="bg-white border-b border-orange-100 px-4 py-3 flex items-center gap-3 sticky top-0 z-30">
+                    <Button type="button" variant="ghost" size="sm" className="rounded-xl -ml-2" onClick={() => navigate(parentSessionsPath)}>
+                        <ChevronLeft className="w-4 h-4 mr-1" />
+                        {t('parent.back')}
+                    </Button>
+                    <span className="font-bold text-gray-900 text-sm sm:text-base">{t('parent.waitlistTitle')}</span>
+                </div>
+            ) : null}
             <div className="px-4 pt-6 pb-6">
                 <div className="rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 overflow-hidden text-white shadow-lg mb-6">
                     <button

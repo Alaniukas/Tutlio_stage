@@ -1,16 +1,55 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
-import PizZip from 'pizzip';
-import Docxtemplater from 'docxtemplater';
-import { promises as fs } from 'fs';
-import os from 'os';
-import path from 'path';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
+import { renderDocxTemplateUrlToPdfBuffer } from './_lib/renderSchoolContractDocxToPdf';
+import { schoolContractPdfStoragePath } from './_lib/schoolContractPdfPath';
 
 function pageHtml(content: string) {
   return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Sutarties duomenų papildymas</title></head><body style="margin:0;font-family:'Segoe UI',Arial,sans-serif;background:linear-gradient(135deg,#f5f3ff 0%,#ecfeff 50%,#f0fdf4 100%);padding:24px;"><div style="max-width:720px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:24px;box-shadow:0 10px 35px rgba(2,6,23,.08);">${content}</div></body></html>`;
+}
+
+function headerFirst(req: VercelRequest, name: string): string {
+  const v = req.headers?.[name];
+  if (typeof v === 'string') return v.split(',')[0].trim();
+  if (Array.isArray(v) && v[0]) return String(v[0]).split(',')[0].trim();
+  return '';
+}
+
+/** Browser origin for the React form. Use APP_URL server-side env, or infer from request (never VITE_* — often production). */
+function publicAppOriginForRedirect(req: VercelRequest): string {
+  const explicit = (process.env.APP_URL || '').trim().replace(/\/$/, '');
+  if (explicit) return explicit;
+
+  const fwdHost = headerFirst(req, 'x-forwarded-host');
+  let hostRaw = (fwdHost || headerFirst(req, 'host')).trim();
+
+  // scripts/dev-api-local.ts sets this; works even when VERCEL=1 exists in .env from Vercel pull.
+  if (!hostRaw && process.env.TUTLIO_DEV_API_LOCAL === '1') {
+    hostRaw = 'localhost:3000';
+  }
+
+  if (!hostRaw) return '';
+
+  // Local API :3002; browser is on Vite — prefer front port when we detect API host.
+  if (/^localhost:3002$/i.test(hostRaw) || /^127\.0\.0\.1:3002$/i.test(hostRaw)) {
+    hostRaw = hostRaw.replace(/:3002$/i, ':3000');
+  }
+
+  let proto = headerFirst(req, 'x-forwarded-proto').toLowerCase();
+  if (proto !== 'http' && proto !== 'https') {
+    proto =
+      hostRaw.includes('localhost') || hostRaw.startsWith('127.') ? 'http' : 'https';
+  }
+  return `${proto}://${hostRaw}`.replace(/\/$/, '');
+}
+
+const BUCKET = 'school-contracts';
+const PUBLIC_MARKER = `/object/public/${BUCKET}/`;
+
+function extractStoragePath(urlOrPath: string): string {
+  const idx = urlOrPath.indexOf(PUBLIC_MARKER);
+  if (idx !== -1) return decodeURIComponent(urlOrPath.slice(idx + PUBLIC_MARKER.length));
+  return urlOrPath;
 }
 
 function fillPlaceholders(template: string, data: Record<string, string>) {
@@ -31,54 +70,6 @@ function templateSafe(value: unknown): string {
   const lower = str.toLowerCase();
   if (lower === 'undefined' || lower === 'null') return '';
   return str;
-}
-
-const execFileAsync = promisify(execFile);
-
-const BUCKET = 'school-contracts';
-const PUBLIC_MARKER = `/object/public/${BUCKET}/`;
-
-function extractStoragePath(urlOrPath: string): string {
-  const idx = urlOrPath.indexOf(PUBLIC_MARKER);
-  if (idx !== -1) return decodeURIComponent(urlOrPath.slice(idx + PUBLIC_MARKER.length));
-  return urlOrPath;
-}
-
-function sofficeCandidates(): string[] {
-  const fromEnv = process.env.LIBREOFFICE_PATH ? [process.env.LIBREOFFICE_PATH] : [];
-  return [
-    ...fromEnv,
-    'soffice',
-    'soffice.exe',
-    'C:\\Program Files\\LibreOffice\\program\\soffice.exe',
-    'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe',
-  ];
-}
-
-async function convertDocxBufferToPdf(docxBuffer: Buffer): Promise<Buffer> {
-  const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'school-contract-complete-'));
-  const inputPath = path.join(workDir, 'contract.docx');
-  const outputPath = path.join(workDir, 'contract.pdf');
-  await fs.writeFile(inputPath, docxBuffer);
-
-  let lastError: unknown = null;
-  try {
-    for (const bin of sofficeCandidates()) {
-      try {
-        await execFileAsync(bin, ['--headless', '--convert-to', 'pdf', '--outdir', workDir, inputPath], {
-          windowsHide: true,
-          timeout: 120000,
-        });
-        const pdf = await fs.readFile(outputPath);
-        if (pdf.length > 0) return pdf;
-      } catch (error) {
-        lastError = error;
-      }
-    }
-    throw new Error(lastError instanceof Error ? lastError.message : 'DOCX conversion failed');
-  } finally {
-    await fs.rm(workDir, { recursive: true, force: true });
-  }
 }
 
 async function createSimpleContractPdf(params: {
@@ -145,18 +136,7 @@ async function createDocxTemplatePdf(params: {
   fetchUrl: string;
   payload: Record<string, string>;
 }): Promise<Uint8Array> {
-  const response = await fetch(params.fetchUrl);
-  if (!response.ok) throw new Error('Nepavyko atsisiųsti DOCX šablono');
-  const source = await response.arrayBuffer();
-  const zip = new PizZip(source);
-  const doc = new Docxtemplater(zip, {
-    delimiters: { start: '{{', end: '}}' },
-    paragraphLoop: true,
-    linebreaks: true,
-  });
-  doc.render(params.payload as any);
-  const renderedDocx = Buffer.from(doc.getZip().generate({ type: 'uint8array' }));
-  const pdfBuffer = await convertDocxBufferToPdf(renderedDocx);
+  const pdfBuffer = await renderDocxTemplateUrlToPdfBuffer({ templateUrl: params.fetchUrl, payload: params.payload });
   return new Uint8Array(pdfBuffer);
 }
 
@@ -169,22 +149,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token =
     (typeof req.query?.token === 'string' ? req.query.token : '') ||
     (typeof req.body?.token === 'string' ? req.body.token : '');
-
-  if (!token) {
-    return res.status(400).send(pageHtml('<h2>Nenurodytas token.</h2><p>Susisiekite su mokykla dėl naujos nuorodos.</p>'));
-  }
+  const contractIdDirect =
+    (typeof req.query?.contractId === 'string' ? req.query.contractId : '') ||
+    (typeof req.body?.contractId === 'string' ? req.body.contractId : '');
 
   let tokenRow: { id: string; contract_id: string; used_at: string | null; expires_at: string } | null = null;
-  const { data: tokenData, error: tokenErr } = await supabase
-    .from('school_contract_completion_tokens')
-    .select('id, contract_id, used_at, expires_at')
-    .eq('token', token)
-    .maybeSingle();
-  if (tokenErr || !tokenData) return res.status(404).send(pageHtml('<h2>Nuoroda nerasta.</h2>'));
-  if (tokenData.used_at) return res.status(410).send(pageHtml('<h2>Nuoroda jau panaudota.</h2>'));
-  if (new Date(tokenData.expires_at).getTime() < Date.now()) return res.status(410).send(pageHtml('<h2>Nuoroda nebegalioja.</h2>'));
-  tokenRow = tokenData as any;
-  const resolvedContractId = tokenData.contract_id;
+  let resolvedContractId = '';
+  if (token) {
+    const { data, error: tokenErr } = await supabase
+      .from('school_contract_completion_tokens')
+      .select('id, contract_id, used_at, expires_at')
+      .eq('token', token)
+      .maybeSingle();
+    if (tokenErr || !data) return res.status(404).send(pageHtml('<h2>Nuoroda nerasta.</h2>'));
+    if (data.used_at) return res.status(410).send(pageHtml('<h2>Nuoroda jau panaudota.</h2>'));
+    if (new Date(data.expires_at).getTime() < Date.now()) return res.status(410).send(pageHtml('<h2>Nuoroda nebegalioja.</h2>'));
+    tokenRow = data as any;
+    resolvedContractId = data.contract_id;
+  } else if (contractIdDirect) {
+    resolvedContractId = contractIdDirect;
+  } else {
+    return res.status(400).send(pageHtml('<h2>Nenurodytas token.</h2>'));
+  }
 
   const { data: contract, error: contractErr } = await supabase
     .from('school_contracts')
@@ -199,6 +185,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const isParentCodeMissing = !String(st.payer_personal_code || '').trim();
 
   if (req.method === 'GET') {
+    const wantsJson = String(req.query?.format ?? '') === 'json';
+    if (wantsJson) {
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.statusCode = 200;
+      return res.end(
+        JSON.stringify({
+          ok: true,
+          token: token || null,
+          contractId: resolvedContractId,
+          missing: {
+            address: isAddressMissing,
+            birthDate: isBirthDateMissing,
+            parentCode: isParentCodeMissing,
+          },
+        }),
+      );
+    }
+
+    const appBase = publicAppOriginForRedirect(req);
+    if (appBase) {
+      const cid = contractIdDirect || resolvedContractId;
+      const dest = token
+        ? `${appBase}/school-contract-complete?token=${encodeURIComponent(token)}`
+        : `${appBase}/school-contract-complete?contractId=${encodeURIComponent(cid)}`;
+      res.statusCode = 302;
+      res.setHeader('Location', dest);
+      return res.end();
+    }
     const fieldSummary = [
       isAddressMissing ? '<li>Gyvenamoji vieta</li>' : '',
       isParentCodeMissing ? '<li>Tėvų asmens kodas</li>' : '',
@@ -262,8 +276,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return el ? el.value : '';
           };
           const payload = {
-            token: ${JSON.stringify(token)},
-            contractId: ${JSON.stringify(resolvedContractId)},
+            token: "${token}",
+            contractId: "${resolvedContractId}",
             parent_personal_code: get('parent_personal_code'),
             student_address: get('student_address'),
             student_city: get('student_city'),
@@ -303,29 +317,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (isAddressMissing && !studentAddress && !studentCity) return res.status(400).send(pageHtml('<h2>Įveskite adresą arba miestą.</h2>'));
   if (isBirthDateMissing && !childBirthDate) return res.status(400).send(pageHtml('<h2>Įveskite vaiko gimimo datą.</h2>'));
 
-  const { error: studentErr } = await supabase
-    .from('students')
-    .update({
-      payer_personal_code: isParentCodeMissing ? (submittedParentPersonalCode || null) : st.payer_personal_code || null,
-      student_address: isAddressMissing ? (studentAddress || null) : st.student_address || null,
-      student_city: isAddressMissing ? (studentCity || null) : st.student_city || null,
-      child_birth_date: isBirthDateMissing ? (childBirthDate || null) : st.child_birth_date || null,
-      parent_secondary_name: submittedParent2Name || st.parent_secondary_name || null,
-      parent_secondary_email: submittedParent2Email || st.parent_secondary_email || null,
-      parent_secondary_phone: submittedParent2Phone || st.parent_secondary_phone || null,
-      parent_secondary_personal_code: submittedParent2PersonalCode || st.parent_secondary_personal_code || null,
-      parent_secondary_address: submittedParent2Address || st.parent_secondary_address || null,
-    })
-    .eq('id', (contract as any).student_id);
-  if (studentErr) {
-    console.error('[school-contract-complete] Student update error:', studentErr);
-    return res.status(500).send(pageHtml('<h2>Nepavyko išsaugoti duomenų. Bandykite dar kartą arba susisiekite su mokykla.</h2>'));
-  }
+  const studentUpdatePayload = {
+    payer_personal_code: isParentCodeMissing ? (submittedParentPersonalCode || null) : st.payer_personal_code || null,
+    student_address: isAddressMissing ? (studentAddress || null) : st.student_address || null,
+    student_city: isAddressMissing ? (studentCity || null) : st.student_city || null,
+    child_birth_date: isBirthDateMissing ? (childBirthDate || null) : st.child_birth_date || null,
+    parent_secondary_name: submittedParent2Name || st.parent_secondary_name || null,
+    parent_secondary_email: submittedParent2Email || st.parent_secondary_email || null,
+    parent_secondary_phone: submittedParent2Phone || st.parent_secondary_phone || null,
+    parent_secondary_personal_code: submittedParent2PersonalCode || st.parent_secondary_personal_code || null,
+    parent_secondary_address: submittedParent2Address || st.parent_secondary_address || null,
+  };
 
-  await supabase
-    .from('school_contracts')
-    .update({ pdf_url: null, signing_status: 'draft', sent_at: null })
-    .eq('id', (contract as any).id);
+  const [studentResult, draftContractResult] = await Promise.all([
+    supabase.from('students').update(studentUpdatePayload).eq('id', (contract as any).student_id),
+    supabase
+      .from('school_contracts')
+      .update({ pdf_url: null, signing_status: 'draft', sent_at: null })
+      .eq('id', (contract as any).id),
+  ]);
+
+  const studentErr = studentResult.error;
+  if (studentErr) return res.status(500).send(pageHtml(`<h2>Nepavyko išsaugoti: ${studentErr.message}</h2>`));
+  if (draftContractResult.error) {
+    console.error('[school-contract-complete] nepavyko anuliuoti PDF:', draftContractResult.error.message);
+  }
 
   const fullAddress = [isAddressMissing ? studentAddress : st.student_address || '', isAddressMissing ? studentCity : st.student_city || '']
     .filter(Boolean)
@@ -436,14 +452,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       body: renderedBody,
     });
   }
-  const safeStudent = String(st.full_name || 'student').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-  const storagePath = `${(contract as any).organization_id}/contracts/${(contract as any).id}-${safeStudent}-${Date.now()}.pdf`;
+  const path = schoolContractPdfStoragePath({
+    organizationId: String((contract as any).organization_id),
+    contractId: String((contract as any).id),
+    contractNumber: (contract as any).contract_number ?? null,
+  });
   const { error: uploadErr } = await supabase.storage.from(BUCKET).upload(
-    storagePath,
+    path,
     new Blob([pdfBytes], { type: 'application/pdf' }),
-    { cacheControl: '3600', upsert: false, contentType: 'application/pdf' },
+    { cacheControl: '3600', upsert: true, contentType: 'application/pdf' },
   );
-  const uploadedPath = uploadErr ? null : storagePath;
+  const uploadedPath = uploadErr ? null : path;
 
   await supabase
     .from('school_contracts')
@@ -456,39 +475,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .eq('id', (contract as any).id);
 
   if (parentEmail && uploadedPath) {
-    const { data: emailSignedData } = await supabase.storage
-      .from(BUCKET)
-      .createSignedUrl(uploadedPath, 7 * 24 * 3600);
-    const emailPdfUrl = emailSignedData?.signedUrl || null;
-
-    if (emailPdfUrl) {
-      await fetch(`${(process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt')}/api/send-email`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-internal-key': serviceRoleKey },
-        body: JSON.stringify({
-          type: 'school_contract',
-          to: parentEmail,
-          data: {
-            schoolName: String((contract as any).organizations?.name || ''),
-            schoolEmail: String((contract as any).organizations?.email || ''),
-            studentName: String(st.full_name || ''),
-            parentName: parentName || String(st.full_name || ''),
-            recipientName: parentName || String(st.full_name || ''),
-            parentPhone,
-            parentPersonalCode,
-            childBirthDate: childBirthDateResolved,
-            address: fullAddress,
-            missingFields: [],
-            contractNumber: String((contract as any).contract_number || ''),
-            annualFee: (contract as any).annual_fee || 0,
-            contractBody: renderedBody,
-            pdfUrl: emailPdfUrl,
-            date: new Date().toLocaleDateString('lt-LT'),
-            contractId: (contract as any).id,
-          },
-        }),
-      }).catch(() => {});
-    }
+    const emailPayload = JSON.stringify({
+      type: 'school_contract',
+      to: parentEmail,
+      data: {
+        schoolName: String((contract as any).organizations?.name || ''),
+        schoolEmail: String((contract as any).organizations?.email || ''),
+        studentName: String(st.full_name || ''),
+        parentName: parentName || String(st.full_name || ''),
+        recipientName: parentName || String(st.full_name || ''),
+        parentPhone,
+        parentPersonalCode,
+        childBirthDate: childBirthDateResolved,
+        address: fullAddress,
+        missingFields: [],
+        contractNumber: String((contract as any).contract_number || ''),
+        annualFee: (contract as any).annual_fee || 0,
+        contractBody: renderedBody,
+        pdfUrl: publicUrl,
+        date: new Date().toLocaleDateString('lt-LT'),
+        contractId: (contract as any).id,
+      },
+    });
+    const emailUrl = `${(process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt').replace(/\/$/, '')}/api/send-email`;
+    void fetch(emailUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-internal-key': serviceRoleKey },
+      body: emailPayload,
+    }).catch(() => {});
   }
 
   if (tokenRow?.id) {

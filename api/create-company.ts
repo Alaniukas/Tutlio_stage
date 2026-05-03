@@ -38,7 +38,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: 'Missing Supabase env vars' });
     }
 
-    const { orgName, orgEmail, tutorLimit, adminEmail, adminPassword } = req.body as any;
+    const { orgName, orgEmail, tutorLicenseCount, adminEmail, adminPassword } = req.body as any;
 
     if (!orgName || !adminEmail || !adminPassword) {
       return res.status(400).json({ error: 'Missing required fields' });
@@ -63,9 +63,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     try {
       // 2. Create organization
+      const licenseCount = Math.max(0, Number(tutorLicenseCount) || 0);
       const { data: org, error: orgError } = await supabase
         .from('organizations')
-        .insert({ name: orgName, email: orgEmail || null, tutor_limit: Number(tutorLimit) || 5 })
+        .insert({
+          name: orgName,
+          email: orgEmail || null,
+          tutor_license_count: licenseCount,
+          // Legacy column kept for backwards-compat; do not enforce tutor count limits.
+          tutor_limit: 9999,
+        })
         .select('id')
         .single();
 
@@ -110,7 +117,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         details: {
           orgName,
           orgEmail: orgEmail || null,
-          tutorLimit: Number(tutorLimit) || 5,
+          tutorLicenseCount: licenseCount,
           adminEmail,
         },
       });

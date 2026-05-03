@@ -103,7 +103,7 @@ if (typeof window !== 'undefined') {
       isPageHidden = true;
       lastVisibilityChange = now;
     } else {
-      // Page became visible - explicitly restore session
+      // Page became visible - optionally refresh (never fight Login/UserContext locks)
       const wasHiddenFor = now - lastVisibilityChange;
       isPageHidden = false;
       isRestoringSession = true;
@@ -112,17 +112,31 @@ if (typeof window !== 'undefined') {
 
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-          // Only refresh if page was hidden for more than 5 seconds
-          if (wasHiddenFor > 5000) {
-            await supabase.auth.refreshSession();
-            console.log('[Supabase Client] Session refreshed after page became visible');
+        if (!session?.expires_at) {
+          console.log('[Supabase Client] No session on visibility');
+        } else if (wasHiddenFor > 5000) {
+          const msLeft = session.expires_at * 1000 - Date.now();
+          if (msLeft < 120_000) {
+            try {
+              const { error: refreshErr } = await supabase.auth.refreshSession();
+              if (refreshErr && String(refreshErr.message || '').includes('Abort')) {
+                /* lock contention — ignore */
+              } else if (refreshErr) {
+                console.warn('[Supabase Client] refreshSession after visibility:', refreshErr.message);
+              } else {
+                console.log('[Supabase Client] Session refreshed after visibility (near expiry)');
+              }
+            } catch (refreshErr: unknown) {
+              const name = (refreshErr as { name?: string })?.name;
+              if (name !== 'AbortError') console.warn('[Supabase Client] refreshSession threw:', refreshErr);
+            }
           } else {
-            console.log('[Supabase Client] Session verified after brief visibility change');
+            console.log('[Supabase Client] Visibility: token still fresh, skipping refresh');
           }
         }
-      } catch (err) {
-        console.error('[Supabase Client] Error restoring session:', err);
+      } catch (err: unknown) {
+        const name = (err as { name?: string })?.name;
+        if (name !== 'AbortError') console.error('[Supabase Client] Error restoring session:', err);
       } finally {
         // Clear the flag after a short delay to allow auth events to settle
         setTimeout(() => {
@@ -138,24 +152,34 @@ if (typeof window !== 'undefined') {
 
   // Also handle window focus/blur as additional safeguard (but only after initial load)
   window.addEventListener('focus', async () => {
-    // Don't interfere with initial page load or if already restoring
     if (!appHasLoaded || isRestoringSession) return;
-
-    isRestoringSession = true;
-    console.log('[Supabase Client] Window regained focus - verifying session');
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        // Silently verify session is still valid
-        await supabase.auth.refreshSession();
+      if (!session?.expires_at) return;
+
+      const msLeft = session.expires_at * 1000 - Date.now();
+      if (msLeft > 120_000) return;
+
+      isRestoringSession = true;
+      console.log('[Supabase Client] Window focus: token expires soon — refresh once');
+
+      try {
+        const { error: refreshErr } = await supabase.auth.refreshSession();
+        if (refreshErr && !String(refreshErr.message || '').includes('Abort')) {
+          console.warn('[Supabase Client] focus refreshSession:', refreshErr.message);
+        }
+      } catch (refreshErr: unknown) {
+        const name = (refreshErr as { name?: string })?.name;
+        if (name !== 'AbortError') console.warn('[Supabase Client] focus refreshSession threw:', refreshErr);
+      } finally {
+        setTimeout(() => {
+          isRestoringSession = false;
+        }, 400);
       }
-    } catch (err) {
-      console.error('[Supabase Client] Error on window focus:', err);
-    } finally {
-      setTimeout(() => {
-        isRestoringSession = false;
-      }, 500);
+    } catch (err: unknown) {
+      const name = (err as { name?: string })?.name;
+      if (name !== 'AbortError') console.error('[Supabase Client] Error on window focus:', err);
     }
   });
 

@@ -1,6 +1,9 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 
+/** Max rows per request — wide date ranges remain bounded server-side */
+const OCCUPIED_SESSIONS_LIMIT = 2000;
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -34,15 +37,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const authUserId = userData.user.id;
 
     const serviceClient = createClient(supabaseUrl, serviceKey);
-    const { data: studentRow, error: studentErr } = await serviceClient
-      .from('students')
-      .select('id')
-      .eq('id', studentId)
-      .eq('tutor_id', tutorId)
-      .eq('linked_user_id', authUserId)
-      .maybeSingle();
 
-    if (studentErr || !studentRow) {
+    const [{ data: access }, { data: parentProfile }] = await Promise.all([
+      serviceClient
+        .from('students')
+        .select('id, linked_user_id')
+        .eq('id', studentId)
+        .eq('tutor_id', tutorId)
+        .maybeSingle(),
+      serviceClient.from('parent_profiles').select('id').eq('user_id', authUserId).maybeSingle(),
+    ]);
+
+    if (!access) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const isLinkedStudent = access.linked_user_id === authUserId;
+
+    let isParent = false;
+    if (!isLinkedStudent && parentProfile?.id) {
+      const { data: ps } = await serviceClient
+        .from('parent_students')
+        .select('id')
+        .eq('parent_id', parentProfile.id)
+        .eq('student_id', studentId)
+        .maybeSingle();
+      isParent = !!ps;
+    }
+
+    if (!isLinkedStudent && !isParent) {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
@@ -53,7 +76,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .neq('student_id', studentId)
       .neq('status', 'cancelled')
       .gte('start_time', start)
-      .lte('start_time', end);
+      .lte('start_time', end)
+      .order('start_time', { ascending: true })
+      .limit(OCCUPIED_SESSIONS_LIMIT);
 
     if (sessionsErr) {
       return res.status(500).json({ error: sessionsErr.message });
@@ -64,4 +89,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: e?.message || 'Unknown error' });
   }
 }
-

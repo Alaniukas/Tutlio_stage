@@ -5,6 +5,7 @@ import { getCached, setCache } from '@/lib/dataCache';
 import { supabase } from '@/lib/supabase';
 import { useTranslation } from '@/lib/i18n';
 import { ArrowLeft, ListOrdered } from 'lucide-react';
+import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 
 export default function CompanyWaitlist() {
   const { t } = useTranslation();
@@ -32,27 +33,11 @@ export default function CompanyWaitlist() {
         setLoading(false);
         return;
       }
-      const { data: adminUsers } = await supabase
-        .from('organization_admins')
-        .select('user_id')
-        .eq('organization_id', adminRow.organization_id);
-      const adminIds = new Set((adminUsers || []).map((a: { user_id: string }) => a.user_id));
-      const { data: profilesList } = await supabase
-        .from('profiles')
-        .select('id, full_name')
-        .eq('organization_id', adminRow.organization_id)
-        .order('full_name');
-      const { data: linkedStudents } = await supabase
-        .from('students')
-        .select('linked_user_id')
-        .eq('organization_id', adminRow.organization_id)
-        .not('linked_user_id', 'is', null);
-      const linkedStudentUserIds = new Set(
-        (linkedStudents || [])
-          .map((s: any) => s.linked_user_id)
-          .filter((id: string | null | undefined): id is string => Boolean(id)),
+      const tutorsList = await getOrgVisibleTutors(
+        supabase as any,
+        adminRow.organization_id,
+        'id, full_name, email',
       );
-      const tutorsList = (profilesList || []).filter((t) => !adminIds.has(t.id) && !linkedStudentUserIds.has(t.id));
       setTutors(tutorsList);
       setCache('company_waitlist', { tutors: tutorsList });
       setLoading(false);

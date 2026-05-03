@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
-import { supabase } from '@/lib/supabase';
+import { rpcGetStudentByUserIdDeduped } from '@/lib/preload';
 import { useUser } from '@/contexts/UserContext';
 
 export default function StudentProtectedRoute() {
@@ -42,10 +42,7 @@ export default function StudentProtectedRoute() {
                     }
                 };
 
-                const result = await withTimeout<any>(
-                    supabase.rpc('get_student_by_user_id', { p_user_id: ctxUser.id }),
-                    2500
-                );
+                const result = await withTimeout<any>(rpcGetStudentByUserIdDeduped(ctxUser.id), 2500);
 
                 const studentRows = result?.data;
                 const rpcError = result?.error;

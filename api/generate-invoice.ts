@@ -23,6 +23,13 @@ interface GenerateInvoiceBody {
   packageIds?: string[];
   /** Validate only, do not create invoice */
   precheckOnly?: boolean;
+  /**
+   * Server-to-server only: unpaid Stripe checkout packages (e.g. attach S.F. to payment email).
+   * Ignored unless verifyRequestAuth is internal (x-internal-key).
+   */
+  allowPendingStripePackages?: boolean;
+  /** Who issues the invoice on internal calls (org admin or tutor JWT subject). Required with internal auth unless tutorId alone is enough for your flow. */
+  issuedByUserId?: string;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -31,11 +38,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const auth = await verifyRequestAuth(req);
   if (!auth) return res.status(401).json({ error: 'Unauthorized' });
 
-  const userId = auth.userId;
-  if (!userId) return res.status(400).json({ error: 'User context required' });
-
   const body = req.body as GenerateInvoiceBody;
   const { periodStart, periodEnd, groupingType, studentId, isOrgTutor, onlyPaid, precheckOnly } = body;
+
+  let issuingUserId: string;
+  if (auth.isInternal) {
+    issuingUserId = (body.issuedByUserId || body.tutorId || '').trim();
+    if (!issuingUserId) {
+      return res.status(400).json({ error: 'issuedByUserId or tutorId required for internal invoice calls' });
+    }
+  } else {
+    if (!auth.userId) return res.status(400).json({ error: 'User context required' });
+    issuingUserId = auth.userId;
+  }
+
+  const allowPendingStripePackages = !!(auth.isInternal && body.allowPendingStripePackages);
 
   if (!periodStart || !periodEnd || !groupingType) {
     return res.status(400).json({ error: 'Missing required fields: periodStart, periodEnd, groupingType' });
@@ -53,7 +70,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (daysDiff > 90) return res.status(400).json({ error: 'Period cannot exceed 90 days' });
 
   try {
-    const tutorId = body.tutorId || userId;
+    const tutorId = body.tutorId || issuingUserId;
     const resolvedPackageIds: string[] = body.packageIds?.length ? [...new Set(body.packageIds)] : [];
 
     const { data: profile } = await supabase
@@ -66,7 +83,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Fetch seller invoice profile
     // When isOrgTutor, the tutor is the seller (billing the org), so use tutorId
-    const sellerUserId = isOrgTutor ? tutorId : userId;
+    const sellerUserId = isOrgTutor ? tutorId : issuingUserId;
     const sellerProfile = await getSellerProfile(sellerUserId, profile.organization_id, isOrgTutor);
     if (!sellerProfile) {
       return res.status(400).json({ error: 'Invoice settings not configured. Please set up your business details first.' });
@@ -119,29 +136,58 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (hasPackageIds) {
-      const { data: pkgs, error: pkgErr } = await supabase
-        .from('lesson_packages')
-        .select(
-          `
+      const baseSelect = `
           id, tutor_id, student_id, subject_id, total_price, total_lessons, paid_at, created_at,
           paid, payment_method, manual_sales_invoice_id,
           students!inner(id, full_name, email, payer_email, payer_name, payer_phone),
           subjects(name)
-        `
-        )
-        .in('id', resolvedPackageIds)
-        .eq('tutor_id', tutorId)
-        .eq('paid', true)
-        .in('payment_method', ['manual', 'stripe'])
-        .is('manual_sales_invoice_id', null);
+        `;
 
-      if (pkgErr) {
-        return res.status(500).json({ error: pkgErr.message });
+      let paidPkgQuery = allowPendingStripePackages
+        ? null
+        : supabase
+            .from('lesson_packages')
+            .select(baseSelect)
+            .in('id', resolvedPackageIds)
+            .eq('tutor_id', tutorId)
+            .eq('paid', true)
+            .in('payment_method', ['manual', 'stripe'])
+            .is('manual_sales_invoice_id', null);
+      if (paidPkgQuery && studentId) paidPkgQuery = paidPkgQuery.eq('student_id', studentId);
+
+      const { data: paidPkgs, error: paidPkgErr } = paidPkgQuery
+        ? await paidPkgQuery
+        : { data: [] as any[], error: null };
+
+      if (paidPkgErr) {
+        return res.status(500).json({ error: paidPkgErr.message });
       }
+
+      let pendingPkgs: any[] = [];
+      if (allowPendingStripePackages) {
+        let pendQ = supabase
+          .from('lesson_packages')
+          .select(baseSelect)
+          .in('id', resolvedPackageIds)
+          .eq('tutor_id', tutorId)
+          .eq('paid', false)
+          .eq('payment_method', 'stripe')
+          .is('manual_sales_invoice_id', null);
+        if (studentId) pendQ = pendQ.eq('student_id', studentId);
+        const { data: pend, error: pendErr } = await pendQ;
+
+        if (pendErr) {
+          return res.status(500).json({ error: pendErr.message });
+        }
+        pendingPkgs = pend || [];
+      }
+
+      const pkgs = [...(paidPkgs || []), ...pendingPkgs];
 
       const requested = new Set(resolvedPackageIds);
       const pseudoSessions = (pkgs || []).filter(p => requested.has(p.id)).map(pkg => {
         const when = pkg.paid_at || pkg.created_at || new Date().toISOString();
+        const isPaid = !!pkg.paid;
         return {
           id: pkg.id,
           tutor_id: pkg.tutor_id,
@@ -151,7 +197,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           price: Number(pkg.total_price) || 0,
           students: pkg.students,
           subjects: pkg.subjects,
-          payment_status: 'paid',
+          payment_status: isPaid ? 'paid' : 'pending',
           total_lessons: pkg.total_lessons,
           __fromPackage: true,
         };
@@ -159,8 +205,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (pseudoSessions.length < requested.size) {
         return res.status(400).json({
-          error:
-            'One or more packages are not eligible (must be manual or Stripe, paid, not already on a sales invoice).',
+          error: allowPendingStripePackages
+            ? 'One or more packages are not eligible (must be unpaid Stripe checkout, not already on a sales invoice).'
+            : 'One or more packages are not eligible (must be manual or Stripe, paid, not already on a sales invoice).',
         });
       }
 
@@ -286,7 +333,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .from('invoices')
         .insert({
           invoice_number: invoiceNumber,
-          issued_by_user_id: userId,
+          issued_by_user_id: issuingUserId,
           organization_id: profile.organization_id ?? null,
           seller_snapshot: sellerSnapshot,
           buyer_snapshot: buyer,
@@ -337,7 +384,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         };
 
         const pdfBytes = await generateInvoicePdf(pdfData);
-        const storagePath = `${userId}/${invoice.id}.pdf`;
+        const storagePath = `${issuingUserId}/${invoice.id}.pdf`;
 
         const { error: uploadErr } = await supabase.storage
           .from('invoices')
@@ -360,6 +407,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       createdInvoices.push(invoice.id);
 
+      const invoicedPkgIds = resolvedPackageIds.filter(id => lineItems.some(li => li.sessionIds.includes(id)));
+      if (invoicedPkgIds.length > 0) {
+        await supabase
+          .from('lesson_packages')
+          .update({ manual_sales_invoice_id: invoice.id })
+          .in('id', invoicedPkgIds);
+      }
+
       if (onlyPaid) {
         const pkgSet = new Set(resolvedPackageIds);
         const invoicedSessionIds = lineItems.flatMap(li => li.sessionIds).filter(id => !pkgSet.has(id));
@@ -368,13 +423,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .from('sessions')
             .update({ payment_status: 'invoiced' })
             .in('id', invoicedSessionIds);
-        }
-        const invoicedPkgIds = resolvedPackageIds.filter(id => lineItems.some(li => li.sessionIds.includes(id)));
-        if (invoicedPkgIds.length > 0) {
-          await supabase
-            .from('lesson_packages')
-            .update({ manual_sales_invoice_id: invoice.id })
-            .in('id', invoicedPkgIds);
         }
       }
     }

@@ -1,5 +1,5 @@
 /**
- * Copy sorted A–Z by full_name (Lithuanian collation, case-insensitive).
+ * Copy sorted A-Z by full_name (Lithuanian collation, case-insensitive).
  * Use for student dropdowns / checklists when picking who joins a lesson.
  */
 export function sortStudentsByFullName<T extends { full_name?: string | null }>(items: T[]): T[] {
