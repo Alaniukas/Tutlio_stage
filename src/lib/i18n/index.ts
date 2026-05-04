@@ -37,15 +37,16 @@ export function detectLocale(): Locale {
   const pathLocale = getLocaleFromPathname(stripped);
   if (pathLocale) return pathLocale;
 
-  const stored = getStoredLocale();
-  if (stored) return stored;
-
   const params = new URLSearchParams(window.location.search);
   const langOverride = params.get('lang');
   if (langOverride && isValidLocale(langOverride)) return langOverride;
 
   const host = window.location.hostname;
+  // On tutlio.com (and subdomains like www.tutlio.com), default to EN unless URL explicitly sets locale.
   if (host === 'tutlio.com' || host.endsWith('.tutlio.com')) return 'en';
+
+  const stored = getStoredLocale();
+  if (stored) return stored;
   return 'lt';
 }
 
