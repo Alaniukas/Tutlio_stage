@@ -34,7 +34,7 @@ export async function getOrgVisibleTutorProfileIds(supabase: any, orgId: string)
       .map((inv: { used_by_profile_id?: string | null }) => inv.used_by_profile_id)
       .filter((id: string | null | undefined): id is string => !!id),
   );
-  const tutorIdSet = new Set<string>([...assignedTutorIds, ...acceptedTutorIds]);
+  const tutorIdSet = new Set<string>([...Array.from(assignedTutorIds), ...Array.from(acceptedTutorIds)]);
 
   const rows = (profileRows || []) as Array<{ id: string; email?: string | null }>;
   return rows
