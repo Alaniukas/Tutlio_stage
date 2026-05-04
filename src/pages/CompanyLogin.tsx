@@ -29,6 +29,9 @@ export default function CompanyLogin() {
 
   useEffect(() => {
     (async () => {
+      // If user just clicked "logout", don't auto-redirect back into the org portal
+      // even if a stale session is still present for a moment.
+      if (sessionStorage.getItem('tutlio_logout_intent') === '1') return;
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) return;
       const { data: adminRow } = await supabase

@@ -30,11 +30,12 @@ type CompanyFinanceCache = {
 export default function CompanyFinance() {
   const { t } = useTranslation();
   const fc = getCached<CompanyFinanceCache>('company_finance');
-  const { loading: orgFeaturesLoading } = useOrgFeatures();
+  const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
   const location = useLocation();
   const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
   const [loading, setLoading] = useState(!fc);
   const [orgId, setOrgId] = useState<string | null>(fc?.orgId ?? null);
+  const manualPaymentsOn = hasFeature('manual_payments');
 
   const [stripeComplete, setStripeComplete] = useState(fc?.stripeComplete ?? false);
   const [stripeLoading, setStripeLoading] = useState(false);
@@ -312,7 +313,7 @@ export default function CompanyFinance() {
     setStripeLoading(false);
   };
 
-  if (loading) {
+  if (loading || orgFeaturesLoading) {
     return (
       <>
         <div className="max-w-3xl mx-auto">
@@ -335,7 +336,7 @@ export default function CompanyFinance() {
             <Wallet className="w-6 h-6 text-indigo-600" /> {t('companyFinance.title')}
           </h1>
           <p className="text-gray-500 mt-1">
-            {t('companyFinance.stripeDesc')}
+            {manualPaymentsOn ? t('companyFinance.manualDesc') : t('companyFinance.stripeDesc')}
           </p>
         </div>
 
@@ -344,7 +345,38 @@ export default function CompanyFinance() {
             <CreditCard className="w-5 h-5 text-violet-600" /> {t('companyFinance.stripePayments')}
           </h2>
 
-          {stripeComplete ? (
+          {manualPaymentsOn ? (
+            <div className="space-y-3">
+              <div className="flex items-start gap-3 p-4 bg-sky-50 border border-sky-200 rounded-xl">
+                <Info className="w-5 h-5 text-sky-700 flex-shrink-0 mt-0.5" />
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold text-sky-900">{t('companyFinance.manualPayments')}</p>
+                  <p className="text-xs text-sky-900/80">{t('companyFinance.manualInfo')} <span className="font-semibold">{t('companyFinance.students')}</span>.</p>
+                  <p className="text-xs text-gray-700">{t('companyFinance.manualPackageNote')}</p>
+                  <p className="text-xs text-gray-700">{t('companyFinance.manualPaymentNote')}</p>
+                </div>
+              </div>
+
+              {stripeComplete && (
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                  <div className="flex items-center gap-2 px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                    <span className="text-sm font-semibold text-emerald-700">Stripe Prijungtas ✓</span>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl gap-2"
+                    onClick={() => handleStripeAction('manage')}
+                    disabled={stripeLoading}
+                  >
+                    {stripeLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ExternalLink className="w-4 h-4" />}
+                    {t('companyFinance.manageStripe')}
+                  </Button>
+                </div>
+              )}
+            </div>
+          ) : stripeComplete ? (
             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
               <div className="flex items-center gap-2 px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
                 <CheckCircle2 className="w-5 h-5 text-emerald-600" />

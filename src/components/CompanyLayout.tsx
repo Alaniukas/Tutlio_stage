@@ -104,12 +104,17 @@ export default function CompanyLayout() {
   const handleLogout = async () => {
     sessionStorage.removeItem(ENTITY_KEY);
     sessionStorage.setItem('tutlio_logout_intent', '1');
-    void supabase.auth.signOut({ scope: 'global' });
-    void supabase.auth.signOut({ scope: 'local' });
+    try {
+      // Prefer local sign-out; global can be slow and is not required for UX.
+      await supabase.auth.signOut({ scope: 'local' });
+    } catch {
+      /* ignore */
+    }
     Object.keys(localStorage)
       .filter((k) => k.startsWith('sb-') && k.endsWith('-auth-token'))
       .forEach((k) => localStorage.removeItem(k));
-    window.location.href = `${window.location.origin}${buildPlatformPath('/login')}`;
+    // After org-admin logout we should land on the main landing, not loop back into /school/login.
+    window.location.href = `${window.location.origin}${buildPlatformPath('/')}`;
   };
 
   const isActive = (item: (typeof NAV_ITEMS)[0]) =>

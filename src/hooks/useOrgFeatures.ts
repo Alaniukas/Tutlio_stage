@@ -59,8 +59,11 @@ export function useOrgFeatures(): OrgFeaturesState {
         const mergedFeatures: Record<string, boolean> = {};
 
         Object.entries(FEATURE_REGISTRY).forEach(([featureId, definition]) => {
-          // Use org feature if set, otherwise use default from registry
-          mergedFeatures[featureId] = org.features?.[featureId] ?? definition.defaultValue;
+          let v = org.features?.[featureId] as boolean | undefined;
+          if (featureId === 'manual_payments' && v === undefined) {
+            v = org.features?.enable_manual_student_payments as boolean | undefined;
+          }
+          mergedFeatures[featureId] = v ?? definition.defaultValue;
         });
 
         setFeatures(mergedFeatures);
@@ -117,7 +120,11 @@ export function useOrgFeature(organizationId: string | null, featureId: string) 
         }
 
         const featureDef = FEATURE_REGISTRY[featureId];
-        const isEnabled = org.features?.[featureId] ?? featureDef?.defaultValue ?? false;
+        let raw = org.features?.[featureId] as boolean | undefined;
+        if (featureId === 'manual_payments' && raw === undefined) {
+          raw = org.features?.enable_manual_student_payments as boolean | undefined;
+        }
+        const isEnabled = raw ?? featureDef?.defaultValue ?? false;
 
         setEnabled(isEnabled);
       } catch (error) {

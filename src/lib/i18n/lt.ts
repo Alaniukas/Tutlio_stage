@@ -1,4 +1,7 @@
 export const lt: Record<string, string> = {
+  'compStu.mediaConsentAgree': 'Atvaizdas: sutinka',
+  'compStu.mediaConsentDisagree': 'Atvaizdas: nesutinka',
+  'compStu.mediaConsentUnknown': 'Atvaizdas: nepateikta',
   'about.contactButton': 'Susisiekti',
   'about.joinDesc': 'Jei turite klausimų arba norite pradėti bendradarbiauti, esame pasiruošę padėti.',
   'about.joinTitle': 'Prisijunkite prie mūsų!',
@@ -1181,6 +1184,8 @@ export const lt: Record<string, string> = {
   'compStu.sendPackage': 'Siųsti paketą',
   'compStu.sendPackageTitle': 'Siųsti pamokų paketą',
   'compStu.stripePaymentHint': 'Mokiniui bus išsiųstas el. laiškas su mokėjimo nuoroda.',
+  'compStu.manualPackageSendHint':
+    'Siunčiamas el. laiškas su mokėjimo instrukcijomis. Jei platformos admin skiltyje nurodėte mokėjimo puslapio URL, laiške bus mygtukas į tą nuorodą.',
   'compStu.studentAdded': 'Mokinys sėkmingai pridėtas',
   'compStu.parentInviteEmailFailed':
     'Mokinys išsaugotas, bet nepavyko automatiškai išsiųsti kvietimo tėvams – patikrinkite el. paštą arba naudokite „Pakviesti tėvus“ / pakartokite vėliau.',

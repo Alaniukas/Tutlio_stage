@@ -53,7 +53,7 @@ export default defineConfig({
     proxy: {
       // Keep browser Host (e.g. localhost:3000) so API redirects use the Vite origin, not :3002.
       '/api': {
-        target: 'http://localhost:3002',
+        target: process.env.DEV_API_PORT ? `http://localhost:${process.env.DEV_API_PORT}` : 'http://localhost:3002',
         changeOrigin: false,
         configure(proxy) {
           proxy.on('proxyReq', (proxyReq, incoming: IncomingMessage) => {

@@ -189,7 +189,9 @@ export default function CompanySettings() {
       if (fcm === 'student_and_parent' || fcm === 'internal_only') nextTrialCommentMode = fcm;
       const fcr = featObj['trial_comment_required'];
       nextTrialCommentRequired = fcr === true;
-      setEnableManualStudentPayments(featObj['enable_manual_student_payments'] === true);
+      setEnableManualStudentPayments(
+        featObj['manual_payments'] === true || featObj['enable_manual_student_payments'] === true,
+      );
       nextSettings = {
         cancellation_hours: orgData.default_cancellation_hours || 24,
         cancellation_fee_percent: orgData.default_cancellation_fee_percent || 50,
@@ -550,6 +552,7 @@ export default function CompanySettings() {
       trial_lesson_comment_mode: trialCommentMode,
       trial_comment_required: trialCommentRequired,
       notify_tutors_on_student_assign: notifyTutorsOnAssign,
+      manual_payments: enableManualStudentPayments,
       enable_manual_student_payments: enableManualStudentPayments,
     };
 

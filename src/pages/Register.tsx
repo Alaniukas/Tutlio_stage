@@ -104,7 +104,7 @@ export default function Register() {
 
     const stripeCheckoutSessionId = sessionStorage.getItem('stripe_checkout_session_id');
 
-    const appOrigin = import.meta.env.VITE_APP_URL || window.location.origin;
+    const appOrigin = (import.meta.env.VITE_APP_URL || window.location.origin).replace(/\/$/, '');
     let authData: any = null;
 
     if (normalizedOrgToken) {
@@ -135,7 +135,9 @@ export default function Register() {
       }
       authData = signInResult.data;
     } else {
-      const emailRedirectTo = `${appOrigin}/registration/subscription`;
+      // Email confirmation must land on a route that can consume the auth hash.
+      // Then we continue to subscription flow via ?next=...
+      const emailRedirectTo = `${appOrigin}/auth/callback?next=${encodeURIComponent('/registration/subscription')}`;
       const signUpResult = await supabase.auth.signUp({
         email,
         password,

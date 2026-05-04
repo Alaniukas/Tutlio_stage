@@ -51,6 +51,7 @@ interface Student {
   full_name: string;
   email: string;
   phone: string;
+  media_publicity_consent?: string | null;
   payer_name?: string | null;
   payer_email?: string | null;
   payer_phone?: string | null;
@@ -100,6 +101,17 @@ function adminShowPhone(v: string | null | undefined) {
   return formatLithuanianPhone(s);
 }
 
+function mediaConsentBadge(consent: string | null | undefined) {
+  const v = String(consent || '').trim().toLowerCase();
+  if (v === 'agree') {
+    return { labelKey: 'compStu.mediaConsentAgree', className: 'text-green-700 bg-green-50 border border-green-200' };
+  }
+  if (v === 'disagree') {
+    return { labelKey: 'compStu.mediaConsentDisagree', className: 'text-rose-700 bg-rose-50 border border-rose-200' };
+  }
+  return { labelKey: 'compStu.mediaConsentUnknown', className: 'text-gray-700 bg-gray-50 border border-gray-200' };
+}
+
 function hasSchoolParentContacts(student: {
   payer_name?: string | null;
   payer_email?: string | null;
@@ -135,6 +147,7 @@ export default function CompanyStudents() {
   const isSchoolView = orgEntityType === 'school';
   const { t } = useTranslation();
   const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
+  const orgUsesManualPackages = !orgFeaturesLoading && hasFeature('manual_payments');
   const stc = getCached<any>('company_students');
   const [students, setStudents] = useState<Student[]>(stc?.students ?? []);
   const [tutors, setTutors] = useState<Tutor[]>(stc?.tutors ?? []);
@@ -614,7 +627,8 @@ export default function CompanyStudents() {
     if (!selectedStudent || !pkgSubjectId || pkgLessons <= 0) return;
     setPkgSending(true);
     try {
-      const response = await fetch('/api/create-package-checkout', {
+      const endpoint = orgUsesManualPackages ? '/api/create-manual-package' : '/api/create-package-checkout';
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: await authHeaders(),
         body: JSON.stringify({
@@ -624,12 +638,16 @@ export default function CompanyStudents() {
           totalLessons: pkgLessons,
           pricePerLesson: pkgPrice,
           ...(pkgExpiresAt ? { expiresAt: pkgExpiresAt } : {}),
-          attachSalesInvoice: pkgAttachSalesInvoice,
+          ...(!orgUsesManualPackages ? { attachSalesInvoice: pkgAttachSalesInvoice } : {}),
         }),
       });
+      const result = await response.json().catch(() => ({}));
       if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error((err as any).error || t('compStu.errorSendingPackage'));
+        throw new Error((result as any).error || (result as any).details || t('compStu.errorSendingPackage'));
+      }
+      const payUrl = typeof (result as any).paymentUrl === 'string' ? (result as any).paymentUrl.trim() : '';
+      if (payUrl && /^https?:\/\//i.test(payUrl)) {
+        window.open(payUrl, '_blank', 'noopener,noreferrer');
       }
       setToastMessage({ message: t('compStu.packageSent', { name: selectedStudent.full_name }), type: 'success' });
       setSendPackageOpen(false);
@@ -1785,6 +1803,18 @@ export default function CompanyStudents() {
                             </span>
                           )}
                         </div>
+                        {isSchoolView && (
+                          <div className="mt-1">
+                            {(() => {
+                              const b = mediaConsentBadge(student.media_publicity_consent);
+                              return (
+                                <span className={`text-[11px] border rounded-md px-1.5 py-0.5 inline-block ${b.className}`}>
+                                  {t(b.labelKey)}
+                                </span>
+                              );
+                            })()}
+                          </div>
+                        )}
                         <p className="text-xs text-gray-500 mt-1 truncate">
                           {t('compStu.tutorInline')}{' '}
                           {tutorNames.length > 0 ? (
@@ -1884,6 +1914,18 @@ export default function CompanyStudents() {
                                   <span className="text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-0.5">{t('compStu.notConnected')}</span>
                                 )}
                               </p>
+                              {isSchoolView && (
+                                <p className="text-xs mt-1">
+                                  {(() => {
+                                    const b = mediaConsentBadge(student.media_publicity_consent);
+                                    return (
+                                      <span className={`text-[11px] border rounded-md px-1.5 py-0.5 inline-block ${b.className}`}>
+                                        {t(b.labelKey)}
+                                      </span>
+                                    );
+                                  })()}
+                                </p>
+                              )}
                             </div>
                           </div>
                         </td>
@@ -2817,11 +2859,12 @@ export default function CompanyStudents() {
                         </div>
                         <div className="flex items-end">
                           <Button size="sm" className="h-8 w-full text-xs rounded-lg bg-violet-600 hover:bg-violet-700"
-                            onClick={handleSendPackage} disabled={pkgSending || !pkgSubjectId}>
+                            onClick={handleSendPackage} disabled={pkgSending || !pkgSubjectId || orgFeaturesLoading}>
                             {pkgSending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : t('compStu.sendBtn')}
                           </Button>
                         </div>
                       </div>
+                      {!orgUsesManualPackages && (
                       <label className="flex items-start gap-2 cursor-pointer text-xs text-violet-900">
                         <input
                           type="checkbox"
@@ -2834,9 +2877,10 @@ export default function CompanyStudents() {
                           <span className="block text-[11px] text-violet-600 font-normal mt-0.5">{t('invoices.includeSfInEmailHint')}</span>
                         </span>
                       </label>
+                      )}
                       <p className="text-[11px] text-violet-500">{t('package.validUntilHint')}</p>
                       <p className="text-xs text-violet-600">
-                        {t('compStu.stripePaymentHint')}
+                        {orgUsesManualPackages ? t('compStu.manualPackageSendHint') : t('compStu.stripePaymentHint')}
                       </p>
                           {pkgSubjectId && pkgLessons > 0 && (
                         <p className="text-xs font-medium text-violet-800">
@@ -2859,7 +2903,9 @@ export default function CompanyStudents() {
                               ? t('package.lessonUnit2to9')
                               : t('package.lessonUnit10plus')}{' '}
                           × {Number(pkgPrice).toFixed(2)} €
+                          {!orgUsesManualPackages && (
                           <span className="text-violet-500 font-normal"> {t('package.includingFeesNote')}</span>
+                          )}
                         </p>
                       )}
                     </div>

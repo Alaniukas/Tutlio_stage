@@ -185,8 +185,8 @@ export default function CompanyContracts() {
 
     const [tRes, cRes, sRes] = await Promise.all([
       supabase.from('school_contract_templates').select('*').eq('organization_id', admin.organization_id).order('created_at', { ascending: false }),
-      supabase.from('school_contracts').select('*, student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date)').eq('organization_id', admin.organization_id).is('archived_at', null).order('created_at', { ascending: false }),
-      supabase.from('students').select('id, full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date').eq('organization_id', admin.organization_id).order('full_name'),
+      supabase.from('school_contracts').select('*, media_publicity_consent, student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent)').eq('organization_id', admin.organization_id).is('archived_at', null).order('created_at', { ascending: false }),
+      supabase.from('students').select('id, full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent').eq('organization_id', admin.organization_id).order('full_name'),
     ]);
 
     const tData = tRes.data || [];
@@ -903,6 +903,7 @@ export default function CompanyContracts() {
         !contractAddress.trim() ? 'Gyvenamoji vieta' : '',
         !contractChildBirthDate.trim() ? 'Vaiko gimimo data' : '',
         !contractParentPersonalCode.trim() ? 'Tėvų asmens kodas' : '',
+        isSchoolView ? 'Vaiko atvaizdo naudojimo sutikimas' : '',
       ].filter(Boolean);
 
       const preContractId = crypto.randomUUID();
@@ -1005,9 +1006,8 @@ export default function CompanyContracts() {
         }
 
         const sendContractChainOk = await (async (): Promise<boolean> => {
-          const completionUrl = parentsWillFillMissing && missingFields.length > 0
-            ? await createCompletionUrl(created.id)
-            : null;
+          const shouldIncludeCompletion = (isSchoolView && missingFields.length > 0) || (parentsWillFillMissing && missingFields.length > 0);
+          const completionUrl = shouldIncludeCompletion ? await createCompletionUrl(created.id) : null;
           const ok = await sendEmail({
             type: 'school_contract',
             to: recipient,
@@ -1021,7 +1021,7 @@ export default function CompanyContracts() {
               parentPersonalCode: contractParentPersonalCode.trim() || undefined,
               childBirthDate: contractChildBirthDate.trim() || undefined,
               address: contractAddress.trim() || undefined,
-              missingFields: parentsWillFillMissing ? missingFields : [],
+              missingFields: isSchoolView ? missingFields : (parentsWillFillMissing ? missingFields : []),
               completionUrl: completionUrl || undefined,
               contractId: created.id,
               contractNumber: created.contract_number || effectiveContractNumber,
@@ -1126,6 +1126,7 @@ export default function CompanyContracts() {
       !(student?.student_address || '').trim() && !(student?.student_city || '').trim() ? 'Gyvenamoji vieta' : '',
       !(student?.child_birth_date || '').trim() ? 'Vaiko gimimo data' : '',
       !(student?.payer_personal_code || '').trim() ? 'Tėvų asmens kodas' : '',
+      isSchoolView && !(String((contract as any)?.media_publicity_consent || '').trim()) ? 'Vaiko atvaizdo naudojimo sutikimas' : '',
     ].filter(Boolean);
       const completionUrl = missingFields.length > 0 ? await createCompletionUrl(contract.id) : null;
       void (async () => {
@@ -1233,12 +1234,24 @@ export default function CompanyContracts() {
   };
 
   const markSigned = async (contractId: string) => {
-    await supabase
-      .from('school_contracts')
-      .update({ signing_status: 'signed', signed_at: new Date().toISOString() })
-      .eq('id', contractId);
-    setToast({ message: tr('school.toastContractSigned'), type: 'success' });
-    reload();
+    try {
+      const hdrs = await authHeaders();
+      const res = await fetch('/api/school-contract-mark-signed', {
+        method: 'POST',
+        headers: hdrs,
+        body: JSON.stringify({ contractId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.success !== true) {
+        setToast({ message: data?.error || `HTTP ${res.status}`, type: 'error' });
+      } else {
+        setToast({ message: tr('school.toastContractSigned'), type: 'success' });
+      }
+    } catch (e: any) {
+      setToast({ message: e?.message || tr('common.error'), type: 'error' });
+    } finally {
+      reload();
+    }
   };
 
   const deleteContract = async (id: string) => {
@@ -1291,6 +1304,17 @@ export default function CompanyContracts() {
       return;
     }
     setToast({ message: 'Pasirašyta sutartis įkelta.', type: 'success' });
+    // Also send student/parent access emails (idempotent).
+    try {
+      const hdrs = await authHeaders();
+      void fetch('/api/school-contract-mark-signed', {
+        method: 'POST',
+        headers: hdrs,
+        body: JSON.stringify({ contractId: contract.id }),
+      });
+    } catch {
+      /* non-fatal */
+    }
     reload();
   };
 

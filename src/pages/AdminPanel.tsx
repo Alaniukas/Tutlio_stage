@@ -125,6 +125,7 @@ export default function AdminPanel() {
   const [archiveLoadingTutorId, setArchiveLoadingTutorId] = useState<string | null>(null);
   const [unarchiveLoadingTutorId, setUnarchiveLoadingTutorId] = useState<string | null>(null);
   const [detailFeaturesBase, setDetailFeaturesBase] = useState<Record<string, unknown>>({});
+  const [editManualPaymentUrl, setEditManualPaymentUrl] = useState('');
   const [detailStats, setDetailStats] = useState<OrgAdminStats | null>(null);
   const [soloTutors, setSoloTutors] = useState<SoloTutorAdminRow[]>([]);
   const [soloListLoading, setSoloListLoading] = useState(false);
@@ -228,10 +229,16 @@ export default function AdminPanel() {
       const orgFeatures = org.features && typeof org.features === 'object' ? org.features : {};
       const mergedFeatures: Record<string, boolean> = {};
       Object.entries(FEATURE_REGISTRY).forEach(([featureId, definition]) => {
-        mergedFeatures[featureId] = orgFeatures[featureId] ?? definition.defaultValue;
+        let v = orgFeatures[featureId] as boolean | undefined;
+        if (featureId === 'manual_payments' && v === undefined) {
+          v = orgFeatures.enable_manual_student_payments as boolean | undefined;
+        }
+        mergedFeatures[featureId] = v ?? definition.defaultValue;
       });
       setEditFeatures(mergedFeatures);
       setDetailFeaturesBase(orgFeatures as Record<string, unknown>);
+      const mpUrl = (orgFeatures as Record<string, unknown>).manual_payment_url;
+      setEditManualPaymentUrl(typeof mpUrl === 'string' ? mpUrl : '');
       setDetailTutors(data.tutors || []);
       setDetailArchivedTutors(data.archived_tutors || []);
       setDetailStudents(data.students || []);
@@ -254,6 +261,14 @@ export default function AdminPanel() {
         ...detailFeaturesBase,
         ...editFeatures,
       };
+      const trimmedUrl = editManualPaymentUrl.trim();
+      if (trimmedUrl) merged.manual_payment_url = trimmedUrl;
+      else delete merged.manual_payment_url;
+
+      const manualOn = !!editFeatures.manual_payments;
+      merged.manual_payments = manualOn;
+      merged.enable_manual_student_payments = manualOn;
+
       const res = await fetch(`/api/admin-organizations?id=${encodeURIComponent(detailId)}`, {
         method: 'PATCH',
         headers: {
@@ -858,6 +873,25 @@ export default function AdminPanel() {
                           </div>
                         </div>
                       ))}
+                    </div>
+
+                    <div className="space-y-3 rounded-xl border border-violet-500/25 bg-violet-500/5 p-4">
+                      <div>
+                        <Label className="text-slate-200 text-sm font-semibold">{t('admin.manualPaymentsTitle')}</Label>
+                        <p className="text-xs text-slate-400 mt-1">{t('admin.manualPaymentsDesc')}</p>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-slate-400 text-xs">{t('admin.paymentPageUrl')}</Label>
+                        <Input
+                          type="url"
+                          inputMode="url"
+                          placeholder="https://example.com/apmoketi"
+                          value={editManualPaymentUrl}
+                          onChange={(e) => setEditManualPaymentUrl(e.target.value)}
+                          className="bg-white/10 border-white/20 text-white placeholder:text-slate-500 rounded-xl"
+                        />
+                        <p className="text-[11px] text-slate-500">{t('admin.leaveEmptyNoButton')}</p>
+                      </div>
                     </div>
 
                     <button

@@ -1,4 +1,7 @@
 export const en: Record<string, string> = {
+  'compStu.mediaConsentAgree': 'Image: consent given',
+  'compStu.mediaConsentDisagree': 'Image: no consent',
+  'compStu.mediaConsentUnknown': 'Image: not provided',
   'about.contactButton': 'Contact us',
   'about.joinDesc': 'If you have questions or want to start collaborating, we are ready to help.',
   'about.joinTitle': 'Join us!',
@@ -62,10 +65,12 @@ export const en: Record<string, string> = {
   'admin.featuresDesc': 'Features',
   'admin.idLabel': 'ID',
   'admin.lastLesson': 'Last lesson',
-  'admin.leaveEmptyNoButton': 'Leave Empty No',
+  'admin.leaveEmptyNoButton':
+    'Leave empty if payers should contact the organization for bank details (no payment button in the email).',
   'admin.lessonsOccurred': 'Occurred lessons',
   'admin.lessonsOccurredDesc': 'Completed or "no-show"',
-  'admin.manualPaymentsDesc': 'Enable the “Manual (non-Stripe) package payments” feature above in the Payments section. Then you can specify the page to redirect payments to.',
+  'admin.manualPaymentsDesc':
+    'Turn on “Manual (off-Stripe) student payments” in the Payments toggles above. Optionally set a payment page URL shown in emails.',
   'admin.manualPaymentsTitle': 'Manual Payments',
   'admin.maxTutors': 'Max tutors',
   'admin.min8': 'min. 8 characters',
@@ -1181,6 +1186,8 @@ export const en: Record<string, string> = {
   'compStu.sendPackage': 'Send package',
   'compStu.sendPackageTitle': 'Send lessons package',
   'compStu.stripePaymentHint': 'Stripe payment',
+  'compStu.manualPackageSendHint':
+    'We email payment instructions. If a payment page URL is set in platform admin for your org, the email button opens that link.',
   'compStu.studentAdded': 'Student added',
   'compStu.parentInviteEmailFailed':
     'Student saved, but we could not send parent invite emails automatically — check mail settings or resend invites later.',

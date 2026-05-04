@@ -11,6 +11,7 @@ import { getAppOrigin, getPasswordResetRedirectTo } from '@/lib/auth-redirects';
 const authCtx = vi.hoisted(() => ({
   setSession: vi.fn(),
   getSession: vi.fn(),
+  getUser: vi.fn(),
   unsubscribe: vi.fn(),
 }));
 
@@ -19,6 +20,7 @@ vi.mock('@/lib/supabase', () => ({
     auth: {
       setSession: authCtx.setSession,
       getSession: authCtx.getSession,
+      getUser: authCtx.getUser,
       onAuthStateChange: vi.fn(() => ({
         data: { subscription: { unsubscribe: authCtx.unsubscribe } },
       })),
@@ -72,6 +74,7 @@ describe('AuthCallback', () => {
     vi.clearAllMocks();
     authCtx.setSession.mockResolvedValue({ data: { session: null }, error: null });
     authCtx.getSession.mockResolvedValue({ data: { session: null }, error: null });
+    authCtx.getUser.mockResolvedValue({ data: { user: null }, error: null });
   });
 
   afterEach(() => {

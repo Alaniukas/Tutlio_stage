@@ -5,6 +5,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { timingSafeEqual } from 'crypto';
+import { getOrgVisibleTutorProfileIds } from './_lib/orgVisibleTutorIds.js';
 
 function getPlatformAdminSecret(): string {
   const s = process.env.ADMIN_SECRET || process.env.VITE_ADMIN_SECRET;
@@ -459,6 +460,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         after,
         patch,
       });
+
+      // Match CompanySettings: org manual-payment feature → all visible org tutors' profiles.
+      if (features !== undefined && after?.features && typeof after.features === 'object') {
+        const feat = after.features as Record<string, unknown>;
+        const manualOn = feat.manual_payments === true || feat.enable_manual_student_payments === true;
+        try {
+          const ids = await getOrgVisibleTutorProfileIds(supabase, idParam);
+          if (ids.length > 0) {
+            const { error: profUpdErr } = await supabase
+              .from('profiles')
+              .update({ enable_manual_student_payments: manualOn })
+              .in('id', ids);
+            if (profUpdErr) console.error('[admin-organizations] sync tutor manual flag:', profUpdErr.message);
+          }
+        } catch (e) {
+          console.error('[admin-organizations] sync tutor manual flag', e);
+        }
+      }
 
       return res.status(200).json({ success: true, organization: after });
     }

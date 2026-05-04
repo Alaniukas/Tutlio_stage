@@ -19,7 +19,7 @@ type Meta = {
   ok: boolean;
   token: string | null;
   contractId: string;
-  missing: { address: boolean; birthDate: boolean; parentCode: boolean };
+  missing: { address: boolean; birthDate: boolean; parentCode: boolean; mediaPublicity?: boolean };
 };
 
 export default function SchoolContractComplete() {
@@ -40,6 +40,7 @@ export default function SchoolContractComplete() {
   const [parent2Phone, setParent2Phone] = useState('');
   const [parent2PersonalCode, setParent2PersonalCode] = useState('');
   const [parent2Address, setParent2Address] = useState('');
+  const [mediaPublicityConsent, setMediaPublicityConsent] = useState<'agree' | 'disagree' | ''>('');
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -98,6 +99,7 @@ export default function SchoolContractComplete() {
         student_address: studentAddress,
         student_city: studentCity,
         child_birth_date: childBirthDate,
+        media_publicity_consent: mediaPublicityConsent || undefined,
         parent2_name: parent2Name,
         parent2_email: parent2Email,
         parent2_phone: parent2Phone,
@@ -162,6 +164,7 @@ export default function SchoolContractComplete() {
   if (missing.address) missingList.push('Gyvenamoji vieta');
   if (missing.parentCode) missingList.push('Tėvų asmens kodas');
   if (missing.birthDate) missingList.push('Vaiko gimimo data');
+  if (missing.mediaPublicity) missingList.push('Vaiko atvaizdo naudojimo sutikimas');
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-violet-50 via-cyan-50 to-green-50 p-6">
@@ -185,6 +188,42 @@ export default function SchoolContractComplete() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-3">
+          {missing.mediaPublicity && (
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
+              <p className="font-bold text-gray-900">Vaiko atvaizdo naudojimas</p>
+              <div className="text-sm text-gray-600 space-y-2 leading-relaxed">
+                <p>
+                  Sutinku, kad Vaiko atvaizdas (nuotraukos ir vaizdo įrašai) būtų naudojamas VšĮ „Laisvi vaikai“ interneto svetainėje,
+                  socialiniuose tinkluose, viešuose pranešimuose ir rinkodaros priemonėse.
+                </p>
+              </div>
+              <p className="text-sm font-semibold text-gray-900">
+                Ar sutinkate, kad vaiko atvaizdas būtų naudojamas aukščiau nurodytais tikslais?
+              </p>
+              <div className="flex flex-col gap-2">
+                <label className="flex items-start gap-2 text-sm text-gray-800">
+                  <input
+                    type="radio"
+                    name="media_publicity_consent"
+                    value="agree"
+                    checked={mediaPublicityConsent === 'agree'}
+                    onChange={() => setMediaPublicityConsent('agree')}
+                  />
+                  <span>Sutinku</span>
+                </label>
+                <label className="flex items-start gap-2 text-sm text-gray-800">
+                  <input
+                    type="radio"
+                    name="media_publicity_consent"
+                    value="disagree"
+                    checked={mediaPublicityConsent === 'disagree'}
+                    onChange={() => setMediaPublicityConsent('disagree')}
+                  />
+                  <span>Nesutinku</span>
+                </label>
+              </div>
+            </div>
+          )}
           {missing.parentCode && (
             <div>
               <Label>Tėvų asmens kodas</Label>

@@ -174,15 +174,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: contract, error: contractErr } = await supabase
     .from('school_contracts')
-    .select('id, student_id, organization_id, template_id, contract_number, annual_fee, filled_body, template:school_contract_templates(pdf_url), organizations(name, email), student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date)')
+    .select('id, student_id, organization_id, template_id, contract_number, annual_fee, filled_body, media_publicity_consent, template:school_contract_templates(pdf_url), organizations(name, email, entity_type), student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent)')
     .eq('id', resolvedContractId)
     .maybeSingle();
   if (contractErr || !contract) return res.status(404).send(pageHtml('<h2>Sutartis nerasta.</h2>'));
 
   const st = (contract as any).student || {};
+  const orgEntityType = String((contract as any)?.organizations?.entity_type || '').trim().toLowerCase();
+  const isSchoolOrg = orgEntityType === 'school';
+  const existingConsent = String((contract as any)?.media_publicity_consent || '').trim();
   const isAddressMissing = !String(st.student_address || '').trim() && !String(st.student_city || '').trim();
   const isBirthDateMissing = !String(st.child_birth_date || '').trim();
   const isParentCodeMissing = !String(st.payer_personal_code || '').trim();
+  const isMediaConsentMissing = isSchoolOrg && !existingConsent;
 
   if (req.method === 'GET') {
     const wantsJson = String(req.query?.format ?? '') === 'json';
@@ -198,6 +202,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             address: isAddressMissing,
             birthDate: isBirthDateMissing,
             parentCode: isParentCodeMissing,
+            mediaPublicity: isMediaConsentMissing,
           },
         }),
       );
@@ -217,6 +222,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       isAddressMissing ? '<li>Gyvenamoji vieta</li>' : '',
       isParentCodeMissing ? '<li>Tėvų asmens kodas</li>' : '',
       isBirthDateMissing ? '<li>Vaiko gimimo data</li>' : '',
+      isMediaConsentMissing ? '<li>Vaiko atvaizdo naudojimo sutikimas</li>' : '',
     ].filter(Boolean).join('');
 
     const fieldsHtml = [
@@ -231,6 +237,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         : '',
       isBirthDateMissing
         ? '<label style="font-size:12px;color:#6b7280;margin-top:2px;">Vaiko gimimo data</label><input id="child_birth_date" type="date" style="padding:12px 14px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;" />'
+        : '',
+      isMediaConsentMissing
+        ? `<div style="border:1px solid #e5e7eb;border-radius:12px;padding:12px 14px;background:#f9fafb;">
+             <p style="margin:0 0 8px;font-weight:700;color:#111827;">Vaiko atvaizdo naudojimas</p>
+             <div style="color:#374151;font-size:13px;line-height:1.55;">
+               <p style="margin:0 0 10px;">Sutinku, kad Vaiko atvaizdas (nuotraukos ir vaizdo įrašai) būtų naudojamas VšĮ „Laisvi vaikai“ interneto svetainėje, socialiniuose tinkluose, viešuose pranešimuose ir rinkodaros priemonėse.</p>
+               <p style="margin:0 0 10px;">Nesutinku, kad Vaiko atvaizdas būtų naudojamas aukščiau nurodytais tikslais.</p>
+             </div>
+             <div style="display:grid;gap:8px;margin-top:10px;">
+               <label style="display:flex;gap:10px;align-items:flex-start;"><input type="radio" name="media_publicity_consent" value="agree" /> <span>Sutinku</span></label>
+               <label style="display:flex;gap:10px;align-items:flex-start;"><input type="radio" name="media_publicity_consent" value="disagree" /> <span>Nesutinku</span></label>
+             </div>
+           </div>`
         : '',
     ].filter(Boolean).join('');
 
@@ -282,6 +301,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             student_address: get('student_address'),
             student_city: get('student_city'),
             child_birth_date: get('child_birth_date'),
+            media_publicity_consent: (() => {
+              const el = document.querySelector('input[name="media_publicity_consent"]:checked');
+              return el ? el.value : '';
+            })(),
             parent2_name: get('parent2_name'),
             parent2_email: get('parent2_email'),
             parent2_phone: get('parent2_phone'),
@@ -312,10 +335,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const submittedParent2Phone = String(body.parent2_phone || '').trim();
   const submittedParent2PersonalCode = String(body.parent2_personal_code || '').trim();
   const submittedParent2Address = String(body.parent2_address || '').trim();
+  const submittedConsent = String(body.media_publicity_consent || '').trim();
+  const consentValue = submittedConsent === 'agree' || submittedConsent === 'disagree' ? submittedConsent : '';
 
   if (isParentCodeMissing && !submittedParentPersonalCode) return res.status(400).send(pageHtml('<h2>Įveskite tėvų asmens kodą.</h2>'));
   if (isAddressMissing && !studentAddress && !studentCity) return res.status(400).send(pageHtml('<h2>Įveskite adresą arba miestą.</h2>'));
   if (isBirthDateMissing && !childBirthDate) return res.status(400).send(pageHtml('<h2>Įveskite vaiko gimimo datą.</h2>'));
+  if (isMediaConsentMissing && !consentValue) return res.status(400).send(pageHtml('<h2>Pasirinkite: sutinku arba nesutinku dėl vaiko atvaizdo naudojimo.</h2>'));
 
   const studentUpdatePayload = {
     payer_personal_code: isParentCodeMissing ? (submittedParentPersonalCode || null) : st.payer_personal_code || null,
@@ -327,13 +353,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     parent_secondary_phone: submittedParent2Phone || st.parent_secondary_phone || null,
     parent_secondary_personal_code: submittedParent2PersonalCode || st.parent_secondary_personal_code || null,
     parent_secondary_address: submittedParent2Address || st.parent_secondary_address || null,
+    ...(isMediaConsentMissing ? { media_publicity_consent: consentValue } : {}),
   };
 
   const [studentResult, draftContractResult] = await Promise.all([
     supabase.from('students').update(studentUpdatePayload).eq('id', (contract as any).student_id),
     supabase
       .from('school_contracts')
-      .update({ pdf_url: null, signing_status: 'draft', sent_at: null })
+      .update({
+        pdf_url: null,
+        signing_status: 'draft',
+        sent_at: null,
+        ...(isMediaConsentMissing ? { media_publicity_consent: consentValue } : {}),
+      })
       .eq('id', (contract as any).id),
   ]);
 
@@ -389,7 +421,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     '{{school_name}}': String((contract as any).organizations?.name || ''),
   });
 
-  const templatePayload: Record<string, string> = {
+  const resolvedConsent = (isMediaConsentMissing ? consentValue : existingConsent) || '';
+  const consentPending = !resolvedConsent;
+  const consentAgreeSelected = resolvedConsent === 'agree';
+  const consentDisagreeSelected = resolvedConsent === 'disagree';
+
+  const templatePayload: Record<string, string | boolean | null> = {
     contract_number: templateSafe((contract as any).contract_number),
     student_name: templateSafe(st.full_name),
     student_email: templateSafe(st.email),
@@ -412,6 +449,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     annual_fee: templateSafe((contract as any).annual_fee),
     date: new Date().toLocaleDateString('lt-LT'),
     school_name: templateSafe((contract as any).organizations?.name),
+
+    // Docxtemplater boolean sections for the DOCX template
+    consent_pending: consentPending,
+    consent_agree_selected: consentAgreeSelected,
+    consent_disagree_selected: consentDisagreeSelected,
   };
 
   let pdfBytes: Uint8Array;
@@ -463,6 +505,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     { cacheControl: '3600', upsert: true, contentType: 'application/pdf' },
   );
   const uploadedPath = uploadErr ? null : path;
+  const publicUrl = uploadedPath
+    ? (supabase.storage.from(BUCKET).getPublicUrl(uploadedPath).data.publicUrl || '')
+    : '';
 
   await supabase
     .from('school_contracts')

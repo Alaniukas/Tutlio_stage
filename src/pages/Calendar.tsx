@@ -309,6 +309,7 @@ export default function CalendarPage() {
   const [editDurationMinutes, setEditDurationMinutes] = useState<number>(60);
   const [editTopic, setEditTopic] = useState('');
   const [editMeetingLink, setEditMeetingLink] = useState('');
+  const [editPrice, setEditPrice] = useState(0);
   const [editTutorComment, setEditTutorComment] = useState('');
   const [editShowCommentToStudent, setEditShowCommentToStudent] = useState(false);
   const [isPaid, setIsPaid] = useState(false);
@@ -2649,6 +2650,14 @@ export default function CalendarPage() {
       const applyToAllFuture = groupEditChoice === 'all_future' && (isGroupSession || !!selectedEvent.recurring_session_id);
       let error: any = null;
 
+      const editSessionPayload = {
+        topic: editTopic,
+        meeting_link: editMeetingLink,
+        tutor_comment: editTutorComment || null,
+        show_comment_to_student: editShowCommentToStudent,
+        ...(!orgPolicy.hideMoney ? { price: Number.isFinite(Number(editPrice)) ? Number(editPrice) : 0 } : {}),
+      };
+
       if (applyToAllFuture) {
         let futureQuery = supabase
           .from('sessions')
@@ -2698,10 +2707,7 @@ export default function CalendarPage() {
             const { error: rowError } = await supabase.from('sessions').update({
               start_time: rowNewStart.toISOString(),
               end_time: rowNewEnd.toISOString(),
-              topic: editTopic,
-              meeting_link: editMeetingLink,
-              tutor_comment: editTutorComment || null,
-              show_comment_to_student: editShowCommentToStudent
+              ...editSessionPayload,
             }).eq('id', session.id);
 
             if (rowError) {
@@ -2714,10 +2720,7 @@ export default function CalendarPage() {
         const { error: singleError } = await supabase.from('sessions').update({
           start_time: newStart.toISOString(),
           end_time: newEnd.toISOString(),
-          topic: editTopic,
-          meeting_link: editMeetingLink,
-          tutor_comment: editTutorComment || null,
-          show_comment_to_student: editShowCommentToStudent
+          ...editSessionPayload,
         }).eq('id', selectedEvent.id);
         error = singleError;
       }
@@ -4097,6 +4100,7 @@ export default function CalendarPage() {
                   setEditDurationMinutes(Math.max(5, Math.round((selectedEvent.end_time.getTime() - selectedEvent.start_time.getTime()) / 60000)));
                   setEditTopic(selectedEvent.topic || '');
                   setEditMeetingLink(selectedEvent.meeting_link || '');
+                  setEditPrice(Number(selectedEvent.price ?? 0) || 0);
                   setEditTutorComment(selectedEvent.tutor_comment || '');
                   setEditShowCommentToStudent(selectedEvent.show_comment_to_student || false);
                   setIsEditingSession(true);
@@ -4147,6 +4151,19 @@ export default function CalendarPage() {
                 <Label>{t('cal.meetingLinkLabel')}</Label>
                 <Input value={editMeetingLink} onChange={(e) => setEditMeetingLink(e.target.value)} placeholder="https://meet.google.com/..." className="rounded-xl" />
               </div>
+              {!orgPolicy.hideMoney && (
+              <div className="space-y-2">
+                <Label>{t('lessonSet.priceLabel')}</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={editPrice}
+                  onChange={(e) => setEditPrice(Number(e.target.value))}
+                  className="rounded-xl"
+                />
+              </div>
+              )}
               <div className="space-y-2">
                 <Label>{t('dash.commentLabel')}</Label>
                 <textarea
@@ -4903,6 +4920,7 @@ export default function CalendarPage() {
                   setEditDurationMinutes(Math.max(5, Math.round((selectedEvent.end_time.getTime() - selectedEvent.start_time.getTime()) / 60000)));
                   setEditTopic(selectedEvent.topic || '');
                   setEditMeetingLink(selectedEvent.meeting_link || '');
+                  setEditPrice(Number(selectedEvent.price ?? 0) || 0);
                   setEditTutorComment(selectedEvent.tutor_comment || '');
                   setEditShowCommentToStudent(selectedEvent.show_comment_to_student || false);
                   setIsEditingSession(true);

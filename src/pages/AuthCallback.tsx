@@ -12,6 +12,19 @@ export default function AuthCallback() {
     let done = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
+    const nextFromSearch = (() => {
+      try {
+        const next = new URLSearchParams(window.location.search).get('next') || '';
+        if (!next) return '';
+        // Only allow same-origin app paths.
+        if (!next.startsWith('/')) return '';
+        if (next.startsWith('//')) return '';
+        return next;
+      } catch {
+        return '';
+      }
+    })();
+
     const navigateSafe = (path: string) => {
       if (done) return;
       done = true;
@@ -48,6 +61,8 @@ export default function AuthCallback() {
           const { data: { user } } = await supabase.auth.getUser();
           if (user?.user_metadata?.org_token) {
             navigateSafe('/dashboard');
+          } else if (nextFromSearch) {
+            navigateSafe(nextFromSearch);
           } else {
             navigateSafe('/login');
           }

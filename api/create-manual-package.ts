@@ -6,6 +6,16 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { tutorUsesManualStudentPayments } from './_lib/soloManualStudentPayments.js';
+import { verifyRequestAuth } from './_lib/auth.js';
+
+function isSafeHttpUrl(raw: string): boolean {
+    try {
+        const u = new URL(raw);
+        return u.protocol === 'http:' || u.protocol === 'https:';
+    } catch {
+        return false;
+    }
+}
 
 function json(res: VercelResponse, status: number, body: unknown) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -60,16 +70,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return json(res, 400, { error: 'Missing required fields' });
     }
 
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
-        return json(res, 401, { error: 'Unauthorized' });
-    }
-
     if (totalLessons <= 0 || totalLessons > 100) {
         return json(res, 400, { error: 'Lesson count must be between 1 and 100' });
     }
 
     try {
+        const auth = await verifyRequestAuth(req);
+        if (!auth?.userId || auth.isInternal) {
+            return json(res, 401, { error: 'Unauthorized' });
+        }
+        const callerId = auth.userId;
+
         const supabaseUrl = getEnv('SUPABASE_URL') || getEnv('VITE_SUPABASE_URL');
         const supabaseServiceRoleKey = getEnv('SUPABASE_SERVICE_ROLE_KEY');
 
@@ -81,15 +92,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
-
-        const token = (authHeader as string).replace('Bearer ', '');
-        const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
-        if (authErr || !user) {
-            return json(res, 401, { error: 'Unauthorized' });
-        }
-        if (user.id !== tutorId) {
-            return json(res, 403, { error: 'Only the tutor can create manual packages' });
-        }
 
         const { data: tutor, error: tutorErr } = await supabase
             .from('profiles')
@@ -103,6 +105,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return json(res, 404, { error: 'Korepetitorius nerastas', details: tutorErr?.message });
         }
 
+        const { data: adminRow } = await supabase
+            .from('organization_admins')
+            .select('organization_id')
+            .eq('user_id', callerId)
+            .maybeSingle();
+
+        let callerAuthorized = callerId === tutorId;
+        if (!callerAuthorized && adminRow?.organization_id && tutor.organization_id === adminRow.organization_id) {
+            callerAuthorized = true;
+        }
+        if (!callerAuthorized) {
+            return json(res, 403, { error: 'Forbidden' });
+        }
+
         if (!tutorUsesManualStudentPayments(tutor)) {
             return json(res, 403, {
                 error: 'Manual student payments are not enabled for this tutor.',
@@ -114,12 +130,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const { data: student, error: studentErr } = await supabase
             .from('students')
-            .select('id, full_name, email, payer_email, payer_name')
+            .select('id, full_name, email, payer_email, payer_name, organization_id')
             .eq('id', studentId)
             .single();
 
         if (studentErr || !student) {
             return json(res, 404, { error: 'Mokinys nerastas', details: studentErr?.message });
+        }
+
+        if (adminRow && callerId !== tutorId) {
+            if (!tutor.organization_id || (student as { organization_id?: string | null }).organization_id !== adminRow.organization_id) {
+                return json(res, 403, { error: 'Forbidden' });
+            }
+        }
+
+        let manualPaymentUrl = '';
+        let orgDisplayName: string | null = null;
+        if (tutor.organization_id) {
+            const { data: orgRow } = await supabase
+                .from('organizations')
+                .select('name, features')
+                .eq('id', tutor.organization_id)
+                .single();
+            const features = (orgRow?.features || {}) as Record<string, unknown>;
+            const rawUrl = features.manual_payment_url;
+            if (typeof rawUrl === 'string' && rawUrl.trim()) {
+                const tUrl = rawUrl.trim();
+                manualPaymentUrl = isSafeHttpUrl(tUrl) ? tUrl : '';
+            }
+            orgDisplayName = orgRow?.name || null;
         }
 
         const { data: subject, error: subjectErr } = await supabase
@@ -185,12 +224,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         data: {
                             recipientName: student.payer_name || student.full_name,
                             studentName: student.full_name,
-                            orgName: tutorName,
+                            orgName: orgDisplayName || tutorName,
                             subjectName: subject.name,
                             totalLessons,
                             pricePerLesson: pricePerLesson.toFixed(2),
                             totalPrice: totalPrice.toFixed(2),
                             bankDetails: (tutor as { manual_payment_bank_details?: string | null }).manual_payment_bank_details || '',
+                            ...(manualPaymentUrl ? { paymentUrl: manualPaymentUrl } : {}),
                         },
                     },
                     20000,
@@ -209,6 +249,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             success: true,
             packageId: lessonPackage.id,
             emailSent,
+            ...(manualPaymentUrl ? { paymentUrl: manualPaymentUrl } : {}),
         });
     } catch (err: any) {
         console.error('create-manual-package error:', err);

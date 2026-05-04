@@ -9,11 +9,22 @@ function json(res: VercelResponse, status: number, body: Record<string, unknown>
   res.end(JSON.stringify(body));
 }
 
-function normalizePayload(raw: unknown): Record<string, string> {
+type DocxPayloadValue = string | number | boolean | null;
+type DocxPayload = Record<string, DocxPayloadValue>;
+
+function normalizePayload(raw: unknown): DocxPayload {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
-  const out: Record<string, string> = {};
+  const out: DocxPayload = {};
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-    out[k] = v === null || v === undefined ? '' : String(v);
+    if (v === null || v === undefined) {
+      out[k] = '';
+      continue;
+    }
+    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+      out[k] = v;
+      continue;
+    }
+    out[k] = String(v);
   }
   return out;
 }

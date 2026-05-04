@@ -5,7 +5,7 @@ import { convertDocxBufferToPdfWithFallbacks } from './docxConverter';
 /** Download DOCX from URL, fill {{placeholders}}, return PDF bytes (server-side). */
 export async function renderDocxTemplateUrlToPdfBuffer(params: {
   templateUrl: string;
-  payload: Record<string, string>;
+  payload: Record<string, string | number | boolean | null>;
 }): Promise<Buffer> {
   const response = await fetch(params.templateUrl);
   if (!response.ok) throw new Error('Nepavyko atsisiųsti DOCX šablono');

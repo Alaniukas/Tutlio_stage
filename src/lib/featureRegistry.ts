@@ -97,6 +97,21 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     defaultValue: false,
     pricingTier: 'premium',
   },
+
+  /** When enabled, org uses prepaid packages / lesson flows outside Stripe student checkout; org admin confirms in Students. */
+  manual_payments: {
+    id: 'manual_payments',
+    name: 'Rankiniai (ne-Stripe) mokinių mokėjimai',
+    nameEn: 'Manual (off-Stripe) student payments',
+    description:
+      'Įjungus: visi org korepetitoriai naudoja rankinį mokinių mokėjimų režimą (be Stripe Checkout). Žemiau galite nurodyti mokėjimo puslapio URL el. laiškuose.',
+    descriptionEn:
+      'When on, org tutors use manual student payments (bank transfer etc.) instead of Stripe Checkout. Optional payment page URL below.',
+    category: 'payments',
+    defaultValue: false,
+    requiresSetup: true,
+    pricingTier: 'enterprise',
+  },
 };
 
 /**
