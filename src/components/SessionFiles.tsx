@@ -12,30 +12,72 @@ interface StorageFile {
 interface SessionFilesProps {
   sessionId: string;
   role: 'tutor' | 'student';
+  /** For group lessons: all sibling session IDs so files are shared across the group. */
+  groupSessionIds?: string[];
 }
 
-export default function SessionFiles({ sessionId, role }: SessionFilesProps) {
+export default function SessionFiles({ sessionId, role, groupSessionIds }: SessionFilesProps) {
   const { t } = useTranslation();
   const [files, setFiles] = useState<StorageFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [resolvedGroupIds, setResolvedGroupIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (groupSessionIds && groupSessionIds.length > 0) {
+      setResolvedGroupIds(groupSessionIds);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data: sess } = await supabase
+        .from('sessions')
+        .select('start_time, end_time, subject_id, tutor_id, subjects(is_group)')
+        .eq('id', sessionId)
+        .single();
+      if (cancelled || !sess) return;
+      const isGroup = (sess.subjects as any)?.is_group === true;
+      if (!isGroup) { setResolvedGroupIds([sessionId]); return; }
+      const { data: siblings } = await supabase
+        .from('sessions')
+        .select('id')
+        .eq('tutor_id', sess.tutor_id)
+        .eq('subject_id', sess.subject_id)
+        .eq('start_time', sess.start_time)
+        .eq('end_time', sess.end_time);
+      if (cancelled) return;
+      const ids = (siblings ?? []).map((s: any) => s.id as string);
+      setResolvedGroupIds(ids.length > 0 ? ids : [sessionId]);
+    })();
+    return () => { cancelled = true; };
+  }, [sessionId, groupSessionIds]);
 
   async function fetchFiles() {
     setLoading(true);
-    const { data } = await supabase.storage
-      .from('session-files')
-      .list(sessionId, { sortBy: { column: 'created_at', order: 'asc' } });
-    const mapped: StorageFile[] = (data ?? []).map((f) => ({
-      name: f.name,
-      metadata: f.metadata?.size != null ? { size: Number(f.metadata.size) } : null,
-    }));
-    setFiles(mapped);
+    const allIds = resolvedGroupIds.length > 0 ? resolvedGroupIds : [sessionId];
+    const results = await Promise.all(
+      allIds.map((id) =>
+        supabase.storage.from('session-files').list(id, { sortBy: { column: 'created_at', order: 'asc' } })
+      ),
+    );
+    const seen = new Set<string>();
+    const merged: StorageFile[] = [];
+    for (const { data } of results) {
+      for (const f of data ?? []) {
+        if (seen.has(f.name)) continue;
+        seen.add(f.name);
+        merged.push({ name: f.name, metadata: f.metadata?.size != null ? { size: Number(f.metadata.size) } : null });
+      }
+    }
+    setFiles(merged);
     setLoading(false);
   }
 
-  useEffect(() => { fetchFiles(); }, [sessionId]);
+  useEffect(() => {
+    if (resolvedGroupIds.length > 0) fetchFiles();
+  }, [resolvedGroupIds]);
 
   function safeObjectName(originalName: string): string {
     // Supabase Storage rejects some characters in object keys (e.g. diacritics, some punctuation).
@@ -62,10 +104,18 @@ export default function SessionFiles({ sessionId, role }: SessionFilesProps) {
     setUploading(true);
     setError(null);
     const safeName = safeObjectName(file.name);
-    const { error } = await supabase.storage
-      .from('session-files')
-      .upload(`${sessionId}/${safeName}`, file, { upsert: true });
-    if (error) setError(error.message);
+    const allIds = resolvedGroupIds.length > 0 ? resolvedGroupIds : [sessionId];
+    const buf = await file.arrayBuffer();
+    const errors: string[] = [];
+    await Promise.all(
+      allIds.map(async (id) => {
+        const { error } = await supabase.storage
+          .from('session-files')
+          .upload(`${id}/${safeName}`, buf, { upsert: true, contentType: file.type });
+        if (error) errors.push(error.message);
+      }),
+    );
+    if (errors.length > 0) setError(errors[0]);
     else await fetchFiles();
     setUploading(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -85,9 +135,9 @@ export default function SessionFiles({ sessionId, role }: SessionFilesProps) {
   }
 
   async function handleDelete(fileName: string) {
-    const { error } = await supabase.storage
-      .from('session-files')
-      .remove([`${sessionId}/${fileName}`]);
+    const allIds = resolvedGroupIds.length > 0 ? resolvedGroupIds : [sessionId];
+    const paths = allIds.map((id) => `${id}/${fileName}`);
+    const { error } = await supabase.storage.from('session-files').remove(paths);
     if (error) setError(error.message);
     else await fetchFiles();
   }

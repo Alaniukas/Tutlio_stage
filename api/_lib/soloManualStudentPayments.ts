@@ -1,4 +1,4 @@
-/** Mirrors src/lib/subscription.ts solo tutor manual-payment flag (solo = no owning organization row on profile). */
+/** Mirrors src/lib/subscription.ts tutor manual-payment flag — works for both solo and org tutors. */
 
 export type TutorManualPaymentProfile = {
   organization_id?: string | null;
@@ -8,13 +8,22 @@ export type TutorManualPaymentProfile = {
   manual_payment_bank_details?: string | null;
 };
 
-export function soloTutorUsesManualStudentPayments(p: TutorManualPaymentProfile | null | undefined): boolean {
-  if (!p || p.organization_id) return false;
+/** Tutor uses manual (non-Stripe) student payments — works for both solo and org tutors. */
+export function tutorUsesManualStudentPayments(p: TutorManualPaymentProfile | null | undefined): boolean {
+  if (!p) return false;
+  if (p.organization_id) {
+    return p.enable_manual_student_payments === true;
+  }
   return (
     p.subscription_plan === 'subscription_only' ||
     p.manual_subscription_exempt === true ||
     p.enable_manual_student_payments === true
   );
+}
+
+/** @deprecated Use tutorUsesManualStudentPayments instead */
+export function soloTutorUsesManualStudentPayments(p: TutorManualPaymentProfile | null | undefined): boolean {
+  return tutorUsesManualStudentPayments(p);
 }
 
 export function trimManualPaymentBankDetails(raw: unknown): string {

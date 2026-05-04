@@ -9,7 +9,7 @@ import { authHeaders } from '@/lib/apiHelpers';
 import { Checkbox } from '@/components/ui/checkbox';
 import { CircleHelp, Loader2, Package } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
-import { soloTutorUsesManualStudentPayments } from '@/lib/subscription';
+import { tutorUsesManualStudentPayments } from '@/lib/subscription';
 
 interface SendPackageModalProps {
   isOpen: boolean;
@@ -112,9 +112,8 @@ export default function SendPackageModal({
         .single();
       const individual = !profile?.organization_id;
       setIsIndividualTutor(individual);
-      const manualOnly = soloTutorUsesManualStudentPayments(profile);
+      const manualOnly = tutorUsesManualStudentPayments(profile);
       setIsManualOnlyPlan(manualOnly);
-      if (!individual) setIsManual(false);
       if (manualOnly) setIsManual(true);
     }
 
@@ -269,7 +268,7 @@ export default function SendPackageModal({
                 </p>
               </div>
 
-              {isIndividualTutor && (
+              {(isIndividualTutor || isManualOnlyPlan) && (
                 <div>
                   <Label className="text-sm font-semibold text-gray-700">{t('package.paymentMethod')}</Label>
                   <div className="flex mt-1 rounded-lg border border-gray-200 overflow-hidden">

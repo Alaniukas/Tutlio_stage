@@ -14,7 +14,7 @@ import { createClient } from '@supabase/supabase-js';
 import { resolvePerLessonPaymentRules } from './_lib/perLessonPaymentRules.js';
 import { isOrgTutor } from './_lib/isOrgTutor.js';
 import {
-    soloTutorUsesManualStudentPayments,
+    tutorUsesManualStudentPayments,
     trimManualPaymentBankDetails,
 } from './_lib/soloManualStudentPayments.js';
 
@@ -260,7 +260,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         const deadlineHoursForEmail = Math.max(1, Math.round(minutesToDeadline / 60)) || 1;
                         const bankDetails = trimManualPaymentBankDetails(tutor.manual_payment_bank_details);
 
-                        if (!isOrgTutor(tutor.organization_id) && soloTutorUsesManualStudentPayments(tutor)) {
+                        if (tutorUsesManualStudentPayments(tutor)) {
                             await sendWarningEmail({
                                 type: 'payment_reminder',
                                 to: rawPayerEmail,

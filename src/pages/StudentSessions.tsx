@@ -22,7 +22,7 @@ import { formatLessonStripeChargeEur } from '@/lib/stripeLessonPricing';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
 import { useUser } from '@/contexts/UserContext';
 import { fetchStudentActiveLessonPackagesDeduped, fetchSubjectNamesByIds } from '@/lib/studentLessonPackagesLight';
-import { soloTutorUsesManualStudentPayments } from '@/lib/subscription';
+import { tutorUsesManualStudentPayments } from '@/lib/subscription';
 
 interface Session {
     id: string;
@@ -630,7 +630,7 @@ export default function StudentSessions() {
               }
             | null
             | undefined;
-        setManualPaymentsOnly(soloTutorUsesManualStudentPayments(tutorSub));
+        setManualPaymentsOnly(tutorUsesManualStudentPayments(tutorSub));
 
         if (sessionsRes.error) {
             console.warn('[StudentSessions] sessions load:', sessionsRes.error.code, sessionsRes.error.message);

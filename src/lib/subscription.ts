@@ -25,22 +25,33 @@ export function tutorHasPlatformSubscriptionAccess(profile: {
   );
 }
 
-/** Fields needed to decide solo tutor student-facing manual (non-Stripe) lesson/package flows. */
-export type SoloManualStudentPaymentProfileFields = {
+/** Fields needed to decide tutor student-facing manual (non-Stripe) lesson/package flows. */
+export type ManualStudentPaymentProfileFields = {
   organization_id?: string | null;
   subscription_plan?: string | null;
   manual_subscription_exempt?: boolean | null;
   enable_manual_student_payments?: boolean | null;
 };
 
-/** Solo tutor: rankiniai studentų mokėjimai (subscription_only, admin exempt, arba /admin įjungta vėliava). */
-export function soloTutorUsesManualStudentPayments(profile: SoloManualStudentPaymentProfileFields | null | undefined): boolean {
-  if (!profile || profile.organization_id) return false;
+/** @deprecated Use tutorUsesManualStudentPayments instead */
+export type SoloManualStudentPaymentProfileFields = ManualStudentPaymentProfileFields;
+
+/** Tutor uses manual (non-Stripe) student payments — works for both solo and org tutors. */
+export function tutorUsesManualStudentPayments(profile: ManualStudentPaymentProfileFields | null | undefined): boolean {
+  if (!profile) return false;
+  if (profile.organization_id) {
+    return profile.enable_manual_student_payments === true;
+  }
   return (
     profile.subscription_plan === 'subscription_only' ||
     profile.manual_subscription_exempt === true ||
     profile.enable_manual_student_payments === true
   );
+}
+
+/** @deprecated Use tutorUsesManualStudentPayments instead */
+export function soloTutorUsesManualStudentPayments(profile: ManualStudentPaymentProfileFields | null | undefined): boolean {
+  return tutorUsesManualStudentPayments(profile);
 }
 
 /** Bank / off-platform payment text from Finance (trimmed). */

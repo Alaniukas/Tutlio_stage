@@ -9,7 +9,7 @@ import { verifyRequestAuth } from './_lib/auth.js';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
 import { generateInvoicePdf, type InvoicePdfData } from './_lib/invoicePdf.js';
 import {
-    soloTutorUsesManualStudentPayments,
+    tutorUsesManualStudentPayments,
     trimManualPaymentBankDetails,
 } from './_lib/soloManualStudentPayments.js';
 
@@ -133,14 +133,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return res.status(400).json({ error: 'No sessions found with payer email' });
         }
 
-        // 4. Determine Stripe account (organization always Stripe; solo may settle off-platform via manual-payment mode)
+        // 4. Determine Stripe account or manual payment mode
         let stripeAccountId: string | null = null;
         let ownerName = tutor.full_name || 'Korepetitorius';
         let useSchoolOrgAbsorbedFees = false;
-        let soloUsesManualStudentPayments = false;
+        const usesManualStudentPayments = tutorUsesManualStudentPayments(tutor);
         let tutorManualBankDetails = '';
 
-        if (tutor.organization_id) {
+        if (usesManualStudentPayments) {
+            tutorManualBankDetails = trimManualPaymentBankDetails(tutor.manual_payment_bank_details);
+            if (tutor.organization_id) {
+                const { data: org } = await supabase
+                    .from('organizations')
+                    .select('name')
+                    .eq('id', tutor.organization_id)
+                    .single();
+                if (org?.name) ownerName = org.name;
+            }
+        } else if (tutor.organization_id) {
             const { data: org } = await supabase
                 .from('organizations')
                 .select('stripe_account_id, stripe_onboarding_complete, name, entity_type')
@@ -154,17 +164,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ownerName = org.name || ownerName;
             useSchoolOrgAbsorbedFees = (org as { entity_type?: string }).entity_type === 'school';
         } else {
-            soloUsesManualStudentPayments = soloTutorUsesManualStudentPayments(tutor);
-            tutorManualBankDetails = trimManualPaymentBankDetails(tutor.manual_payment_bank_details);
-            if (!soloUsesManualStudentPayments) {
-                if (!(tutor as { stripe_onboarding_complete?: boolean }).stripe_onboarding_complete) {
-                    return res.status(400).json({ error: 'Tutor Stripe account is not connected' });
-                }
-                stripeAccountId = (tutor as { stripe_account_id?: string }).stripe_account_id || null;
+            if (!(tutor as { stripe_onboarding_complete?: boolean }).stripe_onboarding_complete) {
+                return res.status(400).json({ error: 'Tutor Stripe account is not connected' });
             }
+            stripeAccountId = (tutor as { stripe_account_id?: string }).stripe_account_id || null;
         }
 
-        if (!stripeAccountId && !soloUsesManualStudentPayments) {
+        if (!stripeAccountId && !usesManualStudentPayments) {
             return res.status(400).json({ error: 'Stripe paskyra nerasta' });
         }
 
@@ -237,7 +243,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             let checkoutSession: Stripe.Checkout.Session | undefined;
             let payerCheckoutTotalEur = totalLessonPrice;
             try {
-                if (soloUsesManualStudentPayments) {
+                if (usesManualStudentPayments) {
                     checkoutSession = undefined;
                     payerCheckoutTotalEur = totalLessonPrice;
                 } else if (useSchoolOrgAbsorbedFees) {
@@ -385,10 +391,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             });
 
             // Send invoice email with optional S.F. PDF attachment
-            const monthlyEmailOk = soloUsesManualStudentPayments ? true : Boolean(checkoutSession?.url);
+            const monthlyEmailOk = usesManualStudentPayments ? true : Boolean(checkoutSession?.url);
             if (monthlyEmailOk) {
                 try {
-                    const emailData = soloUsesManualStudentPayments
+                    const emailData = usesManualStudentPayments
                         ? {
                               recipientName: payerName,
                               studentName: student.full_name,

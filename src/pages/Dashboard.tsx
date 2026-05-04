@@ -7,7 +7,7 @@ import { supabase } from '@/lib/supabase';
 import { getCached, setCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
 import { useUser } from '@/contexts/UserContext';
-import { soloTutorUsesManualStudentPayments } from '@/lib/subscription';
+import { tutorUsesManualStudentPayments } from '@/lib/subscription';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { sendEmail } from '@/lib/email';
 import { format, isAfter, isBefore, addDays, subDays, parseISO, startOfDay } from 'date-fns';
@@ -294,7 +294,7 @@ export default function DashboardPage() {
             };
         }
         setTutorName((profileData as { full_name?: string | null }).full_name || user.email?.split('@')[0] || 'Korepetitorius');
-        const isManualOnlyPlan = soloTutorUsesManualStudentPayments(profileData as Parameters<typeof soloTutorUsesManualStudentPayments>[0]);
+        const isManualOnlyPlan = tutorUsesManualStudentPayments(profileData as Parameters<typeof tutorUsesManualStudentPayments>[0]);
         setIsStripeConnected(!!(profileData as { stripe_account_id?: string | null }).stripe_account_id || isManualOnlyPlan);
         setPaymentTiming((profileData?.payment_timing as 'before_lesson' | 'after_lesson') || 'before_lesson');
         setPaymentDeadlineHours(profileData?.payment_deadline_hours ?? null);

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
+import { getPasswordResetRedirectTo } from '@/lib/auth-redirects';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AlertCircle, ArrowLeft, Building2 } from 'lucide-react';
@@ -14,6 +15,8 @@ export default function CompanyLogin() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   /** Tik `/school` (ne `/schools` landing). */
@@ -79,6 +82,25 @@ export default function CompanyLogin() {
     navigate(path);
   };
 
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim()) {
+      setError(t('login.enterEmail'));
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: getPasswordResetRedirectTo(import.meta.env.VITE_APP_URL, window.location.origin),
+    });
+    if (error) {
+      setError(t('login.resetError') + error.message);
+    } else {
+      setResetSent(true);
+    }
+    setLoading(false);
+  };
+
   return (
     <div className="min-h-screen flex">
       <div className="hidden lg:flex w-1/2 bg-gradient-to-br from-slate-900 to-indigo-950 flex-col justify-between p-12 text-white">
@@ -122,34 +144,92 @@ export default function CompanyLogin() {
               <h2 className="text-white text-xl font-bold mt-0.5">{cardTitle}</h2>
             </div>
 
-            <form onSubmit={handleLogin} className="p-6 space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email" className="text-sm font-medium text-gray-700">{t('common.email')}</Label>
-                <Input id="email" type="email" placeholder={t('companyLogin.emailPlaceholder')} value={email} onChange={(e) => setEmail(e.target.value)} required className="rounded-xl border-gray-200" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password" className="text-sm font-medium text-gray-700">{t('common.password')}</Label>
-                <Input id="password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required className="rounded-xl border-gray-200" />
-              </div>
+            <div className="p-6">
+              {isForgotPassword ? (
+                <form onSubmit={handleForgotPassword} className="space-y-4">
+                  <p className="text-sm text-gray-500 font-medium mb-4">
+                    {t('login.forgotPasswordDesc')}
+                  </p>
+                  <div className="space-y-2">
+                    <Label htmlFor="email" className="text-sm font-medium text-gray-700">{t('common.email')}</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      placeholder={t('companyLogin.emailPlaceholder')}
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                      className="rounded-xl border-gray-200"
+                    />
+                  </div>
+                  {error && (
+                    <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 rounded-xl px-3 py-2">
+                      <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                      {error}
+                    </div>
+                  )}
+                  {resetSent && (
+                    <div className="text-sm text-green-700 bg-green-50 rounded-xl px-4 py-3 font-medium border border-green-200">
+                      {t('login.resetLinkSent', { email })}
+                    </div>
+                  )}
+                  {!resetSent && (
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="w-full py-2.5 rounded-xl bg-slate-800 text-white font-semibold hover:bg-slate-900 disabled:opacity-50 transition-colors"
+                    >
+                      {loading ? t('common.sending') : t('login.sendResetLink')}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => { setIsForgotPassword(false); setResetSent(false); setError(null); }}
+                    className="w-full text-sm text-gray-500 hover:text-slate-700 transition-colors mt-2"
+                  >
+                    {t('login.backToLogin')}
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={handleLogin} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="email" className="text-sm font-medium text-gray-700">{t('common.email')}</Label>
+                    <Input id="email" type="email" placeholder={t('companyLogin.emailPlaceholder')} value={email} onChange={(e) => setEmail(e.target.value)} required className="rounded-xl border-gray-200" />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="password" className="text-sm font-medium text-gray-700">{t('common.password')}</Label>
+                      <button
+                        type="button"
+                        onClick={() => { setIsForgotPassword(true); setError(null); }}
+                        className="text-sm text-indigo-600 hover:underline font-medium"
+                      >
+                        {t('login.forgotPassword')}
+                      </button>
+                    </div>
+                    <Input id="password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required className="rounded-xl border-gray-200" />
+                  </div>
 
-              {error && (
-                <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 rounded-xl px-3 py-2">
-                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                  {error}
-                </div>
+                  {error && (
+                    <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 rounded-xl px-3 py-2">
+                      <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                      {error}
+                    </div>
+                  )}
+
+                  <button type="submit" disabled={loading} className="w-full py-2.5 rounded-xl bg-slate-800 text-white font-semibold hover:bg-slate-900 disabled:opacity-50 transition-colors">
+                    {loading ? t('common.connecting') : t('common.login')}
+                  </button>
+                </form>
               )}
 
-              <button type="submit" disabled={loading} className="w-full py-2.5 rounded-xl bg-slate-800 text-white font-semibold hover:bg-slate-900 disabled:opacity-50 transition-colors">
-                {loading ? t('common.connecting') : t('common.login')}
-              </button>
-
-              <div className="pt-2 border-t border-gray-100">
+              <div className="pt-4 mt-4 border-t border-gray-100">
                 <button type="button" onClick={handleGoToMainLogin} className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-700 transition-colors">
                   <ArrowLeft className="w-3.5 h-3.5" />
                   {t('auth.backToTutorStudentLogin')}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       </div>

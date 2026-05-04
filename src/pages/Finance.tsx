@@ -15,7 +15,7 @@ import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import OrgTutorFinanceSummary from '@/components/OrgTutorFinanceSummary';
 import TutorFinanceReport from '@/components/TutorFinanceReport';
 import { useTranslation } from '@/lib/i18n';
-import { soloTutorUsesManualStudentPayments } from '@/lib/subscription';
+import { tutorUsesManualStudentPayments } from '@/lib/subscription';
 
 interface FinanceProfile {
   stripe_account_id: string | null;
@@ -140,7 +140,7 @@ export default function FinancePage() {
     const { data: tutorData } = await tutorFinancePageProfileDeduped(user.id);
 
     setIsSoloTutor(!tutorData?.organization_id);
-    setSoloManualStudentPayments(soloTutorUsesManualStudentPayments(tutorData));
+    setSoloManualStudentPayments(tutorUsesManualStudentPayments(tutorData));
 
     setManualPaymentBankDetails(typeof tutorData?.manual_payment_bank_details === 'string' ? tutorData.manual_payment_bank_details : '');
 
@@ -223,7 +223,7 @@ export default function FinancePage() {
       ? 'xl:col-span-8'
       : 'xl:col-span-12';
 
-  if (isOrgTutorEffective) {
+  if (isOrgTutorEffective && !soloManualStudentPayments) {
     return (
       <Layout>
         <div className="max-w-4xl mx-auto space-y-6 animate-fade-in px-4">

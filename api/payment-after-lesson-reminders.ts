@@ -7,7 +7,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { resolvePerLessonPaymentRules } from './_lib/perLessonPaymentRules.js';
 import {
-    soloTutorUsesManualStudentPayments,
+    tutorUsesManualStudentPayments,
     trimManualPaymentBankDetails,
 } from './_lib/soloManualStudentPayments.js';
 import { isOrgTutor } from './_lib/isOrgTutor.js';
@@ -125,8 +125,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 continue;
             }
 
-            const tutorManual =
-                !isOrgTutor(tutor?.organization_id) && soloTutorUsesManualStudentPayments(tutor);
+            const tutorManual = tutorUsesManualStudentPayments(tutor);
             let paymentLink: string | null = null;
             if (tutorManual) {
                 paymentLink =

@@ -10,16 +10,24 @@ import { stripPlatformPrefix } from '@/lib/platform';
 
 const LOCALE_STORAGE_KEY = 'tutlio_locale';
 
+function getDomainStorageKey(): string {
+  if (typeof window === 'undefined') return LOCALE_STORAGE_KEY;
+  const host = window.location.hostname;
+  if (host === 'tutlio.com' || host.endsWith('.tutlio.com')) return `${LOCALE_STORAGE_KEY}_com`;
+  if (host === 'tutlio.lt' || host.endsWith('.tutlio.lt')) return `${LOCALE_STORAGE_KEY}_lt`;
+  return LOCALE_STORAGE_KEY;
+}
+
 export function getStoredLocale(): Locale | null {
   if (typeof window === 'undefined') return null;
-  const stored = localStorage.getItem(LOCALE_STORAGE_KEY);
+  const stored = localStorage.getItem(getDomainStorageKey());
   if (stored && isValidLocale(stored)) return stored;
   return null;
 }
 
 export function storeLocale(locale: Locale): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+  localStorage.setItem(getDomainStorageKey(), locale);
 }
 
 export function detectLocale(): Locale {

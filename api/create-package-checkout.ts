@@ -6,7 +6,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
-import { soloTutorUsesManualStudentPayments } from './_lib/soloManualStudentPayments.js';
+import { tutorUsesManualStudentPayments } from './_lib/soloManualStudentPayments.js';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
 
 // Stripe/platform fee helpers (inlined to avoid _lib import issues on Vercel)
@@ -124,7 +124,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return json(res, 404, { error: 'Korepetitorius nerastas', details: tutorErr?.message });
         }
 
-        if (!tutor.organization_id && soloTutorUsesManualStudentPayments(tutor)) {
+        if (tutorUsesManualStudentPayments(tutor)) {
             return json(res, 400, {
                 error:
                     'This tutor uses manual (off-platform) student payments only. Send a manual package instead of Stripe checkout.',

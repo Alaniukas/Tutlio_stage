@@ -26,7 +26,7 @@ import { enUS } from 'date-fns/locale';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 
 import Layout from '@/components/Layout';
-import { soloTutorUsesManualStudentPayments } from '@/lib/subscription';
+import { tutorUsesManualStudentPayments } from '@/lib/subscription';
 import { useTranslation } from '@/lib/i18n';
 import { supabase } from '@/lib/supabase';
 import { useUser } from '@/contexts/UserContext';
@@ -483,7 +483,7 @@ export default function CalendarPage() {
     }
 
     setIsOrgTutor(!!profileData?.organization_id);
-    const isManualOnlyPlan = soloTutorUsesManualStudentPayments(profileData);
+    const isManualOnlyPlan = tutorUsesManualStudentPayments(profileData);
     setStripeConnected(!!profileData?.stripe_account_id || isManualOnlyPlan);
     setGoogleCalendarConnected(!!profileData?.google_calendar_connected);
     setTutorMeetingLink((profileData as any)?.personal_meeting_link || '');
@@ -4458,7 +4458,11 @@ export default function CalendarPage() {
                 </a>
               )}
               {selectedEvent && (
-                <SessionFiles sessionId={selectedEvent.id} role="tutor" />
+                <SessionFiles
+                  sessionId={selectedEvent.id}
+                  role="tutor"
+                  groupSessionIds={isGroupSession && selectedGroupSessions.length > 0 ? selectedGroupSessions.map((s) => s.id) : undefined}
+                />
               )}
             </div>
           )}

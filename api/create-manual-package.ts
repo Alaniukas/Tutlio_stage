@@ -5,7 +5,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import { soloTutorUsesManualStudentPayments } from './_lib/soloManualStudentPayments.js';
+import { tutorUsesManualStudentPayments } from './_lib/soloManualStudentPayments.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -103,11 +103,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return json(res, 404, { error: 'Korepetitorius nerastas', details: tutorErr?.message });
         }
 
-        if (tutor.organization_id) {
-            return json(res, 403, { error: 'Manual payments are only available for individual tutors' });
-        }
-
-        if (!soloTutorUsesManualStudentPayments(tutor)) {
+        if (!tutorUsesManualStudentPayments(tutor)) {
             return json(res, 403, {
                 error: 'Manual student payments are not enabled for this tutor.',
                 details: 'Enable subscription_only, manual exemption, or platform admin manual-student flag.',

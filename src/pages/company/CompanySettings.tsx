@@ -125,6 +125,7 @@ export default function CompanySettings() {
   );
   const [trialCommentRequired, setTrialCommentRequired] = useState(sc?.trialCommentRequired ?? false);
   const [notifyTutorsOnAssign, setNotifyTutorsOnAssign] = useState(sc?.notifyTutorsOnAssign ?? false);
+  const [enableManualStudentPayments, setEnableManualStudentPayments] = useState(sc?.enableManualStudentPayments ?? false);
 
   useEffect(() => { if (!getCached('company_settings')) fetchSettings(); }, []);
 
@@ -188,6 +189,7 @@ export default function CompanySettings() {
       if (fcm === 'student_and_parent' || fcm === 'internal_only') nextTrialCommentMode = fcm;
       const fcr = featObj['trial_comment_required'];
       nextTrialCommentRequired = fcr === true;
+      setEnableManualStudentPayments(featObj['enable_manual_student_payments'] === true);
       nextSettings = {
         cancellation_hours: orgData.default_cancellation_hours || 24,
         cancellation_fee_percent: orgData.default_cancellation_fee_percent || 50,
@@ -548,6 +550,7 @@ export default function CompanySettings() {
       trial_lesson_comment_mode: trialCommentMode,
       trial_comment_required: trialCommentRequired,
       notify_tutors_on_student_assign: notifyTutorsOnAssign,
+      enable_manual_student_payments: enableManualStudentPayments,
     };
 
     const { error } = await supabase
@@ -594,6 +597,7 @@ export default function CompanySettings() {
           break_between_lessons: settings.break_between_lessons,
           min_booking_hours: settings.min_booking_hours,
           company_commission_percent: settings.company_commission_percent,
+          enable_manual_student_payments: enableManualStudentPayments,
         })
         .in('id', tutorIds);
 
@@ -637,6 +641,7 @@ export default function CompanySettings() {
       trialCommentMode,
       trialCommentRequired,
       notifyTutorsOnAssign,
+      enableManualStudentPayments,
       orgTutors,
       subjects,
     });
@@ -1064,6 +1069,33 @@ export default function CompanySettings() {
                     <span>{t('compSet.scopeReminders')}</span>
                   </label>
                 </div>
+              </div>
+
+              <div className="p-4 bg-sky-50 border border-sky-100 rounded-xl mb-6 space-y-3">
+                <div>
+                  <Label className="text-sm font-semibold text-gray-900">
+                    {t('compSet.manualStudentPayments')}
+                  </Label>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {t('compSet.manualStudentPaymentsDesc')}
+                  </p>
+                </div>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={enableManualStudentPayments}
+                    onChange={(e) => setEnableManualStudentPayments(e.target.checked)}
+                    className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-sm text-gray-700">
+                    {t('compSet.enableManualStudentPayments')}
+                  </span>
+                </label>
+                {enableManualStudentPayments && (
+                  <p className="text-xs text-sky-800 bg-sky-100 border border-sky-200 rounded-lg px-3 py-2">
+                    {t('compSet.manualStudentPaymentsActive')}
+                  </p>
+                )}
               </div>
 
               <h2 className="text-lg font-semibold text-gray-900 mb-4">{t('compSet.tutorPay')}</h2>

@@ -24,7 +24,7 @@ import { ParentLessonDetailModal } from '@/components/parent/ParentLessonDetailM
 import { fetchStudentActiveLessonPackagesDeduped } from '@/lib/studentLessonPackagesLight';
 import { rpcGetStudentProfilesDeduped } from '@/lib/preload';
 import { useUser } from '@/contexts/UserContext';
-import { soloTutorUsesManualStudentPayments, trimManualPaymentBankDetails } from '@/lib/subscription';
+import { tutorUsesManualStudentPayments, trimManualPaymentBankDetails } from '@/lib/subscription';
 
 // BigCalendar Setup
 const locales = { lt: lt };
@@ -1225,7 +1225,7 @@ export default function StudentSchedule() {
                 ? new Date(selectedTime.getTime() - paymentDeadlineHours * 3600000)
                 : new Date(endDT.getTime() + paymentDeadlineHours * 3600000);
 
-            const bookingTutorManual = soloTutorUsesManualStudentPayments(tutorProfile ?? null);
+            const bookingTutorManual = tutorUsesManualStudentPayments(tutorProfile ?? null);
             setPendingPaymentSession({
                 id: sessionData.id,
                 start: selectedTime,
@@ -1349,7 +1349,7 @@ export default function StudentSchedule() {
                     }
 
                     if (!usesPackage) {
-                        const tutorSoloManual = soloTutorUsesManualStudentPayments(tutorProfile ?? null);
+                        const tutorSoloManual = tutorUsesManualStudentPayments(tutorProfile ?? null);
                         const tutorBankDetails = tutorSoloManual
                             ? trimManualPaymentBankDetails(
                                   (tutorProfile as { manual_payment_bank_details?: string | null })?.manual_payment_bank_details,

@@ -17,7 +17,7 @@ import { Trash2, Plus, Pencil, Check, X } from 'lucide-react';
 import TimeSpinner from '@/components/TimeSpinner';
 import Toast from '@/components/Toast';
 import { useTranslation } from '@/lib/i18n';
-import { soloTutorUsesManualStudentPayments } from '@/lib/subscription';
+import { tutorUsesManualStudentPayments } from '@/lib/subscription';
 
 interface AvailabilitySlot {
   id: string;
@@ -129,7 +129,7 @@ export default function AvailabilityManager() {
       )
       .eq('id', user.id)
       .single();
-    const manualOk = soloTutorUsesManualStudentPayments(profileData);
+    const manualOk = tutorUsesManualStudentPayments(profileData);
     setStripeConnected(!!profileData?.stripe_account_id || manualOk);
     setIsOrgTutor(!!profileData?.organization_id);
 
