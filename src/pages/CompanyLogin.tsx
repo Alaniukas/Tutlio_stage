@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { AlertCircle, ArrowLeft, Building2 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { buildPlatformPath } from '@/lib/platform';
+import { getOrgAdminDashboardPath } from '@/lib/orgAdminDashboardPath';
 
 export default function CompanyLogin() {
   const { t } = useTranslation();
@@ -15,8 +16,8 @@ export default function CompanyLogin() {
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const isSchoolLogin = location.pathname.startsWith('/school');
-  const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
+  /** Tik `/school` (ne `/schools` landing). */
+  const isSchoolLogin = location.pathname === '/school/login' || location.pathname.startsWith('/school/');
   const heroTitle = isSchoolLogin ? t('school.loginHeroTitle') : t('companyLogin.title');
   const heroSubtitle = isSchoolLogin ? t('school.loginHeroSubtitle') : t('companyLogin.subtitle');
   const portalBadge = isSchoolLogin ? t('school.loginPortalBadge') : t('companyLogin.adminLogin');
@@ -32,9 +33,12 @@ export default function CompanyLogin() {
         .select('id')
         .eq('user_id', session.user.id)
         .maybeSingle();
-      if (adminRow) navigate(orgBasePath, { replace: true });
+      if (adminRow) {
+        const path = await getOrgAdminDashboardPath(supabase, session.user.id);
+        navigate(path, { replace: true });
+      }
     })();
-  }, [navigate, orgBasePath]);
+  }, [navigate]);
 
   const handleGoToMainLogin = async () => {
     sessionStorage.setItem('tutlio_logout_intent', '1');
@@ -71,7 +75,8 @@ export default function CompanyLogin() {
       return;
     }
 
-    navigate(orgBasePath);
+    const path = await getOrgAdminDashboardPath(supabase, data.user.id);
+    navigate(path);
   };
 
   return (

@@ -1,7 +1,6 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
-import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 const STRIPE_API_VERSION = '2026-02-25.clover' as any;
@@ -23,6 +22,17 @@ function plusDays(date: Date, days: number): Date {
   const d = new Date(date);
   d.setDate(d.getDate() + days);
   return d;
+}
+
+/** Veidrodis `api/_lib/schoolInstallmentStripe.ts` — čia be importo, kad Vercel cron bundle nerodytų ERR_MODULE_NOT_FOUND. */
+function schoolInstallmentCheckoutCents(amountEur: number): { chargeCents: number; transferToSchoolCents: number } {
+  const tutlioFeeEur = amountEur * 0.01;
+  const stripeEstimateEur = amountEur * 0.015 + 0.25;
+  const schoolNetEur = amountEur - tutlioFeeEur - stripeEstimateEur;
+  return {
+    chargeCents: Math.round(amountEur * 100),
+    transferToSchoolCents: Math.max(0, Math.round(schoolNetEur * 100)),
+  };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

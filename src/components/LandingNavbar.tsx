@@ -50,6 +50,7 @@ export default function LandingNavbar() {
   }, [mobileOpen]);
 
   const isSchools = platform === 'schools' || platform === 'teachers';
+  const orgAdminLoginHref = isSchools ? '/school/login' : '/login';
   const brandName = isSchools ? 'Tutlio Schools' : 'Tutlio';
   const dropdownLabel = isSchools
     ? (locale === 'lt' ? 'Mokykloms' : 'Schools')
@@ -120,7 +121,7 @@ export default function LandingNavbar() {
             <div className="hidden md:block">
               <LanguageSelector />
             </div>
-            <Link to="/login" className="hidden md:block text-[13px] text-gray-500 hover:text-gray-900 transition-colors font-medium">
+            <Link to={orgAdminLoginHref} className="hidden md:block text-[13px] text-gray-500 hover:text-gray-900 transition-colors font-medium">
               {t('common.login')}
             </Link>
             <Link
@@ -203,7 +204,7 @@ export default function LandingNavbar() {
 
         <div className="px-5 py-5 border-t border-gray-100 space-y-3">
           <Link
-            to="/login"
+            to={orgAdminLoginHref}
             onClick={() => setMobileOpen(false)}
             className="block w-full text-center py-2.5 text-[14px] font-medium text-gray-700 rounded-full border border-gray-200 hover:bg-gray-50 transition-colors"
           >

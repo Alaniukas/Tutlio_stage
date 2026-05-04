@@ -33,7 +33,6 @@ export default function CompanyLayout() {
   const { t } = useTranslation();
   const chatUnreadTotal = useTotalChatUnread();
   const location = useLocation();
-  const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
   const ENTITY_KEY = 'tutlio_entity_type';
   const dashCache = getCached<any>('company_dashboard');
   const [orgName, setOrgName] = useState(dashCache?.orgName ?? '');
@@ -50,6 +49,8 @@ export default function CompanyLayout() {
   };
 
   const isSchool = entityType === 'school';
+  /** Pagal org tipą, ne `pathname.startsWith('/school')` — kitaip `/schools` (landing) klaidingai atitinka `/school`. */
+  const orgBasePath = isSchool ? '/school' : '/company';
   const BrandIcon = isSchool ? School : Building2;
   const brandLabel = isSchool ? t('layout.tutlioSchool') : t('layout.tutlioCompany');
 

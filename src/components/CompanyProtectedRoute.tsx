@@ -7,7 +7,10 @@ export default function CompanyProtectedRoute() {
   const location = useLocation();
   const { user: ctxUser, loading: ctxLoading } = useUser();
   const [status, setStatus] = useState<'loading' | 'admin' | 'none'>('loading');
-  const loginPath = location.pathname.startsWith('/school') ? '/school/login' : '/company/login';
+  const onSchoolPortal =
+    location.pathname === '/school' ||
+    location.pathname.startsWith('/school/');
+  const loginPath = onSchoolPortal ? '/school/login' : '/company/login';
 
   useEffect(() => {
     let cancelled = false;

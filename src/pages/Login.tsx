@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase, setRememberMe } from '@/lib/supabase';
 import { getPasswordResetRedirectTo } from '@/lib/auth-redirects';
 import { hasActiveSubscription, tutorHasPlatformSubscriptionAccess } from '@/lib/subscription';
+import { getOrgAdminDashboardPath } from '@/lib/orgAdminDashboardPath';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AlertCircle, ArrowLeft, ArrowRight, BookOpen, ChevronRight, Sparkles, Building2, Users } from 'lucide-react';
@@ -204,7 +205,11 @@ export default function Login() {
     if (orgAdminErr) {
       console.warn('[Login] redirectByRole organization_admins check failed:', orgAdminErr);
     }
-    if (orgAdmin) { navigate('/company'); return true; }
+    if (orgAdmin) {
+      const path = await getOrgAdminDashboardPath(supabase, user.id);
+      navigate(path);
+      return true;
+    }
 
     // Parent: use SECURITY DEFINER RPC to avoid RLS recursion on parent_profiles.
     const { data: parentProfileId, error: parentErr } = await supabase
@@ -378,7 +383,8 @@ export default function Login() {
       }
       if (orgAdminRow) {
         setLoading(false);
-        navigate('/company');
+        const path = await getOrgAdminDashboardPath(supabase, data.user.id);
+        navigate(path);
         return;
       }
 
@@ -683,7 +689,15 @@ export default function Login() {
               {/* Company admin — separate company login page */}
               <button
                 type="button"
-                onClick={() => navigate('/company/login')}
+                onClick={() => {
+                  let path = '/company/login';
+                  try {
+                    path = sessionStorage.getItem('tutlio_org_admin_login') || path;
+                  } catch {
+                    /* ignore */
+                  }
+                  navigate(path);
+                }}
                 className="group w-full bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 hover:border-emerald-400/40 rounded-2xl p-5 text-left transition-all duration-200 flex items-center gap-5"
               >
                 <div className="w-24 h-18 flex-shrink-0 flex items-center justify-center opacity-95">

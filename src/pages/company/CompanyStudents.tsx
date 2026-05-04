@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useLocation } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
@@ -44,6 +43,7 @@ import StudentPaymentModelSection from '@/components/StudentPaymentModelSection'
 import SendInvoiceModal from '@/components/SendInvoiceModal';
 import { pickStudentContactsForTutorEmail, shouldShowPayerContactSection } from '@/lib/orgContactVisibility';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
+import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 
 interface Student {
   id: string;
@@ -130,8 +130,9 @@ function joinStudentAddressLine(address?: string | null, city?: string | null): 
 }
 
 export default function CompanyStudents() {
-  const location = useLocation();
-  const isSchoolView = location.pathname.startsWith('/school');
+  /** Pagal DB `organizations.entity_type`, ne pagal URL — kitaip `/company/students` mokyklai slepiami tėvų laukai (sutartys). */
+  const orgEntityType = useOrgEntityType();
+  const isSchoolView = orgEntityType === 'school';
   const { t } = useTranslation();
   const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
   const stc = getCached<any>('company_students');

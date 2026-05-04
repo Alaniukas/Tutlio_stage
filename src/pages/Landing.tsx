@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import LandingNavbar from '@/components/LandingNavbar';
 import LandingFooter from '@/components/LandingFooter';
 import HeroSection from '@/components/landing/HeroSection';
@@ -10,8 +11,23 @@ import BlogSection from '@/components/landing/BlogSection';
 import { usePlatform } from '@/contexts/PlatformContext';
 import SchoolsLanding from '@/pages/SchoolsLanding';
 
+/** Pagrindinio `/login` vaidmens pasirinkimui: kur siųsti „įmonės / mokyklos“ administratorių. */
+const ORG_ADMIN_LOGIN_STORAGE_KEY = 'tutlio_org_admin_login';
+
 export default function Landing() {
   const { platform } = usePlatform();
+
+  useEffect(() => {
+    try {
+      if (platform === 'schools' || platform === 'teachers') {
+        sessionStorage.setItem(ORG_ADMIN_LOGIN_STORAGE_KEY, '/school/login');
+      } else {
+        sessionStorage.setItem(ORG_ADMIN_LOGIN_STORAGE_KEY, '/company/login');
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [platform]);
 
   if (platform === 'schools' || platform === 'teachers') {
     return <SchoolsLanding />;
