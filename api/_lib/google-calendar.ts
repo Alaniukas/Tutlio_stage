@@ -88,7 +88,8 @@ async function getValidAccessToken(profile: any): Promise<string | null> {
     const refreshed = await refreshAccessToken(profile.google_calendar_refresh_token);
     if (!refreshed.ok) {
       // If refresh token is revoked/expired, disconnect so we stop spamming 401s.
-      if (refreshed.invalidGrant && profile?.id) {
+      const invalidGrant = 'invalidGrant' in refreshed ? refreshed.invalidGrant : false;
+      if (invalidGrant && profile?.id) {
         await supabase
           .from('profiles')
           .update({
