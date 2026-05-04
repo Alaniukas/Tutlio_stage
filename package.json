@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=20 <25"
+  },
   "scripts": {
     "dev": "concurrently \"npm:dev:frontend\" \"npm:dev:api\" --names \"VITE,API\" --prefix-colors \"cyan,magenta\"",
     "dev:prod": "zsh -ac 'set -a; source .env.local; export SUPABASE_URL=\"$VITE_SUPABASE_URL\"; export VITE_SUPABASE_URL=\"$VITE_SUPABASE_URL\"; export VITE_SUPABASE_ANON_KEY=\"$VITE_SUPABASE_ANON_KEY\"; npm run dev'",

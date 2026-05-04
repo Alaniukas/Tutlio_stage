@@ -69,6 +69,8 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    // Vercelyje dideli chunk map failai (~10 MB+) lėtina build ir gali baigtis OOM.
+    sourcemap: !process.env.VERCEL,
+    reportCompressedSize: false,
   },
 });
