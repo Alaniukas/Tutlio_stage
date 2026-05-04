@@ -232,6 +232,26 @@ export default function AdminPanel() {
     if (step === 'panel' && panelView === 'list') void fetchOrgList();
   }, [step, panelView, fetchOrgList]);
 
+  // Auto-hydrate list stats (students/tutors/revenue/fees) without requiring any button click.
+  useEffect(() => {
+    if (step !== 'panel' || panelView !== 'list') return;
+    if (!platformAdminSecret) return;
+    if (listLoading) return;
+    if (orgList.length === 0) return;
+    if (overviewLoaded) return;
+    if (overviewLoading) return;
+    void loadOverviewStats();
+  }, [
+    step,
+    panelView,
+    platformAdminSecret,
+    listLoading,
+    orgList.length,
+    overviewLoaded,
+    overviewLoading,
+    loadOverviewStats,
+  ]);
+
   useEffect(() => {
     if (step === 'panel' && panelView === 'soloTutors') void fetchSoloTutors();
   }, [step, panelView, fetchSoloTutors]);
@@ -710,22 +730,16 @@ export default function AdminPanel() {
               <div className="p-8 text-center text-slate-400 text-sm">{t('admin.noCompanies')}</div>
             ) : (
               <>
-                <div className="flex items-center justify-between gap-3 p-4 border-b border-white/10">
+                <div className="p-4 border-b border-white/10">
                   <div className="text-sm text-slate-300">
-                    {overviewLoaded ? (
+                    {overviewLoading ? (
+                      <span className="text-slate-400">Skaičiuojama suvestinė…</span>
+                    ) : overviewLoaded ? (
                       <span className="text-emerald-300">Suvestinė įkelta</span>
                     ) : (
-                      <span className="text-slate-400">Suvestinė dar neįkelta (mokiniai/korep/pajamos)</span>
+                      <span className="text-slate-400">Ruošiama suvestinė…</span>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => void loadOverviewStats()}
-                    disabled={overviewLoading || listLoading || orgList.length === 0}
-                    className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
-                  >
-                    {overviewLoading ? 'Kraunama…' : (overviewLoaded ? 'Atnaujinti suvestinę' : 'Įkelti suvestinę')}
-                  </button>
                 </div>
                 {/* Mobile cards */}
                 <div className="md:hidden divide-y divide-white/10">
@@ -865,9 +879,9 @@ export default function AdminPanel() {
                   </span>
                 </div>
               </div>
-              {!overviewLoaded && (
+              {overviewLoading && (
                 <p className="text-[11px] text-slate-400 mt-3">
-                  Pastaba: kol nepaspaudėte „Įkelti suvestinę“, šie skaičiai bus 0.
+                  Kraunama… (šis skaičiavimas gali užtrukti kelias sekundes)
                 </p>
               )}
             </div>
