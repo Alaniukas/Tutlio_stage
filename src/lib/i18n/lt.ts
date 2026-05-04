@@ -2909,6 +2909,7 @@ export const lt: Record<string, string> = {
   'pricing.subscriptionOnlyDesc': 'Pilna prieiga su rankiniais mokėjimais. Jokio komisinio mokesčio.',
   'pricing.manualPayments': 'Tik rankiniai mokėjimai',
   'pricing.noCommission': 'Be platformos komisinio',
+  'pricing.studentFeeNote': 'Rodoma kaina yra be komisinio. Mokinys apmokėjimo metu sumoka papildomą komisinį: 3.5% + 0.25 €.',
   'pricing.createAccountFirst': 'Pirmiau susikurkite paskyrą – tada galėsite pasirinkti planą ir 7 d. nemokamai',
   'pricing.faq.cancelA': 'Taip! Galite atšaukti prenumeratą bet kada per savo nustatymus. Jei atšauksite, prenumerata galioja iki dabartinio laikotarpio pabaigos – neprarandate nieko.',
   'pricing.faq.cancelQ': 'Ar galiu atšaukti prenumeratą bet kada?',

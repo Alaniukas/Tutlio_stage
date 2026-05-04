@@ -16,7 +16,8 @@ import {
   CheckCircle2,
   ArrowLeft,
   Tag,
-  ShieldCheck
+  ShieldCheck,
+  CircleHelp
 } from 'lucide-react';
 import {
   Dialog,
@@ -293,7 +294,15 @@ export default function TutorSubscribe() {
               <h3 className="text-2xl font-bold text-gray-900 mb-2">{t('subscribe.monthlyTitle')}</h3>
               <div className="flex items-baseline gap-2">
                 <span className="text-5xl font-bold text-indigo-600">€19.99</span>
-                <span className="text-gray-500">{t('subscribe.perMonth')}</span>
+                <span className="text-gray-500 inline-flex items-center gap-1.5">
+                  {t('subscribe.perMonth')}
+                  <span className="relative inline-flex items-center group">
+                    <CircleHelp className="w-3.5 h-3.5 text-gray-400 cursor-help" />
+                    <span className="hidden group-hover:block pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-64 -translate-x-1/2 rounded-lg border border-gray-200 bg-white p-2.5 text-xs font-medium text-gray-700 opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                      {t('pricing.studentFeeNote')}
+                    </span>
+                  </span>
+                </span>
               </div>
             </div>
             <ul className="space-y-3">
@@ -332,7 +341,15 @@ export default function TutorSubscribe() {
               <h3 className="text-2xl font-bold text-gray-900 mb-2">{t('subscribe.yearlyTitle')}</h3>
               <div className="flex items-baseline gap-2">
                 <span className="text-5xl font-bold text-indigo-600">€14.99</span>
-                <span className="text-gray-500">{t('subscribe.perMonth')}</span>
+                <span className="text-gray-500 inline-flex items-center gap-1.5">
+                  {t('subscribe.perMonth')}
+                  <span className="relative inline-flex items-center group">
+                    <CircleHelp className="w-3.5 h-3.5 text-gray-400 cursor-help" />
+                    <span className="hidden group-hover:block pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-64 -translate-x-1/2 rounded-lg border border-gray-200 bg-white p-2.5 text-xs font-medium text-gray-700 opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                      {t('pricing.studentFeeNote')}
+                    </span>
+                  </span>
+                </span>
               </div>
               <p className="text-sm text-gray-500 mt-2">{t('subscribe.paidAnnually')}</p>
             </div>

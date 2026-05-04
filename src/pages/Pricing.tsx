@@ -15,6 +15,7 @@ import {
   Banknote,
   FileText,
   UserCheck,
+  CircleHelp,
 } from 'lucide-react';
 import { useTranslation, buildLocalizedPath } from '@/lib/i18n';
 import LandingNavbar from '@/components/LandingNavbar';
@@ -99,7 +100,15 @@ export default function Pricing() {
                   <span className="text-4xl font-bold text-white">
                     {isYearly ? '€14.99' : '€19.99'}
                   </span>
-                  <span className="text-indigo-200 text-sm">{t('common.perMonth')}</span>
+                  <span className="text-indigo-200 text-sm inline-flex items-center gap-1.5">
+                    {t('common.perMonth')}
+                    <span className="relative inline-flex items-center group">
+                      <CircleHelp className="w-3.5 h-3.5 text-white/70 cursor-help" />
+                      <span className="hidden group-hover:block pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-64 -translate-x-1/2 rounded-lg border border-white/15 bg-white p-2.5 text-xs font-medium text-gray-700 opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                        {t('pricing.studentFeeNote')}
+                      </span>
+                    </span>
+                  </span>
                 </div>
                 <p className="text-indigo-200 text-[13px] leading-relaxed">
                   {isYearly ? t('pricing.yearlyDesc') : t('pricing.monthlyDesc')}

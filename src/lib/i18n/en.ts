@@ -2909,6 +2909,7 @@ export const en: Record<string, string> = {
   'pricing.subscriptionOnlyDesc': 'Full platform access with manual payments. No commission on your users.',
   'pricing.manualPayments': 'Manual payments only',
   'pricing.noCommission': 'No platform commission',
+  'pricing.studentFeeNote': 'Price shown excludes the payment fee. Your student pays an additional fee at checkout: 3.5% + €0.25.',
   'pricing.createAccountFirst': 'First create an account — then you can choose a plan and try 7 days free',
   'pricing.faq.cancelA': 'Yes! You can cancel your subscription anytime through your settings. If you cancel, the subscription remains active until the end of the current period — you lose nothing.',
   'pricing.faq.cancelQ': 'Can I cancel my subscription anytime?',
