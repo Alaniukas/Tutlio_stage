@@ -28,7 +28,7 @@ export default function BlogPost() {
 
   useEffect(() => {
     if (title) document.title = `${title} | Tutlio`;
-    return () => { document.title = 'Tutlio - Korepetitoriams ir mokiniams valdyti laiką'; };
+    return () => { document.title = 'Tutlio - For tutors and students to manage their time'; };
   }, [title]);
 
   return (

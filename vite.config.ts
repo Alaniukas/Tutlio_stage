@@ -15,7 +15,7 @@ export default defineConfig({
       manifest: {
         name: 'Tutlio',
         short_name: 'Tutlio',
-        description: 'Korepetitoriams ir mokiniams valdyti laiką',
+        description: 'For tutors and students to manage their time.',
         theme_color: '#4f46e5',
         background_color: '#ffffff',
         display: 'standalone',
