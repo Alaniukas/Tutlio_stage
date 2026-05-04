@@ -2451,11 +2451,32 @@ export default function StudentsPage() {
                   size="sm"
                   onClick={() => {
                     if (!selectedSessionForModal?.start_time) return;
-                    const start = new Date(selectedSessionForModal.start_time);
-                    const end = new Date(selectedSessionForModal.end_time);
-                    const dur = Math.max(5, Math.round((end.getTime() - start.getTime()) / 60000));
+                    const rawStart = selectedSessionForModal.start_time as unknown;
+                    const rawEnd = selectedSessionForModal.end_time as unknown;
+
+                    const toDate = (v: unknown): Date | null => {
+                      if (!v) return null;
+                      if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v;
+                      const d = new Date(String(v));
+                      return Number.isNaN(d.getTime()) ? null : d;
+                    };
+
+                    const start = toDate(rawStart);
+                    const end = toDate(rawEnd);
+                    if (!start) {
+                      setToastMessage({ message: 'Nepavyko atidaryti redagavimo (neteisinga pamokos pradžios data).', type: 'error' });
+                      return;
+                    }
+
+                    const durMinutes = (() => {
+                      if (!end) return 60;
+                      const diff = Math.round((end.getTime() - start.getTime()) / 60000);
+                      return Number.isFinite(diff) && diff > 0 ? diff : 60;
+                    })();
+
+                    // DateTimeSpinner expects yyyy-MM-dd'T'HH:mm
                     setEditNewStartTime(format(start, "yyyy-MM-dd'T'HH:mm"));
-                    setEditDurationMinutes(dur);
+                    setEditDurationMinutes(Math.max(5, durMinutes));
                     setEditTopic(selectedSessionForModal.topic || '');
                     setEditMeetingLink(selectedSessionForModal.meeting_link || '');
                     setEditTutorComment(selectedSessionForModal.tutor_comment || '');
