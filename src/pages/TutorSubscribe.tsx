@@ -136,6 +136,11 @@ export default function TutorSubscribe() {
               ['canceled', 'past_due', 'unpaid'].includes(data?.subscription_status || '');
           } catch (_) {}
         }
+        // Keep manual bypass as a source of truth even if Stripe refresh says no active subscription.
+        if (!hasAccess) {
+          const freshProfile = await loadProfile(user.id);
+          hasAccess = tutorHasPlatformSubscriptionAccess(freshProfile);
+        }
       }
       if (hasAccess) navigate('/dashboard', { replace: true });
     };

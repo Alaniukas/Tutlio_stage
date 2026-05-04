@@ -32,8 +32,12 @@ interface GoogleEvent {
   colorId?: string;
 }
 
+type RefreshAccessTokenResult =
+  | { ok: true; accessToken: string; expiresInSec?: number }
+  | { ok: false; invalidGrant: boolean; errorText: string };
+
 // Refresh access token using refresh token
-export async function refreshAccessToken(refreshToken: string): Promise<string | null> {
+export async function refreshAccessToken(refreshToken: string): Promise<RefreshAccessTokenResult> {
   try {
     const response = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
@@ -47,17 +51,31 @@ export async function refreshAccessToken(refreshToken: string): Promise<string |
     });
 
     if (!response.ok) {
-      console.error('Token refresh failed:', await response.text());
-      return null;
+      const txt = await response.text().catch(() => '');
+      const invalidGrant =
+        txt.includes('invalid_grant') ||
+        (() => {
+          try {
+            const j = JSON.parse(txt);
+            return j?.error === 'invalid_grant';
+          } catch {
+            return false;
+          }
+        })();
+      console.error('Token refresh failed:', txt);
+      return { ok: false, invalidGrant, errorText: txt || `HTTP ${response.status}` };
     }
 
     const data = await response.json();
     const { access_token, expires_in } = data;
 
-    return access_token;
+    if (!access_token || typeof access_token !== 'string') {
+      return { ok: false, invalidGrant: false, errorText: 'Missing access_token in refresh response' };
+    }
+    return { ok: true, accessToken: access_token, expiresInSec: typeof expires_in === 'number' ? expires_in : undefined };
   } catch (err) {
     console.error('Error refreshing token:', err);
-    return null;
+    return { ok: false, invalidGrant: false, errorText: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -67,21 +85,36 @@ async function getValidAccessToken(profile: any): Promise<string | null> {
   const isExpired = profile.google_calendar_token_expiry && new Date(profile.google_calendar_token_expiry) <= new Date();
 
   if (isExpired && profile.google_calendar_refresh_token) {
-    const newToken = await refreshAccessToken(profile.google_calendar_refresh_token);
-    if (newToken) {
-      accessToken = newToken;
-      // Update token in database
-      const expiryDate = new Date();
-      expiryDate.setSeconds(expiryDate.getSeconds() + 3600); // 1 hour
-
-      await supabase
-        .from('profiles')
-        .update({
-          google_calendar_access_token: newToken,
-          google_calendar_token_expiry: expiryDate.toISOString(),
-        })
-        .eq('id', profile.id);
+    const refreshed = await refreshAccessToken(profile.google_calendar_refresh_token);
+    if (!refreshed.ok) {
+      // If refresh token is revoked/expired, disconnect so we stop spamming 401s.
+      if (refreshed.invalidGrant && profile?.id) {
+        await supabase
+          .from('profiles')
+          .update({
+            google_calendar_connected: false,
+            google_calendar_access_token: null,
+            google_calendar_refresh_token: null,
+            google_calendar_token_expiry: null,
+            google_calendar_sync_enabled: false,
+          })
+          .eq('id', profile.id);
+      }
+      return null;
     }
+
+    accessToken = refreshed.accessToken;
+    // Update token in database
+    const expiryDate = new Date();
+    expiryDate.setSeconds(expiryDate.getSeconds() + (refreshed.expiresInSec ?? 3600));
+
+    await supabase
+      .from('profiles')
+      .update({
+        google_calendar_access_token: accessToken,
+        google_calendar_token_expiry: expiryDate.toISOString(),
+      })
+      .eq('id', profile.id);
   }
 
   return accessToken;

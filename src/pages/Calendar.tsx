@@ -2682,46 +2682,60 @@ export default function CalendarPage() {
         if (futureError) {
           error = futureError;
         } else {
-          const shiftMs = newStart.getTime() - oldStart.getTime();
-
           const futureList = futureSessions || [];
-          const sameSlotPeerIdsBySessionId = buildSameSlotPeerIdMap(futureList);
-
-          for (const session of futureList) {
-            const rowOldStart = new Date(session.start_time);
-            const rowNewStart = new Date(rowOldStart.getTime() + shiftMs);
-            const rowNewEnd = new Date(rowNewStart.getTime() + durMs);
-
-            const { data: overlapping } = await supabase
-              .from('sessions')
-              .select('id, start_time, end_time')
-              .eq('tutor_id', user.id)
-              .neq('status', 'cancelled')
-              .neq('id', session.id)
-              .or(`start_time.lte.${rowNewEnd.toISOString()},end_time.gte.${rowNewStart.toISOString()}`);
-
-            const sameSlotPeers = sameSlotPeerIdsBySessionId.get(session.id) ?? new Set();
-            const hasRealOverlap = hasOverlapWithExclusions(
-              rowNewStart,
-              rowNewEnd,
-              overlapping ?? [],
-              sameSlotPeers,
-            );
-
-            if (hasRealOverlap) {
-              error = new Error(`Laiko konfliktas ${format(rowOldStart, 'yyyy-MM-dd')}`);
-              break;
+          // If user isn't changing time/duration (e.g. edits price/comment/link only),
+          // do not run overlap checks — they can falsely treat group peer rows as conflicts.
+          if (!timeChanged && !durationChanged) {
+            for (const session of futureList) {
+              const { error: rowError } = await supabase
+                .from('sessions')
+                .update({ ...editSessionPayload })
+                .eq('id', session.id);
+              if (rowError) {
+                error = rowError;
+                break;
+              }
             }
+          } else {
+            const shiftMs = newStart.getTime() - oldStart.getTime();
+            const sameSlotPeerIdsBySessionId = buildSameSlotPeerIdMap(futureList);
 
-            const { error: rowError } = await supabase.from('sessions').update({
-              start_time: rowNewStart.toISOString(),
-              end_time: rowNewEnd.toISOString(),
-              ...editSessionPayload,
-            }).eq('id', session.id);
+            for (const session of futureList) {
+              const rowOldStart = new Date(session.start_time);
+              const rowNewStart = new Date(rowOldStart.getTime() + shiftMs);
+              const rowNewEnd = new Date(rowNewStart.getTime() + durMs);
 
-            if (rowError) {
-              error = rowError;
-              break;
+              const { data: overlapping } = await supabase
+                .from('sessions')
+                .select('id, start_time, end_time')
+                .eq('tutor_id', user.id)
+                .neq('status', 'cancelled')
+                .neq('id', session.id)
+                .or(`start_time.lte.${rowNewEnd.toISOString()},end_time.gte.${rowNewStart.toISOString()}`);
+
+              const sameSlotPeers = sameSlotPeerIdsBySessionId.get(session.id) ?? new Set();
+              const hasRealOverlap = hasOverlapWithExclusions(
+                rowNewStart,
+                rowNewEnd,
+                overlapping ?? [],
+                sameSlotPeers,
+              );
+
+              if (hasRealOverlap) {
+                error = new Error(`Laiko konfliktas ${format(rowOldStart, 'yyyy-MM-dd')}`);
+                break;
+              }
+
+              const { error: rowError } = await supabase.from('sessions').update({
+                start_time: rowNewStart.toISOString(),
+                end_time: rowNewEnd.toISOString(),
+                ...editSessionPayload,
+              }).eq('id', session.id);
+
+              if (rowError) {
+                error = rowError;
+                break;
+              }
             }
           }
         }

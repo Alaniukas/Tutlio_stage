@@ -219,6 +219,9 @@ export default function StudentsPage() {
   const [checkingOrgStatus, setCheckingOrgStatus] = useState(true);
 
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+  const [isEditingStudentName, setIsEditingStudentName] = useState(false);
+  const [studentNameDraft, setStudentNameDraft] = useState('');
+  const [savingStudentName, setSavingStudentName] = useState(false);
   const [selectedStudentPackages, setSelectedStudentPackages] = useState<any[]>([]);
   const [studentSessions, setStudentSessions] = useState<any[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
@@ -298,6 +301,12 @@ export default function StudentsPage() {
     setBaseUrl(window.location.origin);
     checkIfOrgTutor();
   }, []);
+
+  useEffect(() => {
+    if (!selectedStudent) return;
+    setIsEditingStudentName(false);
+    setStudentNameDraft(selectedStudent.full_name || '');
+  }, [selectedStudent?.id]);
 
   // Refetch when tutor is available and when opening /students so cards are not stuck on stale tutor_students cache.
   useEffect(() => {
@@ -1814,7 +1823,77 @@ export default function StudentsPage() {
             <div className="space-y-5">
               <div className="flex flex-col gap-4 md:flex-row md:justify-between md:items-start pt-1 border-b border-gray-100 pb-5">
                 <div className="min-w-0 flex-1">
-                  <h3 className="text-xl font-bold">{selectedStudent.full_name}</h3>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      {isEditingStudentName ? (
+                        <div className="space-y-2">
+                          <Input
+                            value={studentNameDraft}
+                            onChange={(e) => setStudentNameDraft(e.target.value)}
+                            placeholder="Vardas Pavardė"
+                            className="rounded-xl"
+                          />
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setIsEditingStudentName(false);
+                                setStudentNameDraft(selectedStudent.full_name || '');
+                              }}
+                              disabled={savingStudentName}
+                            >
+                              Atšaukti
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={async () => {
+                                const nextName = studentNameDraft.trim();
+                                if (!nextName) {
+                                  setToastMessage({ message: 'Įveskite vardą ir pavardę', type: 'error' });
+                                  return;
+                                }
+                                setSavingStudentName(true);
+                                const { error } = await supabase
+                                  .from('students')
+                                  .update({ full_name: nextName })
+                                  .eq('id', selectedStudent.id);
+                                if (error) {
+                                  setToastMessage({ message: error.message || 'Nepavyko išsaugoti', type: 'error' });
+                                  setSavingStudentName(false);
+                                  return;
+                                }
+                                setSelectedStudent((s) => (s ? { ...s, full_name: nextName } : s));
+                                setStudents((prev) => prev.map((st) => (st.id === selectedStudent.id ? { ...st, full_name: nextName } : st)));
+                                setToastMessage({ message: 'Mokinio vardas atnaujintas', type: 'success' });
+                                setIsEditingStudentName(false);
+                                setSavingStudentName(false);
+                              }}
+                              disabled={savingStudentName || !studentNameDraft.trim()}
+                              className="bg-emerald-600 hover:bg-emerald-700"
+                            >
+                              {savingStudentName ? 'Saugoma…' : 'Išsaugoti'}
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <h3 className="text-xl font-bold break-words">{selectedStudent.full_name}</h3>
+                      )}
+                    </div>
+                    {!isEditingStudentName && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsEditingStudentName(true)}
+                        className="flex-shrink-0"
+                      >
+                        Redaguoti
+                      </Button>
+                    )}
+                  </div>
                   {selectedStudent.grade && (
                     <p className="text-indigo-600 text-sm font-semibold mt-1">📚 {selectedStudent.grade}</p>
                   )}

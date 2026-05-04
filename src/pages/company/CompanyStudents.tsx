@@ -215,6 +215,9 @@ export default function CompanyStudents() {
   const [studentEditOpen, setStudentEditOpen] = useState(false);
   const [studentEditSecondParentOpen, setStudentEditSecondParentOpen] = useState(false);
   const [savingStudentInfo, setSavingStudentInfo] = useState(false);
+  const [isEditingStudentName, setIsEditingStudentName] = useState(false);
+  const [studentNameDraft, setStudentNameDraft] = useState('');
+  const [savingStudentName, setSavingStudentName] = useState(false);
 
   // Trash bin state
   const [showTrashBin, setShowTrashBin] = useState(false);
@@ -513,6 +516,8 @@ export default function CompanyStudents() {
         (selectedStudent.parent_secondary_address || '').trim(),
       ),
     );
+    setIsEditingStudentName(false);
+    setStudentNameDraft(selectedStudent.full_name || '');
   }, [selectedStudent?.id]);
 
   useEffect(() => {
@@ -2033,7 +2038,77 @@ export default function CompanyStudents() {
                 {/* Info */}
                 <div className="flex justify-between items-start pb-4 border-b border-gray-100 gap-4">
                   <div className="space-y-1 flex-1">
-                    <h3 className="text-xl font-bold text-gray-900">{selectedStudent.full_name}</h3>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        {isEditingStudentName ? (
+                          <div className="space-y-2">
+                            <Input
+                              value={studentNameDraft}
+                              onChange={(e) => setStudentNameDraft(e.target.value)}
+                              placeholder={t('compStu.fullNameRequired')}
+                              className="rounded-xl bg-white"
+                            />
+                            <div className="flex gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setIsEditingStudentName(false);
+                                  setStudentNameDraft(selectedStudent.full_name || '');
+                                }}
+                                disabled={savingStudentName}
+                              >
+                                {t('common.cancel')}
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                onClick={async () => {
+                                  const nextName = studentNameDraft.trim();
+                                  if (!nextName) {
+                                    setToastMessage({ message: t('compStu.fullNameRequired'), type: 'error' });
+                                    return;
+                                  }
+                                  setSavingStudentName(true);
+                                  const { error } = await supabase
+                                    .from('students')
+                                    .update({ full_name: nextName })
+                                    .eq('id', selectedStudent.id);
+                                  if (error) {
+                                    setToastMessage({ message: error.message || t('common.error'), type: 'error' });
+                                    setSavingStudentName(false);
+                                    return;
+                                  }
+                                  setSelectedStudent((s) => (s ? { ...s, full_name: nextName } : s));
+                                  setStudents((prev) => prev.map((st) => (st.id === selectedStudent.id ? { ...st, full_name: nextName } : st)));
+                                  setToastMessage({ message: t('compStu.commentSaved'), type: 'success' });
+                                  setIsEditingStudentName(false);
+                                  setSavingStudentName(false);
+                                }}
+                                disabled={savingStudentName || !studentNameDraft.trim()}
+                                className="bg-emerald-600 hover:bg-emerald-700"
+                              >
+                                {savingStudentName ? t('common.saving') : t('common.save')}
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <h3 className="text-xl font-bold text-gray-900 break-words">{selectedStudent.full_name}</h3>
+                        )}
+                      </div>
+                      {!isEditingStudentName && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setIsEditingStudentName(true)}
+                          className="flex-shrink-0"
+                        >
+                          {t('common.edit')}
+                        </Button>
+                      )}
+                    </div>
                     <div className="text-gray-600 text-sm space-y-3">
                       <div>
                         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">{t('compStu.studentLabel')}</p>
