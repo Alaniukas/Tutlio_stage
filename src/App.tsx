@@ -1,5 +1,5 @@
-import { lazy, Suspense } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useParams } from 'react-router-dom';
+import { lazy, Suspense, useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useParams, useLocation } from 'react-router-dom';
 import { UserProvider } from '@/contexts/UserContext';
 import Login from '@/pages/Login';
 import AuthCallback from '@/pages/AuthCallback';
@@ -67,6 +67,22 @@ import ParentRegister from '@/pages/ParentRegister';
 import SchoolContractComplete from '@/pages/SchoolContractComplete';
 import SupabaseAuthHashErrors from '@/components/SupabaseAuthHashErrors';
 import ThemeColorManager from '@/hooks/useThemeColor';
+import { useTranslation, getLocaleFromPathname } from '@/lib/i18n';
+import { stripPlatformPrefix } from '@/lib/platform';
+
+/** Keep i18n locale aligned with `/:locale/...` URLs when users navigate or land from links. */
+function LocaleFromRouteSync() {
+  const location = useLocation();
+  const { locale, setLocale } = useTranslation();
+
+  useEffect(() => {
+    const stripped = stripPlatformPrefix(location.pathname);
+    const pathLocale = getLocaleFromPathname(stripped);
+    if (pathLocale && pathLocale !== locale) setLocale(pathLocale);
+  }, [location.pathname, locale, setLocale]);
+
+  return null;
+}
 
 function ProtectedWithUser() {
   return (
@@ -130,6 +146,7 @@ function CompanyContractsRoute() {
 export default function App({ basename }: { basename: string }) {
   return (
     <Router basename={basename || undefined}>
+      <LocaleFromRouteSync />
       <SupabaseAuthHashErrors />
       <ThemeColorManager />
       <Routes>

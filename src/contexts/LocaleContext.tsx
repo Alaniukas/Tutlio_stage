@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   I18nContext,
   detectLocale,
@@ -13,15 +13,17 @@ import { isValidLocale } from '@/lib/i18n/core';
 import { supabase } from '@/lib/supabase';
 import { usePlatform } from '@/contexts/PlatformContext';
 import { stripPlatformPrefix } from '@/lib/platform';
+import { applyDefaultDocumentMeta } from '@/lib/documentMeta';
 
 export function LocaleProvider({ children }: { children: ReactNode }) {
   const { platform } = usePlatform();
   const [locale, setLocaleState] = useState<Locale>(detectLocale);
   const dbSyncedRef = useRef(false);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     document.documentElement.lang = locale;
-  }, [locale]);
+    applyDefaultDocumentMeta(locale, platform);
+  }, [locale, platform]);
 
   useEffect(() => {
     let cancelled = false;

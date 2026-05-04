@@ -6,10 +6,13 @@ import LandingFooter from '@/components/LandingFooter';
 import { useTranslation } from '@/lib/i18n';
 import { resolveField, formatBlogDate } from '@/lib/blogLocale';
 import { markdownToHtml } from '@/lib/markdown';
+import { usePlatform } from '@/contexts/PlatformContext';
+import { applyDefaultDocumentMeta } from '@/lib/documentMeta';
 
 export default function BlogPost() {
   const { slug } = useParams<{ slug: string }>();
   const { t, locale } = useTranslation();
+  const { platform } = usePlatform();
   const [post, setPost] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -28,8 +31,8 @@ export default function BlogPost() {
 
   useEffect(() => {
     if (title) document.title = `${title} | Tutlio`;
-    return () => { document.title = 'Tutlio - For tutors and students to manage their time'; };
-  }, [title]);
+    return () => applyDefaultDocumentMeta(locale, platform);
+  }, [title, locale, platform]);
 
   return (
     <div className="min-h-screen bg-white flex flex-col font-sans">
