@@ -328,7 +328,7 @@ export default function StudentsPage() {
     setViewCommentText(selectedSessionForModal.tutor_comment ?? '');
     setViewShowToStudent(selectedSessionForModal.show_comment_to_student ?? false);
     setForceTrialCommentVisibility(false);
-    setIsEditingTime(false);
+    setIsEditingSession(false);
     setEditNewStartTime(selectedSessionForModal.start_time || '');
 
     (async () => {

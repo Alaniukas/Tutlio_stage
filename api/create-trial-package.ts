@@ -396,7 +396,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             subjectName: trialTopic,
             totalLessons: 1,
             pricePerLesson: trialPriceEur.toFixed(2),
-            totalPrice: totalWithFeesEur.toFixed(2),
+            totalPrice: payerChargedTotalEur.toFixed(2),
             paymentLink: checkoutSession.url,
           },
         }),
