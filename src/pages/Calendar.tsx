@@ -57,6 +57,7 @@ import { Input } from '@/components/ui/input';
 import { DateInput } from '@/components/ui/date-input';
 import { cn, normalizeUrl } from '@/lib/utils';
 import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
+import { buildSameSlotPeerIdMap, hasOverlapWithExclusions } from '@/lib/calendarSessionOverlap';
 import TimeSpinner, { DateTimeSpinner } from '@/components/TimeSpinner';
 import AvailabilityManager from '@/components/AvailabilityManager';
 import SessionFiles from '@/components/SessionFiles';
@@ -2623,6 +2624,12 @@ export default function CalendarPage() {
       const durationChanged =
         Math.round((oldEnd.getTime() - oldStart.getTime()) / 60000) !== Math.round(editDurationMinutes);
 
+      /** Same calendar slot = same wall-clock start/end (group lesson: one row per student). */
+      const groupPeerIdSet =
+        isGroupSession && selectedGroupSessions.length > 0
+          ? new Set(selectedGroupSessions.map((s) => s.id))
+          : null;
+
       if (timeChanged || durationChanged) {
         const { data: overlapping } = await supabase
           .from('sessions')
@@ -2632,13 +2639,12 @@ export default function CalendarPage() {
           .neq('id', selectedEvent.id)
           .or(`start_time.lte.${newEnd.toISOString()},end_time.gte.${newStart.toISOString()}`);
 
-        const hasRealOverlap = overlapping?.some(o => {
-          const os = new Date(o.start_time).getTime();
-          const oe = new Date(o.end_time).getTime();
-          const ns = newStart.getTime();
-          const ne = newEnd.getTime();
-          return (ns >= os && ns < oe) || (ne > os && ne <= oe) || (ns <= os && ne >= oe);
-        });
+        const hasRealOverlap = hasOverlapWithExclusions(
+          newStart,
+          newEnd,
+          overlapping ?? [],
+          groupPeerIdSet ?? new Set(),
+        );
 
         if (hasRealOverlap) {
           alert(t('cal.duplicateTime'));
@@ -2678,7 +2684,10 @@ export default function CalendarPage() {
         } else {
           const shiftMs = newStart.getTime() - oldStart.getTime();
 
-          for (const session of (futureSessions || [])) {
+          const futureList = futureSessions || [];
+          const sameSlotPeerIdsBySessionId = buildSameSlotPeerIdMap(futureList);
+
+          for (const session of futureList) {
             const rowOldStart = new Date(session.start_time);
             const rowNewStart = new Date(rowOldStart.getTime() + shiftMs);
             const rowNewEnd = new Date(rowNewStart.getTime() + durMs);
@@ -2691,13 +2700,13 @@ export default function CalendarPage() {
               .neq('id', session.id)
               .or(`start_time.lte.${rowNewEnd.toISOString()},end_time.gte.${rowNewStart.toISOString()}`);
 
-            const hasRealOverlap = overlapping?.some(o => {
-              const os = new Date(o.start_time).getTime();
-              const oe = new Date(o.end_time).getTime();
-              const ns = rowNewStart.getTime();
-              const ne = rowNewEnd.getTime();
-              return (ns >= os && ns < oe) || (ne > os && ne <= oe) || (ns <= os && ne >= oe);
-            });
+            const sameSlotPeers = sameSlotPeerIdsBySessionId.get(session.id) ?? new Set();
+            const hasRealOverlap = hasOverlapWithExclusions(
+              rowNewStart,
+              rowNewEnd,
+              overlapping ?? [],
+              sameSlotPeers,
+            );
 
             if (hasRealOverlap) {
               error = new Error(`Laiko konfliktas ${format(rowOldStart, 'yyyy-MM-dd')}`);
