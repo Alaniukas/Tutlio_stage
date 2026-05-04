@@ -252,9 +252,14 @@ export default function StudentsPage() {
   const [viewShowToStudent, setViewShowToStudent] = useState(false);
   const [viewCommentSaving, setViewCommentSaving] = useState(false);
   const [forceTrialCommentVisibility, setForceTrialCommentVisibility] = useState(false);
-  const [isEditingTime, setIsEditingTime] = useState(false);
+  const [isEditingSession, setIsEditingSession] = useState(false);
   const [editNewStartTime, setEditNewStartTime] = useState<string>('');
-  const [editSessionPrice, setEditSessionPrice] = useState<number | ''>('');
+  const [editDurationMinutes, setEditDurationMinutes] = useState<number>(60);
+  const [editTopic, setEditTopic] = useState('');
+  const [editMeetingLink, setEditMeetingLink] = useState('');
+  const [editTutorComment, setEditTutorComment] = useState('');
+  const [editShowCommentToStudent, setEditShowCommentToStudent] = useState(false);
+  const [editSessionPrice, setEditSessionPrice] = useState<number>(0);
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   // Individual pricing for student modal
@@ -986,34 +991,35 @@ export default function StudentsPage() {
     setSavingSession(false);
   };
 
-  const handleReschedule = async () => {
+  const handleSaveSessionEdits = async () => {
     if (!selectedSessionForModal || !editNewStartTime) return;
-    const oldStart = new Date(selectedSessionForModal.start_time);
-    const oldEnd = new Date(selectedSessionForModal.end_time);
     const newStart = new Date(editNewStartTime);
-    const durationMs = oldEnd.getTime() - oldStart.getTime();
-    const newEnd = new Date(newStart.getTime() + durationMs);
+    if (Number.isNaN(newStart.getTime())) {
+      setToastMessage({ message: 'Neteisingas laikas', type: 'error' });
+      return;
+    }
+    const newEnd = new Date(newStart.getTime() + Math.max(5, editDurationMinutes) * 60 * 1000);
 
     setSavingSession(true);
+    const payload: Record<string, any> = {
+      start_time: newStart.toISOString(),
+      end_time: newEnd.toISOString(),
+      topic: editTopic || null,
+      meeting_link: editMeetingLink || null,
+      tutor_comment: editTutorComment.trim() || null,
+      show_comment_to_student: editShowCommentToStudent,
+      ...(!orgPolicy.hideMoney ? { price: Number(editSessionPrice) || 0 } : {}),
+    };
     const { error } = await supabase
       .from('sessions')
-      .update({
-        start_time: newStart.toISOString(),
-        end_time: newEnd.toISOString(),
-        ...(!orgPolicy.hideMoney && editSessionPrice !== '' ? { price: Number(editSessionPrice) } : {}),
-      })
+      .update(payload)
       .eq('id', selectedSessionForModal.id);
 
     if (!error) {
-      const updated = {
-        ...selectedSessionForModal,
-        start_time: newStart.toISOString(),
-        end_time: newEnd.toISOString(),
-        ...(!orgPolicy.hideMoney && editSessionPrice !== '' ? { price: Number(editSessionPrice) } : {}),
-      };
+      const updated = { ...selectedSessionForModal, ...payload };
       setSelectedSessionForModal(updated);
       setAllSessions((prev) => prev.map((s: any) => (s.id === updated.id ? { ...s, ...updated } : s)));
-      setIsEditingTime(false);
+      setIsEditingSession(false);
       syncSessionToGoogleCalendar(selectedSessionForModal.id);
       setToastMessage({ message: 'Pamokos duomenys atnaujinti', type: 'success' });
     } else {
@@ -2427,44 +2433,115 @@ export default function StudentsPage() {
           setIsSessionModalOpen(open);
           if (!open) {
             setCancelConfirmId(null);
-            setIsEditingTime(false);
+            setIsEditingSession(false);
             setEditNewStartTime('');
-            setEditSessionPrice('');
             setNoShowPickerOpen(false);
           }
         }}
       >
         <DialogContent className="w-[95vw] sm:max-w-[440px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center justify-between gap-2">
-              <span className="flex items-center gap-2">
-                <CalendarDays className="w-5 h-5 text-indigo-600" />
-                Pamokos informacija
-              </span>
-              {selectedSessionForModal?.status === 'active' && (
-                <button
+            <DialogTitle className="flex items-center gap-2 pr-6">
+              <CalendarDays className="w-5 h-5 text-indigo-600 flex-shrink-0" />
+              <span className="flex-1 truncate">{t('cal.lessonInfo')}</span>
+              {!isEditingSession && selectedSessionForModal?.status === 'active' && (
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   onClick={() => {
-                    setIsEditingTime((prev) => !prev);
-                    if (!isEditingTime && selectedSessionForModal?.start_time) {
-                      setEditNewStartTime(selectedSessionForModal.start_time);
-                      setEditSessionPrice(
-                        typeof selectedSessionForModal.price === 'number'
-                          ? selectedSessionForModal.price
-                          : selectedSessionForModal.price != null
-                            ? Number(selectedSessionForModal.price)
-                            : '',
-                      );
-                    }
+                    if (!selectedSessionForModal?.start_time) return;
+                    const start = new Date(selectedSessionForModal.start_time);
+                    const end = new Date(selectedSessionForModal.end_time);
+                    const dur = Math.max(5, Math.round((end.getTime() - start.getTime()) / 60000));
+                    setEditNewStartTime(format(start, "yyyy-MM-dd'T'HH:mm"));
+                    setEditDurationMinutes(dur);
+                    setEditTopic(selectedSessionForModal.topic || '');
+                    setEditMeetingLink(selectedSessionForModal.meeting_link || '');
+                    setEditTutorComment(selectedSessionForModal.tutor_comment || '');
+                    setEditShowCommentToStudent(Boolean(selectedSessionForModal.show_comment_to_student));
+                    setEditSessionPrice(Number(selectedSessionForModal.price ?? 0) || 0);
+                    setIsEditingSession(true);
                   }}
-                  className="inline-flex items-center gap-1 text-xs text-orange-600 hover:text-orange-700"
+                  className="text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 h-8 px-2 flex-shrink-0"
                 >
-                  <Edit2 className="w-3.5 h-3.5" />
-                  Redaguoti
-                </button>
+                  <Edit2 className="w-3.5 h-3.5 mr-1" /> <span className="hidden sm:inline">{t('cal.editBtn')}</span>
+                </Button>
               )}
             </DialogTitle>
           </DialogHeader>
+          {isEditingSession ? (
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label>{t('compSch.topicSubject')}</Label>
+                <Input value={editTopic} onChange={(e) => setEditTopic(e.target.value)} className="rounded-xl" />
+              </div>
+              <div className="space-y-2">
+                <Label>{t('cal.timeLabel')}</Label>
+                <DateTimeSpinner value={editNewStartTime} onChange={setEditNewStartTime} />
+              </div>
+              <div className="space-y-2">
+                <Label>{t('cal.durationLabel')}</Label>
+                <Input
+                  type="number"
+                  value={editDurationMinutes}
+                  onChange={(e) => setEditDurationMinutes(Number(e.target.value))}
+                  className="rounded-xl"
+                  min={15}
+                  max={240}
+                  step={5}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>{t('cal.meetingLinkLabel')}</Label>
+                <Input value={editMeetingLink} onChange={(e) => setEditMeetingLink(e.target.value)} className="rounded-xl" placeholder="https://..." />
+              </div>
+              {!orgPolicy.hideMoney && (
+                <div className="space-y-2">
+                  <Label>{t('lessonSet.priceLabel')}</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    value={editSessionPrice}
+                    onChange={(e) => setEditSessionPrice(Number(e.target.value))}
+                    className="rounded-xl"
+                  />
+                </div>
+              )}
+              <div className="space-y-2">
+                <Label>{t('dash.commentLabel')}</Label>
+                <textarea
+                  value={editTutorComment}
+                  onChange={(e) => setEditTutorComment(e.target.value)}
+                  placeholder={t('dash.commentPlaceholder')}
+                  className="w-full p-3 rounded-xl border border-gray-200 text-sm resize-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 outline-none"
+                  rows={2}
+                />
+                <label className="flex items-center gap-2 cursor-pointer mt-1">
+                  <input
+                    type="checkbox"
+                    checked={editShowCommentToStudent}
+                    onChange={(e) => setEditShowCommentToStudent(e.target.checked)}
+                    className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-sm text-gray-700">{t('cal.showToStudent')}</span>
+                </label>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <Button
+                  variant="outline"
+                  className="flex-1 rounded-xl"
+                  onClick={() => setIsEditingSession(false)}
+                >
+                  {t('cal.cancelEdit')}
+                </Button>
+                <Button onClick={handleSaveSessionEdits} disabled={savingSession} className="flex-1 rounded-xl">
+                  {savingSession ? t('cal.savingEdit') : t('cal.saveEdit')}
+                </Button>
+              </div>
+            </div>
+          ) : (
           <div className="space-y-3 py-2">
             <div className="bg-indigo-50 rounded-xl px-4 py-3 flex items-center gap-3">
               <div className="w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
@@ -2478,43 +2555,21 @@ export default function StudentsPage() {
               </div>
             </div>
 
-            <div className={`grid gap-3 text-sm ${isEditingTime ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-2'}`}>
+            <div className="grid grid-cols-2 gap-3 text-sm">
               <div className="bg-gray-50 rounded-xl p-3">
                 <p className="text-xs text-gray-400 font-medium mb-1 flex items-center gap-1">
                   <Clock className="w-3 h-3" /> {t('dash.start')}
                 </p>
-                {isEditingTime ? (
-                  <div className="mt-2 space-y-2">
-                    <div className="w-full overflow-hidden">
-                      <DateTimeSpinner value={editNewStartTime} onChange={setEditNewStartTime} />
-                    </div>
-                    <div className="flex gap-2">
-                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs flex-1 rounded-lg" onClick={() => setIsEditingTime(false)}>{t('stu.cancelEdit')}</Button>
-                      <Button size="sm" className="h-7 px-2 text-xs flex-1 rounded-lg" onClick={handleReschedule} disabled={savingSession}>{savingSession ? '...' : t('dash.saveEdit')}</Button>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="font-semibold text-gray-800">
-                    {selectedSessionForModal?.start_time ? format(new Date(selectedSessionForModal.start_time), "yyyy-MM-dd HH:mm") : ''}
-                  </p>
-                )}
+                <p className="font-semibold text-gray-800">
+                  {selectedSessionForModal?.start_time ? format(new Date(selectedSessionForModal.start_time), "yyyy-MM-dd HH:mm") : ''}
+                </p>
               </div>
               <div className="bg-gray-50 rounded-xl p-3">
                 <p className="text-xs text-gray-400 font-medium mb-1 flex items-center gap-1">
                   <Clock className="w-3 h-3" /> {t('dash.end')}
                 </p>
                 <p className="font-semibold text-gray-800">
-                  {isEditingTime && editNewStartTime ? (
-                    (() => {
-                      const newStart = new Date(editNewStartTime);
-                      const oldStart = new Date(selectedSessionForModal!.start_time);
-                      const oldEnd = new Date(selectedSessionForModal!.end_time);
-                      const durMs = oldEnd.getTime() - oldStart.getTime();
-                      return format(new Date(newStart.getTime() + durMs), "yyyy-MM-dd HH:mm");
-                    })()
-                  ) : (
-                    selectedSessionForModal?.end_time ? format(new Date(selectedSessionForModal.end_time), "yyyy-MM-dd HH:mm") : ''
-                  )}
+                  {selectedSessionForModal?.end_time ? format(new Date(selectedSessionForModal.end_time), "yyyy-MM-dd HH:mm") : ''}
                 </p>
               </div>
             </div>
@@ -2523,24 +2578,7 @@ export default function StudentsPage() {
               {!orgPolicy.hideMoney && (
               <div className="bg-gray-50 rounded-xl p-3 text-center">
                 <p className="text-xs text-gray-400 mb-1">{t('dash.priceLabel')}</p>
-                {isEditingTime ? (
-                  <div className="mt-1">
-                    <Input
-                      type="number"
-                      min={0}
-                      step={0.01}
-                      value={editSessionPrice}
-                      onChange={(e) => {
-                        const raw = e.target.value;
-                        setEditSessionPrice(raw === '' ? '' : Number(raw));
-                      }}
-                      className="rounded-xl text-center font-bold"
-                      placeholder="0.00"
-                    />
-                  </div>
-                ) : (
-                  <p className="font-bold text-gray-900">€{selectedSessionForModal?.price || '–'}</p>
-                )}
+                <p className="font-bold text-gray-900">€{selectedSessionForModal?.price || '–'}</p>
               </div>
               )}
               <div className="bg-gray-50 rounded-xl p-3 text-center flex flex-col items-center justify-center">
@@ -2617,6 +2655,7 @@ export default function StudentsPage() {
               </div>
             )}
           </div>
+          )}
 
           {selectedSessionForModal?.is_late_cancelled && (
             <div className="p-3 rounded-xl bg-red-50 border border-red-200 space-y-1">

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AlertCircle, CheckCircle2, Building2, Lock, Plus, Eye, EyeOff, ArrowLeft, List, Pencil, FileText, Users } from 'lucide-react';
@@ -111,6 +111,8 @@ export default function AdminPanel() {
   const [panelView, setPanelView] = useState<PanelView>('list');
   const [orgList, setOrgList] = useState<OrgListRow[]>([]);
   const [listLoading, setListLoading] = useState(false);
+  const [overviewLoading, setOverviewLoading] = useState(false);
+  const [overviewLoaded, setOverviewLoaded] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailTutors, setDetailTutors] = useState<TutorRow[]>([]);
@@ -138,13 +140,78 @@ export default function AdminPanel() {
         headers: { 'x-admin-secret': platformAdminSecret },
       });
       const data = await res.json();
-      if (res.ok && data.organizations) setOrgList(data.organizations);
+      if (res.ok && data.organizations) {
+        setOrgList(data.organizations);
+        setOverviewLoaded(false);
+      }
       else setResult({ success: false, message: data.error || tRef.current('admin.failedToLoad') });
     } catch {
       setResult({ success: false, message: tRef.current('admin.serverError') });
     }
     setListLoading(false);
   }, [platformAdminSecret]);
+
+  const loadOverviewStats = useCallback(async () => {
+    if (!platformAdminSecret || overviewLoading) return;
+    setOverviewLoading(true);
+    setResult(null);
+    try {
+      const ids = orgList.map((o) => o.id).filter(Boolean);
+      if (ids.length === 0) {
+        setOverviewLoaded(true);
+        return;
+      }
+
+      const next = new Map<string, Partial<OrgListRow>>();
+      const concurrency = 6;
+      for (let i = 0; i < ids.length; i += concurrency) {
+        const batch = ids.slice(i, i + concurrency);
+        const results = await Promise.all(
+          batch.map(async (id) => {
+            const res = await fetch(`/api/admin-organizations?id=${encodeURIComponent(id)}`, {
+              headers: { 'x-admin-secret': platformAdminSecret },
+            });
+            const data = await res.json().catch(() => ({}));
+            return { id, ok: res.ok, data };
+          }),
+        );
+        for (const r of results) {
+          if (!r.ok) continue;
+          const s = r.data?.stats || {};
+          next.set(r.id, {
+            tutor_count: Number(s.tutor_count) || 0,
+            student_count: Number(s.student_count) || 0,
+            lessons_occurred: Number(s.lessons_occurred) || 0,
+            paid_revenue_eur: Number(s.paid_revenue_eur) || 0,
+            platform_fee_2pct_eur: Number(s.platform_fee_2pct_eur) || 0,
+          });
+        }
+      }
+
+      if (next.size > 0) {
+        setOrgList((prev) =>
+          prev.map((o) => {
+            const patch = next.get(o.id);
+            return patch ? ({ ...o, ...patch } as OrgListRow) : o;
+          }),
+        );
+      }
+      setOverviewLoaded(true);
+    } catch {
+      setResult({ success: false, message: tRef.current('admin.failedToLoad') });
+    } finally {
+      setOverviewLoading(false);
+    }
+  }, [orgList, overviewLoading, platformAdminSecret]);
+
+  const totals = useMemo(() => {
+    const revenue = orgList.reduce((s, o) => s + (Number(o.paid_revenue_eur) || 0), 0);
+    const fee = orgList.reduce((s, o) => s + (Number(o.platform_fee_2pct_eur) || 0), 0);
+    const students = orgList.reduce((s, o) => s + (Number(o.student_count) || 0), 0);
+    const tutors = orgList.reduce((s, o) => s + (Number(o.tutor_count) || 0), 0);
+    const lessons = orgList.reduce((s, o) => s + (Number(o.lessons_occurred) || 0), 0);
+    return { revenue, fee, students, tutors, lessons };
+  }, [orgList]);
 
   const fetchSoloTutors = useCallback(async () => {
     setSoloListLoading(true);
@@ -635,13 +702,31 @@ export default function AdminPanel() {
         )}
 
         {panelView === 'list' && (
-          <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+          <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+            <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
             {listLoading ? (
               <div className="p-8 text-center text-slate-400 text-sm">{t('common.loadingDots')}</div>
             ) : orgList.length === 0 ? (
               <div className="p-8 text-center text-slate-400 text-sm">{t('admin.noCompanies')}</div>
             ) : (
               <>
+                <div className="flex items-center justify-between gap-3 p-4 border-b border-white/10">
+                  <div className="text-sm text-slate-300">
+                    {overviewLoaded ? (
+                      <span className="text-emerald-300">Suvestinė įkelta</span>
+                    ) : (
+                      <span className="text-slate-400">Suvestinė dar neįkelta (mokiniai/korep/pajamos)</span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void loadOverviewStats()}
+                    disabled={overviewLoading || listLoading || orgList.length === 0}
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
+                  >
+                    {overviewLoading ? 'Kraunama…' : (overviewLoaded ? 'Atnaujinti suvestinę' : 'Įkelti suvestinę')}
+                  </button>
+                </div>
                 {/* Mobile cards */}
                 <div className="md:hidden divide-y divide-white/10">
                   {orgList.map((o) => {
@@ -690,7 +775,8 @@ export default function AdminPanel() {
                   <thead>
                     <tr className="border-b border-white/10 text-left text-slate-400">
                       <th className="px-4 py-3 font-medium">{t('admin.thName')}</th>
-                      <th className="px-4 py-3 font-medium">{t('admin.tutorLicenseCount')}</th>
+                      <th className="px-4 py-3 font-medium whitespace-nowrap">Korepet.</th>
+                      <th className="px-4 py-3 font-medium whitespace-nowrap">{t('admin.tutorLicenseCount')}</th>
                       <th className="px-4 py-3 font-medium">{t('admin.thStudents')}</th>
                       <th className="px-4 py-3 font-medium whitespace-nowrap">{t('admin.thLessons')}</th>
                       <th className="px-4 py-3 font-medium whitespace-nowrap">{t('admin.thRevenue')}</th>
@@ -708,6 +794,7 @@ export default function AdminPanel() {
                       return (
                         <tr key={o.id} className="border-b border-white/5 hover:bg-white/5">
                           <td className="px-4 py-3 font-medium">{o.name}</td>
+                          <td className="px-4 py-3 text-slate-300 tabular-nums">{o.tutor_count ?? 0}</td>
                           <td className="px-4 py-3 text-slate-300 tabular-nums">{o.tutor_license_count ?? 0}</td>
                           <td className="px-4 py-3 text-slate-300">{o.student_count}</td>
                           <td className="px-4 py-3 text-slate-300 tabular-nums">{o.lessons_occurred ?? '—'}</td>
@@ -747,6 +834,43 @@ export default function AdminPanel() {
                 </div>
               </>
             )}
+            </div>
+
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 h-fit lg:sticky lg:top-4">
+              <p className="text-sm font-semibold text-white mb-3">Bendra suvestinė</p>
+              <div className="grid gap-2 text-sm">
+                <div className="flex items-center justify-between text-slate-300">
+                  <span>Mokiniai</span>
+                  <span className="tabular-nums font-semibold">{totals.students}</span>
+                </div>
+                <div className="flex items-center justify-between text-slate-300">
+                  <span>Korepetitoriai</span>
+                  <span className="tabular-nums font-semibold">{totals.tutors}</span>
+                </div>
+                <div className="flex items-center justify-between text-slate-300">
+                  <span>Pamokos</span>
+                  <span className="tabular-nums font-semibold">{totals.lessons}</span>
+                </div>
+                <div className="h-px bg-white/10 my-2" />
+                <div className="flex items-center justify-between text-slate-200">
+                  <span>Pajamos</span>
+                  <span className="tabular-nums font-bold">
+                    {totals.revenue.toLocaleString('lt-LT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-slate-200">
+                  <span>Platformos mokestis (2%)</span>
+                  <span className="tabular-nums font-bold">
+                    {totals.fee.toLocaleString('lt-LT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                  </span>
+                </div>
+              </div>
+              {!overviewLoaded && (
+                <p className="text-[11px] text-slate-400 mt-3">
+                  Pastaba: kol nepaspaudėte „Įkelti suvestinę“, šie skaičiai bus 0.
+                </p>
+              )}
+            </div>
           </div>
         )}
 
