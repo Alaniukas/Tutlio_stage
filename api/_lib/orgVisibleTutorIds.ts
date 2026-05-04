@@ -24,12 +24,12 @@ export async function getOrgVisibleTutorProfileIds(supabase: any, orgId: string)
       .filter((email: string) => email.length > 0),
   );
 
-  const assignedTutorIds = new Set(
+  const assignedTutorIds = new Set<string>(
     (linkedStudents || [])
       .map((s: { tutor_id?: string | null }) => s.tutor_id)
       .filter((id: string | null | undefined): id is string => !!id),
   );
-  const acceptedTutorIds = new Set(
+  const acceptedTutorIds = new Set<string>(
     (inviteData || [])
       .map((inv: { used_by_profile_id?: string | null }) => inv.used_by_profile_id)
       .filter((id: string | null | undefined): id is string => !!id),

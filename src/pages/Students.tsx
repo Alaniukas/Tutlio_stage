@@ -254,6 +254,7 @@ export default function StudentsPage() {
   const [forceTrialCommentVisibility, setForceTrialCommentVisibility] = useState(false);
   const [isEditingTime, setIsEditingTime] = useState(false);
   const [editNewStartTime, setEditNewStartTime] = useState<string>('');
+  const [editSessionPrice, setEditSessionPrice] = useState<number | ''>('');
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   // Individual pricing for student modal
@@ -996,7 +997,11 @@ export default function StudentsPage() {
     setSavingSession(true);
     const { error } = await supabase
       .from('sessions')
-      .update({ start_time: newStart.toISOString(), end_time: newEnd.toISOString() })
+      .update({
+        start_time: newStart.toISOString(),
+        end_time: newEnd.toISOString(),
+        ...(!orgPolicy.hideMoney && editSessionPrice !== '' ? { price: Number(editSessionPrice) } : {}),
+      })
       .eq('id', selectedSessionForModal.id);
 
     if (!error) {
@@ -1004,14 +1009,15 @@ export default function StudentsPage() {
         ...selectedSessionForModal,
         start_time: newStart.toISOString(),
         end_time: newEnd.toISOString(),
+        ...(!orgPolicy.hideMoney && editSessionPrice !== '' ? { price: Number(editSessionPrice) } : {}),
       };
       setSelectedSessionForModal(updated);
       setAllSessions((prev) => prev.map((s: any) => (s.id === updated.id ? { ...s, ...updated } : s)));
       setIsEditingTime(false);
       syncSessionToGoogleCalendar(selectedSessionForModal.id);
-      setToastMessage({ message: 'Pamokos laikas atnaujintas', type: 'success' });
+      setToastMessage({ message: 'Pamokos duomenys atnaujinti', type: 'success' });
     } else {
-      setToastMessage({ message: 'Nepavyko pakeisti pamokos laiko', type: 'error' });
+      setToastMessage({ message: 'Nepavyko pakeisti pamokos duomenų', type: 'error' });
     }
     setSavingSession(false);
   };
@@ -2423,6 +2429,7 @@ export default function StudentsPage() {
             setCancelConfirmId(null);
             setIsEditingTime(false);
             setEditNewStartTime('');
+            setEditSessionPrice('');
             setNoShowPickerOpen(false);
           }
         }}
@@ -2441,6 +2448,13 @@ export default function StudentsPage() {
                     setIsEditingTime((prev) => !prev);
                     if (!isEditingTime && selectedSessionForModal?.start_time) {
                       setEditNewStartTime(selectedSessionForModal.start_time);
+                      setEditSessionPrice(
+                        typeof selectedSessionForModal.price === 'number'
+                          ? selectedSessionForModal.price
+                          : selectedSessionForModal.price != null
+                            ? Number(selectedSessionForModal.price)
+                            : '',
+                      );
                     }
                   }}
                   className="inline-flex items-center gap-1 text-xs text-orange-600 hover:text-orange-700"
@@ -2464,14 +2478,16 @@ export default function StudentsPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className={`grid gap-3 text-sm ${isEditingTime ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-2'}`}>
               <div className="bg-gray-50 rounded-xl p-3">
                 <p className="text-xs text-gray-400 font-medium mb-1 flex items-center gap-1">
                   <Clock className="w-3 h-3" /> {t('dash.start')}
                 </p>
                 {isEditingTime ? (
                   <div className="mt-2 space-y-2">
-                    <DateTimeSpinner value={editNewStartTime} onChange={setEditNewStartTime} />
+                    <div className="w-full overflow-hidden">
+                      <DateTimeSpinner value={editNewStartTime} onChange={setEditNewStartTime} />
+                    </div>
                     <div className="flex gap-2">
                       <Button size="sm" variant="outline" className="h-7 px-2 text-xs flex-1 rounded-lg" onClick={() => setIsEditingTime(false)}>{t('stu.cancelEdit')}</Button>
                       <Button size="sm" className="h-7 px-2 text-xs flex-1 rounded-lg" onClick={handleReschedule} disabled={savingSession}>{savingSession ? '...' : t('dash.saveEdit')}</Button>
@@ -2507,7 +2523,24 @@ export default function StudentsPage() {
               {!orgPolicy.hideMoney && (
               <div className="bg-gray-50 rounded-xl p-3 text-center">
                 <p className="text-xs text-gray-400 mb-1">{t('dash.priceLabel')}</p>
-                <p className="font-bold text-gray-900">€{selectedSessionForModal?.price || '–'}</p>
+                {isEditingTime ? (
+                  <div className="mt-1">
+                    <Input
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={editSessionPrice}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        setEditSessionPrice(raw === '' ? '' : Number(raw));
+                      }}
+                      className="rounded-xl text-center font-bold"
+                      placeholder="0.00"
+                    />
+                  </div>
+                ) : (
+                  <p className="font-bold text-gray-900">€{selectedSessionForModal?.price || '–'}</p>
+                )}
               </div>
               )}
               <div className="bg-gray-50 rounded-xl p-3 text-center flex flex-col items-center justify-center">
