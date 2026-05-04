@@ -465,7 +465,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .from(BUCKET)
         .createSignedUrl(templatePath, 300);
       if (!signedData?.signedUrl) throw new Error('Failed to sign template URL');
-      pdfBytes = await createDocxTemplatePdf({ fetchUrl: signedData.signedUrl, payload: templatePayload });
+      pdfBytes = await createDocxTemplatePdf({ fetchUrl: signedData.signedUrl, payload: templatePayload as any });
     } catch {
       pdfBytes = await createSimpleContractPdf({
         contractNumber: String((contract as any).contract_number || ''),

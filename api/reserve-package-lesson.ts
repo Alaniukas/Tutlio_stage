@@ -42,11 +42,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const nowMs = Date.now();
   const expiresAtMs = pkg.expires_at ? new Date(pkg.expires_at).getTime() : null;
   if (expiresAtMs !== null && !Number.isNaN(expiresAtMs) && expiresAtMs <= nowMs) {
-    await supabase
-      .from('lesson_packages')
-      .update({ active: false, payment_status: 'expired' })
-      .eq('id', packageId)
-      .catch(() => {});
+    try {
+      await supabase
+        .from('lesson_packages')
+        .update({ active: false, payment_status: 'expired' })
+        .eq('id', packageId);
+    } catch {
+      // best-effort
+    }
     return json(res, 409, { error: 'Package expired' });
   }
   if (available <= 0) {

@@ -8,7 +8,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return res.status(500).json({ error: 'Missing Supabase configuration' });
 
-  const supabase = createClient(url, key);
+  // Note: this endpoint touches tables that may not exist in generated DB types in some deploys.
+  // Keep it untyped to avoid build-time typecheck failures.
+  const supabase = createClient(url, key) as any;
 
   const body = req.body as {
     token?: string;
@@ -86,7 +88,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 }
 
 async function linkParent(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   userId: string,
   fullName: string,
   studentId: string,
