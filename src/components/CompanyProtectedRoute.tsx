@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
-import { supabase } from '@/lib/supabase';
 import { useUser } from '@/contexts/UserContext';
+import { orgAdminRowByUserDeduped } from '@/lib/preload';
 
 export default function CompanyProtectedRoute() {
   const location = useLocation();
@@ -39,15 +39,11 @@ export default function CompanyProtectedRoute() {
         };
 
         const result = await withTimeout<any>(
-          supabase
-            .from('organization_admins')
-            .select('id')
-            .eq('user_id', ctxUser.id)
-            .maybeSingle(),
+          orgAdminRowByUserDeduped(ctxUser.id),
           2500
         );
 
-        const isAdmin = !!result?.data;
+        const isAdmin = !!result;
         if (!cancelled) setStatus(isAdmin ? 'admin' : 'none');
       } catch (err) {
         console.error('[CompanyProtectedRoute] check error:', err);

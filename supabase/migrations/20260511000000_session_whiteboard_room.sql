@@ -69,15 +69,41 @@ CREATE POLICY "Student manages whiteboard data" ON storage.objects
 
 -- Org admin can read whiteboard data for sessions of their org's tutors
 DROP POLICY IF EXISTS "Org admin reads whiteboard data" ON storage.objects;
-CREATE POLICY "Org admin reads whiteboard data" ON storage.objects
-  FOR SELECT
-  USING (
-    bucket_id = 'whiteboard-data'
-    AND EXISTS (
-      SELECT 1 FROM public.sessions s
-      JOIN public.profiles p ON p.id = s.tutor_id
-      JOIN public.org_admins oa ON oa.organization_id = p.organization_id
-      WHERE s.id::text = split_part(name, '/', 1)
-        AND oa.user_id = auth.uid()
-    )
-  );
+DO $$
+BEGIN
+  -- Newer schemas
+  IF to_regclass('public.org_admins') IS NOT NULL THEN
+    EXECUTE $sql$
+      CREATE POLICY "Org admin reads whiteboard data" ON storage.objects
+        FOR SELECT
+        USING (
+          bucket_id = 'whiteboard-data'
+          AND EXISTS (
+            SELECT 1 FROM public.sessions s
+            JOIN public.profiles p ON p.id = s.tutor_id
+            JOIN public.org_admins oa ON oa.organization_id = p.organization_id
+            WHERE s.id::text = split_part(name, '/', 1)
+              AND oa.user_id = auth.uid()
+          )
+        )
+    $sql$;
+  -- Legacy schemas
+  ELSIF to_regclass('public.organization_admins') IS NOT NULL THEN
+    EXECUTE $sql$
+      CREATE POLICY "Org admin reads whiteboard data" ON storage.objects
+        FOR SELECT
+        USING (
+          bucket_id = 'whiteboard-data'
+          AND EXISTS (
+            SELECT 1 FROM public.sessions s
+            JOIN public.profiles p ON p.id = s.tutor_id
+            JOIN public.organization_admins oa ON oa.organization_id = p.organization_id
+            WHERE s.id::text = split_part(name, '/', 1)
+              AND oa.user_id = auth.uid()
+          )
+        )
+    $sql$;
+  ELSE
+    RAISE NOTICE 'Skipping org-admin whiteboard policy: no admin relation found (org_admins/organization_admins).';
+  END IF;
+END $$;

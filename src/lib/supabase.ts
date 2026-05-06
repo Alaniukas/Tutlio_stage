@@ -7,28 +7,21 @@ const REMEMBER_ME_KEY = 'tutlio_remember_me';
 
 // Cache the storage backend choice to prevent switching mid-session
 let cachedStorage: Storage | null = null;
-let lastRememberMeCheck = 0;
-const STORAGE_CHECK_INTERVAL = 5000; // Re-check storage choice max once per 5 seconds
 
 function getStorage(): Storage {
   if (typeof window === 'undefined') {
     return typeof localStorage !== 'undefined' ? localStorage : ({} as Storage);
   }
 
-  const now = Date.now();
-  // Use cached storage if we checked recently (prevents switching mid-session)
-  if (cachedStorage && (now - lastRememberMeCheck) < STORAGE_CHECK_INTERVAL) {
-    return cachedStorage;
-  }
+  // Pick storage backend once per app boot to avoid auth lock races.
+  if (cachedStorage) return cachedStorage;
 
   try {
     const rememberMe = localStorage.getItem(REMEMBER_ME_KEY);
     cachedStorage = rememberMe === 'false' ? sessionStorage : localStorage;
-    lastRememberMeCheck = now;
     return cachedStorage;
   } catch {
     cachedStorage = localStorage;
-    lastRememberMeCheck = now;
     return localStorage;
   }
 }
@@ -59,6 +52,13 @@ const customStorage = {
       if (s && typeof s.removeItem === 'function') {
         s.removeItem(key);
       }
+      // Defensive cleanup: remove token from both stores to avoid stale-session loops.
+      if (typeof localStorage !== 'undefined' && localStorage !== s) {
+        localStorage.removeItem(key);
+      }
+      if (typeof sessionStorage !== 'undefined' && sessionStorage !== s) {
+        sessionStorage.removeItem(key);
+      }
     } catch (err) {
       console.error('[customStorage] removeItem error:', err);
     }
@@ -79,10 +79,8 @@ export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '', {
   },
 });
 
-// Track page visibility to prevent false sign-outs during tab switching
-let isPageHidden = false;
+// Track transient auth operations for debug logging only.
 let isRestoringSession = false;
-let lastVisibilityChange = 0;
 let appHasLoaded = false;
 
 if (typeof window !== 'undefined') {
@@ -92,96 +90,10 @@ if (typeof window !== 'undefined') {
     console.log('[Supabase Client] App initial load complete');
   }, 2000);
 
-  // Handle page visibility changes - refresh session when page becomes visible
-  const handleVisibilityChange = async () => {
-    // Don't interfere with initial page load
-    if (!appHasLoaded) return;
-
-    const now = Date.now();
-
-    if (document.hidden) {
-      isPageHidden = true;
-      lastVisibilityChange = now;
-    } else {
-      // Page became visible - optionally refresh (never fight Login/UserContext locks)
-      const wasHiddenFor = now - lastVisibilityChange;
-      isPageHidden = false;
-      isRestoringSession = true;
-
-      console.log('[Supabase Client] Page became visible after', wasHiddenFor, 'ms');
-
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session?.expires_at) {
-          console.log('[Supabase Client] No session on visibility');
-        } else if (wasHiddenFor > 5000) {
-          const msLeft = session.expires_at * 1000 - Date.now();
-          if (msLeft < 120_000) {
-            try {
-              const { error: refreshErr } = await supabase.auth.refreshSession();
-              if (refreshErr && String(refreshErr.message || '').includes('Abort')) {
-                /* lock contention — ignore */
-              } else if (refreshErr) {
-                console.warn('[Supabase Client] refreshSession after visibility:', refreshErr.message);
-              } else {
-                console.log('[Supabase Client] Session refreshed after visibility (near expiry)');
-              }
-            } catch (refreshErr: unknown) {
-              const name = (refreshErr as { name?: string })?.name;
-              if (name !== 'AbortError') console.warn('[Supabase Client] refreshSession threw:', refreshErr);
-            }
-          } else {
-            console.log('[Supabase Client] Visibility: token still fresh, skipping refresh');
-          }
-        }
-      } catch (err: unknown) {
-        const name = (err as { name?: string })?.name;
-        if (name !== 'AbortError') console.error('[Supabase Client] Error restoring session:', err);
-      } finally {
-        // Clear the flag after a short delay to allow auth events to settle
-        setTimeout(() => {
-          isRestoringSession = false;
-        }, 1000);
-      }
-
-      lastVisibilityChange = now;
-    }
-  };
-
-  document.addEventListener('visibilitychange', handleVisibilityChange);
-
-  // Also handle window focus/blur as additional safeguard (but only after initial load)
-  window.addEventListener('focus', async () => {
-    if (!appHasLoaded || isRestoringSession) return;
-
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.expires_at) return;
-
-      const msLeft = session.expires_at * 1000 - Date.now();
-      if (msLeft > 120_000) return;
-
-      isRestoringSession = true;
-      console.log('[Supabase Client] Window focus: token expires soon — refresh once');
-
-      try {
-        const { error: refreshErr } = await supabase.auth.refreshSession();
-        if (refreshErr && !String(refreshErr.message || '').includes('Abort')) {
-          console.warn('[Supabase Client] focus refreshSession:', refreshErr.message);
-        }
-      } catch (refreshErr: unknown) {
-        const name = (refreshErr as { name?: string })?.name;
-        if (name !== 'AbortError') console.warn('[Supabase Client] focus refreshSession threw:', refreshErr);
-      } finally {
-        setTimeout(() => {
-          isRestoringSession = false;
-        }, 400);
-      }
-    } catch (err: unknown) {
-      const name = (err as { name?: string })?.name;
-      if (name !== 'AbortError') console.error('[Supabase Client] Error on window focus:', err);
-    }
-  });
+  // NOTE:
+  // We intentionally avoid extra global getSession/refreshSession calls on focus/visibility.
+  // Supabase autoRefreshToken is sufficient and this prevents auth-lock contention storms
+  // in React StrictMode (seen as "Lock broken by another request with steal option").
 
   // Add global auth event logger to track all auth events
   supabase.auth.onAuthStateChange((event, session) => {
@@ -206,7 +118,6 @@ if (typeof window !== 'undefined') {
       console.warn('[Supabase Client] SIGNED_OUT event detected', {
         timestamp: new Date().toISOString(),
         hasSession: !!session,
-        wasPageHidden: isPageHidden,
         appHasLoaded,
         rememberMe: localStorage.getItem(REMEMBER_ME_KEY),
         stackTrace: new Error().stack
@@ -223,10 +134,14 @@ if (typeof window !== 'undefined') {
 export function setRememberMe(value: boolean) {
   if (typeof window !== 'undefined') {
     localStorage.setItem(REMEMBER_ME_KEY, value ? 'true' : 'false');
-    // Clear cached storage to force re-evaluation with new setting
-    cachedStorage = null;
-    lastRememberMeCheck = 0;
-    console.log('[Supabase Client] Remember me set to:', value, '- will use', value ? 'localStorage' : 'sessionStorage');
+    // Do not flip storage backend mid-flight. Apply on next app boot.
+    console.log(
+      '[Supabase Client] Remember me set to:',
+      value,
+      '- will use',
+      value ? 'localStorage' : 'sessionStorage',
+      'after reload/sign-in cycle',
+    );
   }
 }
 

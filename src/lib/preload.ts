@@ -26,7 +26,13 @@ export function tutorDashboardSessionsDeduped(tutorUserId: string) {
 
 function getAuthUser() {
   return dedupeAsync('auth_user', async () => {
+    // #region agent log
+    fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'run1',hypothesisId:'H5',location:'preload.ts:getAuthUser:beforeGetUser',message:'preload getUser start',data:{},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     const { data: { user } } = await supabase.auth.getUser();
+    // #region agent log
+    fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'run1',hypothesisId:'H5',location:'preload.ts:getAuthUser:afterGetUser',message:'preload getUser done',data:{hasUser:!!user,userId:user?.id||null},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     return user;
   });
 }
@@ -254,14 +260,31 @@ export function organizationSubjectTemplatesDeduped(orgId: string) {
   );
 }
 
-function getOrgAdmin(userId: string) {
-  return dedupeAsync('org_admin_row', async () => {
-    const { data } = await supabase
-      .from('organization_admins')
-      .select('organization_id, organizations(name, tutor_limit, entity_type)')
-      .eq('user_id', userId)
-      .maybeSingle();
-    return data;
+export function orgAdminRowByUserDeduped(userId: string) {
+  return dedupeAsync(`org_admin_row:${userId}`, async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2500);
+    try {
+      const { data, error } = await supabase
+        .from('organization_admins')
+        .select('organization_id, organizations(name, tutor_limit, entity_type)')
+        .eq('user_id', userId)
+        .abortSignal(controller.signal)
+        .maybeSingle();
+      if (error) {
+        console.warn('[preload] orgAdminRowByUserDeduped failed:', error.message);
+        return null;
+      }
+      return data;
+    } catch (err) {
+      if (controller.signal.aborted) {
+        console.warn('[preload] orgAdminRowByUserDeduped aborted by timeout');
+        return null;
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeout);
+    }
   });
 }
 
@@ -282,7 +305,7 @@ export async function preloadOrgAdminData() {
     const user = await getAuthUser();
     if (!user) return;
 
-    const adminRow = await getOrgAdmin(user.id);
+    const adminRow = await orgAdminRowByUserDeduped(user.id);
     if (!adminRow) return;
 
     const org = adminRow.organizations as any;

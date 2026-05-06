@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { getCached } from '@/lib/dataCache';
-import { preloadOrgAdminData } from '@/lib/preload';
+import { orgAdminRowByUserDeduped, preloadOrgAdminData } from '@/lib/preload';
 import { buildPlatformPath } from '@/lib/platform';
 import {
   LayoutDashboard,
@@ -28,9 +28,11 @@ import PwaInstallPrompt from '@/components/PwaInstallPrompt';
 import { useTranslation } from '@/lib/i18n';
 import { useTotalChatUnread } from '@/hooks/useChat';
 import { OrgEntityProvider, type OrgEntityType } from '@/contexts/OrgEntityContext';
+import { useUser } from '@/contexts/UserContext';
 
 export default function CompanyLayout() {
   const { t } = useTranslation();
+  const { user: ctxUser } = useUser();
   const chatUnreadTotal = useTotalChatUnread();
   const location = useLocation();
   const ENTITY_KEY = 'tutlio_entity_type';
@@ -84,13 +86,8 @@ export default function CompanyLayout() {
       if (dc?.entityType) setEntityType(dc.entityType);
     });
     (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user || cancelled) return;
-      const { data } = await supabase
-        .from('organization_admins')
-        .select('organization_id, organizations(name, entity_type)')
-        .eq('user_id', user.id)
-        .maybeSingle();
+      if (!ctxUser || cancelled) return;
+      const data = await orgAdminRowByUserDeduped(ctxUser.id);
       if (data && !cancelled) {
         const name = (data.organizations as any)?.name || '';
         const et = ((data.organizations as any)?.entity_type as OrgEntityType) || 'company';
@@ -99,7 +96,7 @@ export default function CompanyLayout() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [ctxUser?.id]);
 
   const handleLogout = async () => {
     sessionStorage.removeItem(ENTITY_KEY);

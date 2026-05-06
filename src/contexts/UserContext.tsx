@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, ReactNode } from 'react';
 import { supabase } from '@/lib/supabase';
 import { dedupeAuthGetUser } from '@/lib/preload';
 import { User } from '@supabase/supabase-js';
@@ -52,8 +52,14 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const profileFetchInFlightRef = useRef<Map<string, Promise<UserProfile | null>>>(new Map());
+  const initAuthInFlightRef = useRef(false);
 
-  const fetchProfile = async (userId: string): Promise<UserProfile | null> => {
+  const fetchProfile = useCallback(async (userId: string): Promise<UserProfile | null> => {
+    const existing = profileFetchInFlightRef.current.get(userId);
+    if (existing) return existing;
+
+    const run = (async (): Promise<UserProfile | null> => {
     try {
       const withTimeout = async <T,>(p: any, ms: number): Promise<T> => {
         let t: any;
@@ -73,7 +79,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
           .select(PROFILE_SELECT_WITH_TRIAL)
           .eq('id', userId)
           .maybeSingle(),
-        2500
+        8000
       );
       let { data, error } = result || {};
 
@@ -87,7 +93,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
             .select(PROFILE_SELECT_LEGACY)
             .eq('id', userId)
             .maybeSingle(),
-          2500
+          8000
         );
         ({ data, error } = result || {});
       }
@@ -98,7 +104,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
             .select(PROFILE_SELECT_CORE)
             .eq('id', userId)
             .maybeSingle(),
-          2500
+          8000
         );
         ({ data, error } = result || {});
       }
@@ -129,21 +135,38 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     } catch (err) {
       console.error('[UserContext] Error in fetchProfile:', err);
       return null;
+    } finally {
+      profileFetchInFlightRef.current.delete(userId);
     }
-  };
+    })();
 
-  const refetchProfile = async () => {
+    profileFetchInFlightRef.current.set(userId, run);
+    return run;
+  }, []);
+
+  const refetchProfile = useCallback(async () => {
     if (user) {
       const profileData = await fetchProfile(user.id);
       setProfile(profileData);
     }
-  };
+  }, [fetchProfile, user]);
 
   useEffect(() => {
+    let cancelled = false;
     // Initial auth check
     const initAuth = async () => {
+      if (initAuthInFlightRef.current) {
+        // #region agent log
+        fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'post-fix',hypothesisId:'H2',location:'UserContext.tsx:initAuth:skipDuplicate',message:'skipping duplicate initAuth in-flight',data:{},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        return;
+      }
+      initAuthInFlightRef.current = true;
       let currentUser: User | null = null;
       try {
+        // #region agent log
+        fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'run1',hypothesisId:'H1',location:'UserContext.tsx:initAuth:start',message:'initAuth start',data:{loadingBefore:true},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         const withTimeout = async <T,>(p: Promise<T>, ms: number): Promise<T> => {
           let t: any;
           const timeout = new Promise<never>((_, reject) => {
@@ -157,31 +180,44 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         };
 
         try {
+          // #region agent log
+          fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'run1',hypothesisId:'H1',location:'UserContext.tsx:initAuth:getUser',message:'calling dedupeAuthGetUser',data:{},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
           currentUser = await withTimeout(dedupeAuthGetUser(), 8000);
         } catch (errFirst) {
           const name = (errFirst as { name?: string })?.name;
           if (name !== 'AbortError' && !(errFirst instanceof Error && errFirst.message === 'Auth init timeout')) {
-            console.warn('[UserContext] getUser dedupe failed, trying getSession:', errFirst);
+            console.warn('[UserContext] getUser dedupe failed during init:', errFirst);
           }
-          try {
-            const { data: { session }, error } = await supabase.auth.getSession();
-            if (!error && session?.user) currentUser = session.user;
-          } catch (_) {
-            /* ignore */
-          }
+          // #region agent log
+          fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'post-fix',hypothesisId:'H2',location:'UserContext.tsx:initAuth:noFallbackGetSession',message:'skip fallback getSession to avoid auth lock contention',data:{errorName:(errFirst as any)?.name||null,errorMessage:(errFirst as any)?.message||null},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
         }
 
-        setUser(currentUser);
+        if (cancelled) return;
+        if (currentUser) {
+          setUser(currentUser);
+          // #region agent log
+          fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'post-fix',hypothesisId:'H6',location:'UserContext.tsx:initAuth:setUserNonNull',message:'initAuth applying non-null user',data:{userId:currentUser.id},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
+        } else {
+          // Never null-out user from initAuth timeout path. SIGNED_OUT handler is the only
+          // source that should clear user/session state.
+          // #region agent log
+          fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'post-fix',hypothesisId:'H6',location:'UserContext.tsx:initAuth:preserveExistingUser',message:'initAuth resolved null user, preserving existing context user',data:{},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
+        }
 
         if (currentUser) {
           void fetchProfile(currentUser.id).then((profileData) => {
-            if (profileData) setProfile(profileData);
+            if (!cancelled && profileData) setProfile(profileData);
           });
         }
       } catch (err) {
         console.error('Error initializing auth:', err);
       } finally {
-        setLoading(false);
+        initAuthInFlightRef.current = false;
+        if (!cancelled) setLoading(false);
       }
     };
 
@@ -190,6 +226,9 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       try {
+        // #region agent log
+        fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'run1',hypothesisId:'H2',location:'UserContext.tsx:onAuthStateChange',message:'auth state event',data:{event,hasUser:!!session?.user,userId:session?.user?.id||null},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         console.log('[UserContext] Auth event:', event, {
           hasUser: !!session?.user,
           userId: session?.user?.id,
@@ -249,9 +288,10 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     });
 
     return () => {
+      cancelled = true;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [fetchProfile]);
 
   return (
     <UserContext.Provider value={{ user, profile, loading, refetchProfile }}>

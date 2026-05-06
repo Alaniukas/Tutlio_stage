@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   I18nContext,
   detectLocale,
@@ -18,102 +18,24 @@ import { applyDefaultDocumentMeta } from '@/lib/documentMeta';
 export function LocaleProvider({ children }: { children: ReactNode }) {
   const { platform } = usePlatform();
   const [locale, setLocaleState] = useState<Locale>(detectLocale);
-  const dbSyncedRef = useRef(false);
 
   useLayoutEffect(() => {
     document.documentElement.lang = locale;
     applyDefaultDocumentMeta(locale, platform);
   }, [locale, platform]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const syncLocaleFromDb = async () => {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (cancelled || !user) return;
-
-        const { data } = await supabase
-          .from('profiles')
-          .select('preferred_locale')
-          .eq('id', user.id)
-          .maybeSingle();
-
-        if (cancelled) return;
-
-        const dbLocale = data?.preferred_locale;
-        const storedLocale = getStoredLocale();
-        const pathLocale = typeof window !== 'undefined'
-          ? getLocaleFromPathname(stripPlatformPrefix(window.location.pathname))
-          : null;
-        const preferredLocale = pathLocale ?? storedLocale;
-
-        if (dbLocale && isValidLocale(dbLocale)) {
-          if (!preferredLocale) {
-            storeLocale(dbLocale);
-            setLocaleState(dbLocale);
-          } else if (preferredLocale !== dbLocale) {
-            // explicit URL locale / localStorage takes priority — push it to DB
-            if (pathLocale) {
-              setLocaleState(pathLocale);
-              storeLocale(pathLocale);
-            }
-            supabase
-              .from('profiles')
-              .update({ preferred_locale: preferredLocale })
-              .eq('id', user.id)
-              .then(() => {});
-          }
-        } else if (preferredLocale) {
-          // DB has no locale yet — persist current choice
-          if (pathLocale) {
-            setLocaleState(pathLocale);
-            storeLocale(pathLocale);
-          }
-          supabase
-            .from('profiles')
-            .update({ preferred_locale: preferredLocale })
-            .eq('id', user.id)
-            .then(() => {});
-        }
-
-        dbSyncedRef.current = true;
-      } catch {
-        // non-critical
-      }
-    };
-
-    syncLocaleFromDb();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_IN') {
-        dbSyncedRef.current = false;
-        syncLocaleFromDb();
-      }
-      if (event === 'SIGNED_OUT') {
-        dbSyncedRef.current = false;
-      }
-    });
-
-    return () => {
-      cancelled = true;
-      subscription.unsubscribe();
-    };
-  }, []);
-
   const setLocale = useCallback((next: Locale) => {
     storeLocale(next);
     setLocaleState(next);
-
-    // Fire-and-forget DB update
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) return;
-      supabase
+    // Best-effort DB sync without blocking UI/auth flows.
+    void supabase.auth.getSession().then(({ data }) => {
+      const userId = data?.session?.user?.id;
+      if (!userId) return;
+      return supabase
         .from('profiles')
         .update({ preferred_locale: next })
-        .eq('id', user.id)
-        .then(() => {});
-    });
+        .eq('id', userId);
+    }).catch(() => {});
   }, []);
 
   const value = useMemo(() => ({

@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase, setRememberMe } from '@/lib/supabase';
 import { getPasswordResetRedirectTo } from '@/lib/auth-redirects';
 import { hasActiveSubscription, tutorHasPlatformSubscriptionAccess } from '@/lib/subscription';
 import { getOrgAdminDashboardPath } from '@/lib/orgAdminDashboardPath';
+import { orgAdminRowByUserDeduped } from '@/lib/preload';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AlertCircle, ArrowLeft, ArrowRight, BookOpen, ChevronRight, Sparkles, Building2, Users } from 'lucide-react';
@@ -164,6 +165,22 @@ export default function Login() {
 
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const redirectOnceRef = useRef(false);
+  const hashHandledRef = useRef(false);
+  const redirectInFlightRef = useRef(false);
+  const loginInFlightRef = useRef(false);
+  const hashSessionRestoreInFlightRef = useRef(false);
+  const withTimeout = async <T,>(p: Promise<T>, ms: number, message: string): Promise<T> => {
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const timeout = new Promise<never>((_, reject) => {
+      t = setTimeout(() => reject(new Error(message)), ms);
+    });
+    try {
+      return await Promise.race([p, timeout]);
+    } finally {
+      if (t) clearTimeout(t);
+    }
+  };
 
   const ensureTutorProfile = async (user: { id: string; email?: string | null; user_metadata?: any }) => {
     const displayName =
@@ -188,6 +205,9 @@ export default function Login() {
 
   // Redirect already-logged-in user to the right page (tutor → dashboard, student → /student, etc.)
   const redirectByRole = async () => {
+    if (redirectInFlightRef.current) return false;
+    redirectInFlightRef.current = true;
+    try {
     const { data: { session } } = await supabase.auth.getSession();
 
     // Check if user just logged out - don't auto-redirect them back
@@ -202,11 +222,14 @@ export default function Login() {
     if (!session?.user) return false;
     const user = session.user;
 
-    const { data: orgAdmin, error: orgAdminErr } = await supabase
-      .from('organization_admins').select('id').eq('user_id', user.id).maybeSingle();
-    if (orgAdminErr) {
-      console.warn('[Login] redirectByRole organization_admins check failed:', orgAdminErr);
-    }
+    const orgAdmin = await withTimeout(
+      orgAdminRowByUserDeduped(user.id),
+      3000,
+      'Org admin check timeout',
+    ).catch((err) => {
+      console.warn('[Login] redirectByRole org admin check timeout/failure:', err);
+      return null;
+    });
     if (orgAdmin) {
       const path = await getOrgAdminDashboardPath(supabase, user.id);
       navigate(path);
@@ -323,10 +346,15 @@ export default function Login() {
       } catch (_) {}
     }
     return false;
+    } finally {
+      redirectInFlightRef.current = false;
+    }
   };
 
   // When user opens /login with existing session (e.g. "remember me" + reload) → auto redirect
   useEffect(() => {
+    if (redirectOnceRef.current) return;
+    redirectOnceRef.current = true;
     redirectByRole();
   }, []);
 
@@ -348,16 +376,24 @@ export default function Login() {
 
   // When URL has access_token (e.g. after email confirmation) → set session from hash then redirect
   useEffect(() => {
+    if (hashHandledRef.current) return;
     const hash = window.location.hash?.replace(/^#/, '') || '';
     if (!hash.includes('access_token')) return;
+    hashHandledRef.current = true;
     const params = new URLSearchParams(hash);
     const access_token = params.get('access_token');
     const refresh_token = params.get('refresh_token');
     if (!access_token || !refresh_token) return;
     (async () => {
-      await supabase.auth.setSession({ access_token, refresh_token });
-      window.history.replaceState(null, '', window.location.pathname + window.location.search);
-      redirectByRole();
+      if (loginInFlightRef.current) return;
+      hashSessionRestoreInFlightRef.current = true;
+      try {
+        await supabase.auth.setSession({ access_token, refresh_token });
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        redirectByRole();
+      } finally {
+        hashSessionRestoreInFlightRef.current = false;
+      }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -365,30 +401,35 @@ export default function Login() {
   // Shared login handler – works for both tutor and student
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loginInFlightRef.current || hashSessionRestoreInFlightRef.current) return;
+    loginInFlightRef.current = true;
     setLoading(true);
     setError(null);
-    setRememberMe(rememberMe);
-    // Clear logout intent when user is actively logging in
-    sessionStorage.removeItem('tutlio_logout_intent');
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) {
-      setError(t('auth.invalidCredentials'));
-      setLoading(false);
-    } else if (data.user) {
-      const { data: orgAdminRow, error: orgAdminRowError } = await supabase
-        .from('organization_admins')
-        .select('id')
-        .eq('user_id', data.user.id)
-        .maybeSingle();
-      if (orgAdminRowError) {
-        console.warn('[Login] organization_admins lookup failed during login:', orgAdminRowError);
-      }
-      if (orgAdminRow) {
-        setLoading(false);
-        const path = await getOrgAdminDashboardPath(supabase, data.user.id);
-        navigate(path);
-        return;
-      }
+    try {
+      setRememberMe(rememberMe);
+      // Clear logout intent when user is actively logging in
+      sessionStorage.removeItem('tutlio_logout_intent');
+      const { data, error } = await withTimeout(
+        supabase.auth.signInWithPassword({ email, password }),
+        12000,
+        'Login timeout',
+      );
+      if (error) {
+        setError(t('auth.invalidCredentials'));
+      } else if (data.user) {
+        const orgAdminRow = await withTimeout(
+          orgAdminRowByUserDeduped(data.user.id),
+          3000,
+          'Org admin check timeout',
+        ).catch((err) => {
+          console.warn('[Login] org admin check during login timeout/failure:', err);
+          return null;
+        });
+        if (orgAdminRow) {
+          const path = await getOrgAdminDashboardPath(supabase, data.user.id);
+          navigate(path);
+          return;
+        }
 
       if (role === 'parent') {
         const { data: parentProfileId, error: parentErr } = await supabase
@@ -517,6 +558,10 @@ export default function Login() {
         return;
       }
 
+      setLoading(false);
+      }
+    } finally {
+      loginInFlightRef.current = false;
       setLoading(false);
     }
   };
