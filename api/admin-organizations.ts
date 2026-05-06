@@ -179,7 +179,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!idParam) {
         let { data: orgs, error } = await supabase
           .from('organizations')
-          .select('id, name, email, tutor_limit, tutor_license_count, status, features, slug, logo_url, brand_color, created_at')
+          .select('id, name, email, tutor_limit, tutor_license_count, status, features, slug, logo_url, brand_color, brand_color_secondary, created_at')
           .order('created_at', { ascending: false });
         if (error?.message?.includes('Could not find')) {
           ({ data: orgs, error } = await supabase
@@ -206,7 +206,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       let { data: org, error: orgErr } = await supabase
         .from('organizations')
-        .select('id, name, email, tutor_limit, tutor_license_count, status, features, slug, logo_url, brand_color, created_at')
+        .select('id, name, email, tutor_limit, tutor_license_count, status, features, slug, logo_url, brand_color, brand_color_secondary, created_at')
         .eq('id', idParam)
         .maybeSingle();
       if (orgErr?.message?.includes('Could not find')) {
@@ -420,7 +420,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const { data: before, error: beforeErr } = await supabase
         .from('organizations')
-        .select('id, name, email, tutor_limit, tutor_license_count, status, features, slug, logo_url, brand_color')
+        .select('id, name, email, tutor_limit, tutor_license_count, status, features, slug, logo_url, brand_color, brand_color_secondary')
         .eq('id', idParam)
         .maybeSingle();
 
@@ -457,6 +457,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if ('slug' in body) patch.slug = typeof body.slug === 'string' ? body.slug : null;
       if ('logo_url' in body) patch.logo_url = typeof body.logo_url === 'string' ? body.logo_url : null;
       if ('brand_color' in body) patch.brand_color = typeof body.brand_color === 'string' ? body.brand_color : '#6366f1';
+      if ('brand_color_secondary' in body) patch.brand_color_secondary = typeof body.brand_color_secondary === 'string' ? body.brand_color_secondary : '#8b5cf6';
 
       if (Object.keys(patch).length === 0) {
         return res.status(400).json({ error: 'No valid fields to update' });
@@ -466,7 +467,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .from('organizations')
         .update(patch as any)
         .eq('id', idParam)
-        .select('id, name, email, tutor_limit, tutor_license_count, status, features, slug, logo_url, brand_color')
+        .select('id, name, email, tutor_limit, tutor_license_count, status, features, slug, logo_url, brand_color, brand_color_secondary')
         .single();
 
       if (updErr) return res.status(500).json({ error: updErr.message });

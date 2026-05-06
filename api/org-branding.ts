@@ -18,7 +18,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: org, error } = await supabase
     .from('organizations')
-    .select('id, name, slug, logo_url, brand_color, features, entity_type')
+    .select('id, name, slug, logo_url, brand_color, brand_color_secondary, features, entity_type')
     .eq('slug', slug)
     .eq('status', 'active')
     .maybeSingle();
@@ -38,6 +38,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     slug: org.slug,
     logo_url: org.logo_url,
     brand_color: org.brand_color || '#6366f1',
+    brand_color_secondary: org.brand_color_secondary || '#8b5cf6',
     entity_type: org.entity_type,
   });
 }

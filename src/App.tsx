@@ -180,6 +180,7 @@ export default function App({ basename }: { basename: string }) {
 
         {/* Public Auth & Onboarding - NO UserProvider wrapper */}
         <Route path="/login" element={<Login />} />
+        <Route path="/:locale/login" element={<Login />} />
         <Route path="/auth/callback" element={<AuthCallback />} />
         <Route path="/register" element={<Register />} />
         <Route path="/reset-password" element={<ResetPassword />} />

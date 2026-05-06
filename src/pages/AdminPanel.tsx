@@ -131,6 +131,7 @@ export default function AdminPanel() {
   const [editSlug, setEditSlug] = useState('');
   const [editLogoUrl, setEditLogoUrl] = useState('');
   const [editBrandColor, setEditBrandColor] = useState('#6366f1');
+  const [editBrandColorSecondary, setEditBrandColorSecondary] = useState('#8b5cf6');
   const [detailStats, setDetailStats] = useState<OrgAdminStats | null>(null);
   const [soloTutors, setSoloTutors] = useState<SoloTutorAdminRow[]>([]);
   const [soloListLoading, setSoloListLoading] = useState(false);
@@ -332,6 +333,7 @@ export default function AdminPanel() {
       setEditSlug(org.slug || '');
       setEditLogoUrl(org.logo_url || '');
       setEditBrandColor(org.brand_color || '#6366f1');
+      setEditBrandColorSecondary(org.brand_color_secondary || '#8b5cf6');
       setDetailTutors(data.tutors || []);
       setDetailArchivedTutors(data.archived_tutors || []);
       setDetailStudents(data.students || []);
@@ -375,6 +377,7 @@ export default function AdminPanel() {
           slug: editSlug.trim() || null,
           logo_url: editLogoUrl.trim() || null,
           brand_color: editBrandColor.trim() || '#6366f1',
+          brand_color_secondary: editBrandColorSecondary.trim() || '#8b5cf6',
         }),
       });
       const data = await res.json();
@@ -1040,38 +1043,107 @@ export default function AdminPanel() {
                           <p className="text-[11px] text-slate-500">tutlio.lt/login?org={editSlug || 'slug'}</p>
                         </div>
                         <div className="space-y-1.5">
-                          <Label className="text-slate-400 text-xs">Logo URL</Label>
-                          <Input
-                            type="url"
-                            inputMode="url"
-                            placeholder="https://example.com/logo.png"
-                            value={editLogoUrl}
-                            onChange={(e) => setEditLogoUrl(e.target.value)}
-                            className="bg-white/10 border-white/20 text-white placeholder:text-slate-500 rounded-xl"
-                          />
+                          <Label className="text-slate-400 text-xs">Logo</Label>
+                          <div className="flex items-center gap-2">
+                            <Input
+                              type="url"
+                              inputMode="url"
+                              placeholder="https://example.com/logo.png"
+                              value={editLogoUrl}
+                              onChange={(e) => setEditLogoUrl(e.target.value)}
+                              className="bg-white/10 border-white/20 text-white placeholder:text-slate-500 rounded-xl flex-1"
+                            />
+                            <label className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-xl text-xs font-semibold text-white cursor-pointer flex-shrink-0 transition-colors">
+                              Įkelti
+                              <input
+                                type="file"
+                                accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                                className="hidden"
+                                onChange={async (e) => {
+                                  const file = e.target.files?.[0];
+                                  if (!file || !detailId) return;
+                                  if (file.size > 2 * 1024 * 1024) {
+                                    alert(`Failas per didelis: ${(file.size / 1024 / 1024).toFixed(1)} MB.\nMaksimalus dydis: 2 MB.\n\nSumažinkite paveikslėlį ir bandykite dar kartą.`);
+                                    e.target.value = '';
+                                    return;
+                                  }
+                                  setResult(null);
+                                  const reader = new FileReader();
+                                  reader.onload = async () => {
+                                    const base64 = (reader.result as string).split(',')[1];
+                                    try {
+                                      const res = await fetch('/api/upload-org-logo', {
+                                        method: 'POST',
+                                        headers: {
+                                          'Content-Type': 'application/json',
+                                          'x-admin-secret': platformAdminSecret,
+                                        },
+                                        body: JSON.stringify({ base64, contentType: file.type, orgId: detailId }),
+                                      });
+                                      const data = await res.json();
+                                      if (res.ok && data.url) {
+                                        setEditLogoUrl(data.url);
+                                        setResult({ success: true, message: 'Logo įkeltas!' });
+                                      } else {
+                                        setResult({ success: false, message: data.error || 'Nepavyko įkelti logo' });
+                                      }
+                                    } catch {
+                                      setResult({ success: false, message: 'Klaida keliant logo' });
+                                    }
+                                  };
+                                  reader.readAsDataURL(file);
+                                  e.target.value = '';
+                                }}
+                              />
+                            </label>
+                          </div>
+                          <p className="text-[11px] text-slate-500">PNG, JPG, WebP arba SVG · max 2 MB · rekomenduojama ~200×60 px</p>
                           {editLogoUrl && (
-                            <div className="mt-2 p-2 bg-white/5 rounded-lg inline-block">
-                              <img src={editLogoUrl} alt="Org logo" className="h-8 max-w-[160px] object-contain" />
+                            <div className="mt-2 p-3 bg-white/5 rounded-lg inline-block">
+                              <img src={editLogoUrl} alt="Org logo" className="h-10 max-w-[200px] object-contain" />
                             </div>
                           )}
                         </div>
-                        <div className="space-y-1.5">
-                          <Label className="text-slate-400 text-xs">Pagrindinė spalva</Label>
-                          <div className="flex items-center gap-3">
-                            <input
-                              type="color"
-                              value={editBrandColor}
-                              onChange={(e) => setEditBrandColor(e.target.value)}
-                              className="w-10 h-10 rounded-lg border border-white/20 cursor-pointer bg-transparent"
-                            />
-                            <Input
-                              type="text"
-                              value={editBrandColor}
-                              onChange={(e) => setEditBrandColor(e.target.value)}
-                              className="bg-white/10 border-white/20 text-white w-28 rounded-xl font-mono text-sm"
-                            />
-                            <div className="h-6 w-6 rounded-full" style={{ backgroundColor: editBrandColor }} />
+                        <div className="space-y-3">
+                          <Label className="text-slate-400 text-xs">Spalvos (gradientas kaip Tutlio indigo → violet)</Label>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <span className="text-[11px] text-slate-500">Pirminė</span>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="color"
+                                  value={editBrandColor}
+                                  onChange={(e) => setEditBrandColor(e.target.value)}
+                                  className="w-9 h-9 rounded-lg border border-white/20 cursor-pointer bg-transparent"
+                                />
+                                <Input
+                                  type="text"
+                                  value={editBrandColor}
+                                  onChange={(e) => setEditBrandColor(e.target.value)}
+                                  className="bg-white/10 border-white/20 text-white rounded-xl font-mono text-xs"
+                                />
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <span className="text-[11px] text-slate-500">Antrinė</span>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="color"
+                                  value={editBrandColorSecondary}
+                                  onChange={(e) => setEditBrandColorSecondary(e.target.value)}
+                                  className="w-9 h-9 rounded-lg border border-white/20 cursor-pointer bg-transparent"
+                                />
+                                <Input
+                                  type="text"
+                                  value={editBrandColorSecondary}
+                                  onChange={(e) => setEditBrandColorSecondary(e.target.value)}
+                                  className="bg-white/10 border-white/20 text-white rounded-xl font-mono text-xs"
+                                />
+                              </div>
+                            </div>
                           </div>
+                          <div className="h-8 rounded-lg" style={{ background: `linear-gradient(135deg, ${editBrandColor} 0%, ${editBrandColorSecondary} 100%)` }} />
+                          <p className="text-[11px] text-slate-500">Tutlio originalus: #6366f1 → #8b5cf6</p>
                         </div>
                       </div>
                     )}

@@ -6,6 +6,7 @@ export interface OrgBranding {
   slug: string;
   logo_url: string | null;
   brand_color: string;
+  brand_color_secondary: string;
   entity_type: string;
 }
 

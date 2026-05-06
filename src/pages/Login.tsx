@@ -615,19 +615,30 @@ export default function Login() {
     setResetSent(false);
   };
 
+  const brandColor = orgBranding?.brand_color || null;
+  const brandColor2 = orgBranding?.brand_color_secondary || brandColor;
+  const loginBgStyle = brandColor
+    ? { background: `linear-gradient(135deg, color-mix(in srgb, ${brandColor} 30%, #0f0f23) 0%, color-mix(in srgb, ${brandColor} 45%, #1a1a2e) 50%, color-mix(in srgb, ${brandColor2} 35%, #16162a) 100%)` }
+    : undefined;
+  const leftOverlayStyle = brandColor
+    ? { background: `linear-gradient(135deg, color-mix(in srgb, ${brandColor} 45%, #000) 0%, color-mix(in srgb, ${brandColor2} 55%, #1a1a2e) 100%)`, opacity: 0.8 }
+    : undefined;
+
   return (
     <div className="min-h-screen flex">
       {/* ── Left Column: Marketing/Image Sidebar ────────────────────────────── */}
       <div className="hidden lg:block w-1/2 relative bg-indigo-950 overflow-hidden">
         <div className="absolute inset-0 z-0">
-          {/* Associative photo from Unsplash */}
           <img
             src="https://images.unsplash.com/photo-1522202176988-66273c2fd55f?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80"
             alt="Students studying"
             className="w-full h-full object-cover opacity-50 mix-blend-overlay"
           />
         </div>
-        <div className="absolute inset-0 bg-gradient-to-br from-indigo-900/80 to-violet-900/80 z-10" />
+        <div
+          className={leftOverlayStyle ? 'absolute inset-0 z-10' : 'absolute inset-0 bg-gradient-to-br from-indigo-900/80 to-violet-900/80 z-10'}
+          style={leftOverlayStyle}
+        />
 
         <div className="relative z-20 flex flex-col justify-between p-12 h-full text-white">
           <Link to="/" className="flex items-center gap-2 hover:bg-white/20 transition-all w-fit text-sm font-medium bg-white/10 px-5 py-2.5 rounded-full backdrop-blur border border-white/10">
@@ -637,23 +648,26 @@ export default function Login() {
 
           <div className="max-w-xl space-y-6">
             <h1 className="text-5xl font-bold leading-tight tracking-tight">{t('login.heroTitle')}</h1>
-            <p className="text-indigo-200 text-xl leading-relaxed font-light">
+            <p className="text-white/70 text-xl leading-relaxed font-light">
               {t('login.heroDesc')}
             </p>
           </div>
 
-          <div className="text-sm text-indigo-300 font-medium">
+          <div className="text-sm text-white/50 font-medium">
             {t('login.copyright', { year: String(new Date().getFullYear()) })}
           </div>
         </div>
       </div>
 
       {/* ── Right Column: Forms ─────────────────────────────────────────────── */}
-      <div className="w-full lg:w-1/2 bg-gradient-to-br from-indigo-950 via-indigo-900 to-violet-900 flex flex-col items-center justify-start lg:justify-center px-4 py-8 lg:py-4 relative">
+      <div
+        className={`w-full lg:w-1/2 flex flex-col items-center justify-start lg:justify-center px-4 py-8 lg:py-4 relative ${!brandColor ? 'bg-gradient-to-br from-indigo-950 via-indigo-900 to-violet-900' : ''}`}
+        style={loginBgStyle}
+      >
 
         {/* Decorative blobs */}
-        <div className="absolute top-0 left-0 w-96 h-96 bg-indigo-600/20 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 right-0 w-80 h-80 bg-violet-600/20 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute top-0 left-0 w-96 h-96 rounded-full blur-3xl pointer-events-none" style={brandColor ? { backgroundColor: `color-mix(in srgb, ${brandColor} 20%, transparent)` } : { backgroundColor: 'rgb(79 70 229 / 0.2)' }} />
+        <div className="absolute bottom-0 right-0 w-80 h-80 rounded-full blur-3xl pointer-events-none" style={brandColor ? { backgroundColor: `color-mix(in srgb, ${brandColor} 15%, transparent)` } : { backgroundColor: 'rgb(124 58 237 / 0.2)' }} />
 
         {/* Mobile back link – part of normal flow so it's always visible */}
         <div className="w-full max-w-md mb-4 lg:hidden relative z-10">
@@ -667,18 +681,20 @@ export default function Login() {
           {/* Logo */}
           <div className="text-center mb-8">
             {orgBranding?.logo_url ? (
-              <>
-                <img src={orgBranding.logo_url} alt={orgBranding.name} className="h-14 max-w-[180px] object-contain mx-auto mb-3" />
-                <h1 className="text-2xl font-bold text-white tracking-tight">{orgBranding.name}</h1>
-                <p className="text-indigo-300 text-xs mt-2 opacity-70">powered by Tutlio</p>
-              </>
+              <div className="inline-flex flex-col items-center">
+                <div className="relative">
+                  <img src={orgBranding.logo_url} alt={orgBranding.name} className="h-14 max-w-[180px] object-contain" />
+                  <span className="absolute -bottom-4 -right-8 text-[10px] text-white/40 whitespace-nowrap">powered by Tutlio</span>
+                </div>
+                <h1 className="text-2xl font-bold text-white tracking-tight mt-6">{orgBranding.name}</h1>
+              </div>
             ) : (
               <>
                 <img src="/logo-icon.png" alt="Tutlio" className="w-14 h-14 rounded-2xl mx-auto mb-3 shadow-xl" />
                 <h1 className="text-2xl font-bold text-white tracking-tight">Tutlio</h1>
               </>
             )}
-            <p className="text-indigo-300 text-sm mt-1">{t('login.welcomeBack')}</p>
+            <p className="text-white/60 text-sm mt-1">{t('login.welcomeBack')}</p>
           </div>
 
           {authHashBanner && (
