@@ -5,9 +5,76 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { formatLithuanianPhone, validateLithuanianPhone } from '@/lib/utils';
 import { Eye, EyeOff, Building2, AlertCircle } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
+
+const COUNTRY_DIAL_CODES = [
+  { code: 'LT', label: 'Lithuania', dial: '+370' },
+  { code: 'LV', label: 'Latvia', dial: '+371' },
+  { code: 'EE', label: 'Estonia', dial: '+372' },
+  { code: 'PL', label: 'Poland', dial: '+48' },
+  { code: 'DE', label: 'Germany', dial: '+49' },
+  { code: 'GB', label: 'United Kingdom', dial: '+44' },
+  { code: 'IE', label: 'Ireland', dial: '+353' },
+  { code: 'NO', label: 'Norway', dial: '+47' },
+  { code: 'SE', label: 'Sweden', dial: '+46' },
+  { code: 'FI', label: 'Finland', dial: '+358' },
+  { code: 'DK', label: 'Denmark', dial: '+45' },
+  { code: 'NL', label: 'Netherlands', dial: '+31' },
+  { code: 'BE', label: 'Belgium', dial: '+32' },
+  { code: 'FR', label: 'France', dial: '+33' },
+  { code: 'ES', label: 'Spain', dial: '+34' },
+  { code: 'IT', label: 'Italy', dial: '+39' },
+  { code: 'PT', label: 'Portugal', dial: '+351' },
+  { code: 'US', label: 'United States', dial: '+1' },
+  { code: 'CA', label: 'Canada', dial: '+1' },
+  { code: 'AU', label: 'Australia', dial: '+61' },
+  { code: 'NZ', label: 'New Zealand', dial: '+64' },
+  { code: 'IN', label: 'India', dial: '+91' },
+  { code: 'BR', label: 'Brazil', dial: '+55' },
+  { code: 'MX', label: 'Mexico', dial: '+52' },
+  { code: 'UA', label: 'Ukraine', dial: '+380' },
+  { code: 'TR', label: 'Turkey', dial: '+90' },
+];
+
+const PHONE_EXAMPLES_BY_DIAL: Record<string, string> = {
+  '+370': '61234567',
+  '+371': '20123456',
+  '+372': '51234567',
+  '+48': '600123456',
+  '+49': '15123456789',
+  '+44': '7400123456',
+  '+353': '851234567',
+  '+47': '41234567',
+  '+46': '701234567',
+  '+358': '401234567',
+  '+45': '20123456',
+  '+31': '612345678',
+  '+32': '470123456',
+  '+33': '612345678',
+  '+34': '612345678',
+  '+39': '3123456789',
+  '+351': '912345678',
+  '+1': '6175551234',
+  '+61': '412345678',
+  '+64': '211234567',
+  '+91': '9123456789',
+  '+55': '11912345678',
+  '+52': '5512345678',
+  '+380': '501234567',
+  '+90': '5321234567',
+};
+
+function digitsOnly(value: string): string {
+  return value.replace(/\D/g, '');
+}
+
+function isValidInternationalPhone(dialCode: string, localNumber: string): boolean {
+  const dialDigits = digitsOnly(dialCode);
+  const localDigits = digitsOnly(localNumber);
+  const total = `${dialDigits}${localDigits}`;
+  return total.length >= 7 && total.length <= 15;
+}
 
 export default function Register() {
   const { t } = useTranslation();
@@ -20,6 +87,8 @@ export default function Register() {
 
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [phoneDialCode, setPhoneDialCode] = useState('+370');
+  const [phoneLocal, setPhoneLocal] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -41,6 +110,8 @@ export default function Register() {
   const [agreeTerms, setAgreeTerms] = useState(false);
 
   const navigate = useNavigate();
+  const phoneExampleLocal = PHONE_EXAMPLES_BY_DIAL[phoneDialCode] || '61234567';
+  const phoneExampleFull = `${phoneDialCode} ${phoneExampleLocal}`;
 
   useEffect(() => {
     if (!normalizedOrgToken) return;
@@ -88,11 +159,13 @@ export default function Register() {
       return;
     }
 
-    if (!validateLithuanianPhone(phone)) {
-      setError(t('register.phoneError'));
+    if (!isValidInternationalPhone(phoneDialCode, phoneLocal)) {
+      setError(t('register.phoneErrorIntl', { example: phoneExampleFull }));
       setLoading(false);
       return;
     }
+    const normalizedPhone = `${phoneDialCode}${digitsOnly(phoneLocal)}`;
+    setPhone(normalizedPhone);
 
     if (!agreePrivacy || !agreeTerms) {
       setError(t('register.mustAgree'));
@@ -115,7 +188,7 @@ export default function Register() {
           email,
           password,
           fullName,
-          phone,
+          phone: normalizedPhone,
           orgToken: normalizedOrgToken,
           acceptedAt,
         }),
@@ -145,7 +218,7 @@ export default function Register() {
           emailRedirectTo,
           data: {
             full_name: fullName,
-            phone,
+            phone: normalizedPhone,
             accepted_privacy_policy_at: acceptedAt,
             accepted_terms_at: acceptedAt,
             ...(stripeCheckoutSessionId ? { stripe_checkout_session_id: stripeCheckoutSessionId } : {}),
@@ -168,7 +241,7 @@ export default function Register() {
       let profileData: any = {
         id: user.id,
         full_name: meta.full_name,
-        phone: meta.phone || '',
+        phone: meta.phone || normalizedPhone,
         email: user.email,
         accepted_privacy_policy_at: meta.accepted_privacy_policy_at || acceptedAt,
         accepted_terms_at: meta.accepted_terms_at || acceptedAt,
@@ -283,8 +356,32 @@ export default function Register() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="phone">{t('register.phone')}</Label>
-              <Input id="phone" type="tel" placeholder={t('register.phonePlaceholder')} value={phone} onChange={(e) => setPhone(formatLithuanianPhone(e.target.value))} required />
-              <p className="text-xs text-gray-500">{t('register.phoneHint')}</p>
+              <div className="grid grid-cols-[150px_1fr] gap-2">
+                <select
+                  aria-label="Country code"
+                  value={phoneDialCode}
+                  onChange={(e) => setPhoneDialCode(e.target.value)}
+                  className="h-10 rounded-md border border-input bg-background px-2 text-sm"
+                >
+                  {COUNTRY_DIAL_CODES.map((c) => (
+                    <option key={`${c.code}-${c.dial}`} value={c.dial}>
+                      {c.code} {c.dial}
+                    </option>
+                  ))}
+                </select>
+                <Input
+                  id="phone"
+                  type="tel"
+                  placeholder={phoneExampleLocal}
+                  value={phoneLocal}
+                  onChange={(e) => setPhoneLocal(e.target.value)}
+                  required
+                />
+              </div>
+              <p className="text-xs text-gray-500">{t('register.phonePlaceholderIntl', { example: phoneExampleLocal })}</p>
+              <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
+                {t('register.phoneHintIntl', { example: phoneExampleFull })}
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="email">{t('common.email')}</Label>
