@@ -3231,6 +3231,7 @@ export const en: Record<string, string> = {
   'stuSched.occurred': 'Occurred',
   'stuSched.occurredGroup': 'Occurred (group)',
   'stuSched.packageReserved': 'Lesson reserved using lesson package. Stripe payment not required.',
+  'stuSched.monthlyBillingReserved': 'Lesson reserved successfully. You do not need to pay now - your tutor or organization admin will send an invoice at the end of the month.',
   'stuSched.packageUpdateFailed': 'Package update failed',
   'stuSched.payAfterLesson': 'Payment after lesson',
   'stuSched.payBefore': 'Payment before lesson',

@@ -3231,6 +3231,7 @@ export const lt: Record<string, string> = {
   'stuSched.occurred': 'Įvyko',
   'stuSched.occurredGroup': 'Įvyko (grupinė)',
   'stuSched.packageReserved': 'Pamoka rezervuota naudojant pamokų paketą. Stripe apmokėjimas nereikalingas.',
+  'stuSched.monthlyBillingReserved': 'Pamoka sėkmingai rezervuota. Šiuo metu mokėti nereikia - mėnesio pabaigoje korepetitorius arba organizacijos administratorius atsiųs sąskaitą.',
   'stuSched.packageUpdateFailed': 'Nepavyko atnaujinti pamokų paketo. Rezervacija atšaukta, bandykite dar kartą.',
   'stuSched.payAfterLesson': 'Mokėjimas po pamokos',
   'stuSched.payBefore': 'Mokėjimas prieš pamoką',
