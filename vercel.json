@@ -28,12 +28,20 @@
     ],
     "rewrites": [
         {
+            "source": "/robots.txt",
+            "destination": "/api/robots"
+        },
+        {
+            "source": "/sitemap.xml",
+            "destination": "/api/sitemap"
+        },
+        {
             "source": "/blog/:slug",
-            "destination": "/api/blog-render?slug=:slug&locale=lt"
+            "destination": "/api/blog-render?slug=:slug"
         },
         {
             "source": "/blog",
-            "destination": "/api/blog-render?locale=lt"
+            "destination": "/api/blog-render"
         },
         {
             "source": "/:locale/blog/:slug",
@@ -44,8 +52,80 @@
             "destination": "/api/blog-render?locale=:locale"
         },
         {
-            "source": "/sitemap.xml",
-            "destination": "/api/sitemap"
+            "source": "/pricing",
+            "destination": "/api/page-render?page=pricing"
+        },
+        {
+            "source": "/:locale/pricing",
+            "destination": "/api/page-render?page=pricing&locale=:locale"
+        },
+        {
+            "source": "/apie-mus",
+            "destination": "/api/page-render?page=about"
+        },
+        {
+            "source": "/:locale/apie-mus",
+            "destination": "/api/page-render?page=about&locale=:locale"
+        },
+        {
+            "source": "/kontaktai",
+            "destination": "/api/page-render?page=contacts"
+        },
+        {
+            "source": "/:locale/kontaktai",
+            "destination": "/api/page-render?page=contacts&locale=:locale"
+        },
+        {
+            "source": "/",
+            "destination": "/api/page-render?page=landing"
+        },
+        {
+            "source": "/en",
+            "destination": "/api/page-render?page=landing&locale=en"
+        },
+        {
+            "source": "/lt",
+            "destination": "/api/page-render?page=landing&locale=lt"
+        },
+        {
+            "source": "/pl",
+            "destination": "/api/page-render?page=landing&locale=pl"
+        },
+        {
+            "source": "/lv",
+            "destination": "/api/page-render?page=landing&locale=lv"
+        },
+        {
+            "source": "/ee",
+            "destination": "/api/page-render?page=landing&locale=ee"
+        },
+        {
+            "source": "/fr",
+            "destination": "/api/page-render?page=landing&locale=fr"
+        },
+        {
+            "source": "/es",
+            "destination": "/api/page-render?page=landing&locale=es"
+        },
+        {
+            "source": "/de",
+            "destination": "/api/page-render?page=landing&locale=de"
+        },
+        {
+            "source": "/se",
+            "destination": "/api/page-render?page=landing&locale=se"
+        },
+        {
+            "source": "/dk",
+            "destination": "/api/page-render?page=landing&locale=dk"
+        },
+        {
+            "source": "/fi",
+            "destination": "/api/page-render?page=landing&locale=fi"
+        },
+        {
+            "source": "/no",
+            "destination": "/api/page-render?page=landing&locale=no"
         },
         {
             "source": "/((?!api/|@|src/|assets/|node_modules/|\\.vite/|favicon\\.ico|favicon\\.svg|robots\\.txt|sitemap\\.xml|manifest\\.webmanifest).*)",

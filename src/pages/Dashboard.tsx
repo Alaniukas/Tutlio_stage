@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import Layout from '@/components/Layout';
 import TutorOnboarding from '@/components/TutorOnboarding';
 import SessionFiles from '@/components/SessionFiles';
+import WhiteboardButton from '@/components/WhiteboardButton';
 import { supabase } from '@/lib/supabase';
 import { getCached, setCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
@@ -1975,6 +1976,8 @@ export default function DashboardPage() {
                                 {t('dash.joinVideoCall')}
                             </a>
                         )}
+
+                        <WhiteboardButton roomId={(selectedSession as any)?.whiteboard_room_id} />
 
                         {/* Action buttons area */}
                         {isOrgTutor !== true && selectedSession?.payment_status === 'paid_by_student' && !selectedSession?.paid && (

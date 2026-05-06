@@ -11,6 +11,7 @@ import { useTranslation } from '@/lib/i18n';
 import { Clock, CheckCircle, XCircle, CalendarDays, RefreshCw, ShieldAlert, ListOrdered, Mail, Video, ChevronLeft, ChevronRight, CreditCard, Loader2, Package, Users, FileText } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import SessionFiles from '@/components/SessionFiles';
+import WhiteboardButton from '@/components/WhiteboardButton';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DateInput } from '@/components/ui/date-input';
@@ -607,7 +608,7 @@ export default function StudentSessions() {
 
         /** Narrow columns + no nested embed — `*, subjects(...)` pegged Postgres/RLS (statement timeouts). */
         const SESSION_LIST_COLUMNS =
-            'id,start_time,end_time,status,paid,price,topic,meeting_link,payment_status,tutor_comment,show_comment_to_student,subject_id,lesson_package_id,is_late_cancelled,cancellation_penalty_amount,penalty_resolution,cancelled_by,no_show_when';
+            'id,start_time,end_time,status,paid,price,topic,meeting_link,whiteboard_room_id,payment_status,tutor_comment,show_comment_to_student,subject_id,lesson_package_id,is_late_cancelled,cancellation_penalty_amount,penalty_resolution,cancelled_by,no_show_when';
 
         const secondaryGen = ++sessionsSecondaryGenRef.current;
 
@@ -1589,6 +1590,8 @@ export default function StudentSessions() {
                                 </div>
                             )
                         )}
+
+                        <WhiteboardButton roomId={(selectedSession as any)?.whiteboard_room_id} />
 
                         {/* Credit balance + Stripe payment button for unpaid sessions (only for self-payers) */}
                         {selectedSession?.status === 'active' && !selectedSession.paid && paymentPayer !== 'parent' && !manualPaymentsOnly && (

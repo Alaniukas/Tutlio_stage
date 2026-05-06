@@ -10,6 +10,7 @@ import { LayoutDashboard, BookOpen, CalendarDays, Clock, Settings, Info, Mail, H
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import OrgSuspendedBanner from '@/components/OrgSuspendedBanner';
 import PwaInstallPrompt from '@/components/PwaInstallPrompt';
+import BrandedLogo from '@/components/BrandedLogo';
 import { useTranslation } from '@/lib/i18n';
 import { useTotalChatUnread } from '@/hooks/useChat';
 import { usePushSubscription } from '@/hooks/usePushSubscription';
@@ -210,8 +211,7 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
             <header className="bg-white/80 backdrop-blur-md border-b border-gray-100 px-3 sm:px-4 py-3 flex items-center justify-between gap-2 sticky top-0 z-40 min-w-0">
                 <div className="flex items-center gap-2 sm:gap-4 min-w-0 flex-1">
                     <Link to="/" className="flex items-center gap-2 flex-shrink-0">
-                        <img src="/logo-icon.png" alt="Tutlio" className="w-8 h-8 rounded-xl" />
-                        <span className="font-black text-gray-900 text-base tracking-tight hidden sm:block">Tutlio</span>
+                        <BrandedLogo size="sm" nameClassName="hidden sm:block" />
                     </Link>
 
                     <div className="cursor-pointer hover:bg-indigo-50/50 p-1.5 rounded-xl transition-colors min-w-0 flex-1 sm:flex-initial">

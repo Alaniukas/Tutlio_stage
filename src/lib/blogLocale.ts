@@ -14,7 +14,7 @@ export function resolveField(post: Record<string, unknown>, field: string, local
   return (lt && typeof lt === 'string') ? lt : '';
 }
 
-const DATE_LOCALE_MAP: Record<Locale, string> = {
+const DATE_LOCALE_MAP: Partial<Record<Locale, string>> = {
   lt: 'lt-LT', en: 'en-US', pl: 'pl-PL', lv: 'lv-LV', ee: 'et-EE',
 };
 

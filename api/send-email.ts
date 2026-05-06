@@ -160,7 +160,20 @@ const baseStyles = `
   </style>
 `;
 
-function wrap(content: string, locale: Locale = 'lt'): string {
+interface EmailBranding {
+  name: string;
+  logo_url: string | null;
+  brand_color: string;
+}
+
+function wrap(content: string, locale: Locale = 'lt', branding?: EmailBranding | null): string {
+  const brandName = branding?.name || 'Tutlio';
+  const logoHtml = branding?.logo_url
+    ? `<img src="${branding.logo_url}" alt="${brandName}" style="max-height:36px;max-width:160px;" />`
+    : `<span style="font-size:26px;font-weight:900;color:#4f46e5;letter-spacing:-0.5px;">Tutlio <span style="font-size:24px;">🎓</span></span>`;
+  const poweredBy = branding?.name
+    ? `<p style="color:#9ca3af;font-size:11px;margin:8px 0 0;">powered by Tutlio</p>`
+    : '';
   return `<!DOCTYPE html>
 <html lang="${locale}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">${baseStyles}</head>
@@ -170,7 +183,7 @@ function wrap(content: string, locale: Locale = 'lt'): string {
 <table role="presentation" width="560" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;max-width:560px;width:100%;background-color:#ffffff;">
 <tr><td style="padding:0;background-color:#ffffff;">
   <div style="background-color:#ffffff;padding:20px 24px;text-align:center;border-bottom:1px solid #f0f0f0;">
-    <span style="font-size:26px;font-weight:900;color:#4f46e5;letter-spacing:-0.5px;">Tutlio <span style="font-size:24px;">🎓</span></span>
+    ${logoHtml}${poweredBy}
   </div>
   ${content}
 </td></tr></table>
@@ -372,7 +385,8 @@ function sessionReminder(d: any, locale: Locale) {
         ${td(t(locale, 'em.labelTime'), d.time)}
         ${td(t(locale, 'em.labelDuration'), d.duration ? d.duration + ' ' + t(locale, 'em.min') : '60 ' + t(locale, 'em.min'))}
         ${!d.isTutor ? td(t(locale, 'em.labelPriceAlt'), d.price ? '€' + d.price : '–', !d.meetingLink && !d.tutorComment) : ''}
-        ${d.meetingLink ? `<tr><td style="padding:10px 0;${!d.tutorComment ? ' border-bottom:1px solid #f0eeff;' : ''} color:#6b7280; font-size:14px;">${t(locale, 'em.labelLink')}</td><td style="padding:10px 0;${!d.tutorComment ? ' border-bottom:1px solid #f0eeff;' : ''} text-align:right;"><a href="${d.meetingLink}" style="color:#6366f1; font-weight:600; font-size:14px; text-decoration:none;">${t(locale, 'em.btnJoinNow')}</a></td></tr>` : ''}
+        ${d.meetingLink ? `<tr><td style="padding:10px 0;${!d.whiteboardLink && !d.tutorComment ? ' border-bottom:1px solid #f0eeff;' : ''} color:#6b7280; font-size:14px;">${t(locale, 'em.labelLink')}</td><td style="padding:10px 0;${!d.whiteboardLink && !d.tutorComment ? ' border-bottom:1px solid #f0eeff;' : ''} text-align:right;"><a href="${d.meetingLink}" style="color:#6366f1; font-weight:600; font-size:14px; text-decoration:none;">${t(locale, 'em.btnJoinNow')}</a></td></tr>` : ''}
+        ${d.whiteboardLink ? `<tr><td style="padding:10px 0;${!d.tutorComment ? ' border-bottom:1px solid #f0eeff;' : ''} color:#6b7280; font-size:14px;">${t(locale, 'em.labelWhiteboard')}</td><td style="padding:10px 0;${!d.tutorComment ? ' border-bottom:1px solid #f0eeff;' : ''} text-align:right;"><a href="${d.whiteboardLink}" style="color:#7c3aed; font-weight:600; font-size:14px; text-decoration:none;">${t(locale, 'em.btnOpenWhiteboard')}</a></td></tr>` : ''}
         ${d.tutorComment ? `<tr><td colspan="2" style="padding:16px 0 0 0;"><div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:16px;"><p style="color:#1e3a8a; font-size:13px; font-weight:700; margin:0 0 6px 0;">${t(locale, 'em.tutorComment')}</p><div style="color:#1e40af; font-size:14px; line-height:1.5; white-space:pre-wrap;">${d.tutorComment}</div></div></td></tr>` : ''}
         </table></div>
         <div style="text-align:center; margin-top:20px;">
@@ -398,6 +412,7 @@ function sessionReminderPayer(d: any, locale: Locale) {
         ${td(t(locale, 'em.labelDuration'), d.duration ? d.duration + ' ' + t(locale, 'em.min') : '60 ' + t(locale, 'em.min'))}
         ${td(t(locale, 'em.labelPriceAlt'), d.price ? '€' + d.price : '–', !d.meetingLink)}
         ${d.meetingLink ? td(t(locale, 'em.labelLink'), `<a href="${d.meetingLink}" style="color:#6366f1; font-weight:600; text-decoration:none;">${t(locale, 'em.btnJoin')}</a>`, false) : ''}
+        ${d.whiteboardLink ? td(t(locale, 'em.labelWhiteboard'), `<a href="${d.whiteboardLink}" style="color:#7c3aed; font-weight:600; text-decoration:none;">${t(locale, 'em.btnOpenWhiteboard')}</a>`, false) : ''}
         </table></div>
         <div class="info-card" style="background:#f8fafc; border-color:#e2e8f0;">
           <p style="color:#374151; font-size:14px; font-weight:700; margin:0 0 8px;">${t(locale, 'em.tutorContacts')}</p>
@@ -1858,6 +1873,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const locale: Locale = 'lt';
 
+    // Resolve org branding for whitelabel emails
+    let orgBranding: EmailBranding | null = null;
+    const orgIdForBranding = data.organizationId || data.organization_id || null;
+    if (orgIdForBranding) {
+      try {
+        const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+        const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+        if (supabaseUrl && serviceKey) {
+          const sb = createClient(supabaseUrl, serviceKey);
+          const { data: org } = await sb
+            .from('organizations')
+            .select('name, logo_url, brand_color, features')
+            .eq('id', orgIdForBranding)
+            .maybeSingle();
+          if (org) {
+            const features = (org.features && typeof org.features === 'object' ? org.features : {}) as Record<string, unknown>;
+            if (features.custom_branding && org.logo_url) {
+              orgBranding = { name: org.name, logo_url: org.logo_url, brand_color: org.brand_color || '#6366f1' };
+            }
+          }
+        }
+      } catch {}
+    }
+
+    // Patch the email HTML post-generation to inject org branding into the wrap() header
+    function applyBranding(result: { subject: string; html: string }): { subject: string; html: string } {
+      if (!orgBranding) return result;
+      const logoHtml = orgBranding.logo_url
+        ? `<img src="${orgBranding.logo_url}" alt="${escapeHtml(orgBranding.name)}" style="max-height:36px;max-width:160px;" />`
+        : `<span style="font-size:26px;font-weight:900;color:${orgBranding.brand_color};letter-spacing:-0.5px;">${escapeHtml(orgBranding.name)}</span>`;
+      const poweredBy = `<p style="color:#9ca3af;font-size:11px;margin:8px 0 0;">powered by Tutlio</p>`;
+      const defaultHeader = `<span style="font-size:26px;font-weight:900;color:#4f46e5;letter-spacing:-0.5px;">Tutlio <span style="font-size:24px;">🎓</span></span>`;
+      const branded = result.html.replace(defaultHeader, `${logoHtml}${poweredBy}`);
+      return { subject: result.subject, html: branded };
+    }
+
     let emailContent: { subject: string; html: string };
     switch (type) {
       case 'booking_confirmation': emailContent = bookingConfirmation(data, locale); break;
@@ -1907,6 +1958,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'parent_invite': emailContent = parentInvite(data, locale); break;
       default: return res.status(400).json({ error: `Unknown email type: ${type}` });
     }
+
+    emailContent = applyBranding(emailContent);
 
     const emailPayload: Parameters<typeof resend.emails.send>[0] = {
       from: FROM_EMAIL,

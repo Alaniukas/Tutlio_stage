@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import OrgSuspendedBanner from '@/components/OrgSuspendedBanner';
 import PwaInstallPrompt from '@/components/PwaInstallPrompt';
+import BrandedLogo from '@/components/BrandedLogo';
 import { useTranslation } from '@/lib/i18n';
 import { useUser } from '@/contexts/UserContext';
 import { useTotalChatUnread } from '@/hooks/useChat';
@@ -142,10 +143,7 @@ export default function Layout({ children }: LayoutProps) {
           sidebarExpanded ? 'items-center justify-between p-4' : 'flex-col items-center gap-2 py-3 px-2'
         )}>
           <Link to="/" className="flex items-center gap-2 min-w-0">
-            <img src="/logo-icon.png" alt="Tutlio" className="w-9 h-9 rounded-xl flex-shrink-0" />
-            {sidebarExpanded && (
-              <span className="font-black text-gray-900 text-base tracking-tight truncate">Tutlio</span>
-            )}
+            <BrandedLogo size="md" showName={sidebarExpanded} />
           </Link>
           <button
             onClick={() => {
@@ -259,8 +257,7 @@ export default function Layout({ children }: LayoutProps) {
           <aside className="relative z-50 flex h-full w-72 max-w-[85vw] flex-col border-r border-gray-100 bg-white">
             <div className="flex items-center justify-between border-b border-gray-100 p-4">
               <Link to="/" className="flex items-center gap-2" onClick={() => setMobileOpen(false)}>
-                <img src="/logo-icon.png" alt="Tutlio" className="w-9 h-9 rounded-xl" />
-                <span className="font-black text-gray-900 text-base tracking-tight">Tutlio</span>
+                <BrandedLogo size="md" />
               </Link>
               <button
                 onClick={() => setMobileOpen(false)}
@@ -348,8 +345,7 @@ export default function Layout({ children }: LayoutProps) {
             <Menu className="w-5 h-5" />
           </button>
           <div className="flex items-center gap-2">
-            <img src="/logo-icon.png" alt="Tutlio" className="w-8 h-8 rounded-xl" />
-            <span className="font-black text-gray-900 text-base tracking-tight">Tutlio</span>
+            <BrandedLogo size="sm" />
           </div>
           <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
             {initials}

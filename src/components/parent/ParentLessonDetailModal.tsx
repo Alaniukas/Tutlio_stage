@@ -24,6 +24,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import StatusBadge from '@/components/StatusBadge';
+import WhiteboardButton from '@/components/WhiteboardButton';
 import { normalizeUrl } from '@/lib/utils';
 /** Tutor contact + payment / cancellation rules (from profiles). */
 export type ParentTutorContactPolicy = {
@@ -49,6 +50,7 @@ export type ParentLessonModalSession = {
   payment_status?: string;
   price: number | null;
   meeting_link: string | null;
+  whiteboard_room_id?: string | null;
   tutor_comment?: string | null;
   show_comment_to_student?: boolean;
   isGroupSubject?: boolean;
@@ -240,6 +242,8 @@ export function ParentLessonDetailModal({
               {t('studentDash.joinMeeting')}
             </a>
           )}
+
+          <WhiteboardButton roomId={(session as any)?.whiteboard_room_id} />
 
           {tutorPolicy && session.status === 'active' && (
             <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1.5">

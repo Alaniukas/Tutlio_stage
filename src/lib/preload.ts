@@ -5,7 +5,7 @@ import { startOfMonth, endOfMonth, isAfter, isBefore, addDays, subDays, subMonth
 
 /** Columns the tutor Dashboard needs (avoid `*` + share one deduped round-trip with Layout preload). */
 const TUTOR_DASH_SESSIONS_SELECT =
-  'id, student_id, subject_id, start_time, end_time, status, paid, price, topic, created_at, meeting_link, cancellation_reason, payment_status, tutor_comment, show_comment_to_student, is_late_cancelled, cancellation_penalty_amount, penalty_resolution, cancelled_by, no_show_when, credit_applied_amount, lesson_package_id, payment_batch_id, subjects(is_trial, name), student:students(full_name, email, phone, payer_email, payer_phone, grade)';
+  'id, student_id, subject_id, start_time, end_time, status, paid, price, topic, created_at, meeting_link, whiteboard_room_id, cancellation_reason, payment_status, tutor_comment, show_comment_to_student, is_late_cancelled, cancellation_penalty_amount, penalty_resolution, cancelled_by, no_show_when, credit_applied_amount, lesson_package_id, payment_batch_id, subjects(is_trial, name), student:students(full_name, email, phone, payer_email, payer_phone, grade)';
 
 /** Single in-flight tutor dashboard sessions fetch (Layout preload + Dashboard share the same promise). */
 export function tutorDashboardSessionsDeduped(tutorUserId: string) {

@@ -128,6 +128,9 @@ export default function AdminPanel() {
   const [unarchiveLoadingTutorId, setUnarchiveLoadingTutorId] = useState<string | null>(null);
   const [detailFeaturesBase, setDetailFeaturesBase] = useState<Record<string, unknown>>({});
   const [editManualPaymentUrl, setEditManualPaymentUrl] = useState('');
+  const [editSlug, setEditSlug] = useState('');
+  const [editLogoUrl, setEditLogoUrl] = useState('');
+  const [editBrandColor, setEditBrandColor] = useState('#6366f1');
   const [detailStats, setDetailStats] = useState<OrgAdminStats | null>(null);
   const [soloTutors, setSoloTutors] = useState<SoloTutorAdminRow[]>([]);
   const [soloListLoading, setSoloListLoading] = useState(false);
@@ -326,6 +329,9 @@ export default function AdminPanel() {
       setDetailFeaturesBase(orgFeatures as Record<string, unknown>);
       const mpUrl = (orgFeatures as Record<string, unknown>).manual_payment_url;
       setEditManualPaymentUrl(typeof mpUrl === 'string' ? mpUrl : '');
+      setEditSlug(org.slug || '');
+      setEditLogoUrl(org.logo_url || '');
+      setEditBrandColor(org.brand_color || '#6366f1');
       setDetailTutors(data.tutors || []);
       setDetailArchivedTutors(data.archived_tutors || []);
       setDetailStudents(data.students || []);
@@ -366,6 +372,9 @@ export default function AdminPanel() {
           tutor_license_count: editTutorLicenseCount,
           status: editStatus,
           features: merged,
+          slug: editSlug.trim() || null,
+          logo_url: editLogoUrl.trim() || null,
+          brand_color: editBrandColor.trim() || '#6366f1',
         }),
       });
       const data = await res.json();
@@ -1012,6 +1021,60 @@ export default function AdminPanel() {
                         </div>
                       ))}
                     </div>
+
+                    {editFeatures.custom_branding && (
+                      <div className="space-y-3 rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-4">
+                        <div>
+                          <Label className="text-slate-200 text-sm font-semibold">Whitelabel nustatymai</Label>
+                          <p className="text-xs text-slate-400 mt-1">Slug, logo ir spalva – rodoma login ir app viduje</p>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-slate-400 text-xs">Slug (URL identifikatorius)</Label>
+                          <Input
+                            type="text"
+                            placeholder="proklase"
+                            value={editSlug}
+                            onChange={(e) => setEditSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                            className="bg-white/10 border-white/20 text-white placeholder:text-slate-500 rounded-xl"
+                          />
+                          <p className="text-[11px] text-slate-500">tutlio.lt/login?org={editSlug || 'slug'}</p>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-slate-400 text-xs">Logo URL</Label>
+                          <Input
+                            type="url"
+                            inputMode="url"
+                            placeholder="https://example.com/logo.png"
+                            value={editLogoUrl}
+                            onChange={(e) => setEditLogoUrl(e.target.value)}
+                            className="bg-white/10 border-white/20 text-white placeholder:text-slate-500 rounded-xl"
+                          />
+                          {editLogoUrl && (
+                            <div className="mt-2 p-2 bg-white/5 rounded-lg inline-block">
+                              <img src={editLogoUrl} alt="Org logo" className="h-8 max-w-[160px] object-contain" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-slate-400 text-xs">Pagrindinė spalva</Label>
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="color"
+                              value={editBrandColor}
+                              onChange={(e) => setEditBrandColor(e.target.value)}
+                              className="w-10 h-10 rounded-lg border border-white/20 cursor-pointer bg-transparent"
+                            />
+                            <Input
+                              type="text"
+                              value={editBrandColor}
+                              onChange={(e) => setEditBrandColor(e.target.value)}
+                              className="bg-white/10 border-white/20 text-white w-28 rounded-xl font-mono text-sm"
+                            />
+                            <div className="h-6 w-6 rounded-full" style={{ backgroundColor: editBrandColor }} />
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     <div className="space-y-3 rounded-xl border border-violet-500/25 bg-violet-500/5 p-4">
                       <div>

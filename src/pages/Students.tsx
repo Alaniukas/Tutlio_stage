@@ -53,6 +53,7 @@ import {
 import { formatContactForTutorView, shouldShowPayerContactSection } from '@/lib/orgContactVisibility';
 import { DateTimeSpinner } from '@/components/TimeSpinner';
 import SessionFiles from '@/components/SessionFiles';
+import WhiteboardButton from '@/components/WhiteboardButton';
 import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
 import { buildNoShowSessionPatch, type NoShowWhen } from '@/lib/noShowWhen';
 
@@ -2717,6 +2718,8 @@ export default function StudentsPage() {
                 {t('dash.joinVideoCall')}
               </a>
             )}
+
+            <WhiteboardButton roomId={(selectedSessionForModal as any)?.whiteboard_room_id} />
 
             <div className="space-y-2 pt-3 border-t border-gray-100">
               <p className="text-sm font-semibold text-gray-700">{t('dash.commentLabel')}</p>

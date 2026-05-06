@@ -41,6 +41,7 @@ interface ChildSession {
   payment_status?: string;
   price: number | null;
   meeting_link: string | null;
+  whiteboard_room_id?: string | null;
   cancelled_by?: string | null;
   tutor_comment?: string | null;
   show_comment_to_student?: boolean;
@@ -142,7 +143,7 @@ export default function ParentDashboard() {
         supabase
           .from('sessions')
           .select(
-            'id, student_id, start_time, end_time, status, cancelled_by, topic, paid, payment_status, price, meeting_link, tutor_comment, show_comment_to_student, subjects(name, is_group)',
+            'id, student_id, start_time, end_time, status, cancelled_by, topic, paid, payment_status, price, meeting_link, whiteboard_room_id, tutor_comment, show_comment_to_student, subjects(name, is_group)',
           )
           .in('student_id', studentIds)
           .gte('start_time', past.toISOString())
@@ -196,6 +197,7 @@ export default function ParentDashboard() {
           payment_status: (s as any).payment_status,
           price: (s as any).price ?? null,
           meeting_link: (s as any).meeting_link ?? null,
+          whiteboard_room_id: (s as any).whiteboard_room_id ?? null,
           cancelled_by: (s as any).cancelled_by ?? null,
           tutor_comment: (s as any).tutor_comment ?? null,
           show_comment_to_student: !!(s as any).show_comment_to_student,

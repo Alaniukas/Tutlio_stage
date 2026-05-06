@@ -61,6 +61,7 @@ import { buildSameSlotPeerIdMap, hasOverlapWithExclusions } from '@/lib/calendar
 import TimeSpinner, { DateTimeSpinner } from '@/components/TimeSpinner';
 import AvailabilityManager from '@/components/AvailabilityManager';
 import SessionFiles from '@/components/SessionFiles';
+import WhiteboardButton from '@/components/WhiteboardButton';
 import {
   ChevronLeft,
   ChevronRight,
@@ -117,7 +118,7 @@ const localizer = dateFnsLocalizer({
 });
 
 const CALENDAR_SESSION_COLUMNS =
-  'id, tutor_id, student_id, start_time, end_time, status, paid, meeting_link, cancellation_reason, cancelled_at, topic, price, payment_status, tutor_comment, show_comment_to_student, hidden_from_calendar, subject_id, available_spots, recurring_session_id, lesson_package_id, payment_batch_id, no_show_when, is_late_cancelled, subjects(is_trial, name), student:students(full_name, email, phone, payer_email, payer_phone, grade, admin_comment, admin_comment_visible_to_tutor)';
+  'id, tutor_id, student_id, start_time, end_time, status, paid, meeting_link, whiteboard_room_id, cancellation_reason, cancelled_at, topic, price, payment_status, tutor_comment, show_comment_to_student, hidden_from_calendar, subject_id, available_spots, recurring_session_id, lesson_package_id, payment_batch_id, no_show_when, is_late_cancelled, subjects(is_trial, name), student:students(full_name, email, phone, payer_email, payer_phone, grade, admin_comment, admin_comment_visible_to_tutor)';
 
 interface Session {
   id: string;
@@ -4497,6 +4498,7 @@ export default function CalendarPage() {
                   {t('cal.joinVideoCall')}
                 </a>
               )}
+              <WhiteboardButton roomId={(selectedEvent as any)?.whiteboard_room_id} />
               {selectedEvent && (
                 <SessionFiles
                   sessionId={selectedEvent.id}

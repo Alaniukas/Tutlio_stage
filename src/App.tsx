@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useParams, useLocation } from 'react-router-dom';
 import { UserProvider } from '@/contexts/UserContext';
+import { OrgBrandingProvider } from '@/contexts/OrgBrandingContext';
 import Login from '@/pages/Login';
 import AuthCallback from '@/pages/AuthCallback';
 import Register from '@/pages/Register';
@@ -65,6 +66,7 @@ import ParentInstructions from '@/pages/ParentInstructions';
 import ParentSettings from '@/pages/ParentSettings';
 import ParentRegister from '@/pages/ParentRegister';
 import SchoolContractComplete from '@/pages/SchoolContractComplete';
+const WhiteboardPage = lazy(() => import('@/pages/Whiteboard'));
 import SupabaseAuthHashErrors from '@/components/SupabaseAuthHashErrors';
 import ThemeColorManager from '@/hooks/useThemeColor';
 import { useTranslation, getLocaleFromPathname } from '@/lib/i18n';
@@ -87,7 +89,9 @@ function LocaleFromRouteSync() {
 function ProtectedWithUser() {
   return (
     <UserProvider>
-      <ProtectedRoute />
+      <OrgBrandingProvider>
+        <ProtectedRoute />
+      </OrgBrandingProvider>
     </UserProvider>
   );
 }
@@ -95,7 +99,9 @@ function ProtectedWithUser() {
 function StudentProtectedWithUser() {
   return (
     <UserProvider>
-      <StudentProtectedRoute />
+      <OrgBrandingProvider>
+        <StudentProtectedRoute />
+      </OrgBrandingProvider>
     </UserProvider>
   );
 }
@@ -103,7 +109,9 @@ function StudentProtectedWithUser() {
 function ParentProtectedWithUser() {
   return (
     <UserProvider>
-      <ParentProtectedRoute />
+      <OrgBrandingProvider>
+        <ParentProtectedRoute />
+      </OrgBrandingProvider>
     </UserProvider>
   );
 }
@@ -184,6 +192,18 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/package-success" element={<PackagePaymentSuccess />} />
         <Route path="/package-cancelled" element={<PackagePaymentCancelled />} />
         <Route path="/school-payment-success" element={<SchoolPaymentSuccess />} />
+
+        {/* Whiteboard - any authenticated user (auth checked inside component) */}
+        <Route
+          path="/whiteboard/:roomId"
+          element={
+            <UserProvider>
+              <Suspense fallback={<div className="flex h-screen items-center justify-center text-gray-500">Loading...</div>}>
+                <WhiteboardPage />
+              </Suspense>
+            </UserProvider>
+          }
+        />
 
         {/* Tutor routes - WITH UserProvider for caching */}
         <Route element={<ProtectedWithUser />}>

@@ -40,7 +40,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data: sessions, error } = await supabase
       .from('sessions')
       .select(`
-        id, start_time, end_time, topic, price, meeting_link,
+        id, start_time, end_time, topic, price, meeting_link, whiteboard_room_id,
         reminder_student_sent, reminder_tutor_sent, reminder_payer_sent,
         student:students(id, full_name, email, payment_payer, payer_email, payer_name),
         tutor:profiles(id, full_name, email, phone, reminder_student_hours, reminder_tutor_hours)
@@ -66,7 +66,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const tz = 'Europe/Vilnius';
         const dateStr = startTime.toLocaleDateString('lt-LT', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: tz });
         const timeStr = startTime.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit', timeZone: tz });
-        const baseData = { date: dateStr, time: timeStr, topic: session.topic, duration: durationMinutes, price: session.price, meetingLink: session.meeting_link };
+        const whiteboardLink = (session as any).whiteboard_room_id
+          ? `${API_URL}/whiteboard/${(session as any).whiteboard_room_id}`
+          : null;
+        const baseData = { date: dateStr, time: timeStr, topic: session.topic, duration: durationMinutes, price: session.price, meetingLink: session.meeting_link, whiteboardLink };
 
         if (reminderStudentHours > 0 && !session.reminder_student_sent && diffHours <= reminderStudentHours && diffHours >= 0 && student?.email) {
           try {

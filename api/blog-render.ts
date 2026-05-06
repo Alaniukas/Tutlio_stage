@@ -1,9 +1,14 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
-
-const DOMAIN = 'https://www.tutlio.lt';
-const LOCALES = ['lt', 'en', 'pl', 'lv', 'ee'] as const;
-type Locale = (typeof LOCALES)[number];
+import {
+  type Locale,
+  type DomainKey,
+  LOCALES,
+  detectDomain,
+  buildPath,
+  buildFullUrl,
+  hreflangTags,
+} from './_lib/ssr-shell';
 
 function getSupabase() {
   const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -74,14 +79,18 @@ function inl(t: string): string {
 
 function fmtDate(d: string | null, locale: Locale): string {
   if (!d) return '';
-  const map: Record<Locale, string> = { lt: 'lt-LT', en: 'en-GB', pl: 'pl-PL', lv: 'lv-LV', ee: 'et-EE' };
-  return new Date(d).toLocaleDateString(map[locale] || 'lt-LT', { year: 'numeric', month: 'long', day: 'numeric' });
+  const map: Record<Locale, string> = {
+    lt: 'lt-LT', en: 'en-GB', pl: 'pl-PL', lv: 'lv-LV', ee: 'et-EE',
+    fr: 'fr-FR', es: 'es-ES', de: 'de-DE', se: 'sv-SE', dk: 'da-DK', fi: 'fi-FI', no: 'nb-NO',
+  };
+  return new Date(d).toLocaleDateString(map[locale] || 'en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
-function detectLocale(req: VercelRequest): Locale {
+function detectLocaleFromQuery(req: VercelRequest): Locale {
   const q = typeof req.query.locale === 'string' ? req.query.locale : '';
   if (LOCALES.includes(q as Locale)) return q as Locale;
-  return 'lt';
+  const domain = detectDomain(req);
+  return domain === 'com' ? 'en' : 'lt';
 }
 
 const LABELS: Record<Locale, { blog: string; back: string; home: string; read: string }> = {
@@ -90,11 +99,19 @@ const LABELS: Record<Locale, { blog: string; back: string; home: string; read: s
   pl: { blog: 'Blog', back: 'Wszystkie artykuły', home: 'Strona główna', read: 'Czytaj więcej' },
   lv: { blog: 'Emuārs', back: 'Visi raksti', home: 'Sākumlapa', read: 'Lasīt vairāk' },
   ee: { blog: 'Blogi', back: 'Kõik artiklid', home: 'Avaleht', read: 'Loe edasi' },
+  fr: { blog: 'Blog', back: 'Tous les articles', home: 'Accueil', read: 'Lire la suite' },
+  es: { blog: 'Blog', back: 'Todos los artículos', home: 'Inicio', read: 'Leer más' },
+  de: { blog: 'Blog', back: 'Alle Artikel', home: 'Startseite', read: 'Weiterlesen' },
+  se: { blog: 'Blogg', back: 'Alla artiklar', home: 'Startsida', read: 'Läs mer' },
+  dk: { blog: 'Blog', back: 'Alle artikler', home: 'Forside', read: 'Læs mere' },
+  fi: { blog: 'Blogi', back: 'Kaikki artikkelit', home: 'Etusivu', read: 'Lue lisää' },
+  no: { blog: 'Blogg', back: 'Alle artikler', home: 'Forside', read: 'Les mer' },
 };
 
-function shell(locale: Locale, title: string, description: string, url: string, image: string, body: string, jsonLd?: string): string {
+function shell(locale: Locale, domain: DomainKey, blogPath: string, title: string, description: string, url: string, image: string, body: string, jsonLd?: string): string {
   const l = LABELS[locale];
-  const prefix = locale === 'lt' ? '' : `/${locale}`;
+  const homePath = buildPath('/', locale, domain);
+  const blogListPath = buildPath('/blog', locale, domain);
   return `<!DOCTYPE html>
 <html lang="${locale}">
 <head>
@@ -103,10 +120,12 @@ function shell(locale: Locale, title: string, description: string, url: string, 
 <title>${esc(title)}</title>
 <meta name="description" content="${esc(description)}" />
 <link rel="canonical" href="${esc(url)}" />
+${hreflangTags(blogPath)}
 <meta property="og:type" content="article" />
 <meta property="og:title" content="${esc(title)}" />
 <meta property="og:description" content="${esc(description)}" />
 <meta property="og:url" content="${esc(url)}" />
+<meta property="og:site_name" content="Tutlio" />
 ${image ? `<meta property="og:image" content="${esc(image)}" />` : ''}
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="${esc(title)}" />
@@ -152,10 +171,10 @@ a:hover{text-decoration:underline}
 </head>
 <body>
 <nav class="nav">
-  <a href="${prefix || '/'}" class="nav-logo">Tutlio</a>
+  <a href="${homePath}" class="nav-logo">Tutlio</a>
   <div class="nav-links">
-    <a href="${prefix || '/'}">${l.home}</a>
-    <a href="${prefix}/blog">${l.blog}</a>
+    <a href="${homePath}">${l.home}</a>
+    <a href="${blogListPath}">${l.blog}</a>
   </div>
 </nav>
 ${body}
@@ -170,9 +189,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const supabase = getSupabase();
   if (!supabase) return res.status(503).send('Database not configured');
 
-  const locale = detectLocale(req);
+  const domain = detectDomain(req);
+  const locale = detectLocaleFromQuery(req);
   const slug = typeof req.query.slug === 'string' ? req.query.slug : '';
-  const prefix = locale === 'lt' ? '' : `/${locale}`;
+  const blogListPath = buildPath('/blog', locale, domain);
   const l = LABELS[locale];
 
   if (slug) {
@@ -184,9 +204,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const excerpt = resolve(post, 'excerpt', locale);
     const content = resolve(post, 'content', locale);
     const date = fmtDate(post.published_at as string, locale);
-    const url = `${DOMAIN}${prefix}/blog/${post.slug}`;
+    const blogPath = `/blog/${post.slug}`;
+    const url = buildFullUrl(blogPath, locale, domain);
     const image = (post.cover_image as string) || '';
 
+    const LANG_MAP: Record<Locale, string> = {
+      lt: 'lt', en: 'en', pl: 'pl', lv: 'lv', ee: 'et',
+      fr: 'fr', es: 'es', de: 'de', se: 'sv', dk: 'da', fi: 'fi', no: 'nb',
+    };
     const jsonLd = JSON.stringify({
       '@context': 'https://schema.org',
       '@type': 'BlogPosting',
@@ -194,9 +219,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       description: excerpt,
       image: image || undefined,
       datePublished: post.published_at,
+      inLanguage: LANG_MAP[locale],
       author: { '@type': 'Organization', name: 'Tutlio' },
-      publisher: { '@type': 'Organization', name: 'Tutlio', url: DOMAIN },
+      publisher: { '@type': 'Organization', name: 'Tutlio', url: 'https://www.tutlio.com', logo: { '@type': 'ImageObject', url: 'https://www.tutlio.com/pwa-512x512.png' } },
       url,
+      mainEntityOfPage: { '@type': 'WebPage', '@id': url },
     });
 
     const body = `
@@ -207,29 +234,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 </div>
 <article class="content">
   ${mdToHtml(content)}
-  <p style="margin-top:2em"><a href="${prefix}/blog">&larr; ${l.back}</a></p>
+  <p style="margin-top:2em"><a href="${blogListPath}">&larr; ${l.back}</a></p>
 </article>`;
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400');
-    return res.status(200).send(shell(locale, `${title} | Tutlio`, excerpt, url, image, body, jsonLd));
+    return res.status(200).send(shell(locale, domain, blogPath, `${title} | Tutlio`, excerpt, url, image, body, jsonLd));
   }
 
   // Blog listing
   const { data: posts } = await supabase
     .from('blog_posts')
-    .select('slug, cover_image, tag, published_at, title_lt, title_en, title_pl, title_lv, title_ee, excerpt_lt, excerpt_en, excerpt_pl, excerpt_lv, excerpt_ee')
+    .select('slug, cover_image, tag, published_at, title_lt, title_en, title_pl, title_lv, title_ee, title_fr, title_es, title_de, title_se, title_dk, title_fi, title_no, excerpt_lt, excerpt_en, excerpt_pl, excerpt_lv, excerpt_ee, excerpt_fr, excerpt_es, excerpt_de, excerpt_se, excerpt_dk, excerpt_fi, excerpt_no')
     .eq('status', 'published')
     .order('published_at', { ascending: false });
 
   const items = posts || [];
-  const url = `${DOMAIN}${prefix}/blog`;
+  const blogPath = '/blog';
+  const url = buildFullUrl(blogPath, locale, domain);
 
   const cards = items.map((p: Record<string, unknown>) => {
     const t = resolve(p, 'title', locale);
     const e = resolve(p, 'excerpt', locale);
     const img = (p.cover_image as string) || '';
-    const href = `${prefix}/blog/${p.slug}`;
+    const href = `${buildPath(`/blog/${p.slug}`, locale, domain)}`;
     return `<a href="${href}" class="card" style="text-decoration:none;color:inherit">
   ${img ? `<img src="${esc(img)}" alt="${esc(t)}" loading="lazy" />` : ''}
   <div class="card-body">
@@ -249,7 +277,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   ${cards || `<p style="padding:24px;color:#888">No posts yet.</p>`}
 </div>`;
 
+  const BLOG_DESC: Record<Locale, string> = {
+    lt: 'Tutlio tinklaraštis – patarimai korepetitoriams, pamokų valdymo strategijos ir produkto naujienos.',
+    en: 'Tutlio blog – tips for tutors, lesson management strategies, and product updates.',
+    pl: 'Blog Tutlio – porady dla korepetytorów, strategie zarządzania lekcjami i aktualności.',
+    lv: 'Tutlio emuārs – padomi pasniedzējiem, nodarbību pārvaldības stratēģijas un produkta jaunumi.',
+    ee: 'Tutlio blogi – nõuanded õpetajatele, tundide haldamise strateegiad ja tooteuudised.',
+    fr: 'Blog Tutlio – conseils pour les tuteurs, stratégies de gestion des cours et actualités produit.',
+    es: 'Blog Tutlio – consejos para tutores, estrategias de gestión de clases y novedades del producto.',
+    de: 'Tutlio Blog – Tipps für Tutoren, Strategien zur Unterrichtsverwaltung und Produktneuheiten.',
+    se: 'Tutlio blogg – tips för lärare, strategier för lektionshantering och produktnyheter.',
+    dk: 'Tutlio blog – tips til undervisere, strategier til lektionsstyring og produktnyheder.',
+    fi: 'Tutlio blogi – vinkkejä opettajille, tuntien hallinnan strategioita ja tuoteuutisia.',
+    no: 'Tutlio blogg – tips for tutorer, strategier for timeadministrasjon og produktnyheter.',
+  };
+  const blogDesc = BLOG_DESC[locale];
+
+  const blogListJsonLd = JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'Blog',
+    name: `${l.blog} | Tutlio`,
+    description: blogDesc,
+    url,
+    publisher: { '@type': 'Organization', name: 'Tutlio', url: 'https://www.tutlio.com' },
+  });
+
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400');
-  return res.status(200).send(shell(locale, `${l.blog} | Tutlio`, 'Tutlio blog', url, '', body));
+  return res.status(200).send(shell(locale, domain, blogPath, `${l.blog} | Tutlio`, blogDesc, url, '', body, blogListJsonLd));
 }

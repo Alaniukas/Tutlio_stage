@@ -13,6 +13,7 @@ import { useTranslation } from '@/lib/i18n';
 import { useTotalChatUnread } from '@/hooks/useChat';
 import { preloadParentData } from '@/lib/preload';
 import PwaInstallPrompt from '@/components/PwaInstallPrompt';
+import BrandedLogo from '@/components/BrandedLogo';
 
 interface ParentLayoutProps {
   children: ReactNode;
@@ -51,8 +52,7 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
 
       <header className="sticky top-0 z-40 bg-white/85 backdrop-blur-md border-b border-orange-100/80 px-4 py-2.5 flex items-center justify-between">
         <Link to="/parent" className="flex items-center gap-2 min-w-0">
-          <img src="/logo-icon.png" alt="Tutlio" className="w-8 h-8 rounded-xl shrink-0" />
-          <span className="font-black text-gray-900 text-sm sm:text-base tracking-tight truncate">Tutlio</span>
+          <BrandedLogo size="sm" nameClassName="text-sm sm:text-base" />
         </Link>
         <span className="hidden sm:inline text-[11px] font-semibold tracking-wide text-orange-500 shrink-0">
           {t('parent.portalLabel')}

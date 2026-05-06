@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import StudentLayout from '@/components/StudentLayout';
 import StatusBadge from '@/components/StatusBadge';
 import SessionFiles from '@/components/SessionFiles';
+import WhiteboardButton from '@/components/WhiteboardButton';
 import { supabase } from '@/lib/supabase';
 import { getCached, setCache } from '@/lib/dataCache';
 import {
@@ -109,7 +110,7 @@ export default function StudentDashboard() {
     }, [loading, student, sessions]);
 
     const STUDENT_DASH_SESSION_COLS =
-        'id,start_time,end_time,status,paid,price,topic,meeting_link,payment_status,tutor_comment,show_comment_to_student,subject_id';
+        'id,start_time,end_time,status,paid,price,topic,meeting_link,whiteboard_room_id,payment_status,tutor_comment,show_comment_to_student,subject_id';
 
     const fetchData = async () => {
         if (!ctxUser) return;
@@ -645,6 +646,8 @@ export default function StudentDashboard() {
                                 {t('studentDash.joinMeeting')}
                             </a>
                         )}
+
+                        <WhiteboardButton roomId={(selectedSession as any)?.whiteboard_room_id} />
 
                         {selectedSession?.status === 'active' && !selectedSession.paid && paymentPayer !== 'parent' && isAfter(new Date(selectedSession.end_time), now) && (
                             <button

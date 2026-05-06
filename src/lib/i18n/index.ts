@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext } from 'react';
-import { lt as dateFnsLt, pl as dateFnsPl, lv as dateFnsLv, et as dateFnsEe } from 'date-fns/locale';
+import { lt as dateFnsLt, pl as dateFnsPl, lv as dateFnsLv, et as dateFnsEe, fr as dateFnsFr, es as dateFnsEs, de as dateFnsDe, sv as dateFnsSe, da as dateFnsDk, fi as dateFnsFi, nb as dateFnsNo } from 'date-fns/locale';
 import type { Locale as DateFnsLocale } from 'date-fns';
 
 export { t, detectLocaleFromHost, isValidLocale, SUPPORTED_LOCALES, LOCALE_LABELS, LOCALE_NAMES } from './core';
@@ -89,6 +89,13 @@ const dateFnsLocales: Record<Locale, DateFnsLocale | undefined> = {
   pl: dateFnsPl,
   lv: dateFnsLv,
   ee: dateFnsEe,
+  fr: dateFnsFr,
+  es: dateFnsEs,
+  de: dateFnsDe,
+  se: dateFnsSe,
+  dk: dateFnsDk,
+  fi: dateFnsFi,
+  no: dateFnsNo,
 };
 
 export function getDateFnsLocale(locale: Locale): DateFnsLocale | undefined {

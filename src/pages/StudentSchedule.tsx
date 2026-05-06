@@ -14,6 +14,7 @@ import { ChevronLeft, ChevronRight, LayoutGrid, CalendarDays, List, Check, Calen
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { cn, normalizeUrl } from '@/lib/utils';
+import WhiteboardButton from '@/components/WhiteboardButton';
 import { useSearchParams, useNavigate, useMatch } from 'react-router-dom';
 import { sendEmail } from '@/lib/email';
 import { useStudentPaymentBlock } from '@/hooks/useStudentPaymentBlock';
@@ -68,7 +69,7 @@ interface LessonPackageSummary {
 
 /** Be įterptų `subjects(*)`: RLS/postgres užklausos nerą lūžta nuo 57014 (statement timeout). */
 const PARENT_SCHEDULE_SESSION_COLS =
-    'id,start_time,end_time,status,paid,price,topic,meeting_link,payment_status,tutor_comment,show_comment_to_student,subject_id,student_id,available_spots';
+    'id,start_time,end_time,status,paid,price,topic,meeting_link,whiteboard_room_id,payment_status,tutor_comment,show_comment_to_student,subject_id,student_id,available_spots';
 
 async function enrichScheduleSessionsWithSubjects(
     client: typeof supabase,
@@ -2033,6 +2034,7 @@ export default function StudentSchedule() {
                                     price:
                                         mySessionData.price != null ? Number(mySessionData.price) : null,
                                     meeting_link: mySessionData.meeting_link ?? null,
+                                    whiteboard_room_id: (mySessionData as any).whiteboard_room_id ?? null,
                                     tutor_comment: mySessionData.tutor_comment ?? null,
                                     show_comment_to_student: !!mySessionData.show_comment_to_student,
                                     isGroupSubject: mySessionData.subjects?.is_group === true,
@@ -2134,6 +2136,8 @@ export default function StudentSchedule() {
                                     {t('studentDash.joinMeeting')}
                                 </a>
                             )}
+
+                            <WhiteboardButton roomId={(mySessionData as any)?.whiteboard_room_id} />
 
                             {mySessionData?.status === 'active' && !mySessionData.paid && (studentPaymentPayer !== 'parent' || isParentRoute) &&
                                 (!tutorSoloManualPayments ? (

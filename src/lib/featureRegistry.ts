@@ -98,6 +98,20 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     pricingTier: 'premium',
   },
 
+  custom_branding: {
+    id: 'custom_branding',
+    name: 'Whitelabel / organizacijos stilius',
+    nameEn: 'Whitelabel / Custom Branding',
+    description:
+      'Mokiniai, tėvai ir korepetitoriai mato organizacijos logo ir spalvas vietoj Tutlio. Login puslapyje rodomas org logo su "powered by Tutlio".',
+    descriptionEn:
+      'Students, parents, and tutors see the organization\'s logo and colors instead of Tutlio. Login page shows org logo with "powered by Tutlio".',
+    category: 'appearance',
+    defaultValue: false,
+    requiresSetup: true,
+    pricingTier: 'enterprise',
+  },
+
   /** When enabled, org uses prepaid packages / lesson flows outside Stripe student checkout; org admin confirms in Students. */
   manual_payments: {
     id: 'manual_payments',

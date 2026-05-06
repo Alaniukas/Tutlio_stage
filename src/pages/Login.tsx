@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AlertCircle, ArrowLeft, ArrowRight, BookOpen, ChevronRight, Sparkles, Building2, Users } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
+import { useOrgBranding } from '@/hooks/useOrgBranding';
 
 // ─── SVG Illustrations ────────────────────────────────────────────────────────
 
@@ -113,6 +114,7 @@ function messageForAuthHashError(code: string, detailEnc: string | null): string
 
 export default function Login() {
   const { t, locale } = useTranslation();
+  const { branding: orgBranding } = useOrgBranding();
   const [role, setRole] = useState<Role>(null);
   const [studentMode, setStudentMode] = useState<StudentMode>(null);
   const [tutorMode, setTutorMode] = useState<TutorMode>(null);
@@ -664,8 +666,18 @@ export default function Login() {
         <div className="relative w-full max-w-md z-10">
           {/* Logo */}
           <div className="text-center mb-8">
-            <img src="/logo-icon.png" alt="Tutlio" className="w-14 h-14 rounded-2xl mx-auto mb-3 shadow-xl" />
-            <h1 className="text-2xl font-bold text-white tracking-tight">Tutlio</h1>
+            {orgBranding?.logo_url ? (
+              <>
+                <img src={orgBranding.logo_url} alt={orgBranding.name} className="h-14 max-w-[180px] object-contain mx-auto mb-3" />
+                <h1 className="text-2xl font-bold text-white tracking-tight">{orgBranding.name}</h1>
+                <p className="text-indigo-300 text-xs mt-2 opacity-70">powered by Tutlio</p>
+              </>
+            ) : (
+              <>
+                <img src="/logo-icon.png" alt="Tutlio" className="w-14 h-14 rounded-2xl mx-auto mb-3 shadow-xl" />
+                <h1 className="text-2xl font-bold text-white tracking-tight">Tutlio</h1>
+              </>
+            )}
             <p className="text-indigo-300 text-sm mt-1">{t('login.welcomeBack')}</p>
           </div>
 

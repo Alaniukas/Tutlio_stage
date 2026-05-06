@@ -177,10 +177,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     if (req.method === 'GET') {
       if (!idParam) {
-        const { data: orgs, error } = await supabase
+        let { data: orgs, error } = await supabase
           .from('organizations')
-          .select('id, name, email, tutor_limit, tutor_license_count, status, features, created_at')
+          .select('id, name, email, tutor_limit, tutor_license_count, status, features, slug, logo_url, brand_color, created_at')
           .order('created_at', { ascending: false });
+        if (error?.message?.includes('Could not find')) {
+          ({ data: orgs, error } = await supabase
+            .from('organizations')
+            .select('id, name, email, tutor_limit, tutor_license_count, status, features, created_at')
+            .order('created_at', { ascending: false }));
+        }
 
         if (error) return res.status(500).json({ error: error.message });
 
@@ -198,11 +204,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(200).json({ organizations: out });
       }
 
-      const { data: org, error: orgErr } = await supabase
+      let { data: org, error: orgErr } = await supabase
         .from('organizations')
-        .select('id, name, email, tutor_limit, tutor_license_count, status, features, created_at')
+        .select('id, name, email, tutor_limit, tutor_license_count, status, features, slug, logo_url, brand_color, created_at')
         .eq('id', idParam)
         .maybeSingle();
+      if (orgErr?.message?.includes('Could not find')) {
+        ({ data: org, error: orgErr } = await supabase
+          .from('organizations')
+          .select('id, name, email, tutor_limit, tutor_license_count, status, features, created_at')
+          .eq('id', idParam)
+          .maybeSingle());
+      }
 
       if (orgErr) return res.status(500).json({ error: orgErr.message });
       if (!org) return res.status(404).json({ error: 'Organization not found' });
@@ -407,7 +420,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const { data: before, error: beforeErr } = await supabase
         .from('organizations')
-        .select('id, name, email, tutor_limit, tutor_license_count, status, features')
+        .select('id, name, email, tutor_limit, tutor_license_count, status, features, slug, logo_url, brand_color')
         .eq('id', idParam)
         .maybeSingle();
 
@@ -441,6 +454,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       if (status !== undefined) patch.status = status;
       if (features !== undefined) patch.features = features;
+      if ('slug' in body) patch.slug = typeof body.slug === 'string' ? body.slug : null;
+      if ('logo_url' in body) patch.logo_url = typeof body.logo_url === 'string' ? body.logo_url : null;
+      if ('brand_color' in body) patch.brand_color = typeof body.brand_color === 'string' ? body.brand_color : '#6366f1';
 
       if (Object.keys(patch).length === 0) {
         return res.status(400).json({ error: 'No valid fields to update' });
@@ -450,7 +466,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .from('organizations')
         .update(patch as any)
         .eq('id', idParam)
-        .select('id, name, email, tutor_limit, tutor_license_count, status, features')
+        .select('id, name, email, tutor_limit, tutor_license_count, status, features, slug, logo_url, brand_color')
         .single();
 
       if (updErr) return res.status(500).json({ error: updErr.message });

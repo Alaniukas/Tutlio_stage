@@ -3,12 +3,19 @@ import { en } from './en';
 import { pl } from './pl';
 import { lv } from './lv';
 import { ee } from './ee';
+import { fr } from './fr';
+import { es } from './es';
+import { de } from './de';
+import { se } from './se';
+import { dk } from './dk';
+import { fi } from './fi';
+import { no } from './no';
 import { resolvePlatformTranslation } from './platformOverrides';
 import { type Platform, DEFAULT_PLATFORM } from '@/lib/platform';
 
-export type Locale = 'lt' | 'en' | 'pl' | 'lv' | 'ee';
+export type Locale = 'lt' | 'en' | 'pl' | 'lv' | 'ee' | 'fr' | 'es' | 'de' | 'se' | 'dk' | 'fi' | 'no';
 
-export const SUPPORTED_LOCALES: Locale[] = ['lt', 'en', 'pl', 'lv', 'ee'];
+export const SUPPORTED_LOCALES: Locale[] = ['lt', 'en', 'pl', 'lv', 'ee', 'fr', 'es', 'de', 'se', 'dk', 'fi', 'no'];
 
 export const LOCALE_LABELS: Record<Locale, string> = {
   lt: 'LT',
@@ -16,6 +23,13 @@ export const LOCALE_LABELS: Record<Locale, string> = {
   pl: 'PL',
   lv: 'LV',
   ee: 'EE',
+  fr: 'FR',
+  es: 'ES',
+  de: 'DE',
+  se: 'SE',
+  dk: 'DK',
+  fi: 'FI',
+  no: 'NO',
 };
 
 export const LOCALE_NAMES: Record<Locale, string> = {
@@ -24,9 +38,16 @@ export const LOCALE_NAMES: Record<Locale, string> = {
   pl: 'Polski',
   lv: 'Latviešu',
   ee: 'Eesti',
+  fr: 'Français',
+  es: 'Español',
+  de: 'Deutsch',
+  se: 'Svenska',
+  dk: 'Dansk',
+  fi: 'Suomi',
+  no: 'Norsk',
 };
 
-const translations: Record<Locale, Record<string, string>> = { lt, en, pl, lv, ee };
+const translations: Record<Locale, Record<string, string>> = { lt, en, pl, lv, ee, fr, es, de, se, dk, fi, no };
 
 export function t(
   locale: Locale,
