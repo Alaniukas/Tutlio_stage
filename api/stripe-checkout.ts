@@ -60,7 +60,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .from('sessions')
             .select(`
                 id, price, topic, student_id, tutor_id, start_time,
-                students!inner(id, full_name, payment_payer, payer_email, payer_name, payer_phone, credit_balance),
+                students!inner(id, full_name, payment_payer, payer_email, payer_name, payer_phone, credit_balance, payment_model),
                 profiles!sessions_tutor_id_fkey(
                     stripe_account_id, stripe_onboarding_complete,
                     payment_timing, payment_deadline_hours, organization_id,
@@ -77,6 +77,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const tutor = session.profiles as any;
         const student = session.students as any;
+        const isPenaltyPayment = typeof penaltyAmountOverride === 'number' && penaltyAmountOverride > 0;
+        const studentPaymentModelRaw = String(student?.payment_model || '').trim();
+        const allowsPerLessonPayment =
+            !studentPaymentModelRaw ||
+            studentPaymentModelRaw
+                .split(',')
+                .map((part: string) => part.trim())
+                .includes('per_lesson');
+
+        if (!isPenaltyPayment && !allowsPerLessonPayment) {
+            return res.status(400).json({
+                error:
+                    'Šiam mokiniui įjungtas mėnesinis / paketinis atsiskaitymas. Momentinis pamokos apmokėjimas nereikalingas.',
+                code: 'PER_LESSON_DISABLED_FOR_STUDENT',
+            });
+        }
 
         if (tutorUsesManualStudentPayments(tutor)) {
             return res.status(400).json({
@@ -116,7 +132,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         // 3. Amounts: if penaltyAmount is provided, charge that instead of full price
-        const isPenaltyPayment = typeof penaltyAmountOverride === 'number' && penaltyAmountOverride > 0;
         const rawPriceEur = isPenaltyPayment ? penaltyAmountOverride : (session.price ?? 25);
 
         // 3a. Apply student credit balance (only for regular lesson payments, not penalties)

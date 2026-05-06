@@ -130,3 +130,13 @@ export function shouldUsePackageForBooking(
   if (!paymentOverrideActive || selectedModels.size === 0) return true;
   return selectedModels.has('prepaid_packages');
 }
+
+/** Whether booking flow should request immediate Stripe/manual payment for this student. */
+export function shouldRequestPerLessonCheckout(
+  studentPaymentModel: string | null | undefined,
+  paymentOverrideActive: boolean,
+): boolean {
+  const selectedModels = parseStudentPaymentModels(studentPaymentModel);
+  if (!paymentOverrideActive || selectedModels.size === 0) return true;
+  return selectedModels.has('per_lesson');
+}

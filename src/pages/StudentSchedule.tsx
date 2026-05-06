@@ -18,7 +18,7 @@ import WhiteboardButton from '@/components/WhiteboardButton';
 import { useSearchParams, useNavigate, useMatch } from 'react-router-dom';
 import { sendEmail } from '@/lib/email';
 import { useStudentPaymentBlock } from '@/hooks/useStudentPaymentBlock';
-import { shouldUsePackageForBooking } from '@/lib/studentPaymentModel';
+import { shouldRequestPerLessonCheckout, shouldUsePackageForBooking } from '@/lib/studentPaymentModel';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
 import { formatLessonStripeChargeEur } from '@/lib/stripeLessonPricing';
 import { ParentLessonDetailModal } from '@/components/parent/ParentLessonDetailModal';
@@ -1227,6 +1227,10 @@ export default function StudentSchedule() {
                 : new Date(endDT.getTime() + paymentDeadlineHours * 3600000);
 
             const bookingTutorManual = tutorUsesManualStudentPayments(tutorProfile ?? null);
+            const requiresImmediatePayment = shouldRequestPerLessonCheckout(
+                studentPaymentModel,
+                studentPaymentOverrideActive,
+            );
             setPendingPaymentSession({
                 id: sessionData.id,
                 start: selectedTime,
@@ -1236,12 +1240,14 @@ export default function StudentSchedule() {
                 tutorName: tutorProfile?.full_name ?? 'Korepetitorius',
                 tutorSoloManual: bookingTutorManual,
             });
-            setShowPaymentModal(!usesPackage);
+            setShowPaymentModal(!usesPackage && requiresImmediatePayment);
             setIsDialogOpen(false);
             setSaving(false);
 
             if (usesPackage) {
                 setSuccessMsg(t('stuSched.packageReserved'));
+            } else if (!requiresImmediatePayment) {
+                setSuccessMsg(t('stuSched.monthlyBillingReserved'));
             }
 
             // Run in background: tutor email, Google sync, parent checkout+email, then refresh data
@@ -1269,7 +1275,7 @@ export default function StudentSchedule() {
                     const hasPayer = studentPaymentPayer === 'parent' && !!studentPayerEmail?.trim();
                     let selfPayLink: string | null = null;
                     let creditFullyCovered = false;
-                    if (!hasPayer && !usesPackage && selectedSubject?.price) {
+                    if (!hasPayer && !usesPackage && selectedSubject?.price && requiresImmediatePayment) {
                         try {
                             const chkRes = await fetch('/api/stripe-checkout', {
                                 method: 'POST',
@@ -1349,7 +1355,7 @@ export default function StudentSchedule() {
                         console.error('[StudentSchedule] booking_confirmation to parent failed:', payerEmail);
                     }
 
-                    if (!usesPackage) {
+                    if (!usesPackage && requiresImmediatePayment) {
                         const tutorSoloManual = tutorUsesManualStudentPayments(tutorProfile ?? null);
                         const tutorBankDetails = tutorSoloManual
                             ? trimManualPaymentBankDetails(
@@ -1435,6 +1441,10 @@ export default function StudentSchedule() {
     };
 
     const handleGoToStripe = async (sessionId: string) => {
+        if (!shouldRequestPerLessonCheckout(studentPaymentModel, studentPaymentOverrideActive)) {
+            alert('Šiam mokiniui taikoma mėnesinė sąskaita arba kitas ne momentinis apmokėjimas. Sąskaita bus pateikta mėnesio pabaigoje.');
+            return;
+        }
         setFetchingStripe(true);
         setRedirectingToStripe(true);
         try {

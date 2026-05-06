@@ -19,6 +19,14 @@ const supabase = createClient(
 
 const BASE_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
+function hasPerLessonModel(value: string | null | undefined): boolean {
+    if (!value) return false;
+    return value
+        .split(',')
+        .map((v) => v.trim())
+        .includes('per_lesson');
+}
+
 async function getPaymentUrl(sessionId: string, payerEmail: string | null): Promise<string | null> {
     const url = `${BASE_URL}/api/stripe-checkout`;
     const res = await fetch(url, {
@@ -103,6 +111,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         for (const session of sessions || []) {
             const tutor = session.tutor as any;
             const student = session.student as any;
+            const studentPaymentModelRaw = String(student?.payment_model || '').trim();
+            if (studentPaymentModelRaw && !hasPerLessonModel(studentPaymentModelRaw)) {
+                skipped.push(session.id);
+                continue;
+            }
             const resolved = resolvePerLessonPaymentRules(
                 {
                     payment_model: student?.payment_model,

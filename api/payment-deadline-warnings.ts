@@ -25,6 +25,14 @@ const supabase = createClient(
 
 const BASE_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
+function hasPerLessonModel(value: string | null | undefined): boolean {
+    if (!value) return false;
+    return value
+        .split(',')
+        .map((v) => v.trim())
+        .includes('per_lesson');
+}
+
 async function sendWarningEmail(payload: any) {
     const url = `${BASE_URL}/api/send-email`;
     const resp = await fetch(url, {
@@ -140,6 +148,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         for (const session of sessions || []) {
             const tutor = session.tutor as any;
             const student = session.student as any;
+            const studentPaymentModelRaw = String(student?.payment_model || '').trim();
+
+            // Per-student payment override: monthly/package students must not get per-lesson payment reminders.
+            if (studentPaymentModelRaw && !hasPerLessonModel(studentPaymentModelRaw)) {
+                skipped.push(session.id);
+                continue;
+            }
 
             const baseHours = tutor?.payment_deadline_hours ?? (tutor?.cancellation_hours ?? 24);
             const resolved = resolvePerLessonPaymentRules(
