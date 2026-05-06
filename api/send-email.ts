@@ -1639,6 +1639,10 @@ function schoolContract(d: any, locale: Locale) {
 
 function schoolInstallmentRequest(d: any, locale: Locale) {
   const appUrl = getAppUrl();
+  const annualFee = Number(d.annualFee || 0);
+  const additionalFee = Number(d.additionalFeeAmount || 0);
+  const hasBreakdown = annualFee > 0 || additionalFee > 0;
+  const totalAmount = Number(d.amount || 0);
   return {
     subject: `Mokėjimo prašymas — įmoka #${d.installmentNumber || ''}`,
     html: wrap(`
@@ -1656,6 +1660,9 @@ function schoolInstallmentRequest(d: any, locale: Locale) {
             ${td('Mokinys', esc(d.studentName))}
             ${td('Įmoka', `#${d.installmentNumber || '—'} iš ${d.totalInstallments || '—'}`)}
             ${td('Suma', d.amount ? `€${d.amount}` : '—')}
+            ${hasBreakdown ? td('Fiksuotas mokestis', annualFee > 0 ? `€${annualFee.toFixed(2)}` : '—') : ''}
+            ${hasBreakdown ? td('Papildomas mokestis', additionalFee > 0 ? `€${additionalFee.toFixed(2)}${d.additionalFeePurpose ? ` (${esc(d.additionalFeePurpose)})` : ''}` : '—') : ''}
+            ${hasBreakdown ? td('Iš viso', totalAmount > 0 ? `€${totalAmount.toFixed(2)}` : '—') : ''}
             ${td('Terminas', d.dueDate || '—', false)}
           </table>
         </div>

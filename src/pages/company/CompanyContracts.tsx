@@ -73,6 +73,8 @@ interface Contract {
   pdf_url?: string | null;
   signed_contract_url?: string | null;
   signed_uploaded_at?: string | null;
+  additional_fee_amount?: number | null;
+  additional_fee_purpose?: string | null;
   student?: { full_name: string; email: string; phone?: string | null; payer_name: string | null; payer_email: string | null; payer_phone?: string | null; payer_personal_code?: string | null; parent_secondary_name?: string | null; parent_secondary_email?: string | null; parent_secondary_phone?: string | null; parent_secondary_personal_code?: string | null; parent_secondary_address?: string | null; student_address?: string | null; student_city?: string | null; child_birth_date?: string | null };
 }
 
@@ -153,6 +155,9 @@ export default function CompanyContracts() {
   const [sendImmediately, setSendImmediately] = useState(true);
   const [paymentMode, setPaymentMode] = useState<'full' | 'installments'>('full');
   const [installmentRows, setInstallmentRows] = useState<InstallmentDraft[]>([{ amount: '', due_date: '' }]);
+  const [hasAdditionalFee, setHasAdditionalFee] = useState(false);
+  const [additionalFeePurpose, setAdditionalFeePurpose] = useState('');
+  const [additionalFeeAmount, setAdditionalFeeAmount] = useState('');
   const [saving, setSaving] = useState(false);
 
   const [tab, setTab] = useState<'contracts' | 'templates'>('contracts');
@@ -346,6 +351,9 @@ export default function CompanyContracts() {
     setSendImmediately(true);
     setPaymentMode('full');
     setInstallmentRows([{ amount: '', due_date: '' }]);
+    setHasAdditionalFee(false);
+    setAdditionalFeePurpose('');
+    setAdditionalFeeAmount('');
     setContractOpen(true);
   };
 
@@ -456,6 +464,9 @@ export default function CompanyContracts() {
     studentName: string;
     parentName: string;
     recipientEmail: string;
+    additionalFeeAmount?: number;
+    additionalFeePurpose?: string;
+    annualFee?: number;
   }): Promise<{ paymentUrl?: string; checkoutError?: string }> => {
     let paymentUrl: string | undefined;
     let checkoutError: string | undefined;
@@ -496,6 +507,9 @@ export default function CompanyContracts() {
         totalInstallments: params.totalInstallments,
         amount: Number(params.amount).toFixed(2),
         dueDate: new Date(params.dueDate).toLocaleDateString('lt-LT'),
+        additionalFeeAmount: params.additionalFeeAmount ? Number(params.additionalFeeAmount).toFixed(2) : undefined,
+        additionalFeePurpose: params.additionalFeePurpose || undefined,
+        annualFee: params.annualFee ? Number(params.annualFee).toFixed(2) : undefined,
         ...(paymentUrl ? { paymentUrl } : {}),
       },
     });
@@ -837,6 +851,7 @@ export default function CompanyContracts() {
   const createContract = async () => {
     if (!orgId || !cForm.student_id || !cForm.annual_fee) return;
     const effectiveAnnualFee = isSchoolView ? '300' : cForm.annual_fee;
+    const additionalFeeAmountNum = hasAdditionalFee ? Number(additionalFeeAmount) : 0;
     const effectiveContractNumber = cForm.contract_number.trim() || generateContractNumber();
     if (!contractParentName.trim()) {
       setToast({ message: tr('compStu.parentNameRequiredError'), type: 'error' });
@@ -852,6 +867,14 @@ export default function CompanyContracts() {
     }
     if (paymentMode === 'installments' && installmentRows.some((r) => !r.amount || !r.due_date)) {
       setToast({ message: tr('school.installmentsRequired'), type: 'error' });
+      return;
+    }
+    if (hasAdditionalFee && !additionalFeePurpose.trim()) {
+      setToast({ message: 'Įrašykite papildomo mokesčio paskirtį.', type: 'error' });
+      return;
+    }
+    if (hasAdditionalFee && !(additionalFeeAmountNum > 0)) {
+      setToast({ message: 'Papildomo mokesčio suma turi būti didesnė nei 0.', type: 'error' });
       return;
     }
     if (paymentMode === 'installments') {
@@ -939,6 +962,8 @@ export default function CompanyContracts() {
         filled_body: finalBody,
         pdf_url: generatedPdfUrl || null,
         annual_fee: Number(effectiveAnnualFee),
+        additional_fee_amount: hasAdditionalFee ? additionalFeeAmountNum : null,
+        additional_fee_purpose: hasAdditionalFee ? additionalFeePurpose.trim() : null,
         signing_status: sendImmediately ? 'sent' : 'draft',
         sent_at: sendImmediately ? new Date().toISOString() : null,
       }).select('*, student:students(full_name, email, payer_name, payer_email, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date)').single();
@@ -954,7 +979,7 @@ export default function CompanyContracts() {
       const schedule = installmentRows.map((r, idx) => ({
         contract_id: created.id,
         installment_number: idx + 1,
-        amount: Number(r.amount),
+        amount: Number(r.amount) + (idx === 0 && hasAdditionalFee ? additionalFeeAmountNum : 0),
         due_date: r.due_date,
       }));
       const { data: insertedInstallments, error: installmentsErr } = await supabase
@@ -980,7 +1005,7 @@ export default function CompanyContracts() {
         .insert({
           contract_id: created.id,
           installment_number: 1,
-          amount: Number(effectiveAnnualFee),
+          amount: Number(effectiveAnnualFee) + (hasAdditionalFee ? additionalFeeAmountNum : 0),
           due_date: dueDate,
         })
         .select('id, installment_number, amount, due_date')
@@ -1049,6 +1074,9 @@ export default function CompanyContracts() {
                 studentName: created.student?.full_name || '',
                 parentName: contractParentName.trim() || created.student?.payer_name || created.student?.full_name || '',
                 recipientEmail: recipient,
+                additionalFeeAmount: Number(created.additional_fee_amount || 0),
+                additionalFeePurpose: created.additional_fee_purpose || undefined,
+                annualFee: Number(created.annual_fee || 0),
               });
               if (!pay.paymentUrl && pay.checkoutError) {
                 installmentCheckoutWarning = pay.checkoutError;
@@ -1181,6 +1209,9 @@ export default function CompanyContracts() {
               studentName: student?.full_name || '',
               parentName: student?.payer_name || student?.full_name || '',
               recipientEmail: recipient,
+              additionalFeeAmount: Number(contract.additional_fee_amount || 0),
+              additionalFeePurpose: contract.additional_fee_purpose || undefined,
+              annualFee: Number(contract.annual_fee || 0),
             });
             if (!pay.paymentUrl && pay.checkoutError) {
               setToast({
@@ -1200,7 +1231,7 @@ export default function CompanyContracts() {
             .insert({
               contract_id: contract.id,
               installment_number: 1,
-              amount: Number(contract.annual_fee),
+              amount: Number(contract.annual_fee) + Number(contract.additional_fee_amount || 0),
               due_date: dueDate,
             })
             .select('id, installment_number, amount, due_date')
@@ -1389,6 +1420,12 @@ export default function CompanyContracts() {
       <p className="text-sm text-gray-500 mt-1">
                         {c.contract_number && <span className="mr-3">Sutarties Nr. {c.contract_number}</span>}
                         {tr('school.annualFee')} <span className="font-medium text-gray-700">&euro;{Number(c.annual_fee).toFixed(2)}</span>
+                        {Number(c.additional_fee_amount || 0) > 0 && (
+                          <span className="ml-3 text-gray-600">
+                            + Papildomas: <span className="font-medium text-gray-700">&euro;{Number(c.additional_fee_amount).toFixed(2)}</span>
+                            {c.additional_fee_purpose ? ` (${c.additional_fee_purpose})` : ''}
+                          </span>
+                        )}
                         {c.sent_at && <span className="ml-3">{tr('school.sent')} {new Date(c.sent_at).toLocaleDateString('lt-LT')}</span>}
                         {c.signed_at && <span className="ml-3">{tr('school.signed')} {new Date(c.signed_at).toLocaleDateString('lt-LT')}</span>}
                       </p>
@@ -1647,6 +1684,41 @@ export default function CompanyContracts() {
               />
               {isSchoolView && <p className="text-xs text-gray-500">Fiksuotas metinis mokestis: 300 EUR.</p>}
             </div>
+            {isSchoolView && (
+              <div className="space-y-3 rounded-xl border border-gray-200 p-3">
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={hasAdditionalFee}
+                    onChange={(e) => setHasAdditionalFee(e.target.checked)}
+                    className="w-4 h-4 rounded border-gray-300 text-emerald-600"
+                  />
+                  Papildomas mokestis
+                </label>
+                {hasAdditionalFee && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label>Paskirtis</Label>
+                      <Input
+                        value={additionalFeePurpose}
+                        onChange={(e) => setAdditionalFeePurpose(e.target.value)}
+                        placeholder="Pvz. administravimo mokestis"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Suma (EUR)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={additionalFeeAmount}
+                        onChange={(e) => setAdditionalFeeAmount(e.target.value)}
+                        placeholder="50.00"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>{tr('compStu.parentFullNameRequired')}</Label>

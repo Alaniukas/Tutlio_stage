@@ -82,6 +82,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!payerEmail) return json(res, 400, { error: 'No payer email on student' });
 
   const baseEur = Number(installment.amount);
+  const extraEurRaw = Number(contract?.additional_fee_amount || 0);
+  const extraEur = installment.installment_number === 1 && extraEurRaw > 0 ? extraEurRaw : 0;
+  const fixedEur = Math.max(0, baseEur - extraEur);
   const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(baseEur);
 
   if (chargeCents < 50 || transferToSchoolCents < 1) {
@@ -99,23 +102,53 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
+    const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
+    if (fixedEur > 0) {
+      lineItems.push({
+        price_data: {
+          currency: 'eur',
+          unit_amount: Math.round(fixedEur * 100),
+          product_data: {
+            name: `${org?.name || 'Mokykla'} — Fiksuotas mokestis`,
+            description: `Metinio mokesčio įmoka: ${student?.full_name || 'Mokinys'}`,
+          },
+        },
+        quantity: 1,
+      });
+    }
+    if (extraEur > 0) {
+      const purpose = String(contract?.additional_fee_purpose || '').trim() || 'Papildomas mokestis';
+      lineItems.push({
+        price_data: {
+          currency: 'eur',
+          unit_amount: Math.round(extraEur * 100),
+          product_data: {
+            name: `${org?.name || 'Mokykla'} — Papildomas mokestis`,
+            description: purpose,
+          },
+        },
+        quantity: 1,
+      });
+    }
+    if (lineItems.length === 0) {
+      lineItems.push({
+        price_data: {
+          currency: 'eur',
+          unit_amount: chargeCents,
+          product_data: {
+            name: `${org?.name || 'Mokykla'} — Įmoka #${installment.installment_number}`,
+            description: `Metinio mokesčio įmoka: ${student?.full_name || 'Mokinys'}`,
+          },
+        },
+        quantity: 1,
+      });
+    }
+
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
       payment_method_types: ['card'],
       customer_email: payerEmail,
-      line_items: [
-        {
-          price_data: {
-            currency: 'eur',
-            unit_amount: chargeCents,
-            product_data: {
-              name: `${org?.name || 'Mokykla'} — Įmoka #${installment.installment_number}`,
-              description: `Metinio mokesčio įmoka: ${student?.full_name || 'Mokinys'}`,
-            },
-          },
-          quantity: 1,
-        },
-      ],
+      line_items: lineItems,
       payment_intent_data: {
         application_fee_amount: applicationFeeCents,
         transfer_data: {
