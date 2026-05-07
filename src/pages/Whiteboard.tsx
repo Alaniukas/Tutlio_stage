@@ -59,17 +59,10 @@ export default function WhiteboardPage() {
     if (userLoading) return;
     let cancelled = false;
     (async () => {
-      // #region agent log
-      fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'post-fix',hypothesisId:'H3',location:'Whiteboard.tsx:authBootstrap:start',message:'whiteboard auth bootstrap start',data:{hasOpener:!!window.opener,hasNewTabParam:window.location.search.includes('new_tab=1'),hasUserFromContext:!!user,userId:user?.id||null},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
-
       // If UserContext already resolved a user, never mutate auth session here.
       // This avoids cross-account session overrides in new-tab whiteboard flows.
       if (user) {
         if (!cancelled) setAuthBootstrapDone(true);
-        // #region agent log
-        fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'post-fix',hypothesisId:'H3',location:'Whiteboard.tsx:authBootstrap:skipBecauseUserContext',message:'skip whiteboard setSession because context user exists',data:{userId:user.id},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         return;
       }
 
@@ -94,9 +87,6 @@ export default function WhiteboardPage() {
             }, AUTH_HANDSHAKE_TIMEOUT_MS);
           });
           if (received?.accessToken && received?.refreshToken) {
-            // #region agent log
-            fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'post-fix',hypothesisId:'H3',location:'Whiteboard.tsx:authBootstrap:openerSetSession',message:'calling setSession from opener bootstrap',data:{hasTokens:true},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
             await supabase.auth.setSession({
               access_token: received.accessToken,
               refresh_token: received.refreshToken,
@@ -120,9 +110,6 @@ export default function WhiteboardPage() {
             typeof parsed?.refreshToken === 'string' &&
             Number(parsed?.expiresAt || 0) > Date.now();
           if (isValid) {
-            // #region agent log
-            fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'post-fix',hypothesisId:'H3',location:'Whiteboard.tsx:authBootstrap:localSetSession',message:'calling setSession from local bootstrap key',data:{hasBootstrapKey:true,expiresAt:parsed.expiresAt||null},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
             await supabase.auth.setSession({
               access_token: parsed.accessToken as string,
               refresh_token: parsed.refreshToken as string,
@@ -202,27 +189,6 @@ export default function WhiteboardPage() {
 
     (async () => {
       try {
-        // #region agent log
-        fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'run1',hypothesisId:'H4',location:'Whiteboard.tsx:sessionLoad:start',message:'starting whiteboard session fetch',data:{roomId,authBootstrapDone,userLoading,hasUser:!!user},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
-        // #region agent log
-        const { data: authSnapshot, error: authSnapshotErr } = await supabase.auth.getSession();
-        fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'run3',hypothesisId:'H8',location:'Whiteboard.tsx:sessionLoad:authSnapshot',message:'auth snapshot before sessions select',data:{hasSession:!!authSnapshot?.session,userId:authSnapshot?.session?.user?.id||null,hasAccessToken:!!authSnapshot?.session?.access_token,expiresAt:authSnapshot?.session?.expires_at||null,authError:authSnapshotErr?.message||null},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
-        // #region agent log
-        try {
-          const probe = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/sessions?select=id&limit=1`, {
-            method: 'GET',
-            headers: {
-              apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
-              Authorization: `Bearer ${authSnapshot?.session?.access_token || ''}`,
-            },
-          });
-          fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'run3',hypothesisId:'H7',location:'Whiteboard.tsx:sessionLoad:networkProbe',message:'supabase authorized sessions probe result',data:{ok:probe.ok,status:probe.status},timestamp:Date.now()})}).catch(()=>{});
-        } catch (probeErr: any) {
-          fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'run3',hypothesisId:'H7',location:'Whiteboard.tsx:sessionLoad:networkProbe',message:'supabase rest probe failed',data:{errorName:probeErr?.name||null,errorMessage:probeErr?.message||null},timestamp:Date.now()})}).catch(()=>{});
-        }
-        // #endregion
         const checkOrgAdminAccess = async (organizationId: string, userId: string): Promise<boolean> => {
           try {
             const { data: orgAdminsCheck, error: orgAdminsErr } = await supabase
@@ -250,9 +216,6 @@ export default function WhiteboardPage() {
           .select('id, tutor_id, student_id, topic, start_time, students(full_name, linked_user_id), profiles!sessions_tutor_id_fkey(full_name, organization_id)')
           .eq('whiteboard_room_id', roomId)
           .maybeSingle();
-        // #region agent log
-        fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'run1',hypothesisId:'H4',location:'Whiteboard.tsx:sessionLoad:afterFetch',message:'whiteboard session fetch result',data:{hasData:!!data,hasError:!!fetchErr,errorCode:fetchErr?.code||null,errorMessage:fetchErr?.message||null},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
 
         if (cancelled) return;
 
@@ -262,9 +225,6 @@ export default function WhiteboardPage() {
             (String(fetchErr.message).includes('Failed to fetch') ||
               String(fetchErr.message).includes('AbortError') ||
               String(fetchErr.message).includes('Load failed'));
-          // #region agent log
-          fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'run3',hypothesisId:'H4',location:'Whiteboard.tsx:sessionLoad:notFoundBranch',message:'whiteboard denied at fetchErr/notFound branch',data:{errorCode:fetchErr?.code||null,errorMessage:fetchErr?.message||null,transientNetworkError},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
           if (transientNetworkError) {
             // Don't render a false "not found" on transient fetch/auth races.
             return;
@@ -296,9 +256,6 @@ export default function WhiteboardPage() {
         }
 
         if (!isTutor && !isStudent && !isOrgAdmin && !isOrgTutor) {
-          // #region agent log
-          fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'run2',hypothesisId:'H4',location:'Whiteboard.tsx:sessionLoad:unauthorizedBranch',message:'whiteboard unauthorized branch',data:{currentUserId:user.id,tutorId:sess.tutor_id,studentLinkedUserId:studentLinkedUserId||null,tutorOrgId:tutorOrgId||null,isTutor,isStudent,isOrgAdmin,isOrgTutor},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
           console.warn('[Whiteboard] Access denied', {
             roomId,
             currentUserId: user.id,
