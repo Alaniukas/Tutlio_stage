@@ -234,3 +234,141 @@
 
 ### 8.5 Compliance statement exact wording
 1. Verify the English version contains exactly: *"Tutlio's use and transfer to any other app of information received from Google APIs will adhere to the Google API Services User Data Policy, including the Limited Use requirements."*
+
+---
+
+## Task 9: Whitelabel / Custom Branding (commit `1d8fec0`)
+
+### 9.1 Whitelabel login page (public, unauthenticated)
+1. Navigate to `/login?org=<slug>` (use a known org slug that has `custom_branding` enabled).
+2. Verify the org logo appears instead of the Tutlio logo.
+3. Verify "powered by Tutlio" text appears below the logo.
+4. Verify the background gradient uses the org's `brand_color` / `brand_color_secondary`.
+5. Test with an invalid slug → verify standard Tutlio login renders (no error).
+
+### 9.2 Whitelabel within authenticated app (tutor in org)
+1. Log in as a tutor belonging to an org with `custom_branding` enabled and a `logo_url` set.
+2. Verify the sidebar header shows the **org logo + org name** instead of the Tutlio logo.
+3. Verify the mobile header also shows the org logo.
+4. Log out → verify the login page reverts to Tutlio branding (no stale org logo flash).
+
+### 9.3 Whitelabel for student portal
+1. Log in as a student whose tutor belongs to a whitelabeled org.
+2. Verify the top header shows the org logo and name.
+
+### 9.4 Whitelabel for parent portal
+1. Log in as a parent linked to a student in a whitelabeled org.
+2. Verify the parent portal header shows the org logo.
+
+### 9.5 Branding cache cleared on logout
+1. Log in as a user from org A (whitelabel enabled) → confirm org A branding shows.
+2. Log out.
+3. Log in as a user from org B (different branding or no whitelabel) → verify org A branding does NOT persist.
+4. Check browser sessionStorage: key `tutlio_org_branding` should be cleared after logout.
+
+### 9.6 Whitelabel in emails
+1. Trigger a session reminder or invoice email for a tutor/student in a whitelabeled org.
+2. Verify the email header shows the **org logo** instead of "Tutlio 🎓".
+3. Verify "powered by Tutlio" appears below the org logo in the email.
+4. Trigger the same email for a non-whitelabel org → verify standard "Tutlio 🎓" header.
+
+### 9.7 Admin panel – branding settings
+1. Log in as platform admin → open the admin panel → select an org.
+2. Enable the `custom_branding` feature toggle.
+3. Verify the whitelabel settings section appears (slug, logo upload, color pickers).
+4. Set a slug (e.g. `test-org`) → save → verify it persists on reload.
+5. Upload a logo (jpg/png/webp/svg, <2 MB) → verify it uploads and the URL is stored.
+6. Change brand color / secondary color → save → verify they persist.
+7. Visit `/login?org=test-org` → confirm the new branding appears.
+
+### 9.8 API endpoint – `/api/org-branding`
+1. `GET /api/org-branding?slug=valid-slug` → expect 200 with `{ id, name, slug, logo_url, brand_color, brand_color_secondary, entity_type }`.
+2. `GET /api/org-branding?slug=nonexistent` → expect 404.
+3. `GET /api/org-branding?slug=` (empty) → expect 400.
+4. `GET /api/org-branding?slug=org-without-custom-branding-enabled` → expect 404 (feature gated).
+5. Verify response includes `Cache-Control: public, s-maxage=300, stale-while-revalidate=600`.
+
+### 9.9 Feature gate enforcement
+1. Disable `custom_branding` for an org that previously had it enabled.
+2. Visit `/login?org=<slug>` → verify standard Tutlio branding (API returns 404).
+3. Log in as a tutor in that org → verify sidebar shows Tutlio logo (context skips branding when feature off).
+
+---
+
+## Task 10: Parent Lesson Reminder Toggle (migration `20260514`)
+
+### 10.1 Toggle visibility
+1. Log in as a parent.
+2. Navigate to parent settings.
+3. Verify a "Lesson reminders" toggle is visible.
+
+### 10.2 Disable reminders
+1. Toggle lesson reminders OFF → save.
+2. Trigger `GET /api/send-reminders` cron.
+3. Verify the parent does NOT receive a reminder email for upcoming lessons.
+
+### 10.3 Re-enable reminders
+1. Toggle lesson reminders ON → save.
+2. Trigger reminder cron again.
+3. Verify the parent receives the reminder email as expected.
+
+---
+
+## Task 11: Dashboard Performance (migration `20260515`)
+
+### 11.1 Covering index applied
+1. Run the migration `20260515000000_dashboard_sessions_covering_index.sql` against the database.
+2. Open the Dashboard as a tutor with many sessions.
+3. Verify load time is acceptable (no regression).
+4. (Optional) Run `EXPLAIN ANALYZE` on the dashboard sessions query to confirm index usage.
+
+---
+
+## Task 12: Admin Statistics Panel
+
+### 12.1 Panel renders
+1. Log in as platform admin.
+2. Navigate to admin panel → verify the statistics panel/tab is visible.
+3. Verify key stats load (total orgs, tutors, students, sessions, revenue, etc.).
+
+### 12.2 API endpoint
+1. `GET /api/admin-statistics` with valid admin secret → expect 200 with stats JSON.
+2. Without admin secret → expect 401.
+
+---
+
+## Task 13: Analytics & UTM Tracking (migration `20260513`)
+
+### 13.1 UTM capture on registration
+1. Navigate to `/register?utm_source=google&utm_medium=cpc&utm_campaign=test`.
+2. Complete registration.
+3. Verify the `analytics_events` table (or equivalent) records the UTM params for this user.
+
+### 13.2 Event tracking
+1. Perform key actions (login, create session, complete payment).
+2. Verify events are logged to the analytics system without errors in the console.
+
+---
+
+## Task 14: Landing Page Public Stats (migration `20260512`)
+
+### 14.1 RPC returns data
+1. Call the `public_landing_stats` RPC (or equivalent endpoint).
+2. Verify it returns aggregated stats (total tutors, students, sessions, etc.) without requiring auth.
+
+### 14.2 Landing page displays stats
+1. Visit the landing page.
+2. Verify the "social proof" stats section renders real numbers (not zeros or errors).
+
+---
+
+## Task 15: Invoice Regeneration
+
+### 15.1 Regenerate endpoint
+1. As platform admin, call `POST /api/regenerate-monthly-invoice` with a valid invoice ID.
+2. Verify the invoice PDF/data is regenerated with updated session data.
+3. Verify the old invoice version is replaced (not duplicated).
+
+### 15.2 Error handling
+1. Call with an invalid invoice ID → expect appropriate error.
+2. Call without admin auth → expect 401.
