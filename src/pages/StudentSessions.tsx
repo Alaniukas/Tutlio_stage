@@ -121,6 +121,7 @@ export default function StudentSessions() {
     const [paymentPayer, setPaymentPayer] = useState<string | null>(null);
     const [payerEmail, setPayerEmail] = useState<string | null>(null);
     const [tutorEmail, setTutorEmail] = useState<string | null>(null);
+    const tutorEmailRaw = useRef<string | null>(null);
     const [tutorName, setTutorName] = useState<string>('');
     const [tutorId, setTutorId] = useState<string>('');
     const [noTutorAssigned, setNoTutorAssigned] = useState(false);
@@ -575,6 +576,7 @@ export default function StudentSessions() {
         setCancellationFeePercent(st.tutor_cancellation_fee_percent ?? 0);
         setMinBookingHours(st.tutor_min_booking_hours ?? 1);
         setTutorName(st.tutor_full_name || '');
+        tutorEmailRaw.current = st.tutor_email ?? null;
         if (st.tutor_id) {
             if (isParentLessonsRoute) {
                 setTutorEmail(st.tutor_email ?? null);
@@ -953,22 +955,31 @@ export default function StudentSessions() {
         });
 
         if (!error && data?.success) {
-            // Notify only student about lesson reschedule
+            const rescheduleEmailData = {
+                studentName, tutorName,
+                oldDate: format(new Date(selectedSession.start_time), 'yyyy-MM-dd'),
+                oldTime: format(new Date(selectedSession.start_time), 'HH:mm'),
+                newDate: format(selectedNewSlot.start, 'yyyy-MM-dd'),
+                newTime: format(selectedNewSlot.start, 'HH:mm'),
+                rescheduledBy: 'student' as const,
+            };
+
+            const emailPromises: Promise<boolean>[] = [];
             if (studentEmail) {
-                await sendEmail({
+                emailPromises.push(sendEmail({
                     type: 'lesson_rescheduled',
                     to: studentEmail,
-                    data: {
-                        studentName, tutorName,
-                        oldDate: format(new Date(selectedSession.start_time), 'yyyy-MM-dd'),
-                        oldTime: format(new Date(selectedSession.start_time), 'HH:mm'),
-                        newDate: format(selectedNewSlot.start, 'yyyy-MM-dd'),
-                        newTime: format(selectedNewSlot.start, 'HH:mm'),
-                        rescheduledBy: 'student',
-                        recipientRole: 'student',
-                    },
-                });
+                    data: { ...rescheduleEmailData, recipientRole: 'student' },
+                }));
             }
+            if (tutorEmailRaw.current) {
+                emailPromises.push(sendEmail({
+                    type: 'lesson_rescheduled',
+                    to: tutorEmailRaw.current,
+                    data: { ...rescheduleEmailData, recipientRole: 'tutor' },
+                }));
+            }
+            await Promise.all(emailPromises);
 
             // Full sync: move lesson and refresh free time slots in Google Calendar
             try {

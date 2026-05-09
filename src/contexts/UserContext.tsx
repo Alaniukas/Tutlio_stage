@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { dedupeAuthGetUser } from '@/lib/preload';
 import { User } from '@supabase/supabase-js';
 import { buildPlatformPath } from '@/lib/platform';
+import { clearOrgBrandingCache } from '@/contexts/OrgBrandingContext';
 
 interface UserProfile {
   id: string;
@@ -156,17 +157,11 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     // Initial auth check
     const initAuth = async () => {
       if (initAuthInFlightRef.current) {
-        // #region agent log
-        fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'post-fix',hypothesisId:'H2',location:'UserContext.tsx:initAuth:skipDuplicate',message:'skipping duplicate initAuth in-flight',data:{},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         return;
       }
       initAuthInFlightRef.current = true;
       let currentUser: User | null = null;
       try {
-        // #region agent log
-        fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'run1',hypothesisId:'H1',location:'UserContext.tsx:initAuth:start',message:'initAuth start',data:{loadingBefore:true},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         const withTimeout = async <T,>(p: Promise<T>, ms: number): Promise<T> => {
           let t: any;
           const timeout = new Promise<never>((_, reject) => {
@@ -180,32 +175,20 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         };
 
         try {
-          // #region agent log
-          fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'run1',hypothesisId:'H1',location:'UserContext.tsx:initAuth:getUser',message:'calling dedupeAuthGetUser',data:{},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
           currentUser = await withTimeout(dedupeAuthGetUser(), 8000);
         } catch (errFirst) {
           const name = (errFirst as { name?: string })?.name;
           if (name !== 'AbortError' && !(errFirst instanceof Error && errFirst.message === 'Auth init timeout')) {
             console.warn('[UserContext] getUser dedupe failed during init:', errFirst);
           }
-          // #region agent log
-          fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'post-fix',hypothesisId:'H2',location:'UserContext.tsx:initAuth:noFallbackGetSession',message:'skip fallback getSession to avoid auth lock contention',data:{errorName:(errFirst as any)?.name||null,errorMessage:(errFirst as any)?.message||null},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
         }
 
         if (cancelled) return;
         if (currentUser) {
           setUser(currentUser);
-          // #region agent log
-          fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'post-fix',hypothesisId:'H6',location:'UserContext.tsx:initAuth:setUserNonNull',message:'initAuth applying non-null user',data:{userId:currentUser.id},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
         } else {
           // Never null-out user from initAuth timeout path. SIGNED_OUT handler is the only
           // source that should clear user/session state.
-          // #region agent log
-          fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'post-fix',hypothesisId:'H6',location:'UserContext.tsx:initAuth:preserveExistingUser',message:'initAuth resolved null user, preserving existing context user',data:{},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
         }
 
         if (currentUser) {
@@ -226,9 +209,6 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       try {
-        // #region agent log
-        fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'run1',hypothesisId:'H2',location:'UserContext.tsx:onAuthStateChange',message:'auth state event',data:{event,hasUser:!!session?.user,userId:session?.user?.id||null},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         console.log('[UserContext] Auth event:', event, {
           hasUser: !!session?.user,
           userId: session?.user?.id,
@@ -261,6 +241,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
           setUser(null);
           setProfile(null);
           sessionStorage.removeItem('tutlio_logout_intent');
+          clearOrgBrandingCache();
 
           // Clear any parent-profile caches so a future user does not
           // accidentally inherit a stale "is-parent" verdict.

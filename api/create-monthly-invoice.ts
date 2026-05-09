@@ -378,17 +378,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 }
             }
 
-            // Prepare session details for email
-            const sessionsForEmail = payerSessions.map(s => {
-                const sessionDate = new Date(s.start_time);
-                const subject = s.subjects as any;
-                return {
-                    date: sessionDate.toLocaleDateString('lt-LT', { year: 'numeric', month: '2-digit', day: '2-digit' }),
-                    time: sessionDate.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' }),
-                    subject: subject?.name || '–',
-                    price: (s.price || 0).toFixed(2),
-                };
-            });
+            // Prepare session details for email (sorted oldest → newest)
+            const sessionsForEmail = [...payerSessions]
+                .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+                .map(s => {
+                    const sessionDate = new Date(s.start_time);
+                    const subject = s.subjects as any;
+                    return {
+                        date: sessionDate.toLocaleDateString('lt-LT', { year: 'numeric', month: '2-digit', day: '2-digit' }),
+                        time: sessionDate.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' }),
+                        subject: subject?.name || '–',
+                        price: (s.price || 0).toFixed(2),
+                    };
+                });
+
+            const platformFeesEur = payerCheckoutTotalEur - totalLessonPrice;
 
             // Send invoice email with optional S.F. PDF attachment
             const monthlyEmailOk = usesManualStudentPayments ? true : Boolean(checkoutSession?.url);
@@ -401,6 +405,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                               tutorName: ownerName,
                               periodText,
                               sessions: sessionsForEmail,
+                              lessonsTotal: totalLessonPrice.toFixed(2),
+                              platformFees: platformFeesEur > 0 ? platformFeesEur.toFixed(2) : undefined,
                               totalAmount: payerCheckoutTotalEur.toFixed(2),
                               paymentDeadline: paymentDeadlineDate.toLocaleDateString('lt-LT', {
                                   year: 'numeric',
@@ -419,6 +425,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                               tutorName: ownerName,
                               periodText,
                               sessions: sessionsForEmail,
+                              lessonsTotal: totalLessonPrice.toFixed(2),
+                              platformFees: platformFeesEur > 0 ? platformFeesEur.toFixed(2) : undefined,
                               totalAmount: payerCheckoutTotalEur.toFixed(2),
                               paymentDeadline: paymentDeadlineDate.toLocaleDateString('lt-LT', {
                                   year: 'numeric',

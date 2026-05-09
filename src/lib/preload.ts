@@ -10,8 +10,8 @@ const TUTOR_DASH_SESSIONS_SELECT =
 /** Single in-flight tutor dashboard sessions fetch (Layout preload + Dashboard share the same promise). */
 export function tutorDashboardSessionsDeduped(tutorUserId: string) {
   const now = new Date();
-  const rangeStart = subDays(now, 90).toISOString();
-  const rangeEnd = addDays(now, 366).toISOString();
+  const rangeStart = subDays(now, 60).toISOString();
+  const rangeEnd = addDays(now, 30).toISOString();
   return dedupeAsync(`tutor_dash_sessions:${tutorUserId}`, () =>
     supabase
       .from('sessions')
@@ -20,19 +20,13 @@ export function tutorDashboardSessionsDeduped(tutorUserId: string) {
       .gte('start_time', rangeStart)
       .lte('start_time', rangeEnd)
       .order('start_time', { ascending: true })
-      .limit(800),
+      .limit(400),
   );
 }
 
 function getAuthUser() {
   return dedupeAsync('auth_user', async () => {
-    // #region agent log
-    fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'run1',hypothesisId:'H5',location:'preload.ts:getAuthUser:beforeGetUser',message:'preload getUser start',data:{},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     const { data: { user } } = await supabase.auth.getUser();
-    // #region agent log
-    fetch('http://127.0.0.1:7542/ingest/2074e1d8-d766-40c5-91c7-5d517d892573',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'155c01'},body:JSON.stringify({sessionId:'155c01',runId:'run1',hypothesisId:'H5',location:'preload.ts:getAuthUser:afterGetUser',message:'preload getUser done',data:{hasUser:!!user,userId:user?.id||null},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return user;
   });
 }
@@ -99,7 +93,7 @@ export function tutorPreloadProfileDeduped(userId: string) {
  * Laiko riba sumažina planner darbą prie didelės istorijos.
  */
 export function tutorRecentPaidLessonsDeduped(tutorId: string) {
-  const since = subDays(new Date(), 800).toISOString();
+  const since = subDays(new Date(), 90).toISOString();
   return dedupeAsync(`tutor_recent_paid_lessons:${tutorId}`, () =>
     supabase
       .from('sessions')
@@ -148,6 +142,7 @@ export function tutorStudentCountEstimatedDeduped(tutorId: string) {
 }
 
 export function tutorRecentPaidPackagesDeduped(tutorId: string) {
+  const since = subDays(new Date(), 90).toISOString();
   return dedupeAsync(`tutor_recent_pkgs:${tutorId}`, () =>
     supabase
       .from('lesson_packages')
@@ -155,12 +150,14 @@ export function tutorRecentPaidPackagesDeduped(tutorId: string) {
       .eq('tutor_id', tutorId)
       .eq('paid', true)
       .not('paid_at', 'is', null)
+      .gte('paid_at', since)
       .order('paid_at', { ascending: false })
       .limit(20),
   );
 }
 
 export function tutorRecentPaidInvoicesDeduped(tutorId: string) {
+  const since = subDays(new Date(), 90).toISOString();
   return dedupeAsync(`tutor_recent_inv:${tutorId}`, () =>
     supabase
       .from('billing_batches')
@@ -168,6 +165,7 @@ export function tutorRecentPaidInvoicesDeduped(tutorId: string) {
       .eq('tutor_id', tutorId)
       .eq('paid', true)
       .not('paid_at', 'is', null)
+      .gte('paid_at', since)
       .order('paid_at', { ascending: false })
       .limit(20),
   );

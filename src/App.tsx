@@ -71,16 +71,20 @@ import SupabaseAuthHashErrors from '@/components/SupabaseAuthHashErrors';
 import ThemeColorManager from '@/hooks/useThemeColor';
 import { useTranslation, getLocaleFromPathname } from '@/lib/i18n';
 import { stripPlatformPrefix } from '@/lib/platform';
+import { initAnalytics, trackPageview } from '@/lib/analytics';
 
 /** Keep i18n locale aligned with `/:locale/...` URLs when users navigate or land from links. */
 function LocaleFromRouteSync() {
   const location = useLocation();
   const { locale, setLocale } = useTranslation();
 
+  useEffect(() => { initAnalytics(); }, []);
+
   useEffect(() => {
     const stripped = stripPlatformPrefix(location.pathname);
     const pathLocale = getLocaleFromPathname(stripped);
     if (pathLocale && pathLocale !== locale) setLocale(pathLocale);
+    trackPageview(location.pathname);
   }, [location.pathname, locale, setLocale]);
 
   return null;

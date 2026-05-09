@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { useUser } from '@/contexts/UserContext';
@@ -44,6 +44,7 @@ export default function WhiteboardPage() {
   const [authBootstrapDone, setAuthBootstrapDone] = useState(false);
   const [copiedSymbol, setCopiedSymbol] = useState<string | null>(null);
   const [libraryItems, setLibraryItems] = useState<any[]>([]);
+  const [retryKey, setRetryKey] = useState(0);
 
   const currentUser = user && session
     ? { id: user.id, name: session.profiles?.full_name || user.email || 'User' }
@@ -172,6 +173,9 @@ export default function WhiteboardPage() {
     return () => { cancelled = true; };
   }, []);
 
+  const userIdRef = useRef(user?.id);
+  useEffect(() => { userIdRef.current = user?.id; }, [user?.id]);
+
   useEffect(() => {
     if (!roomId) {
       setError(t('whiteboard.notFound'));
@@ -185,94 +189,132 @@ export default function WhiteboardPage() {
       setLoading(false);
       return;
     }
+    // Session already loaded for this user — don't re-fetch on user object ref changes
+    if (session && userIdRef.current === user.id) return;
     let cancelled = false;
 
-    (async () => {
-      try {
-        const checkOrgAdminAccess = async (organizationId: string, userId: string): Promise<boolean> => {
-          try {
-            const { data: orgAdminsCheck, error: orgAdminsErr } = await supabase
-              .from('org_admins')
-              .select('id')
-              .eq('user_id', userId)
-              .eq('organization_id', organizationId)
-              .maybeSingle();
-            if (!orgAdminsErr && orgAdminsCheck) return true;
-          } catch {
-            // Fallback below handles schemas that only have organization_admins.
-          }
+    const isRetryableError = (err: { message?: string; code?: string } | null): boolean => {
+      if (!err) return false;
+      const msg = String(err.message || '');
+      const code = String(err.code || '');
+      return (
+        msg.includes('Failed to fetch') ||
+        msg.includes('AbortError') ||
+        msg.includes('Load failed') ||
+        msg.includes('timeout') ||
+        msg.includes('statement') ||
+        code === '57014' ||
+        code === '500' ||
+        code === '503' ||
+        code === '502' ||
+        code === '504'
+      );
+    };
 
-          const { data: organizationAdminsCheck } = await supabase
-            .from('organization_admins')
-            .select('user_id')
-            .eq('user_id', userId)
-            .eq('organization_id', organizationId)
-            .maybeSingle();
-          return !!organizationAdminsCheck;
-        };
+    const MAX_RETRIES = 2;
+    const RETRY_BASE_MS = 1000;
 
+    const fetchSessionWithRetry = async (): Promise<{ data: any; error: any }> => {
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        if (cancelled) return { data: null, error: null };
+        // Lightweight query first — no joins, avoids heavy RLS + join overhead
         const { data, error: fetchErr } = await supabase
           .from('sessions')
-          .select('id, tutor_id, student_id, topic, start_time, students(full_name, linked_user_id), profiles!sessions_tutor_id_fkey(full_name, organization_id)')
+          .select('id, tutor_id, student_id, topic, start_time')
           .eq('whiteboard_room_id', roomId)
           .maybeSingle();
 
+        if (!fetchErr && data) return { data, error: null };
+        if (fetchErr && !isRetryableError(fetchErr)) return { data: null, error: fetchErr };
+        if (attempt < MAX_RETRIES) {
+          const delay = RETRY_BASE_MS * Math.pow(2, attempt);
+          await new Promise((r) => setTimeout(r, delay));
+        } else {
+          return { data, error: fetchErr };
+        }
+      }
+      return { data: null, error: { message: 'Max retries exceeded' } };
+    };
+
+    (async () => {
+      try {
+        const { data: baseSession, error: fetchErr } = await fetchSessionWithRetry();
+
         if (cancelled) return;
 
-        if (fetchErr || !data) {
-          const transientNetworkError =
-            !!fetchErr?.message &&
-            (String(fetchErr.message).includes('Failed to fetch') ||
-              String(fetchErr.message).includes('AbortError') ||
-              String(fetchErr.message).includes('Load failed'));
-          if (transientNetworkError) {
-            // Don't render a false "not found" on transient fetch/auth races.
-            return;
-          }
+        if (fetchErr || !baseSession) {
           setError(t('whiteboard.notFound'));
           setLoading(false);
           return;
         }
 
-        const sess = data as unknown as SessionInfo;
-        const studentLinkedUserId = (sess.students as any)?.linked_user_id;
-        const tutorOrgId = (sess.profiles as any)?.organization_id;
-        const { data: currentProfile } = await supabase
-          .from('profiles')
-          .select('id, organization_id')
-          .eq('id', user.id)
-          .maybeSingle();
+        const isTutor = user.id === baseSession.tutor_id;
 
-        const isTutor = user.id === sess.tutor_id;
+        // Fetch related data in parallel — these are small single-row queries
+        const [studentRes, tutorProfileRes] = await Promise.all([
+          supabase.from('students').select('full_name, linked_user_id').eq('id', baseSession.student_id).maybeSingle(),
+          supabase.from('profiles').select('full_name, organization_id').eq('id', baseSession.tutor_id).maybeSingle(),
+        ]);
+
+        if (cancelled) return;
+
+        const studentLinkedUserId = studentRes.data?.linked_user_id;
+        const tutorOrgId = tutorProfileRes.data?.organization_id;
         const isStudent = studentLinkedUserId && user.id === studentLinkedUserId;
-        const isOrgTutor =
-          !!currentProfile &&
-          !!tutorOrgId &&
-          String((currentProfile as any).organization_id || '') === String(tutorOrgId);
 
+        let isOrgTutor = false;
         let isOrgAdmin = false;
-        if (tutorOrgId && !isTutor && !isStudent) {
-          isOrgAdmin = await checkOrgAdminAccess(tutorOrgId, user.id);
+
+        if (!isTutor && !isStudent && tutorOrgId) {
+          const { data: currentProfile } = await supabase
+            .from('profiles')
+            .select('organization_id')
+            .eq('id', user.id)
+            .maybeSingle();
+
+          isOrgTutor = !!currentProfile &&
+            String(currentProfile.organization_id || '') === String(tutorOrgId);
+
+          if (!isOrgTutor) {
+            try {
+              const { data: orgAdminsCheck, error: orgAdminsErr } = await supabase
+                .from('org_admins')
+                .select('id')
+                .eq('user_id', user.id)
+                .eq('organization_id', tutorOrgId)
+                .maybeSingle();
+              if (!orgAdminsErr && orgAdminsCheck) isOrgAdmin = true;
+            } catch { /* fallback */ }
+
+            if (!isOrgAdmin) {
+              const { data: organizationAdminsCheck } = await supabase
+                .from('organization_admins')
+                .select('user_id')
+                .eq('user_id', user.id)
+                .eq('organization_id', tutorOrgId)
+                .maybeSingle();
+              isOrgAdmin = !!organizationAdminsCheck;
+            }
+          }
         }
 
         if (!isTutor && !isStudent && !isOrgAdmin && !isOrgTutor) {
-          console.warn('[Whiteboard] Access denied', {
-            roomId,
-            currentUserId: user.id,
-            tutorId: sess.tutor_id,
-            studentLinkedUserId,
-            tutorOrgId,
-            isTutor,
-            isStudent,
-            isOrgAdmin,
-            isOrgTutor,
-          });
           if (!cancelled) {
             setError(t('whiteboard.unauthorized'));
             setLoading(false);
           }
           return;
         }
+
+        const sess: SessionInfo = {
+          id: baseSession.id,
+          tutor_id: baseSession.tutor_id,
+          student_id: baseSession.student_id,
+          topic: baseSession.topic,
+          start_time: baseSession.start_time,
+          students: studentRes.data ? { full_name: studentRes.data.full_name, linked_user_id: studentRes.data.linked_user_id } : null,
+          profiles: tutorProfileRes.data ? { full_name: tutorProfileRes.data.full_name, organization_id: tutorProfileRes.data.organization_id } : null,
+        };
 
         setSession(sess);
         setLoading(false);
@@ -286,7 +328,8 @@ export default function WhiteboardPage() {
     })();
 
     return () => { cancelled = true; };
-  }, [roomId, user, userLoading, t, authBootstrapDone]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId, user?.id, userLoading, authBootstrapDone, retryKey]);
 
   const handleExportPdf = useCallback(async () => {
     if (!excalidrawAPI || !exportToBlobFn || !session) return;
@@ -298,14 +341,14 @@ export default function WhiteboardPage() {
 
       const blob = await exportToBlobFn({
         elements,
-        appState: { ...appState, exportWithDarkMode: false },
+        appState: {
+          ...appState,
+          exportWithDarkMode: false,
+          exportBackground: true,
+        },
         files,
         mimeType: 'image/png',
-        getDimensions: (w: number, h: number) => ({
-          width: Math.min(w, 3840),
-          height: Math.min(h, 2160),
-          scale: 2,
-        }),
+        getDimensions: (w: number, h: number) => ({ width: w, height: h, scale: 2 }),
       });
 
       const { PDFDocument } = await import('pdf-lib');
@@ -313,17 +356,21 @@ export default function WhiteboardPage() {
       const pngBytes = new Uint8Array(await blob.arrayBuffer());
       const pngImage = await pdfDoc.embedPng(pngBytes);
 
-      const pageWidth = Math.max(pngImage.width, 595);
-      const pageHeight = Math.max(pngImage.height, 842);
-      const page = pdfDoc.addPage([pageWidth, pageHeight]);
-
-      const scale = Math.min(pageWidth / pngImage.width, pageHeight / pngImage.height);
-      const scaledW = pngImage.width * scale;
-      const scaledH = pngImage.height * scale;
+      const A4_W = 595;
+      const A4_H = 842;
+      const MARGIN = 20;
+      const usableW = A4_W - MARGIN * 2;
+      const usableH = A4_H - MARGIN * 2;
+      const imgScale = Math.min(usableW / pngImage.width, usableH / pngImage.height, 1);
+      const scaledW = pngImage.width * imgScale;
+      const scaledH = pngImage.height * imgScale;
+      const pageW = Math.max(scaledW + MARGIN * 2, A4_W);
+      const pageH = Math.max(scaledH + MARGIN * 2, A4_H);
+      const page = pdfDoc.addPage([pageW, pageH]);
 
       page.drawImage(pngImage, {
-        x: (pageWidth - scaledW) / 2,
-        y: (pageHeight - scaledH) / 2,
+        x: (pageW - scaledW) / 2,
+        y: (pageH - scaledH) / 2,
         width: scaledW,
         height: scaledH,
       });
@@ -332,21 +379,21 @@ export default function WhiteboardPage() {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const fileName = `whiteboard-${timestamp}.pdf`;
 
-      const { error: uploadErr } = await supabase.storage
-        .from('session-files')
-        .upload(`${session.id}/${fileName}`, pdfBytes, {
-          upsert: false,
-          contentType: 'application/pdf',
-        });
+      // Always download locally first so the user gets the file immediately
+      const blobUrl = URL.createObjectURL(new Blob([pdfBytes], { type: 'application/pdf' }));
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = fileName;
+      a.click();
+      URL.revokeObjectURL(blobUrl);
 
-      if (uploadErr) {
-        console.error('[Whiteboard] PDF upload error:', uploadErr);
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(new Blob([pdfBytes], { type: 'application/pdf' }));
-        a.download = fileName;
-        a.click();
-        URL.revokeObjectURL(a.href);
-      }
+      // Upload to storage in background (best-effort)
+      supabase.storage
+        .from('session-files')
+        .upload(`${session.id}/${fileName}`, pdfBytes, { upsert: false, contentType: 'application/pdf' })
+        .then(({ error: uploadErr }) => {
+          if (uploadErr) console.warn('[Whiteboard] PDF upload to storage failed (local copy saved):', uploadErr.message);
+        });
     } catch (err) {
       console.error('[Whiteboard] export error:', err);
     } finally {
@@ -365,7 +412,13 @@ export default function WhiteboardPage() {
   }, []);
 
   if (error) {
-    const handleErrorAction = () => {
+    const handleRetry = () => {
+      setError(null);
+      setLoading(true);
+      setRetryKey((k) => k + 1);
+    };
+
+    const handleGoBack = () => {
       if (window.history.length > 1) {
         navigate(-1);
         return;
@@ -382,12 +435,20 @@ export default function WhiteboardPage() {
       <div className="flex items-center justify-center h-screen bg-white">
         <div className="text-center space-y-4">
           <p className="text-red-600 font-medium">{error}</p>
-          <button
-            onClick={handleErrorAction}
-            className="text-sm text-indigo-600 hover:underline"
-          >
-            Perkrauti / Uždaryti
-          </button>
+          <div className="flex items-center justify-center gap-3">
+            <button
+              onClick={handleRetry}
+              className="text-sm text-white bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded-lg transition-colors"
+            >
+              {t('whiteboard.retry') || 'Retry'}
+            </button>
+            <button
+              onClick={handleGoBack}
+              className="text-sm text-indigo-600 hover:underline"
+            >
+              {t('whiteboard.back')}
+            </button>
+          </div>
         </div>
       </div>
     );

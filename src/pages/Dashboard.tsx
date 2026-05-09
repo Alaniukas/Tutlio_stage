@@ -7,6 +7,7 @@ import WhiteboardButton from '@/components/WhiteboardButton';
 import { supabase } from '@/lib/supabase';
 import { getCached, setCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
+import { autoCloseBillingBatchIfAllPaid } from '@/lib/autoCloseBillingBatch';
 import { useUser } from '@/contexts/UserContext';
 import { tutorUsesManualStudentPayments } from '@/lib/subscription';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -788,6 +789,7 @@ export default function DashboardPage() {
         }).eq('id', selectedSession.id);
 
         if (!error) {
+            autoCloseBillingBatchIfAllPaid(selectedSession.id);
             setToastMessage({ message: t('dash.paymentConfirmed'), type: 'success' });
             setIsModalOpen(false);
             fetchData();

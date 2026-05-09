@@ -3,9 +3,9 @@ import { supabase } from '@/lib/supabase';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 type ExcalidrawImperativeAPI = any;
 
-const SAVE_DEBOUNCE_MS = 8_000;
-const SAVE_TIMEOUT_MS = 12_000;
-const SAVE_ERROR_COOLDOWN_MS = 30_000;
+const SAVE_DEBOUNCE_MS = 6_000;
+const SAVE_TIMEOUT_MS = 20_000;
+const SAVE_ERROR_COOLDOWN_MS = 15_000;
 const MAX_SCENE_BYTES = 2_000_000;
 const SCENE_FILE = 'scene.json';
 const IMAGE_PREFIX = 'data:image/';
@@ -301,15 +301,22 @@ export function useWhiteboardSync(
     setSaving(true);
     try {
       const blob = new Blob([serialized], { type: 'application/json' });
-      const uploadPromise = supabase.storage
-        .from(WHITEBOARD_BUCKET)
-        .upload(`${sessionId}/${SCENE_FILE}`, blob, { upsert: true, contentType: 'application/json' });
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Whiteboard save timeout')), SAVE_TIMEOUT_MS),
-      );
-      const result = await Promise.race([uploadPromise, timeoutPromise]) as Awaited<typeof uploadPromise>;
-      if (result?.error) {
-        throw result.error;
+      let saved = false;
+      for (let attempt = 0; attempt < 2 && !saved; attempt++) {
+        try {
+          const uploadPromise = supabase.storage
+            .from(WHITEBOARD_BUCKET)
+            .upload(`${sessionId}/${SCENE_FILE}`, blob, { upsert: true, contentType: 'application/json' });
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Whiteboard save timeout')), SAVE_TIMEOUT_MS),
+          );
+          const result = await Promise.race([uploadPromise, timeoutPromise]) as Awaited<typeof uploadPromise>;
+          if (result?.error) throw result.error;
+          saved = true;
+        } catch (retryErr) {
+          if (attempt === 1) throw retryErr;
+          await new Promise((r) => setTimeout(r, 2000));
+        }
       }
       lastSavedPayloadRef.current = serialized;
     } catch (err) {
@@ -369,47 +376,73 @@ export function useWhiteboardSync(
 
   useEffect(() => {
     if (!sessionId || !currentUser) return;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-    const channel = supabase.channel(`wb:${sessionId}`, {
-      config: { broadcast: { self: false } },
-    });
-
-    channel
-      .on('broadcast', { event: 'scene-update' }, ({ payload }) => {
-        const typedPayload = payload as SceneUpdatePayload;
-        if (!typedPayload?.elements) return;
-        if (typedPayload.senderId && currentUser && typedPayload.senderId === currentUser.id) return;
-        if (!loadedRef.current) {
-          pendingRemotePayloadsRef.current.push(typedPayload);
-          return;
-        }
-        void applyRemotePayload(typedPayload);
-      })
-      .on('presence', { event: 'sync' }, () => {
-        const state = channel.presenceState<{ userId: string; name: string; joinedAt: string }>();
-        const list: Participant[] = [];
-        for (const key of Object.keys(state)) {
-          for (const p of state[key]) {
-            if (!list.some((x) => x.userId === p.userId)) {
-              list.push({ userId: p.userId, name: p.name, joinedAt: p.joinedAt });
-            }
-          }
-        }
-        setParticipants(list);
-      })
-      .subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
-          await channel.track({
-            userId: currentUser.id,
-            name: currentUser.name,
-            joinedAt: new Date().toISOString(),
-          });
-        }
+    const setupChannel = () => {
+      const channel = supabase.channel(`wb:${sessionId}`, {
+        config: { broadcast: { self: false } },
       });
 
+      channel
+        .on('broadcast', { event: 'scene-update' }, ({ payload }) => {
+          const typedPayload = payload as SceneUpdatePayload;
+          if (!typedPayload?.elements) return;
+          if (typedPayload.senderId && currentUser && typedPayload.senderId === currentUser.id) return;
+          if (!loadedRef.current) {
+            pendingRemotePayloadsRef.current.push(typedPayload);
+            return;
+          }
+          void applyRemotePayload(typedPayload);
+        })
+        .on('presence', { event: 'sync' }, () => {
+          const state = channel.presenceState<{ userId: string; name: string; joinedAt: string }>();
+          const list: Participant[] = [];
+          for (const key of Object.keys(state)) {
+            for (const p of state[key]) {
+              if (!list.some((x) => x.userId === p.userId)) {
+                list.push({ userId: p.userId, name: p.name, joinedAt: p.joinedAt });
+              }
+            }
+          }
+          setParticipants(list);
+        })
+        .subscribe(async (status) => {
+          if (status === 'SUBSCRIBED') {
+            await channel.track({
+              userId: currentUser.id,
+              name: currentUser.name,
+              joinedAt: new Date().toISOString(),
+            });
+          }
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            reconnectTimer = setTimeout(() => {
+              if (channelRef.current) {
+                supabase.removeChannel(channelRef.current);
+                channelRef.current = null;
+              }
+              const newChannel = setupChannel();
+              channelRef.current = newChannel;
+            }, 3000);
+          }
+        });
+
+      return channel;
+    };
+
+    const channel = setupChannel();
     channelRef.current = channel;
 
+    const handleOnline = () => {
+      if (!channelRef.current) return;
+      supabase.removeChannel(channelRef.current);
+      channelRef.current = setupChannel();
+    };
+    window.addEventListener('online', handleOnline);
+
     return () => {
+      window.removeEventListener('online', handleOnline);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
         channelRef.current = null;
@@ -464,6 +497,35 @@ export function useWhiteboardSync(
       clearTimeout(loadFailSafe);
     };
   }, [sessionId, excalidrawAPI, loaded, loadScene, flushQueuedPayloads, hydrateFilesFromStorage]);
+
+  const saveSceneRef = useRef(saveScene);
+  useEffect(() => { saveSceneRef.current = saveScene; }, [saveScene]);
+
+  useEffect(() => {
+    if (!sessionId || !excalidrawAPI || !currentUser) return;
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        if (saveTimerRef.current) {
+          clearTimeout(saveTimerRef.current);
+          saveTimerRef.current = null;
+        }
+        void saveSceneRef.current();
+      }
+    };
+    const handleBeforeUnload = () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      void saveSceneRef.current();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [sessionId, excalidrawAPI, currentUser?.id]);
 
   const onChange = useCallback(
     (elements: readonly any[], appState?: any, files?: Record<string, WhiteboardFile>) => {

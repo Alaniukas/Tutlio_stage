@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Eye, EyeOff, Building2, AlertCircle } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
+import { getStoredUtm } from '@/lib/analytics';
 
 const COUNTRY_DIAL_CODES = [
   { code: 'LT', label: 'Lithuania', dial: '+370' },
@@ -238,6 +239,7 @@ export default function Register() {
       const user = authData.user;
       const meta = user.user_metadata || {};
 
+      const utm = getStoredUtm();
       let profileData: any = {
         id: user.id,
         full_name: meta.full_name,
@@ -245,6 +247,9 @@ export default function Register() {
         email: user.email,
         accepted_privacy_policy_at: meta.accepted_privacy_policy_at || acceptedAt,
         accepted_terms_at: meta.accepted_terms_at || acceptedAt,
+        ...(utm.utm_source ? { utm_source: utm.utm_source } : {}),
+        ...(utm.utm_medium ? { utm_medium: utm.utm_medium } : {}),
+        ...(utm.utm_campaign ? { utm_campaign: utm.utm_campaign } : {}),
       };
 
       if (meta.stripe_checkout_session_id) {

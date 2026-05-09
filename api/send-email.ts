@@ -1395,7 +1395,17 @@ function monthlyInvoice(d: any, locale: Locale) {
             </thead>
             <tbody>${sessionsHtml}</tbody>
             <tfoot>
+              ${d.platformFees ? `
               <tr style="background:#f0f9ff;">
+                <td colspan="3" style="padding:10px 8px; color:#374151; font-size:14px; text-align:right;">${t(locale, 'em.lessonsSubtotal')}</td>
+                <td style="padding:10px 8px; color:#374151; font-size:14px; font-weight:600; text-align:right;">€${d.lessonsTotal}</td>
+              </tr>
+              <tr style="background:#f0f9ff;">
+                <td colspan="3" style="padding:10px 8px; color:#6b7280; font-size:13px; text-align:right;">${t(locale, 'em.platformFees')}</td>
+                <td style="padding:10px 8px; color:#6b7280; font-size:13px; font-weight:600; text-align:right;">€${d.platformFees}</td>
+              </tr>
+              ` : ''}
+              <tr style="background:#f0f9ff; border-top:2px solid #bfdbfe;">
                 <td colspan="3" style="padding:14px 8px; color:#1e40af; font-size:15px; font-weight:700; text-align:right;">${t(locale, 'em.totalLabel')}</td>
                 <td style="padding:14px 8px; color:#1e40af; font-size:16px; font-weight:800; text-align:right;">€${d.totalAmount}</td>
               </tr>

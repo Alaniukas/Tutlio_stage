@@ -1,9 +1,42 @@
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Building2, CalendarDays, ListOrdered, Users } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
 import Reveal from './Reveal';
 
 export type LandingVariant = 'tutor' | 'schools';
+
+function AnimatedCount({ value }: { value: number }) {
+  const [display, setDisplay] = useState(0);
+  const ref = useRef<HTMLSpanElement>(null);
+  const started = useRef(false);
+
+  useEffect(() => {
+    if (!value || started.current) return;
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting || started.current) return;
+        started.current = true;
+        observer.disconnect();
+        const t0 = performance.now();
+        const step = (now: number) => {
+          const p = Math.min((now - t0) / 2000, 1);
+          setDisplay(Math.round((1 - Math.pow(1 - p, 3)) * value));
+          if (p < 1) requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
+      },
+      { threshold: 0.3 },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [value]);
+
+  return <span ref={ref}>{display.toLocaleString()}</span>;
+}
 
 /** `invert:false` — spalvotas logotipas violetiniame marquee (nebenaudojamas brightness/invert maršalas). */
 const CUSTOMER_LOGOS: { src: string; alt: string; invert?: boolean }[] = [
@@ -29,6 +62,17 @@ export default function HeroSection({ variant = 'tutor' }: { variant?: LandingVa
   const p = variant === 'schools' ? 'schoolsLanding' : 'landing';
   const ctaLink = variant === 'schools' ? buildLocalizedPath('/kontaktai', locale) : '/register';
   const spotIcons = variant === 'schools' ? HERO_SPOT_ICONS_SCHOOLS : HERO_SPOT_ICONS_TUTOR;
+
+  const [lessonCount, setLessonCount] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    supabase.rpc('get_public_landing_stats').then(({ data }) => {
+      if (cancelled || !data) return;
+      const d = data as { completed_lessons: number; upcoming_lessons: number };
+      setLessonCount(d.completed_lessons + d.upcoming_lessons);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   return (
     <section className="relative overflow-hidden bg-gradient-to-b from-[#f5f5f3] via-[#f0efed] to-[#eae9e6]">
@@ -69,6 +113,15 @@ export default function HeroSection({ variant = 'tutor' }: { variant?: LandingVa
             {t(`${p}.heroSubtitle`)}
           </p>
         </Reveal>
+
+        {lessonCount !== null && lessonCount > 0 && (
+          <Reveal delay={250}>
+            <p className="text-[13px] sm:text-sm text-gray-400 mb-8 sm:mb-10 -mt-4 sm:-mt-6">
+              <span className="font-bold text-gray-900 tabular-nums"><AnimatedCount value={lessonCount} /></span>{' '}
+              {t(`${p}.heroLessonCount`)}
+            </p>
+          </Reveal>
+        )}
 
         <Reveal delay={300}>
           <div className="flex justify-center">

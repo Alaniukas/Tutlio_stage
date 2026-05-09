@@ -20,6 +20,8 @@ import {
   ChevronDown,
   ChevronUp,
   Settings,
+  RefreshCw,
+  ArrowUpDown,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -56,6 +58,8 @@ export default function InvoicesPage() {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [downloadingAllList, setDownloadingAllList] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const [sortAsc, setSortAsc] = useState(false);
 
   const fetchInvoices = useCallback(async () => {
     /** Tas pats `sub` kaip PostgREST `auth.uid()` — ne konteksto profilis. */
@@ -147,7 +151,7 @@ export default function InvoicesPage() {
   }, [invoicePeriodMode, invoiceMonth, invoiceRangeStart, invoiceRangeEnd]);
 
   const filteredInvoices = useMemo(() => {
-    return invoices.filter((inv) => {
+    const filtered = invoices.filter((inv) => {
       const issueDate = String(inv.issue_date || '').slice(0, 10);
       if (invoicePeriodMode === 'month' && invoiceMonth && /^\d{4}-\d{2}$/.test(invoiceMonth)) {
         const [yStr, mStr] = invoiceMonth.split('-');
@@ -170,7 +174,12 @@ export default function InvoicesPage() {
       }
       return true;
     });
-  }, [invoices, invoicePeriodMode, invoiceMonth, invoiceRangeStart, invoiceRangeEnd]);
+    filtered.sort((a, b) => {
+      const cmp = (a.issue_date || a.created_at).localeCompare(b.issue_date || b.created_at);
+      return sortAsc ? cmp : -cmp;
+    });
+    return filtered;
+  }, [invoices, invoicePeriodMode, invoiceMonth, invoiceRangeStart, invoiceRangeEnd, sortAsc]);
 
   useEffect(() => {
     if (!orgPolicy.isOrgTutor) fetchInvoices();
@@ -281,6 +290,35 @@ export default function InvoicesPage() {
     }
   };
 
+  const handleRegenerate = async (invoiceId: string) => {
+    const target = invoices.find(inv => inv.id === invoiceId);
+    if (!target?.billing_batch_id) return;
+
+    const confirmed = window.confirm(t('invoices.regenerateConfirm'));
+    if (!confirmed) return;
+
+    setRegeneratingId(invoiceId);
+    try {
+      const res = await fetch('/api/regenerate-monthly-invoice', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ billingBatchId: target.billing_batch_id }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        window.alert(body.error || t('invoices.regenerateFailed'));
+        return;
+      }
+      setInvoices(prev => prev.filter(inv => inv.id !== invoiceId));
+      window.alert(t('invoices.regenerateSuccess'));
+    } catch (e) {
+      console.error('[Invoices] regenerate error:', e);
+      window.alert(t('invoices.regenerateFailed'));
+    } finally {
+      setRegeneratingId(null);
+    }
+  };
+
   const statusBadge = (status: string) => {
     const styles: Record<string, string> = {
       issued: 'bg-blue-100 text-blue-700',
@@ -366,6 +404,15 @@ export default function InvoicesPage() {
                   {status === 'all' ? t('invoices.filterAll') : t(`invoices.status${status.charAt(0).toUpperCase() + status.slice(1)}`)}
                 </button>
               ))}
+              <span className="mx-0.5 self-stretch w-px bg-gray-200" />
+              <button
+                type="button"
+                onClick={() => setSortAsc((prev) => !prev)}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors bg-gray-50 text-gray-600 hover:bg-gray-100 flex items-center gap-1"
+              >
+                <ArrowUpDown className="w-3 h-3" />
+                {sortAsc ? t('invoices.sortOldestFirst') : t('invoices.sortNewestFirst')}
+              </button>
             </div>
           </div>
 
@@ -543,6 +590,22 @@ export default function InvoicesPage() {
                     </Button>
                     {inv.status === 'issued' && (
                       <>
+                        {inv.billing_batch_id && (!inv.billing_batches || !inv.billing_batches.paid) && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRegenerate(inv.id)}
+                            disabled={regeneratingId === inv.id}
+                            className="rounded-lg text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                            title={t('invoices.regenerate')}
+                          >
+                            {regeneratingId === inv.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <RefreshCw className="w-4 h-4" />
+                            )}
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="sm"

@@ -32,24 +32,29 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
     }
     let cancelled = false;
     (async () => {
-      const { data: sess } = await supabase
-        .from('sessions')
-        .select('start_time, end_time, subject_id, tutor_id, subjects(is_group)')
-        .eq('id', sessionId)
-        .single();
-      if (cancelled || !sess) return;
-      const isGroup = (sess.subjects as any)?.is_group === true;
-      if (!isGroup) { setResolvedGroupIds([sessionId]); return; }
-      const { data: siblings } = await supabase
-        .from('sessions')
-        .select('id')
-        .eq('tutor_id', sess.tutor_id)
-        .eq('subject_id', sess.subject_id)
-        .eq('start_time', sess.start_time)
-        .eq('end_time', sess.end_time);
-      if (cancelled) return;
-      const ids = (siblings ?? []).map((s: any) => s.id as string);
-      setResolvedGroupIds(ids.length > 0 ? ids : [sessionId]);
+      try {
+        const { data: sess } = await supabase
+          .from('sessions')
+          .select('start_time, end_time, subject_id, tutor_id, subjects(is_group)')
+          .eq('id', sessionId)
+          .single();
+        if (cancelled) return;
+        if (!sess) { setResolvedGroupIds([sessionId]); return; }
+        const isGroup = (sess.subjects as any)?.is_group === true;
+        if (!isGroup) { setResolvedGroupIds([sessionId]); return; }
+        const { data: siblings } = await supabase
+          .from('sessions')
+          .select('id')
+          .eq('tutor_id', sess.tutor_id)
+          .eq('subject_id', sess.subject_id)
+          .eq('start_time', sess.start_time)
+          .eq('end_time', sess.end_time);
+        if (cancelled) return;
+        const ids = (siblings ?? []).map((s: any) => s.id as string);
+        setResolvedGroupIds(ids.length > 0 ? ids : [sessionId]);
+      } catch {
+        if (!cancelled) setResolvedGroupIds([sessionId]);
+      }
     })();
     return () => { cancelled = true; };
   }, [sessionId, groupSessionIds]);

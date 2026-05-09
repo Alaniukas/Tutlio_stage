@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import ParentLayout from '@/components/ParentLayout';
 import { supabase } from '@/lib/supabase';
 import { useUser } from '@/contexts/UserContext';
-import { Eye, EyeOff, Check, LogOut } from 'lucide-react';
+import { Eye, EyeOff, Check, LogOut, BellOff, Bell } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from '@/lib/i18n';
 import PwaInstallGuide from '@/components/PwaInstallGuide';
@@ -44,13 +44,26 @@ export default function ParentSettings() {
   const [successPass, setSuccessPass] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [disableLessonReminders, setDisableLessonReminders] = useState(false);
+  const [savingReminders, setSavingReminders] = useState(false);
+
   useEffect(() => {
     if (!ctxUser) return;
     let cancelled = false;
 
     void (async () => {
       setEmail(ctxUser.email || '');
-      const fromProfile = await parentFullNameForUserDeduped(ctxUser.id);
+      const [fromProfile] = await Promise.all([
+        parentFullNameForUserDeduped(ctxUser.id),
+        supabase
+          .from('parent_profiles')
+          .select('disable_lesson_reminders')
+          .eq('user_id', ctxUser.id)
+          .maybeSingle()
+          .then(({ data }) => {
+            if (!cancelled && data) setDisableLessonReminders(!!data.disable_lesson_reminders);
+          }),
+      ]);
       if (cancelled) return;
 
       const fromRpc = pickNonEmpty(fromProfile ?? undefined);
@@ -115,6 +128,18 @@ export default function ParentSettings() {
     }
     await supabase.auth.signOut();
     navigate('/login');
+  };
+
+  const toggleLessonReminders = async () => {
+    if (!ctxUser || savingReminders) return;
+    setSavingReminders(true);
+    const newVal = !disableLessonReminders;
+    const { error: err } = await supabase
+      .from('parent_profiles')
+      .update({ disable_lesson_reminders: newVal })
+      .eq('user_id', ctxUser.id);
+    if (!err) setDisableLessonReminders(newVal);
+    setSavingReminders(false);
   };
 
   return (
@@ -205,6 +230,37 @@ export default function ParentSettings() {
           >
             {savingPass ? t('studentSettings.changing') : t('studentSettings.changePassword')}
           </button>
+        </div>
+
+        <div className="bg-white rounded-3xl p-5 shadow-sm border border-orange-100/40">
+          <h2 className="font-bold text-gray-900 mb-4">{t('parent.notificationsTitle')}</h2>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              {disableLessonReminders
+                ? <BellOff className="w-5 h-5 text-gray-400 shrink-0" />
+                : <Bell className="w-5 h-5 text-orange-500 shrink-0" />}
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-gray-900">{t('parent.lessonRemindersLabel')}</p>
+                <p className="text-xs text-gray-400">{t('parent.lessonRemindersDesc')}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => void toggleLessonReminders()}
+              disabled={savingReminders}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:ring-offset-2 disabled:opacity-50 ${
+                !disableLessonReminders ? 'bg-orange-500' : 'bg-gray-200'
+              }`}
+              role="switch"
+              aria-checked={!disableLessonReminders}
+            >
+              <span
+                className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform duration-200 ${
+                  !disableLessonReminders ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
         </div>
 
         <PwaInstallGuide />

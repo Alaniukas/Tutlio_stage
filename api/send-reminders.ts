@@ -96,7 +96,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const isPayerParent = (student as any)?.payment_payer === 'parent';
         const payerName = (student as any)?.payer_name || null;
         const payerIsDifferentFromStudent = payerEmail && payerEmail !== (student?.email || '').trim();
-        if (reminderStudentHours > 0 && !session.reminder_payer_sent && isPayerParent && payerIsDifferentFromStudent && diffHours <= reminderStudentHours && diffHours >= 0) {
+
+        let parentOptedOut = false;
+        if (isPayerParent && payerEmail) {
+          const { data: pp } = await supabase
+            .from('parent_profiles')
+            .select('disable_lesson_reminders')
+            .eq('email', payerEmail)
+            .limit(1)
+            .single();
+          if (pp?.disable_lesson_reminders) parentOptedOut = true;
+        }
+
+        if (reminderStudentHours > 0 && !session.reminder_payer_sent && isPayerParent && payerIsDifferentFromStudent && !parentOptedOut && diffHours <= reminderStudentHours && diffHours >= 0) {
           try {
             const resp = await fetch(`${API_URL}/api/send-email`, {
               method: 'POST',

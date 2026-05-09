@@ -32,6 +32,7 @@ import { supabase } from '@/lib/supabase';
 import { useUser } from '@/contexts/UserContext';
 import { sendEmail } from '@/lib/email';
 import { authHeaders } from '@/lib/apiHelpers';
+import { autoCloseBillingBatchIfAllPaid } from '@/lib/autoCloseBillingBatch';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -2331,6 +2332,9 @@ export default function CalendarPage() {
       .eq('id', selectedEvent.id);
 
     if (!error) {
+      if (newPaid) {
+        autoCloseBillingBatchIfAllPaid(selectedEvent.id);
+      }
       setIsEventModalOpen(false);
       fetchData();
     }
