@@ -1,374 +1,234 @@
-# QA Testing Plan – 7 Tasks + Privacy Policy Update
+# QA Testing Plan — Simo-local → main merge
 
-## Task 1: Google Calendar Auto-Sync on Status/Payment Changes
-
-### 1.1 Auto-complete → GCal update
-1. Create a session with a start/end time in the near past (or wait for one to pass).
-2. Trigger the cron `GET /api/auto-complete-sessions` (or wait for it).
-3. Open Google Calendar → verify the event summary now shows **"Įvykusi ✓"** (if paid) or **"Įvykusi (neapmokėta)"** (if unpaid).
-4. Verify the event color changed (green/sage for paid-completed, tangerine for unpaid-completed).
-
-### 1.2 Stripe payment → GCal update
-1. Create an unpaid session → check GCal shows **"Laukiama apmokėjimo"** (yellow/banana color).
-2. Complete a Stripe payment for that session (per-lesson, package, or monthly invoice).
-3. Verify GCal event updates to **"Apmokėta"** (blue/blueberry color).
-
-### 1.3 Manual payment confirmation → GCal update
-1. Create a lesson package with `payment_method = 'manual'` that has pre-created sessions.
-2. As org admin, confirm manual payment via the UI.
-3. Verify the associated sessions' GCal events update to show paid status.
-
-### 1.4 No-show → GCal update
-1. Mark an active session as **no_show** from the tutor calendar.
-2. Trigger `POST /api/notify-session-no-show`.
-3. Verify GCal event summary shows **"Neatvyko"** and the color is dark red (tomato).
-
-### 1.5 Cancellation → GCal deletion
-1. Cancel an active session from the tutor calendar (provide a reason).
-2. Verify the GCal event is **deleted** (not updated — cancelled sessions are removed from GCal).
-
-### 1.6 Tutor without GCal connected
-1. Repeat any of the above with a tutor that has **not** connected Google Calendar.
-2. Verify no errors occur — sync is silently skipped.
+**Scope:** All features/fixes on `Simo-local` that are not yet on `origin/main` (8 commits).
 
 ---
 
-## Task 2: Solo Tutor Finance Report
+## 1. Whitelabel / Custom Branding
 
-### 2.1 Visibility
-1. Log in as a **solo tutor** with Stripe onboarding complete.
-2. Navigate to **Finance** page.
-3. Verify the **"Finansinė ataskaita"** card appears above the Stripe account section.
+**Commits:** `3e90774`, `9357ec7`, `1d8fec0`
 
-### 2.2 Not visible for org tutors
-1. Log in as an **org tutor**.
-2. Navigate to Finance page → verify you see `OrgTutorFinanceSummary`, NOT the new report.
+### 1.1 Login page with `?org=<slug>`
+1. Navigate to `/login?org=<slug>` using a known org that has `custom_branding` enabled + `logo_url` set.
+2. Verify the org logo appears (not Tutlio logo).
+3. Verify "powered by Tutlio" text below the logo.
+4. Verify background gradient uses org's `brand_color` / `brand_color_secondary`.
+5. Test with invalid slug → standard Tutlio login renders (no crash).
+6. Test with slug of org that has `custom_branding` disabled → standard Tutlio login.
 
-### 2.3 Not visible before Stripe onboarding
-1. Log in as a solo tutor whose `stripe_onboarding_complete = false`.
-2. Verify the finance report does NOT appear.
+### 1.2 Authenticated app branding
+1. Log in as a tutor in a whitelabeled org.
+2. Sidebar header → org logo + org name (desktop and mobile).
+3. Log in as a student of that org → student header shows org logo.
+4. Log in as a parent linked to a student in that org → parent header shows org logo.
 
-### 2.4 Month picker
-1. Select different months using the month picker.
-2. Verify session counts and earnings update accordingly.
-3. Verify the month label formats correctly (e.g., "balandis 2026").
-
-### 2.5 Date range picker
-1. Switch to **"Datos intervalas"** mode.
-2. Set a valid range → verify data loads.
-3. Set start > end → verify amber error message appears.
-4. Set a range longer than 90 days → verify the "too long" error appears.
-
-### 2.6 Stats accuracy
-1. For a known period, manually count: completed, active, cancelled, no-show sessions.
-2. Verify the 4 stat cards match.
-3. Verify "Earned" = sum of prices of paid completed+active sessions.
-4. Verify "Outstanding" = sum of prices of unpaid completed+active sessions.
-
----
-
-## Task 3: Cancel/Delete Completed Lessons
-
-### 3.1 Cancel a completed lesson
-1. Open a **completed** session in the tutor calendar event modal.
-2. Verify the **"Atšaukti įvykusią"** button is visible.
-3. Click it → verify the cancellation reason textarea appears.
-4. Enter a reason (min 5 chars) → click **"Patvirtinti atšaukimą"**.
-5. Verify the session status changes to **cancelled**.
-6. Verify the student receives a cancellation email.
-
-### 3.2 Delete a completed lesson
-1. Open a completed session in the event modal.
-2. Click the **trash icon** (delete button).
-3. Confirm deletion → verify the session is removed from the calendar.
-4. If the session used a lesson package, verify credits are returned.
-
-### 3.3 Edit button NOT shown for completed
-1. Open a completed session → verify the **Edit** (pencil) button is NOT visible.
-2. Open an active session → verify the Edit button IS visible.
-
-### 3.4 Recurring completed session
-1. Open a completed session that belongs to a recurring series.
-2. Click cancel → verify you're asked "single or all future".
-3. Pick "single" → only that one session is cancelled.
-
----
-
-## Task 4: Multi-Day Recurring Lessons
-
-### 4.1 Weekday picker visibility
-1. Open the create lesson modal → toggle **"Pasikartojanti"** ON.
-2. Verify the weekday picker appears (Mon–Sun buttons).
-3. Switch frequency to **"Kas mėnesį"** → verify weekday picker **hides**.
-4. Switch back to **"Kas savaitę"** → verify weekday picker **reappears**.
-
-### 4.2 Default weekday selection
-1. Click on a **Wednesday** cell to open create modal.
-2. Toggle recurring ON → verify **Wednesday** is pre-selected in the picker.
-
-### 4.3 Multi-day selection
-1. Select Mon, Wed, Fri in the weekday picker.
-2. Set an end date 4 weeks out.
-3. Verify the preview shows `≈12 pamokos (3 d/sav × ≈4)`.
-4. Create the lessons → verify 3 separate recurring templates are created (one per day).
-5. Check the calendar — sessions should appear on all three weekdays.
-
-### 4.4 Empty weekday validation
-1. Toggle recurring ON, deselect all weekdays.
-2. Verify the amber warning **"Pasirinkite bent vieną dieną"** appears.
-3. Verify the **Create** button is disabled.
-
-### 4.5 Biweekly multi-day
-1. Select frequency **"Kas 2 savaites"** + select Tue, Thu.
-2. Create lessons → verify sessions appear every other week on Tue and Thu.
-
----
-
-## Task 5: Contact Visibility Bug Fix
-
-### 5.1 Org setting: hide tutor email
-1. As org admin, go to **Company Settings** → set **student sees tutor email = hide**.
-2. Log in as a **company student** linked to a tutor in that org.
-3. Open **Student Dashboard** → verify tutor email is **NOT** shown (no mailto link).
-4. Open **Student Sessions** page → verify tutor email is NOT shown.
-5. Click tutor name in header → open tutor info modal → verify email is NOT shown.
-
-### 5.2 Org setting: show tutor email
-1. Change setting back to **show**.
-2. Repeat steps 3–5 → verify tutor email IS visible everywhere.
-
-### 5.3 Solo student (no org)
-1. Log in as a student of a **solo tutor** (not in any organization).
-2. Verify tutor email is visible in all locations (default = show).
-
-### 5.4 Multiple student profiles
-1. If a student has profiles under multiple tutors (one org with hidden contacts, one solo), switch between profiles.
-2. Verify the contact visibility updates correctly per profile.
-
----
-
-## Task 6: Missing Cancellation Email Fix
-
-### 6.1 Student cancels → tutor gets email
-1. Log in as a student and cancel an upcoming session (provide reason).
-2. Check the **tutor's** inbox → verify they receive a `session_cancelled` email.
-
-### 6.2 Student cancels → student gets email
-1. After the same cancellation, check the **student's** inbox → verify they receive a cancellation confirmation email.
-
-### 6.3 Tutor cancels → student gets email
-1. Log in as a tutor and cancel a session.
-2. Check the **student's** inbox → verify they receive a cancellation email.
-
-### 6.4 Payer email (parent)
-1. Set up a student with a different `payer_email`.
-2. Student cancels a session → verify BOTH the student email and payer email receive notifications.
-
-### 6.5 Missing client-side email fallback
-1. (Advanced) Temporarily break the client-side email passing (e.g., pass `null` for `tutorEmail` in the API call).
-2. Cancel a session → verify the email still sends because the server fetches it from the DB.
-
----
-
-## Task 7: Create Recurring Lesson from Availability Slot
-
-### 7.1 Button visibility
-1. Open the tutor calendar → click on a **recurring** availability slot (green block).
-2. In the slot edit modal, verify the **"Sukurti pasikartojančią pamoką"** button appears.
-
-### 7.2 Button NOT shown for one-time slots
-1. Click on a **specific-date** (non-recurring) availability slot.
-2. Verify the "Create recurring lesson" button is **NOT** shown.
-
-### 7.3 Pre-fill behavior
-1. Click "Sukurti pasikartojančią pamoką" on a recurring slot that runs **14:00–16:00 on Tuesdays**.
-2. Verify the create lesson modal opens with:
-   - Start time = the clicked date at **14:00**
-   - End time = the clicked date at **15:00** (capped to 60 min)
-   - Recurring = **ON**
-   - Frequency = **weekly**
-   - Weekday = **Tuesday** pre-selected
-   - End date = **empty** (user must fill in)
-   - Meeting link = pre-filled if the slot had one
-
-### 7.4 Full creation flow
-1. After pre-fill, select a student, set an end date, and create.
-2. Verify recurring sessions are created on the correct weekday.
-
-### 7.5 Stale state check
-1. Open a create modal normally, set a recurring end date, then close it.
-2. Now click "Create recurring lesson" from a slot.
-3. Verify the end date field is **empty** (not carrying over the old value).
-
----
-
-## Task 8: Privacy Policy – Google API Section
-
-### 8.1 New section presence (LT)
-1. Switch language to **Lithuanian**.
-2. Navigate to `/privacy`.
-3. Verify section **"4. Google API duomenų naudojimas (Google API Limited Use Policy)"** exists.
-4. Verify it contains 3 paragraphs: data access, data usage, and compliance.
-5. Verify the compliance paragraph contains a **clickable link** to Google API Services User Data Policy.
-
-### 8.2 New section presence (EN)
-1. Switch language to **English**.
-2. Navigate to `/privacy`.
-3. Verify section **"4. Google API Data Usage (Google API Limited Use Policy)"** exists.
-4. Verify the link to Google's policy page works.
-
-### 8.3 Section numbering
-1. Verify the full section order is:
-   - 1. General provisions
-   - 2. Data controllers and roles (2.1, 2.2)
-   - 3. What data we collect
-   - **4. Google API Data Usage** ← new
-   - 5. Purposes and legal bases
-   - 6. Data storage and security (6.1)
-   - 7. Your rights (7.1)
-   - 8. Cookies and analytics
-   - 9. Changes
-
-### 8.4 Updated date
-1. Verify the subtitle shows **"2026 m. balandžio 19 d."** (LT) / **"April 19, 2026"** (EN).
-
-### 8.5 Compliance statement exact wording
-1. Verify the English version contains exactly: *"Tutlio's use and transfer to any other app of information received from Google APIs will adhere to the Google API Services User Data Policy, including the Limited Use requirements."*
-
----
-
-## Task 9: Whitelabel / Custom Branding (commit `1d8fec0`)
-
-### 9.1 Whitelabel login page (public, unauthenticated)
-1. Navigate to `/login?org=<slug>` (use a known org slug that has `custom_branding` enabled).
-2. Verify the org logo appears instead of the Tutlio logo.
-3. Verify "powered by Tutlio" text appears below the logo.
-4. Verify the background gradient uses the org's `brand_color` / `brand_color_secondary`.
-5. Test with an invalid slug → verify standard Tutlio login renders (no error).
-
-### 9.2 Whitelabel within authenticated app (tutor in org)
-1. Log in as a tutor belonging to an org with `custom_branding` enabled and a `logo_url` set.
-2. Verify the sidebar header shows the **org logo + org name** instead of the Tutlio logo.
-3. Verify the mobile header also shows the org logo.
-4. Log out → verify the login page reverts to Tutlio branding (no stale org logo flash).
-
-### 9.3 Whitelabel for student portal
-1. Log in as a student whose tutor belongs to a whitelabeled org.
-2. Verify the top header shows the org logo and name.
-
-### 9.4 Whitelabel for parent portal
-1. Log in as a parent linked to a student in a whitelabeled org.
-2. Verify the parent portal header shows the org logo.
-
-### 9.5 Branding cache cleared on logout
-1. Log in as a user from org A (whitelabel enabled) → confirm org A branding shows.
+### 1.3 Branding cache cleared on logout
+1. Log in as user from org A (whitelabel on) → confirm branding.
 2. Log out.
-3. Log in as a user from org B (different branding or no whitelabel) → verify org A branding does NOT persist.
-4. Check browser sessionStorage: key `tutlio_org_branding` should be cleared after logout.
+3. Log in as user from org B (different branding or no whitelabel) → confirm no org A branding leaks.
+4. `sessionStorage.getItem('tutlio_org_branding')` should be `null` after logout.
 
-### 9.6 Whitelabel in emails
-1. Trigger a session reminder or invoice email for a tutor/student in a whitelabeled org.
-2. Verify the email header shows the **org logo** instead of "Tutlio 🎓".
-3. Verify "powered by Tutlio" appears below the org logo in the email.
-4. Trigger the same email for a non-whitelabel org → verify standard "Tutlio 🎓" header.
+### 1.4 Emails with org branding
+1. Trigger a session reminder for a student in a whitelabeled org.
+2. Email header shows org logo + "powered by Tutlio" (not "Tutlio 🎓").
+3. Same email for non-whitelabel org → standard Tutlio header.
 
-### 9.7 Admin panel – branding settings
-1. Log in as platform admin → open the admin panel → select an org.
-2. Enable the `custom_branding` feature toggle.
-3. Verify the whitelabel settings section appears (slug, logo upload, color pickers).
-4. Set a slug (e.g. `test-org`) → save → verify it persists on reload.
-5. Upload a logo (jpg/png/webp/svg, <2 MB) → verify it uploads and the URL is stored.
-6. Change brand color / secondary color → save → verify they persist.
-7. Visit `/login?org=test-org` → confirm the new branding appears.
+### 1.5 Admin panel settings
+1. Platform admin → open org detail → enable `custom_branding`.
+2. Whitelabel section appears: slug input, logo upload, color pickers.
+3. Upload a logo (<2 MB, jpg/png/webp/svg) → URL saved.
+4. Set slug → save → reload → persisted.
+5. Change colors → save → visit `/login?org=<slug>` → gradient updated.
 
-### 9.8 API endpoint – `/api/org-branding`
-1. `GET /api/org-branding?slug=valid-slug` → expect 200 with `{ id, name, slug, logo_url, brand_color, brand_color_secondary, entity_type }`.
-2. `GET /api/org-branding?slug=nonexistent` → expect 404.
-3. `GET /api/org-branding?slug=` (empty) → expect 400.
-4. `GET /api/org-branding?slug=org-without-custom-branding-enabled` → expect 404 (feature gated).
-5. Verify response includes `Cache-Control: public, s-maxage=300, stale-while-revalidate=600`.
-
-### 9.9 Feature gate enforcement
-1. Disable `custom_branding` for an org that previously had it enabled.
-2. Visit `/login?org=<slug>` → verify standard Tutlio branding (API returns 404).
-3. Log in as a tutor in that org → verify sidebar shows Tutlio logo (context skips branding when feature off).
+### 1.6 API endpoint `/api/org-branding`
+1. `GET /api/org-branding?slug=valid` → 200 with `{ id, name, slug, logo_url, brand_color, brand_color_secondary, entity_type }`.
+2. `GET /api/org-branding?slug=nonexistent` → 404.
+3. `GET /api/org-branding?slug=` → 400.
+4. Response header: `Cache-Control: public, s-maxage=300, stale-while-revalidate=600`.
 
 ---
 
-## Task 10: Parent Lesson Reminder Toggle (migration `20260514`)
+## 2. Whiteboard (Collaborative)
 
-### 10.1 Toggle visibility
-1. Log in as a parent.
-2. Navigate to parent settings.
-3. Verify a "Lesson reminders" toggle is visible.
+**Commits:** `3e90774`, `102fde5`, `320303d`
 
-### 10.2 Disable reminders
-1. Toggle lesson reminders OFF → save.
-2. Trigger `GET /api/send-reminders` cron.
-3. Verify the parent does NOT receive a reminder email for upcoming lessons.
+### 2.1 Opening whiteboard
+1. As a tutor, open a session → click the Whiteboard button.
+2. Verify the whiteboard page loads without blank/white screen.
+3. Verify the room ID is associated with the session.
 
-### 10.3 Re-enable reminders
-1. Toggle lesson reminders ON → save.
-2. Trigger reminder cron again.
-3. Verify the parent receives the reminder email as expected.
+### 2.2 Collaborative sync
+1. Open the same session whiteboard in two browser tabs (or tutor + student).
+2. Draw on one → verify strokes appear on the other in real-time.
+3. Close one tab → verify no crash on the remaining tab.
 
----
+### 2.3 Auth stability
+1. Open whiteboard → wait 5+ minutes (token refresh cycle).
+2. Verify no disconnect or auth error splash.
+3. Reload the page → whiteboard reconnects and loads saved assets.
 
-## Task 11: Dashboard Performance (migration `20260515`)
-
-### 11.1 Covering index applied
-1. Run the migration `20260515000000_dashboard_sessions_covering_index.sql` against the database.
-2. Open the Dashboard as a tutor with many sessions.
-3. Verify load time is acceptable (no regression).
-4. (Optional) Run `EXPLAIN ANALYZE` on the dashboard sessions query to confirm index usage.
+### 2.4 Student access
+1. As a student, navigate to a session that has a whiteboard room.
+2. Verify whiteboard loads and student can draw.
 
 ---
 
-## Task 12: Admin Statistics Panel
+## 3. i18n / Locale Login Routes + SSR Pages
 
-### 12.1 Panel renders
-1. Log in as platform admin.
-2. Navigate to admin panel → verify the statistics panel/tab is visible.
-3. Verify key stats load (total orgs, tutors, students, sessions, revenue, etc.).
+**Commit:** `3e90774`, `9357ec7`
 
-### 12.2 API endpoint
-1. `GET /api/admin-statistics` with valid admin secret → expect 200 with stats JSON.
-2. Without admin secret → expect 401.
+### 3.1 Locale-specific login
+1. Navigate to `/login` on `tutlio.lt` → Lithuanian UI by default.
+2. Navigate to `/login` on `tutlio.com` → English UI by default.
+3. Switch locale in the UI → verify login page updates language.
+
+### 3.2 SSR landing pages
+1. Visit `/` → verify SSR-rendered landing page loads (not blank).
+2. Visit `/en`, `/lt`, `/pl`, `/lv`, etc. → correct locale rendered.
+3. Visit `/pricing`, `/apie-mus`, `/kontaktai` → pages render via SSR.
+
+### 3.3 Blog locale columns
+1. Visit `/blog` and `/en/blog` → correct locale content.
+2. Verify blog posts use the new locale columns (migration `20260506`).
 
 ---
 
-## Task 13: Analytics & UTM Tracking (migration `20260513`)
+## 4. Payment Fixes
 
-### 13.1 UTM capture on registration
-1. Navigate to `/register?utm_source=google&utm_medium=cpc&utm_campaign=test`.
+**Commit:** `c09ad76`
+
+### 4.1 Monthly-billed students skip instant payment
+1. Create a student with payment model = `monthly_invoices`.
+2. Complete a session with that student.
+3. Verify NO instant Stripe Checkout link is generated/sent.
+4. Verify the session is batched for the monthly invoice instead.
+
+### 4.2 Non-monthly students still get instant payment
+1. Student with `per_lesson` payment model → complete session → verify Stripe Checkout link is sent.
+
+---
+
+## 5. School Contract Additional Fee
+
+**Commit:** `59a41f1`
+
+### 5.1 Additional fee field
+1. As org admin, open a school contract.
+2. Verify an "Additional fee" field is available.
+3. Set an additional fee amount → save.
+4. Verify the contract total reflects base + additional fee.
+5. Verify the installment breakdown includes the additional fee.
+
+---
+
+## 6. Session Files (Attachments)
+
+**Commit:** `1d8fec0` (part of batch)
+
+### 6.1 Upload and view
+1. As a tutor, open a session → attach a file.
+2. Verify the file uploads successfully and appears in the session.
+3. As the student of that session → verify they can see/download the file.
+
+---
+
+## 7. Admin Statistics Panel
+
+**Commit:** `1d8fec0` (new file)
+
+### 7.1 Panel renders
+1. Platform admin → admin panel → verify statistics tab/section visible.
+2. Stats load: total orgs, tutors, students, sessions, revenue.
+
+### 7.2 API
+1. `GET /api/admin-statistics` with valid admin secret → 200.
+2. Without secret → 401.
+
+---
+
+## 8. Analytics & UTM Tracking (migration `20260513`)
+
+### 8.1 UTM capture
+1. Visit `/register?utm_source=google&utm_medium=cpc&utm_campaign=test`.
 2. Complete registration.
-3. Verify the `analytics_events` table (or equivalent) records the UTM params for this user.
+3. Verify `analytics_events` table records the UTM params.
 
-### 13.2 Event tracking
-1. Perform key actions (login, create session, complete payment).
-2. Verify events are logged to the analytics system without errors in the console.
-
----
-
-## Task 14: Landing Page Public Stats (migration `20260512`)
-
-### 14.1 RPC returns data
-1. Call the `public_landing_stats` RPC (or equivalent endpoint).
-2. Verify it returns aggregated stats (total tutors, students, sessions, etc.) without requiring auth.
-
-### 14.2 Landing page displays stats
-1. Visit the landing page.
-2. Verify the "social proof" stats section renders real numbers (not zeros or errors).
+### 8.2 No console errors
+1. Navigate the app normally → verify no analytics-related errors in console.
 
 ---
 
-## Task 15: Invoice Regeneration
+## 9. Landing Page Public Stats (migration `20260512`)
 
-### 15.1 Regenerate endpoint
-1. As platform admin, call `POST /api/regenerate-monthly-invoice` with a valid invoice ID.
-2. Verify the invoice PDF/data is regenerated with updated session data.
-3. Verify the old invoice version is replaced (not duplicated).
+### 9.1 Stats RPC
+1. Call `public_landing_stats` RPC → returns aggregated numbers without auth.
 
-### 15.2 Error handling
-1. Call with an invalid invoice ID → expect appropriate error.
-2. Call without admin auth → expect 401.
+### 9.2 Hero section
+1. Visit landing page → social proof stats section renders real numbers.
+
+---
+
+## 10. Parent Lesson Reminder Toggle (migration `20260514`)
+
+### 10.1 Toggle
+1. Log in as parent → settings → verify "Lesson reminders" toggle visible.
+2. Disable → trigger `/api/send-reminders` → parent does NOT receive email.
+3. Re-enable → trigger again → parent DOES receive email.
+
+---
+
+## 11. Dashboard Performance (migration `20260515`)
+
+### 11.1 Index applied
+1. Run migration → open Dashboard as tutor with many sessions.
+2. Verify no performance regression (should be faster).
+
+---
+
+## 12. Invoice Regeneration
+
+### 12.1 Regenerate
+1. `POST /api/regenerate-monthly-invoice` with valid invoice ID + admin auth → invoice regenerated.
+2. Invalid ID → appropriate error.
+3. No auth → 401.
+
+---
+
+## 13. Monthly Invoice Improvements
+
+### 13.1 `create-monthly-invoice` changes
+1. Generate a monthly invoice for a tutor with sessions in the billing period.
+2. Verify invoice includes correct session count and amounts.
+3. Verify auto-close billing batch logic works (if applicable).
+
+---
+
+## 14. Send Reminders Fixes
+
+### 14.1 Reminder cron
+1. Create upcoming sessions (within reminder window).
+2. Trigger `GET /api/send-reminders`.
+3. Verify tutor and student/parent receive reminder emails.
+4. Verify no duplicate reminders on re-trigger.
+
+---
+
+## 15. Org Admin Login Hang Fix (migration `20260511120000`)
+
+### 15.1 Org admin login
+1. Log in as org admin → verify no hang/infinite loading.
+2. Verify redirect to company dashboard works smoothly.
+
+---
+
+## Migrations to apply (in order)
+
+1. `20260506000000_blog_posts_new_locale_columns.sql`
+2. `20260510000000_org_whitelabel_branding.sql`
+3. `20260511000000_session_whiteboard_room.sql`
+4. `20260511120000_hotfix_org_admin_login_hang.sql`
+5. `20260511133000_whiteboard_assets_support.sql`
+6. `20260512000000_public_landing_stats_rpc.sql`
+7. `20260513000000_analytics_events_and_utm.sql`
+8. `20260514000000_parent_disable_lesson_reminders.sql`
+9. `20260515000000_dashboard_sessions_covering_index.sql`
