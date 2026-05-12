@@ -6,6 +6,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { timingSafeEqual } from 'crypto';
 import { getOrgVisibleTutorProfileIds } from './_lib/orgVisibleTutorIds.js';
+import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClientOptions.js';
 
 function getPlatformAdminSecret(): string {
   const s = process.env.ADMIN_SECRET || process.env.VITE_ADMIN_SECRET;
@@ -19,12 +20,35 @@ function secretsMatch(a: string, b: string): boolean {
   return timingSafeEqual(x, y);
 }
 
+/** PostgREST sometimes returns HTML (e.g. Cloudflare 522) instead of JSON — never pass that raw to clients or logs. */
+function formatPostgrestListError(raw: string | undefined): { error: string; hint?: string } {
+  const m = String(raw || '');
+  const htmlOrCf =
+    m.includes('<!DOCTYPE') ||
+    /\b522\b/.test(m) ||
+    /cloudflare/i.test(m) ||
+    m.includes('Connection timed out');
+  if (htmlOrCf) {
+    return {
+      error:
+        'Supabase API unreachable (network timeout / Cloudflare 522). Usually temporary: check Supabase status, project not paused, VPN/firewall, then retry.',
+    };
+  }
+  if (m.includes('fetch failed') && process.env.TUTLIO_DEV_API_LOCAL === '1') {
+    return {
+      error: m,
+      hint: 'Node could not reach Supabase over HTTPS (TLS/proxy). Try NODE_EXTRA_CA_CERTS with your corporate root CA.',
+    };
+  }
+  return { error: m.length > 800 ? `${m.slice(0, 800)}…` : m || 'Unknown error' };
+}
+
 function getSupabase() {
   const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return null;
   // Cast to any to avoid build-time strict DB type coupling in serverless.
-  return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } }) as any;
+  return createClient(url, key, supabaseServiceRoleClientOptions() as any) as any;
 }
 
 function requireAdmin(req: VercelRequest, res: VercelResponse): boolean {
@@ -188,7 +212,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .order('created_at', { ascending: false }));
         }
 
-        if (error) return res.status(500).json({ error: error.message });
+        if (error) {
+          const { error: errOut, hint } = formatPostgrestListError(error.message);
+          return res.status(500).json(hint ? { error: errOut, hint } : { error: errOut });
+        }
 
         // Keep list endpoint fast: heavy stats are computed in the detail endpoint.
         const out = (orgs || []).map((org) => ({

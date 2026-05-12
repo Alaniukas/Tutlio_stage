@@ -101,7 +101,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(500).json({ error: 'Failed to cancel session', details: cancelError });
     }
 
-    // If this is a group lesson, increment available_spots on all other sessions at this time
+    // Check if this is a group lesson (needed for available_spots + waitlist auto-fill)
+    let isGroupLesson = false;
     if (session.subject_id) {
         const { data: subject } = await supabase
             .from('subjects')
@@ -109,7 +110,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .eq('id', session.subject_id)
             .maybeSingle();
 
-        if (subject?.is_group) {
+        isGroupLesson = !!subject?.is_group;
+
+        if (isGroupLesson) {
             // Fetch all other group sessions at this time
             const { data: otherSessions } = await supabase
                 .from('sessions')
@@ -155,10 +158,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .maybeSingle(),
         supabase
             .from('profiles')
-            .select('email')
+            .select('email, organization_id')
             .eq('id', session.tutor_id || tutorId)
             .maybeSingle(),
     ]);
+    const orgId = (tutorRow as any)?.organization_id || null;
     const paymentModelEarly = studentRow?.payment_model || 'per_lesson';
     const resolvedTutorEmail = tutorEmail || tutorRow?.email || null;
     const resolvedStudentEmail = studentEmail || studentRow?.email || null;
@@ -197,6 +201,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     studentName, tutorName, date: emailDate, time: emailTime, cancelledBy, reason,
                     hideRefund: true,
                     locale: 'lt',
+                    ...(orgId ? { organizationId: orgId } : {}),
                 },
             })
         );
@@ -211,6 +216,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     isPaid: hideStudentRefund ? false : isPaid,
                     sessionPrice: hideStudentRefund ? null : sessionPrice,
                     locale: 'lt',
+                    ...(orgId ? { organizationId: orgId } : {}),
                 },
             })
         );
@@ -234,6 +240,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     cancelledBy,
                     reason,
                     locale: 'lt',
+                    ...(orgId ? { organizationId: orgId } : {}),
                 },
             })
         );
@@ -375,19 +382,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
             const nextInLine = waitlist[0];
 
+            const newSessionData: Record<string, unknown> = {
+                tutor_id: tutorId,
+                student_id: nextInLine.student_id,
+                start_time: session.start_time,
+                end_time: session.end_time,
+                topic: session.topic,
+                status: 'active',
+                price: session.price,
+                payment_status: 'pending',
+                paid: false,
+            };
+
+            if (isGroupLesson && session.subject_id) {
+                const { data: siblings } = await supabase
+                    .from('sessions')
+                    .select('id, available_spots')
+                    .eq('tutor_id', tutorId)
+                    .eq('start_time', session.start_time)
+                    .eq('subject_id', session.subject_id)
+                    .neq('status', 'cancelled');
+
+                const currentSpots = siblings?.[0]?.available_spots ?? 1;
+                const newSpots = Math.max(0, currentSpots - 1);
+
+                newSessionData.subject_id = session.subject_id;
+                newSessionData.available_spots = newSpots;
+
+                if (siblings && siblings.length > 0) {
+                    for (const sib of siblings) {
+                        await supabase
+                            .from('sessions')
+                            .update({ available_spots: newSpots })
+                            .eq('id', sib.id);
+                    }
+                }
+                console.log(`[Waitlist API] Group lesson: set available_spots=${newSpots} on ${(siblings?.length ?? 0) + 1} sessions`);
+            }
+
             const { data: newSession, error: createError } = await supabase
                 .from('sessions')
-                .insert([{
-                    tutor_id: tutorId,
-                    student_id: nextInLine.student_id,
-                    start_time: session.start_time,
-                    end_time: session.end_time,
-                    topic: session.topic,
-                    status: 'active',
-                    price: session.price,
-                    payment_status: 'pending',
-                    paid: false,
-                }])
+                .insert([newSessionData])
                 .select()
                 .single();
 
@@ -422,6 +457,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         bankAccountNumber: null,
                         paymentPurpose: null,
                         locale: 'lt',
+                        ...(orgId ? { organizationId: orgId } : {}),
                     },
                 }, 2000);
             }
@@ -436,6 +472,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         date: emailDate,
                         time: emailTime,
                         locale: 'lt',
+                        ...(orgId ? { organizationId: orgId } : {}),
                     },
                 }, 2000);
             }

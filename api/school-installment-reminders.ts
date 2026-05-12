@@ -172,6 +172,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           amount: Number(inst.amount).toFixed(2),
           dueDate: new Date(inst.due_date).toLocaleDateString('lt-LT'),
           paymentUrl: session.url,
+          ...(inst.contract?.organization_id ? { organizationId: inst.contract.organization_id } : {}),
         },
       }),
     });

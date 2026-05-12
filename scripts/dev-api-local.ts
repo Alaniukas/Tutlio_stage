@@ -2,6 +2,7 @@
  * Local API dev server — same routes as Vercel `/api/*`, no `vercel login` required.
  * Listens on DEV_API_PORT (default 3002) for Vite proxy.
  */
+process.env.NODE_TLS_REJECT_UNAUTHORIZED ??= '0';
 import http from 'node:http';
 import { Readable } from 'node:stream';
 import { readFileSync, existsSync, statSync } from 'node:fs';

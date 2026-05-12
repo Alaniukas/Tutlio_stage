@@ -84,7 +84,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: tutor } = await supabase
         .from('profiles')
-        .select('full_name, email')
+        .select('full_name, email, organization_id')
         .eq('id', session.tutor_id)
         .maybeSingle();
 
@@ -105,6 +105,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             tutorEmail: tutor?.email || '',
             date: emailDate,
             time: emailTime,
+            ...((tutor as any)?.organization_id ? { organizationId: (tutor as any).organization_id } : {}),
         },
     }, 1500);
 

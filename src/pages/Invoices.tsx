@@ -59,7 +59,7 @@ export default function InvoicesPage() {
   const [downloadingAllList, setDownloadingAllList] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
-  const [sortAsc, setSortAsc] = useState(false);
+  const [sortAsc, setSortAsc] = useState(true);
 
   const fetchInvoices = useCallback(async () => {
     /** Tas pats `sub` kaip PostgREST `auth.uid()` — ne konteksto profilis. */

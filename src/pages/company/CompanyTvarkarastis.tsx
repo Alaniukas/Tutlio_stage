@@ -109,7 +109,7 @@ async function emailOrgTutorAvailabilityNotice(
   action: 'created' | 'updated',
   scheduleSummaryHtml: string,
 ) {
-  const { data: tutor } = await supabase.from('profiles').select('full_name, email').eq('id', tutorId).single();
+  const { data: tutor } = await supabase.from('profiles').select('full_name, email, organization_id').eq('id', tutorId).single();
   if (!tutor?.email) return;
   void sendEmail({
     type: 'org_tutor_availability_notice',
@@ -118,6 +118,7 @@ async function emailOrgTutorAvailabilityNotice(
       action,
       tutorName: tutor.full_name || '',
       scheduleSummaryHtml,
+      ...((tutor as any).organization_id ? { organizationId: (tutor as any).organization_id } : {}),
     },
   }).catch(err => console.error('[OrgSchedule] availability notice', err));
 }
@@ -1277,7 +1278,7 @@ export default function CompanyTvarkarastis() {
         const studentId = payload.student_id as string;
         const { data: tutorRow } = await supabase
           .from('profiles')
-          .select('full_name, email')
+          .select('full_name, email, organization_id')
           .eq('id', tutorId)
           .single();
         const { data: studentRow } = await supabase
@@ -1297,6 +1298,7 @@ export default function CompanyTvarkarastis() {
           newDate: format(newStart, 'yyyy-MM-dd'),
           newTime: `${format(newStart, 'HH:mm')}–${format(newEnd, 'HH:mm')}`,
           rescheduledBy: 'org_admin' as const,
+          ...((tutorRow as any)?.organization_id ? { organizationId: (tutorRow as any).organization_id } : {}),
         };
 
         const seriesSummaryHtml = isSeries

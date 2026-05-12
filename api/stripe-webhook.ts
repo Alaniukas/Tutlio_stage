@@ -402,6 +402,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                     totalLessons: updatedPackage.total_lessons,
                                     availableLessons: updatedPackage.available_lessons,
                                     totalPrice: updatedPackage.total_price.toFixed(2),
+                                    ...(tutor?.organization_id ? { organizationId: tutor.organization_id } : {}),
                                 },
                             }),
                         }).catch(e => console.error('[stripe-webhook] Error sending package success email:', e));
@@ -553,6 +554,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                         periodText,
                                         totalAmount: Number(updatedBatch.total_amount || 0).toFixed(2),
                                         sessionsCount,
+                                        ...(tutor?.organization_id ? { organizationId: tutor.organization_id } : {}),
                                     },
                                 }),
                             }).catch(e => console.error('[stripe-webhook] Error sending invoice paid email:', e))
@@ -660,6 +662,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                     subject: (dbSession as any).topic,
                                     totalChargedEur: amountTotal != null ? amountTotal / 100 : undefined,
                                     duration: durationMinutes,
+                                    ...(tutor?.organization_id ? { organizationId: tutor.organization_id } : {}),
                                 };
                                 const recipients = new Set<string>();
                                 const pe = (student.payer_email || '').trim().toLowerCase();
@@ -716,6 +719,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                     duration: durationMinutes,
                                     cancellationHours: tutor.cancellation_hours ?? 24,
                                     cancellationFeePercent: tutor.cancellation_fee_percent ?? 0,
+                                    ...(tutor?.organization_id ? { organizationId: tutor.organization_id } : {}),
                                 };
 
                                 const recipients = new Set<string>();
@@ -744,6 +748,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                                 time: timeStr,
                                                 subject: (dbSession as any).topic,
                                                 meetingLink: (dbSession as any).meeting_link || '',
+                                                organizationId: tutor.organization_id,
                                             },
                                         }
                                         : {
@@ -756,6 +761,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                                 time: timeStr,
                                                 subject: (dbSession as any).topic,
                                                 price: (dbSession as any).price,
+                                                ...(tutor.organization_id ? { organizationId: tutor.organization_id } : {}),
                                             },
                                         };
                                     await fetch(sendEmailUrl, {
@@ -785,7 +791,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
                 const { data: dbSession } = await supabase
                     .from('sessions')
-                    .select('*, students(full_name, email, payment_payer, payer_email), profiles!sessions_tutor_id_fkey(full_name)')
+                    .select('*, students(full_name, email, payment_payer, payer_email), profiles!sessions_tutor_id_fkey(full_name, organization_id)')
                     .eq('id', sessionId)
                     .single();
 
@@ -814,7 +820,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                     studentName: student.full_name,
                                     tutorName: tutor.full_name,
                                     date: dateStr,
-                                    time: timeStr
+                                    time: timeStr,
+                                    ...(tutor?.organization_id ? { organizationId: tutor.organization_id } : {}),
                                 }
                             })
                         }).catch(() => {});

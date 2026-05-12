@@ -100,6 +100,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             inviteCode = Math.random().toString(36).substring(2, 8).toUpperCase();
             await supabase.from('students').update({ invite_code: inviteCode }).eq('id', student.id);
           }
+          let schoolOrgId: string | null = null;
+          if (effectiveInstallment.contract_id) {
+            const { data: cRow } = await supabase.from('school_contracts').select('organization_id').eq('id', effectiveInstallment.contract_id).maybeSingle();
+            schoolOrgId = (cRow as any)?.organization_id || null;
+          }
           const recipientEmail = student.payer_email || student.email;
           if (recipientEmail) {
             const bookingUrl = `${APP_URL}/book/${inviteCode}`;
@@ -115,6 +120,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   tutorName: 'Mokykla',
                   inviteCode,
                   bookingUrl,
+                  ...(schoolOrgId ? { organizationId: schoolOrgId } : {}),
                 },
               }),
             }).catch(() => {});

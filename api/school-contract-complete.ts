@@ -540,6 +540,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         pdfUrl: publicUrl,
         date: new Date().toLocaleDateString('lt-LT'),
         contractId: (contract as any).id,
+        ...((contract as any).organization_id ? { organizationId: (contract as any).organization_id } : {}),
       },
     });
     const emailUrl = `${(process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt').replace(/\/$/, '')}/api/send-email`;

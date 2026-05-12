@@ -2,8 +2,8 @@ import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 
 function getThemeColor(pathname: string): string {
-  // Auth – dark indigo
-  if (/^\/login$/.test(pathname)) return '#1e1b4b';
+  // Auth – dark indigo (with optional /:locale/ prefix, e.g. /lt/login)
+  if (/^\/(?:[a-z]{2}\/)?login$/i.test(pathname)) return '#1e1b4b';
   if (/^\/auth\/callback/.test(pathname)) return '#1e1b4b';
   if (/^\/(registration\/subscription|tutor-subscribe)$/.test(pathname)) return '#1e1b4b';
   if (/^\/book\//.test(pathname)) return '#1e1b4b';

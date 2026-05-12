@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { timingSafeEqual } from 'crypto';
+import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClientOptions.js';
 
 function getPlatformAdminSecret(): string {
   const s = process.env.ADMIN_SECRET || process.env.VITE_ADMIN_SECRET;
@@ -18,7 +19,7 @@ function getSupabase() {
   const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return null;
-  return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } }) as any;
+  return createClient(url, key, supabaseServiceRoleClientOptions() as any) as any;
 }
 
 function requireAdmin(req: VercelRequest, res: VercelResponse): boolean {

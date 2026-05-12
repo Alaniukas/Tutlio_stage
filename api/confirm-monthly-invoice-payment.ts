@@ -244,6 +244,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               periodText,
               totalAmount,
               sessionsCount,
+              ...(tutorProfile.organization_id ? { organizationId: tutorProfile.organization_id } : {}),
             },
           }),
         }).catch(() => {})

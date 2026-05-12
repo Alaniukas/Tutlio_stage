@@ -411,7 +411,7 @@ export default function Login() {
       sessionStorage.removeItem('tutlio_logout_intent');
       const { data, error } = await withTimeout(
         supabase.auth.signInWithPassword({ email, password }),
-        12000,
+        30000,
         'Login timeout',
       );
       if (error) {
@@ -559,6 +559,14 @@ export default function Login() {
       }
 
       setLoading(false);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg === 'Login timeout' || /timeout/i.test(msg)) {
+        setError(t('login.timeout'));
+      } else {
+        console.error('[Login] unexpected error:', err);
+        setError(t('login.unexpectedError'));
       }
     } finally {
       loginInFlightRef.current = false;
@@ -727,11 +735,9 @@ export default function Login() {
           <div className="text-center mb-8">
             {orgBranding?.logo_url ? (
               <div className="inline-flex flex-col items-center">
-                <div className="relative">
-                  <img src={orgBranding.logo_url} alt={orgBranding.name} className="h-14 max-w-[180px] object-contain" />
-                  <span className="absolute -bottom-4 -right-8 text-[10px] text-white/40 whitespace-nowrap">powered by Tutlio</span>
-                </div>
-                <h1 className="text-2xl font-bold text-white tracking-tight mt-6">{orgBranding.name}</h1>
+                <img src={orgBranding.logo_url} alt={orgBranding.name} className="h-14 max-w-[180px] object-contain" />
+                <span className="text-[10px] text-white/40 mt-1">powered by Tutlio</span>
+                <h1 className="text-2xl font-bold text-white tracking-tight mt-4">{orgBranding.name}</h1>
               </div>
             ) : (
               <>

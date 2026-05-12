@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { reconcileElements, CaptureUpdateAction } from '@excalidraw/excalidraw';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 type ExcalidrawImperativeAPI = any;
 
@@ -11,7 +12,7 @@ const SCENE_FILE = 'scene.json';
 const IMAGE_PREFIX = 'data:image/';
 const WHITEBOARD_BUCKET = 'whiteboard-data';
 const FILES_PREFIX = 'files';
-const MAX_BROADCAST_DATAURL_BYTES = 180_000;
+const MAX_BROADCAST_DATAURL_BYTES = 200_000;
 
 type WhiteboardFile = Record<string, any> & {
   id?: string;
@@ -115,8 +116,20 @@ export function useWhiteboardSync(
           }
           try {
             const { data, error } = await supabase.storage.from(WHITEBOARD_BUCKET).download(storagePath);
-            if (error || !data) return;
-            const dataURL = await blobToDataURL(data);
+            if (error || !data) {
+              console.warn('[Whiteboard] Storage download failed:', error?.message, '| path:', storagePath);
+              return;
+            }
+            let dataURL: string | undefined;
+            if (storagePath.endsWith('.json')) {
+              // JSON-wrapped image asset
+              const text = await data.text();
+              const parsed = JSON.parse(text);
+              dataURL = typeof parsed.dataURL === 'string' ? parsed.dataURL : undefined;
+            } else {
+              // Legacy raw blob asset
+              dataURL = await blobToDataURL(data) || undefined;
+            }
             if (!dataURL) return;
             hydratedDataUrlByPathRef.current.set(storagePath, dataURL);
             hydrated[fileId] = { ...file, dataURL };
@@ -139,29 +152,36 @@ export function useWhiteboardSync(
       }
       const dataURL = typeof file.dataURL === 'string' ? file.dataURL : '';
       const isImageDataUrl = dataURL.startsWith(IMAGE_PREFIX);
-      if (!isImageDataUrl) return file;
+      if (!isImageDataUrl) {
+        console.warn('[Whiteboard] Upload skipped - no image dataURL | fileId:', fileId, '| dataURL length:', dataURL.length);
+        return file;
+      }
+
+      console.log('[Whiteboard] Uploading file asset | fileId:', fileId, '| dataURL size:', Math.round(dataURL.length / 1024), 'KB');
 
       const knownPath = uploadedAssetPathByFileIdRef.current.get(fileId);
-      const targetPath = knownPath || `${sessionId}/${FILES_PREFIX}/${fileId}`;
-      const blob = dataUrlToBlob(dataURL);
-      if (!blob) return file;
+      const targetPath = knownPath || `${sessionId}/${FILES_PREFIX}/${fileId}.json`;
 
-      const { error } = await supabase.storage.from(WHITEBOARD_BUCKET).upload(targetPath, blob, {
+      const jsonPayload = JSON.stringify({ dataURL, mimeType: file.mimeType });
+      const jsonBlob = new Blob([jsonPayload], { type: 'application/json' });
+
+      const { error } = await supabase.storage.from(WHITEBOARD_BUCKET).upload(targetPath, jsonBlob, {
         upsert: true,
-        contentType: file.mimeType || blob.type || 'application/octet-stream',
+        contentType: 'application/json',
       });
-      if (!error) {
-        uploadedAssetPathByFileIdRef.current.set(fileId, targetPath);
-        hydratedDataUrlByPathRef.current.set(targetPath, dataURL);
-        return {
-          ...file,
-          storagePath: targetPath,
-          dataURL: undefined,
-        };
+      if (error) {
+        console.warn('[Whiteboard] Storage upload failed:', error.message, '| fileId:', fileId);
+        return file;
       }
-      return file;
+      uploadedAssetPathByFileIdRef.current.set(fileId, targetPath);
+      hydratedDataUrlByPathRef.current.set(targetPath, dataURL);
+      return {
+        ...file,
+        storagePath: targetPath,
+        dataURL: undefined,
+      };
     },
-    [dataUrlToBlob, sessionId],
+    [sessionId],
   );
 
   const prepareFilesForTransport = useCallback(
@@ -177,21 +197,6 @@ export function useWhiteboardSync(
     [uploadFileAssetIfNeeded],
   );
 
-  const sanitizeFilesForBroadcast = useCallback((files?: Record<string, WhiteboardFile>) => {
-    if (!files) return {};
-    const sanitized: Record<string, WhiteboardFile> = {};
-    for (const [fileId, file] of Object.entries(files)) {
-      const safeFile: WhiteboardFile = { ...(file || {}) };
-      const dataURL = typeof safeFile.dataURL === 'string' ? safeFile.dataURL : '';
-      if (dataURL.startsWith(IMAGE_PREFIX) && dataURL.length > MAX_BROADCAST_DATAURL_BYTES) {
-        // Keep live payload small to avoid auth/session lock pressure and dropped broadcasts.
-        safeFile.dataURL = undefined;
-      }
-      sanitized[fileId] = safeFile;
-    }
-    return sanitized;
-  }, []);
-
   const applyRemotePayload = useCallback(
     async (payload: SceneUpdatePayload) => {
       const api = excalidrawApiRef.current;
@@ -205,26 +210,46 @@ export function useWhiteboardSync(
       lastRevisionBySenderRef.current.set(senderId, revision);
 
       const hydratedFiles = await hydrateFilesFromStorage(payload.files || {});
+
+      // Merge with local files: never overwrite a local dataURL with an empty one
+      const localFiles = api.getFiles?.() || {};
+      const mergedFiles: Record<string, WhiteboardFile> = { ...hydratedFiles };
+      for (const [fileId, localFile] of Object.entries(localFiles)) {
+        const localDataURL = typeof (localFile as any)?.dataURL === 'string' ? (localFile as any).dataURL : '';
+        const remoteDataURL = typeof mergedFiles[fileId]?.dataURL === 'string' ? mergedFiles[fileId].dataURL : '';
+        if (localDataURL.startsWith(IMAGE_PREFIX) && !remoteDataURL.startsWith(IMAGE_PREFIX)) {
+          mergedFiles[fileId] = { ...(mergedFiles[fileId] || {}), ...localFile };
+        }
+      }
+
+      // Only pass files that have a valid image dataURL to updateScene.
+      // Passing a file without dataURL would overwrite a good local copy via Excalidraw's merge.
+      const filesToApply: Record<string, WhiteboardFile> = {};
+      for (const [fid, f] of Object.entries(mergedFiles)) {
+        if (typeof f?.dataURL === 'string' && f.dataURL.startsWith(IMAGE_PREFIX)) {
+          filesToApply[fid] = f;
+        }
+      }
+
       isRemoteUpdateRef.current = true;
       try {
-        const { reconcileElements, CaptureUpdateAction } = require('@excalidraw/excalidraw');
         const local = api.getSceneElementsIncludingDeleted();
-        const reconciled = reconcileElements(local, payload.elements, api.getAppState());
+        const reconciled = reconcileElements(local, payload.elements as any, api.getAppState());
         api.updateScene({
           elements: reconciled,
-          files: hydratedFiles,
+          ...(Object.keys(filesToApply).length > 0 ? { files: filesToApply } : {}),
           captureUpdate: CaptureUpdateAction.NEVER,
         });
       } catch {
         api.updateScene({
           elements: payload.elements,
-          files: hydratedFiles,
+          ...(Object.keys(filesToApply).length > 0 ? { files: filesToApply } : {}),
+          captureUpdate: CaptureUpdateAction.NEVER,
         });
       } finally {
-        // Keep guard through current tick to prevent immediate rebroadcast loops.
-        window.setTimeout(() => {
+        requestAnimationFrame(() => {
           isRemoteUpdateRef.current = false;
-        }, 0);
+        });
       }
     },
     [hydrateFilesFromStorage],
@@ -275,6 +300,7 @@ export function useWhiteboardSync(
       appState: {
         viewBackgroundColor: appState.viewBackgroundColor,
         gridSize: appState.gridSize,
+        gridModeEnabled: appState.gridModeEnabled,
       },
       files,
       updatedBy: currentUser.id,
@@ -336,22 +362,73 @@ export function useWhiteboardSync(
   const broadcastUpdate = useCallback(
     (elements: readonly any[], files?: Record<string, WhiteboardFile>) => {
       if (!channelRef.current || isRemoteUpdateRef.current || !currentUser) return;
-      const preparedFiles = sanitizeFilesForBroadcast(files || {});
+
+      const fileEntries = Object.entries(files || {});
+      const needsUpload: [string, WhiteboardFile][] = [];
+      const preparedFiles: Record<string, WhiteboardFile> = {};
+
+      for (const [fileId, file] of fileEntries) {
+        const dataURL = typeof file?.dataURL === 'string' ? file.dataURL : '';
+        const hasLargeData = dataURL.startsWith(IMAGE_PREFIX) && dataURL.length > MAX_BROADCAST_DATAURL_BYTES;
+        const knownPath = uploadedAssetPathByFileIdRef.current.get(fileId);
+
+        if (hasLargeData && !knownPath) {
+          // Snapshot ALL properties now - Excalidraw may mutate the object before async upload runs
+          needsUpload.push([fileId, { ...file, dataURL }]);
+          continue;
+        }
+
+        const safeFile: WhiteboardFile = { ...file };
+        if (hasLargeData && knownPath) {
+          safeFile.dataURL = undefined;
+          safeFile.storagePath = knownPath;
+        }
+        preparedFiles[fileId] = safeFile;
+      }
+
       localRevisionRef.current += 1;
-      const payload: SceneUpdatePayload = {
-        senderId: currentUser.id,
-        revision: localRevisionRef.current,
-        sentAt: Date.now(),
-        elements,
-        files: preparedFiles,
-      };
       channelRef.current.send({
         type: 'broadcast',
         event: 'scene-update',
-        payload,
+        payload: {
+          senderId: currentUser.id,
+          revision: localRevisionRef.current,
+          sentAt: Date.now(),
+          elements,
+          files: preparedFiles,
+        } satisfies SceneUpdatePayload,
       });
+
+      if (needsUpload.length > 0) {
+        (async () => {
+          const followUpFiles: Record<string, WhiteboardFile> = { ...preparedFiles };
+          for (const [fileId, fileSnapshot] of needsUpload) {
+            const uploaded = await uploadFileAssetIfNeeded(fileId, fileSnapshot);
+            if (uploaded.storagePath) {
+              followUpFiles[fileId] = { ...uploaded, dataURL: undefined };
+            } else {
+              console.warn('[Whiteboard] Storage upload failed, sending dataURL inline:', fileId);
+              followUpFiles[fileId] = fileSnapshot;
+            }
+          }
+          if (channelRef.current && !isRemoteUpdateRef.current) {
+            localRevisionRef.current += 1;
+            channelRef.current.send({
+              type: 'broadcast',
+              event: 'scene-update',
+              payload: {
+                senderId: currentUser.id,
+                revision: localRevisionRef.current,
+                sentAt: Date.now(),
+                elements,
+                files: followUpFiles,
+              } satisfies SceneUpdatePayload,
+            });
+          }
+        })();
+      }
     },
-    [currentUser?.id, sanitizeFilesForBroadcast],
+    [currentUser?.id, uploadFileAssetIfNeeded],
   );
 
   const scheduleStableBroadcast = useCallback(() => {
@@ -471,23 +548,19 @@ export function useWhiteboardSync(
         setLoaded(true);
         return;
       }
-      try {
-        const { CaptureUpdateAction } = require('@excalidraw/excalidraw');
-        const hydratedFiles = await hydrateFilesFromStorage(scene.files || {});
-        excalidrawAPI.updateScene({
-          elements: scene.elements,
-          appState: scene.appState,
-          files: hydratedFiles,
-          captureUpdate: CaptureUpdateAction.NEVER,
-        });
-      } catch {
-        const hydratedFiles = await hydrateFilesFromStorage(scene.files || {});
-        excalidrawAPI.updateScene({
-          elements: scene.elements,
-          appState: scene.appState,
-          files: hydratedFiles,
-        });
+      const hydratedFiles = await hydrateFilesFromStorage(scene.files || {});
+      const validFiles: Record<string, WhiteboardFile> = {};
+      for (const [fid, f] of Object.entries(hydratedFiles)) {
+        if (typeof f?.dataURL === 'string' && f.dataURL.startsWith(IMAGE_PREFIX)) {
+          validFiles[fid] = f;
+        }
       }
+      excalidrawAPI.updateScene({
+        elements: scene.elements,
+        appState: scene.appState,
+        ...(Object.keys(validFiles).length > 0 ? { files: validFiles } : {}),
+        captureUpdate: CaptureUpdateAction.NEVER,
+      });
       setLoaded(true);
       await flushQueuedPayloads();
     })();

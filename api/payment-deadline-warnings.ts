@@ -230,6 +230,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                     paymentContext,
                                     price: session.price ?? '–',
                                     assignedTutorName: tutor.full_name || 'Korepetitorius',
+                                    organizationId: tutor.organization_id,
                                 },
                             });
                             if (!ok) allSent = false;
@@ -250,6 +251,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             deadlineTime,
                             paymentContext,
                             price: session.price ?? '–',
+                            ...(tutor.organization_id ? { organizationId: tutor.organization_id } : {}),
                         },
                     });
                 }
@@ -275,6 +277,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         const deadlineHoursForEmail = Math.max(1, Math.round(minutesToDeadline / 60)) || 1;
                         const bankDetails = trimManualPaymentBankDetails(tutor.manual_payment_bank_details);
 
+                        const orgIdForPayer = tutor.organization_id || null;
                         if (tutorUsesManualStudentPayments(tutor)) {
                             await sendWarningEmail({
                                 type: 'payment_reminder',
@@ -292,6 +295,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                     bankDetails: bankDetails || undefined,
                                     paymentUrl: `${BASE_URL}/student/sessions`,
                                     payerIsParent: studentObj?.payment_payer === 'parent',
+                                    ...(orgIdForPayer ? { organizationId: orgIdForPayer } : {}),
                                 },
                             });
                         } else {
@@ -310,6 +314,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                         deadlineHours: deadlineHoursForEmail,
                                         paymentTiming,
                                         paymentUrl,
+                                        ...(orgIdForPayer ? { organizationId: orgIdForPayer } : {}),
                                     },
                                 });
                             }

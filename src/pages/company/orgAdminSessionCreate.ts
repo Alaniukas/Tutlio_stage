@@ -76,9 +76,11 @@ async function notifyAfterOrgAdminSessionsCreated(
 
   const { data: tutorProfile } = await supabase
     .from('profiles')
-    .select('full_name, email, stripe_account_id, cancellation_hours, cancellation_fee_percent')
+    .select('full_name, email, stripe_account_id, cancellation_hours, cancellation_fee_percent, organization_id')
     .eq('id', tutorId)
     .single();
+
+  const orgIdPayload = (tutorProfile as any)?.organization_id ? { organizationId: (tutorProfile as any).organization_id } : {};
 
   const studentIds = [...new Set(sessionsForNotify.map(s => s.student_id))];
   const { data: studentRows } = await supabase
@@ -109,6 +111,7 @@ async function notifyAfterOrgAdminSessionsCreated(
         tutorName: tutorProfile.full_name || '',
         date: format(tutorStart, 'yyyy-MM-dd'),
         time: format(tutorStart, 'HH:mm'),
+        ...((tutorProfile as any).organization_id ? { organizationId: (tutorProfile as any).organization_id } : {}),
       },
     }).catch(err => console.error('[OrgSchedule] tutor notify', err));
   }
@@ -151,6 +154,7 @@ async function notifyAfterOrgAdminSessionsCreated(
             duration: dur,
             totalLessons: studentSessions.length,
             sessions: sessionDates,
+            ...orgIdPayload,
           },
         }).catch(err => console.error('[OrgSchedule] recurring student email', err));
       }
@@ -170,6 +174,7 @@ async function notifyAfterOrgAdminSessionsCreated(
             totalLessons: studentSessions.length,
             sessions: sessionDates,
             paymentReminderNote: true,
+            ...orgIdPayload,
           },
         }).catch(err => console.error('[OrgSchedule] recurring payer email', err));
       }
@@ -208,6 +213,7 @@ async function notifyAfterOrgAdminSessionsCreated(
           paymentStatus: hasPayer ? null : rawPaymentStatusForEmail(sess.paid, sess.payment_status),
           meetingLink: sessionMeetingLink,
           hidePaymentInfo: hasPayer,
+          ...orgIdPayload,
         },
       }).catch(err => console.error('[OrgSchedule] student booking', err));
     }
@@ -230,6 +236,7 @@ async function notifyAfterOrgAdminSessionsCreated(
           cancellationFeePercent: tutorProfile?.cancellation_fee_percent ?? 0,
           paymentStatus: rawPaymentStatusForEmail(sess.paid, sess.payment_status),
           meetingLink: sessionMeetingLink,
+          ...orgIdPayload,
         },
       }).catch(err => console.error('[OrgSchedule] payer booking', err));
     } else if (!st.email && payerRaw) {
@@ -250,6 +257,7 @@ async function notifyAfterOrgAdminSessionsCreated(
           cancellationFeePercent: tutorProfile?.cancellation_fee_percent ?? 0,
           paymentStatus: rawPaymentStatusForEmail(sess.paid, sess.payment_status),
           meetingLink: sessionMeetingLink,
+          ...orgIdPayload,
         },
       }).catch(err => console.error('[OrgSchedule] payer booking', err));
     }
@@ -709,6 +717,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
           date: format(startDate, 'yyyy-MM-dd'),
           time: format(startDate, 'HH:mm'),
           comment: createTutorComment,
+          ...((tutorProfile as any)?.organization_id ? { organizationId: (tutorProfile as any).organization_id } : {}),
         },
       }).catch(() => {});
     }

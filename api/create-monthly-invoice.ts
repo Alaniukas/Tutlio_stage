@@ -398,6 +398,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const monthlyEmailOk = usesManualStudentPayments ? true : Boolean(checkoutSession?.url);
             if (monthlyEmailOk) {
                 try {
+                    const invoiceOrgId = (tutor as any).organization_id || null;
                     const emailData = usesManualStudentPayments
                         ? {
                               recipientName: payerName,
@@ -418,6 +419,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                               manualPaymentInstructions: true,
                               bankDetails: tutorManualBankDetails || undefined,
                               paymentLink: `${APP_URL}/student/sessions`,
+                              ...(invoiceOrgId ? { organizationId: invoiceOrgId } : {}),
                           }
                         : {
                               recipientName: payerName,
@@ -436,6 +438,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                   minute: '2-digit',
                               }),
                               paymentLink: checkoutSession!.url as string,
+                              ...(invoiceOrgId ? { organizationId: invoiceOrgId } : {}),
                           };
                     const emailPayload: Record<string, unknown> = {
                         type: 'monthly_invoice',

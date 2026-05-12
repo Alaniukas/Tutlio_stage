@@ -3,11 +3,16 @@
 // Body: { type, to, data }
 // All templates are inlined to avoid Vercel module resolution issues.
 
+if (typeof process !== 'undefined' && process.env.TUTLIO_DEV_API_LOCAL === '1') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+}
+
 import type { VercelRequest, VercelResponse } from './types';
 import { t, type Locale } from './_lib/i18n.js';
 import { Resend } from 'resend';
 import { createClient } from '@supabase/supabase-js';
 import { outlookEmailButton, headerInlineStyle } from './_lib/outlookEmail.js';
+import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClientOptions.js';
 import { sendPushForEmail } from './_lib/sendPush.js';
 
 const resend = new Resend(process.env.RESEND_API_KEY_STAGE || process.env.RESEND_API_KEY);
@@ -164,13 +169,17 @@ interface EmailBranding {
   name: string;
   logo_url: string | null;
   brand_color: string;
+  brand_color_secondary?: string;
 }
 
 function wrap(content: string, locale: Locale = 'lt', branding?: EmailBranding | null): string {
   const brandName = branding?.name || 'Tutlio';
+  const fallbackColor = branding?.brand_color || '#4f46e5';
   const logoHtml = branding?.logo_url
-    ? `<img src="${branding.logo_url}" alt="${brandName}" style="max-height:36px;max-width:160px;" />`
-    : `<span style="font-size:26px;font-weight:900;color:#4f46e5;letter-spacing:-0.5px;">Tutlio <span style="font-size:24px;">🎓</span></span>`;
+    ? `<img src="${branding.logo_url}" alt="${escapeHtml(brandName)}" style="max-height:36px;max-width:160px;" />`
+    : branding?.name
+      ? `<span style="font-size:26px;font-weight:900;color:${fallbackColor};letter-spacing:-0.5px;">${escapeHtml(branding.name)}</span>`
+      : `<span style="font-size:26px;font-weight:900;color:#4f46e5;letter-spacing:-0.5px;">Tutlio <span style="font-size:24px;">🎓</span></span>`;
   const poweredBy = branding?.name
     ? `<p style="color:#9ca3af;font-size:11px;margin:8px 0 0;">powered by Tutlio</p>`
     : '';
@@ -1788,6 +1797,66 @@ async function isAuthenticatedUser(req: VercelRequest): Promise<boolean> {
   return !error;
 }
 
+/** When `organizationId` is omitted from the payload, infer org from the logged-in user (tutor / org admin / student / parent). */
+async function resolveOrganizationIdFromAuthBearer(req: VercelRequest): Promise<string | null> {
+  const authHeader = typeof req.headers.authorization === 'string' ? req.headers.authorization : '';
+  if (!authHeader.startsWith('Bearer ')) return null;
+  const token = authHeader.slice(7);
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  if (!supabaseUrl || !serviceKey) return null;
+  const sb = createClient(supabaseUrl, serviceKey, supabaseServiceRoleClientOptions() as any) as any;
+  const { data: authData, error: authErr } = await sb.auth.getUser(token);
+  if (authErr || !authData?.user?.id) return null;
+  const userId = authData.user.id as string;
+
+  const { data: profile } = await sb.from('profiles').select('organization_id').eq('id', userId).maybeSingle();
+  if (profile?.organization_id) return profile.organization_id as string;
+
+  const { data: adminRow } = await sb
+    .from('organization_admins')
+    .select('organization_id')
+    .eq('user_id', userId)
+    .limit(1)
+    .maybeSingle();
+  if (adminRow?.organization_id) return adminRow.organization_id as string;
+
+  const { data: studentRows } = await sb
+    .from('students')
+    .select('organization_id, tutor_id')
+    .eq('linked_user_id', userId);
+  const allStudentRows = (studentRows as any[]) ?? [];
+  if (allStudentRows.length > 0) {
+    const withOrg = allStudentRows.find((r: any) => r.organization_id);
+    if (withOrg?.organization_id) return withOrg.organization_id as string;
+    for (const row of allStudentRows) {
+      if (!row.tutor_id) continue;
+      const { data: tutorProf } = await sb.from('profiles').select('organization_id').eq('id', row.tutor_id).maybeSingle();
+      if (tutorProf?.organization_id) return tutorProf.organization_id as string;
+    }
+  }
+
+  const { data: parentProfileId, error: parentErr } = await sb.rpc('get_parent_profile_id_by_user_id', {
+    p_user_id: userId,
+  });
+  if (parentErr || parentProfileId == null) return null;
+  const parentId = String(parentProfileId);
+  const { data: link } = await sb
+    .from('parent_students')
+    .select('student_id')
+    .eq('parent_id', parentId)
+    .limit(1)
+    .maybeSingle();
+  if (!link?.student_id) return null;
+  const { data: childOrg } = await sb.from('students').select('organization_id, tutor_id').eq('id', link.student_id).maybeSingle();
+  if (childOrg?.organization_id) return childOrg.organization_id as string;
+  if (childOrg?.tutor_id) {
+    const { data: childTutorProf } = await sb.from('profiles').select('organization_id').eq('id', childOrg.tutor_id).maybeSingle();
+    if (childTutorProf?.organization_id) return childTutorProf.organization_id as string;
+  }
+  return null;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -1821,6 +1890,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const data = sanitizeEmailData(rawData);
+    const orgIdFromPayload =
+      (typeof rawData?.organizationId === 'string' && rawData.organizationId.trim()) ||
+      (typeof rawData?.organization_id === 'string' && rawData.organization_id.trim()) ||
+      null;
+    const orgIdForBrandingLookup = orgIdFromPayload || (await resolveOrganizationIdFromAuthBearer(req));
 
     function tutorStudentAssigned(d: any, locale: Locale) {
       const hasEmail = d.studentEmail && String(d.studentEmail).trim() !== '';
@@ -1892,22 +1966,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Resolve org branding for whitelabel emails
     let orgBranding: EmailBranding | null = null;
-    const orgIdForBranding = data.organizationId || data.organization_id || null;
-    if (orgIdForBranding) {
+    if (orgIdForBrandingLookup) {
       try {
         const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
         const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
         if (supabaseUrl && serviceKey) {
-          const sb = createClient(supabaseUrl, serviceKey);
+          const sb = createClient(supabaseUrl, serviceKey, supabaseServiceRoleClientOptions() as any) as any;
           const { data: org } = await sb
             .from('organizations')
-            .select('name, logo_url, brand_color, features')
-            .eq('id', orgIdForBranding)
+            .select('name, logo_url, brand_color, brand_color_secondary, features')
+            .eq('id', orgIdForBrandingLookup)
             .maybeSingle();
           if (org) {
             const features = (org.features && typeof org.features === 'object' ? org.features : {}) as Record<string, unknown>;
-            if (features.custom_branding && org.logo_url) {
-              orgBranding = { name: org.name, logo_url: org.logo_url, brand_color: org.brand_color || '#6366f1' };
+            if (features.custom_branding) {
+              orgBranding = {
+                name: org.name,
+                logo_url: org.logo_url ?? null,
+                brand_color: org.brand_color || '#6366f1',
+                brand_color_secondary: (org as { brand_color_secondary?: string | null }).brand_color_secondary || undefined,
+              };
             }
           }
         }
@@ -1922,8 +2000,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         : `<span style="font-size:26px;font-weight:900;color:${orgBranding.brand_color};letter-spacing:-0.5px;">${escapeHtml(orgBranding.name)}</span>`;
       const poweredBy = `<p style="color:#9ca3af;font-size:11px;margin:8px 0 0;">powered by Tutlio</p>`;
       const defaultHeader = `<span style="font-size:26px;font-weight:900;color:#4f46e5;letter-spacing:-0.5px;">Tutlio <span style="font-size:24px;">🎓</span></span>`;
-      const branded = result.html.replace(defaultHeader, `${logoHtml}${poweredBy}`);
-      return { subject: result.subject, html: branded };
+      let html = result.html.replace(defaultHeader, `${logoHtml}${poweredBy}`);
+      const a = orgBranding.brand_color;
+      const b = orgBranding.brand_color_secondary || orgBranding.brand_color;
+      const orgHeader = headerInlineStyle(a, b);
+      const headerPairs: [string, string][] = [
+        ['#6366f1', '#8b5cf6'], ['#6366f1', '#4f46e5'], ['#8b5cf6', '#6366f1'], ['#7c3aed', '#6d28d9'],
+        ['#ef4444', '#f97316'], ['#ef4444', '#b91c1c'],
+        ['#f59e0b', '#f97316'], ['#f59e0b', '#d97706'],
+        ['#10b981', '#059669'], ['#059669', '#10b981'], ['#059669', '#047857'],
+        ['#3b82f6', '#2563eb'],
+        ['#0d9488', '#14b8a6'],
+        ['#b45309', '#92400e'],
+        ['#64748b', '#475569'],
+      ];
+      for (const [c1, c2] of headerPairs) {
+        html = html.replaceAll(headerInlineStyle(c1, c2), orgHeader);
+      }
+      const accentColors = ['#4f46e5', '#6366f1', '#7c3aed', '#6d28d9', '#8b5cf6',
+        '#10b981', '#059669', '#047857', '#ef4444', '#b91c1c', '#f97316',
+        '#f59e0b', '#d97706', '#3b82f6', '#2563eb', '#0d9488', '#14b8a6',
+        '#b45309', '#92400e', '#64748b', '#475569', '#dc2626', '#ea580c'];
+      for (const c of accentColors) {
+        html = html.replaceAll(`bgcolor="${c}"`, `bgcolor="${a}"`);
+        html = html.replaceAll(`background-color:${c};`, `background-color:${a};`);
+        html = html.replaceAll(`background:${c};`, `background:${a};`);
+      }
+      html = html.replaceAll('color:#6366f1;', `color:${a};`);
+      return { subject: result.subject, html };
     }
 
     let emailContent: { subject: string; html: string };

@@ -103,6 +103,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             tutorName: String(org.name || 'Mokykla'),
             inviteCode,
             bookingUrl,
+            ...(orgId ? { organizationId: orgId } : {}),
           },
         }),
       });

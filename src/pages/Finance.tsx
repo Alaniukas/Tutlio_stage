@@ -223,7 +223,7 @@ export default function FinancePage() {
       ? 'xl:col-span-8'
       : 'xl:col-span-12';
 
-  if (isOrgTutorEffective && !soloManualStudentPayments) {
+  if (isOrgTutorEffective) {
     return (
       <Layout>
         <div className="max-w-4xl mx-auto space-y-6 animate-fade-in px-4">

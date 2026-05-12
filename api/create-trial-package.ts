@@ -398,6 +398,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             pricePerLesson: trialPriceEur.toFixed(2),
             totalPrice: payerChargedTotalEur.toFixed(2),
             paymentLink: checkoutSession.url,
+            ...((tutor as any).organization_id ? { organizationId: (tutor as any).organization_id } : {}),
           },
         }),
       })

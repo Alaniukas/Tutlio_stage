@@ -231,6 +231,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             totalPrice: totalPrice.toFixed(2),
                             bankDetails: (tutor as { manual_payment_bank_details?: string | null }).manual_payment_bank_details || '',
                             ...(manualPaymentUrl ? { paymentUrl: manualPaymentUrl } : {}),
+                            ...((tutor as any).organization_id ? { organizationId: (tutor as any).organization_id } : {}),
                         },
                     },
                     20000,

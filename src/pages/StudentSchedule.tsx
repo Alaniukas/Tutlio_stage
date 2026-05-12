@@ -2147,7 +2147,11 @@ export default function StudentSchedule() {
                                 </a>
                             )}
 
-                            <WhiteboardButton roomId={(mySessionData as any)?.whiteboard_room_id} />
+                            <WhiteboardButton
+                              roomId={(mySessionData as any)?.whiteboard_room_id}
+                              sessionStatus={(mySessionData as any)?.status}
+                              sessionEndTime={(mySessionData as any)?.end_time ?? null}
+                            />
 
                             {mySessionData?.status === 'active' && !mySessionData.paid && (studentPaymentPayer !== 'parent' || isParentRoute) &&
                                 (!tutorSoloManualPayments ? (

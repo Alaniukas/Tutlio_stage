@@ -17,6 +17,9 @@ import {
   ChevronUp,
   Settings,
   Users,
+  ArrowUpDown,
+  RefreshCw,
+  CheckCircle2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -76,6 +79,8 @@ export default function CompanyInvoices() {
   const [loadingTutorSessions, setLoadingTutorSessions] = useState(false);
   const [invoiceIssuerMode, setInvoiceIssuerMode] = useState<string>('both');
   const [checkingAlreadyIssued, setCheckingAlreadyIssued] = useState(false);
+  const [sortAsc, setSortAsc] = useState(true);
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
 
   const tutorEffectiveRange = useMemo(() => {
     if (tutorPeriodMode === 'month' && tutorMonth && /^\d{4}-\d{2}$/.test(tutorMonth)) {
@@ -255,7 +260,7 @@ export default function CompanyInvoices() {
   }, [activeTab, selectedTutorIds, tutorEffectiveRange.start, tutorEffectiveRange.end]);
 
   const filteredInvoices = useMemo(() => {
-    return invoices.filter((inv) => {
+    const filtered = invoices.filter((inv) => {
       const issueDate = String(inv.issue_date || '').slice(0, 10);
       if (invoicePeriodMode === 'month' && invoiceMonth && /^\d{4}-\d{2}$/.test(invoiceMonth)) {
         const [yStr, mStr] = invoiceMonth.split('-');
@@ -284,6 +289,11 @@ export default function CompanyInvoices() {
       if (buyerKindFilter === 'payer') return !isOrgBuyer;
       return true;
     });
+    filtered.sort((a, b) => {
+      const cmp = (a.issue_date || a.created_at).localeCompare(b.issue_date || b.created_at);
+      return sortAsc ? cmp : -cmp;
+    });
+    return filtered;
   }, [
     invoices,
     buyerKindFilter,
@@ -292,6 +302,7 @@ export default function CompanyInvoices() {
     invoiceMonth,
     invoiceRangeStart,
     invoiceRangeEnd,
+    sortAsc,
   ]);
 
   const handleDownloadAllVisible = async () => {
@@ -335,6 +346,57 @@ export default function CompanyInvoices() {
       console.error('[CompanyInvoices] download error:', err);
     } finally {
       setDownloadingId(null);
+    }
+  };
+
+  const handleRegenerate = async (invoiceId: string) => {
+    const target = invoices.find(inv => inv.id === invoiceId);
+    if (!target?.billing_batch_id) return;
+    const confirmed = window.confirm(t('invoices.regenerateConfirm'));
+    if (!confirmed) return;
+    setRegeneratingId(invoiceId);
+    try {
+      const res = await fetch('/api/regenerate-monthly-invoice', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ billingBatchId: target.billing_batch_id }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        window.alert(body.error || t('invoices.regenerateFailed'));
+        return;
+      }
+      setInvoices(prev => prev.filter(inv => inv.id !== invoiceId));
+      window.alert(t('invoices.regenerateSuccess'));
+    } catch (e) {
+      console.error('[CompanyInvoices] regenerate error:', e);
+      window.alert(t('invoices.regenerateFailed'));
+    } finally {
+      setRegeneratingId(null);
+    }
+  };
+
+  const handleMarkPaid = async (invoiceId: string) => {
+    const target = invoices.find(inv => inv.id === invoiceId);
+    if (!target) return;
+    if (target.billing_batch_id) {
+      try {
+        const res = await fetch('/api/confirm-monthly-invoice-payment', {
+          method: 'POST',
+          headers: await authHeaders(),
+          body: JSON.stringify({ billingBatchId: target.billing_batch_id, manualConfirm: true }),
+        });
+        if (res.ok) {
+          setInvoices(prev => prev.map(inv => inv.id === invoiceId ? { ...inv, status: 'paid' as const } : inv));
+        }
+      } catch (e) {
+        console.error('[CompanyInvoices] mark paid error:', e);
+      }
+    } else {
+      const { error } = await supabase.from('invoices').update({ status: 'paid' }).eq('id', invoiceId);
+      if (!error) {
+        setInvoices(prev => prev.map(inv => inv.id === invoiceId ? { ...inv, status: 'paid' as const } : inv));
+      }
     }
   };
 
@@ -831,20 +893,30 @@ export default function CompanyInvoices() {
                 </div>
               </div>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="rounded-xl gap-2 shrink-0"
-              disabled={downloadingAllList || filteredInvoices.length === 0}
-              onClick={() => void handleDownloadAllVisible()}
-            >
-              {downloadingAllList ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Download className="w-4 h-4" />
-              )}
-              {t('invoices.downloadAllFiltered', { count: String(filteredInvoices.length) })}
-            </Button>
+            <div className="flex gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setSortAsc((prev) => !prev)}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors bg-gray-50 text-gray-600 hover:bg-gray-100 flex items-center gap-1"
+              >
+                <ArrowUpDown className="w-3 h-3" />
+                {sortAsc ? t('invoices.sortOldestFirst') : t('invoices.sortNewestFirst')}
+              </button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-xl gap-2 shrink-0"
+                disabled={downloadingAllList || filteredInvoices.length === 0}
+                onClick={() => void handleDownloadAllVisible()}
+              >
+                {downloadingAllList ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Download className="w-4 h-4" />
+                )}
+                {t('invoices.downloadAllFiltered', { count: String(filteredInvoices.length) })}
+              </Button>
+            </div>
           </div>
 
           {loading ? (
@@ -903,19 +975,50 @@ export default function CompanyInvoices() {
                         )}
                       </div>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleDownloadPdf(inv.id)}
-                      disabled={downloadingId === inv.id}
-                      className="rounded-lg"
-                    >
-                      {downloadingId === inv.id ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <Download className="w-4 h-4" />
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDownloadPdf(inv.id)}
+                        disabled={downloadingId === inv.id}
+                        className="rounded-lg"
+                      >
+                        {downloadingId === inv.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Download className="w-4 h-4" />
+                        )}
+                      </Button>
+                      {inv.status === 'issued' && (
+                        <>
+                          {inv.billing_batch_id && (!inv.billing_batches || !inv.billing_batches.paid) && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleRegenerate(inv.id)}
+                              disabled={regeneratingId === inv.id}
+                              className="rounded-lg text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                              title={t('invoices.regenerate')}
+                            >
+                              {regeneratingId === inv.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <RefreshCw className="w-4 h-4" />
+                              )}
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleMarkPaid(inv.id)}
+                            className="rounded-lg text-green-600 hover:text-green-700 hover:bg-green-50"
+                            title={t('invoices.markPaid')}
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                          </Button>
+                        </>
                       )}
-                    </Button>
+                    </div>
                   </div>
                 );
               })}

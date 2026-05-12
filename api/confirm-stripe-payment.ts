@@ -144,6 +144,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     subject: sessionData.topic,
                     totalChargedEur,
                     duration: durationMinutes,
+                    ...(tutorProfile?.organization_id ? { organizationId: tutorProfile.organization_id } : {}),
                 };
 
                 const recipients = new Set<string>();
@@ -256,6 +257,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 duration: durationMinutes,
                 cancellationHours: tutor.cancellation_hours ?? 24,
                 cancellationFeePercent: tutor.cancellation_fee_percent ?? 0,
+                ...(tutorProfile?.organization_id ? { organizationId: tutorProfile.organization_id } : {}),
             };
 
             const recipients = new Set<string>();
@@ -294,7 +296,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                 date: dateStr,
                                 time: timeStr,
                                 subject: sessionData.topic,
-                                meetingLink: (sessionData as { meeting_link?: string | null }).meeting_link || ''
+                                meetingLink: (sessionData as { meeting_link?: string | null }).meeting_link || '',
+                                organizationId: tutorProfile.organization_id,
                             }
                         }
                         : {
@@ -306,7 +309,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                 date: dateStr,
                                 time: timeStr,
                                 subject: sessionData.topic,
-                                price: sessionData.price
+                                price: sessionData.price,
+                                ...(tutorProfile?.organization_id ? { organizationId: tutorProfile.organization_id } : {}),
                             }
                         };
                     await fetch(sendEmailUrl, {

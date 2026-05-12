@@ -114,6 +114,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               studentName: (studentRow as any)?.full_name || 'Mokinys',
               subjectName: (subjectRow as any)?.name || 'Dalykas',
               totalLessons: Number(pkg.total_lessons || 0),
+              ...((tutorRow as any)?.organization_id ? { organizationId: (tutorRow as any).organization_id } : {}),
             },
           }),
         }).catch(() => {});

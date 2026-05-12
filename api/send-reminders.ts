@@ -43,7 +43,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         id, start_time, end_time, topic, price, meeting_link, whiteboard_room_id,
         reminder_student_sent, reminder_tutor_sent, reminder_payer_sent,
         student:students(id, full_name, email, payment_payer, payer_email, payer_name),
-        tutor:profiles(id, full_name, email, phone, reminder_student_hours, reminder_tutor_hours)
+        tutor:profiles(id, full_name, email, phone, reminder_student_hours, reminder_tutor_hours, organization_id)
       `)
       .eq('status', 'active')
       .gte('start_time', now.toISOString())
@@ -69,7 +69,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const whiteboardLink = (session as any).whiteboard_room_id
           ? `${API_URL}/whiteboard/${(session as any).whiteboard_room_id}`
           : null;
-        const baseData = { date: dateStr, time: timeStr, topic: session.topic, duration: durationMinutes, price: session.price, meetingLink: session.meeting_link, whiteboardLink };
+        const orgId = (tutor as any)?.organization_id || null;
+        const baseData = { date: dateStr, time: timeStr, topic: session.topic, duration: durationMinutes, price: session.price, meetingLink: session.meeting_link, whiteboardLink, ...(orgId ? { organizationId: orgId } : {}) };
 
         if (reminderStudentHours > 0 && !session.reminder_student_sent && diffHours <= reminderStudentHours && diffHours >= 0 && student?.email) {
           try {
@@ -145,8 +146,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               meetingLink: session.meeting_link,
             };
             const tutorReminderData = isOrgTutor(tutor.organization_id)
-              ? tutorReminderCore
-              : { ...tutorReminderCore, price: session.price };
+              ? { ...tutorReminderCore, ...(orgId ? { organizationId: orgId } : {}) }
+              : { ...tutorReminderCore, price: session.price, ...(orgId ? { organizationId: orgId } : {}) };
             const resp = await fetch(`${API_URL}/api/send-email`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },

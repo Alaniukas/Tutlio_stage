@@ -180,6 +180,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
 
             const bankDetails = trimManualPaymentBankDetails(tutor.manual_payment_bank_details);
+            const orgIdForEmail = (tutor as any)?.organization_id || null;
             const ok = await sendEmail({
                 type: 'payment_after_lesson_reminder',
                 to: toEmail,
@@ -199,6 +200,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                               payerIsParent: student?.payment_payer === 'parent',
                           }
                         : {}),
+                    ...(orgIdForEmail ? { organizationId: orgIdForEmail } : {}),
                 },
             });
 

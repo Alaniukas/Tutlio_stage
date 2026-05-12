@@ -117,6 +117,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const student = (updated as any).students || {};
         const subject = (updated as any).subjects || {};
 
+        let orgId: string | null = null;
+        if ((updated as any).tutor_id) {
+            const { data: tp } = await supabase.from('profiles').select('organization_id').eq('id', (updated as any).tutor_id).maybeSingle();
+            orgId = (tp as any)?.organization_id || null;
+        }
+
         const recipients = new Map<string, string>();
         if (student.payer_email) {
             recipients.set(student.payer_email, student.payer_name || student.full_name || 'Kliente');
@@ -139,6 +145,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     availableLessons: updated.available_lessons,
                     totalLessons: updated.total_lessons,
                     totalPrice: Number(updated.total_price || 0).toFixed(2),
+                    ...(orgId ? { organizationId: orgId } : {}),
                 },
             }).catch((e) => {
                 console.error('[confirm-manual-payment] Email send failed:', e);

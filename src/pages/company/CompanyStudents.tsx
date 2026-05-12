@@ -981,6 +981,7 @@ export default function CompanyStudents() {
             tutorName: tutor?.full_name || t('compStu.tutorFallback'),
             inviteCode: row.invite_code,
             bookingUrl,
+            ...(orgId ? { organizationId: orgId } : {}),
           },
         });
         if (!ok) emailOk = false;
@@ -1000,7 +1001,7 @@ export default function CompanyStudents() {
             void sendEmail({
               type: 'tutor_student_assigned',
               to: tutorProfile.email,
-              data: { tutorName: tutorProfile.full_name, studentName: newStudent.full_name, ...contactPayload },
+              data: { tutorName: tutorProfile.full_name, studentName: newStudent.full_name, ...contactPayload, ...(orgId ? { organizationId: orgId } : {}) },
             });
           }
         }
@@ -1246,6 +1247,7 @@ export default function CompanyStudents() {
         tutorName: selectedStudent.tutor?.full_name || t('compStu.tutorFallback'),
         inviteCode: selectedStudent.invite_code,
         bookingUrl,
+        ...(orgId ? { organizationId: orgId } : {}),
       },
     });
     setSendingInviteNow(false);
@@ -2464,7 +2466,7 @@ export default function CompanyStudents() {
                                     void sendEmail({
                                       type: 'tutor_student_assigned',
                                       to: tutorProfile.email,
-                                      data: { tutorName: tutorProfile.full_name, studentName: selectedStudent.full_name, ...contactPayload },
+                                      data: { tutorName: tutorProfile.full_name, studentName: selectedStudent.full_name, ...contactPayload, ...(orgId ? { organizationId: orgId } : {}) },
                                     });
                                   }
                                 }

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
 export interface OrgBranding {
   id: string;
@@ -23,16 +24,22 @@ const cache = new Map<string, OrgBranding>();
  * Reads `?org=<slug>` from the URL or accepts a slug directly.
  */
 export function useOrgBranding(slugOverride?: string | null): OrgBrandingState {
+  const [searchParams] = useSearchParams();
   const [branding, setBranding] = useState<OrgBranding | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const slug = slugOverride ?? new URLSearchParams(window.location.search).get('org');
+  const slug = (slugOverride ?? searchParams.get('org'))?.trim() || null;
 
   useEffect(() => {
-    if (!slug) return;
+    if (!slug) {
+      setBranding(null);
+      setLoading(false);
+      return;
+    }
 
     if (cache.has(slug)) {
       setBranding(cache.get(slug)!);
+      setLoading(false);
       return;
     }
 
@@ -46,9 +53,13 @@ export function useOrgBranding(slugOverride?: string | null): OrgBrandingState {
         if (data) {
           cache.set(slug, data);
           setBranding(data);
+        } else {
+          setBranding(null);
         }
       })
-      .catch(() => {})
+      .catch(() => {
+        if (!cancelled) setBranding(null);
+      })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });

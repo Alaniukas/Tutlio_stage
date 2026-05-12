@@ -2719,7 +2719,11 @@ export default function StudentsPage() {
               </a>
             )}
 
-            <WhiteboardButton roomId={(selectedSessionForModal as any)?.whiteboard_room_id} />
+            <WhiteboardButton
+              roomId={(selectedSessionForModal as any)?.whiteboard_room_id}
+              sessionStatus={(selectedSessionForModal as any)?.status}
+              sessionEndTime={(selectedSessionForModal as any)?.end_time ?? null}
+            />
 
             <div className="space-y-2 pt-3 border-t border-gray-100">
               <p className="text-sm font-semibold text-gray-700">{t('dash.commentLabel')}</p>

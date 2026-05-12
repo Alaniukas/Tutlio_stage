@@ -647,7 +647,11 @@ export default function StudentDashboard() {
                             </a>
                         )}
 
-                        <WhiteboardButton roomId={(selectedSession as any)?.whiteboard_room_id} />
+                        <WhiteboardButton
+                          roomId={(selectedSession as any)?.whiteboard_room_id}
+                          sessionStatus={(selectedSession as any)?.status}
+                          sessionEndTime={(selectedSession as any)?.end_time ?? null}
+                        />
 
                         {selectedSession?.status === 'active' && !selectedSession.paid && paymentPayer !== 'parent' && isAfter(new Date(selectedSession.end_time), now) && (
                             <button

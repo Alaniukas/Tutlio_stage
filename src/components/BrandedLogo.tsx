@@ -28,6 +28,15 @@ export default function BrandedLogo({ size = 'md', showName = true, nameClassNam
     );
   }
 
+  if (enabled && name) {
+    return (
+      <>
+        <img src="/logo-icon.png" alt="" className={`${SIZES[size]} rounded-xl object-contain flex-shrink-0 opacity-90`} />
+        {showName && <span className={`font-bold text-gray-900 text-base tracking-tight truncate ${nameClassName}`}>{name}</span>}
+      </>
+    );
+  }
+
   return (
     <>
       <img src="/logo-icon.png" alt="Tutlio" className={`${SIZES[size]} rounded-xl flex-shrink-0`} />

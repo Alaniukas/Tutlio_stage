@@ -181,6 +181,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const publicAppUrl = (process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt').replace(/\/$/, '');
   const apiBase = internalApiBaseUrl(req);
 
+  let chatOrgId: string | null = null;
+  const allUserIds = participants.map((p) => p.user_id as string);
+  if (allUserIds.length > 0) {
+    const { data: profRows } = await sb.from('profiles').select('organization_id').in('id', allUserIds).not('organization_id', 'is', null).limit(1);
+    if (profRows && profRows.length > 0) chatOrgId = (profRows[0] as any).organization_id;
+  }
+
   for (const p of participants) {
     if (p.user_id === auth.userId) continue;
 
@@ -226,6 +233,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             senderName,
             preview,
             messagesUrl,
+            ...(chatOrgId ? { organizationId: chatOrgId } : {}),
           },
         }),
       });

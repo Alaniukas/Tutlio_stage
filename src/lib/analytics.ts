@@ -60,21 +60,26 @@ export function trackPageview(pathname: string) {
   const utm = getStoredUtm();
   const locale = document.documentElement.lang || navigator.language?.slice(0, 2) || '';
 
-  supabase.from('analytics_events').insert({
-    session_id: getSessionId(),
-    event_name: 'pageview',
-    page_path: pathname,
-    referrer: document.referrer || null,
-    utm_source: utm.utm_source || null,
-    utm_medium: utm.utm_medium || null,
-    utm_campaign: utm.utm_campaign || null,
-    locale: locale || null,
-    user_agent: navigator.userAgent?.slice(0, 512) || null,
-  }).then(({ error }) => {
-    if (error && !String(error.message || '').includes('relation') && error.code !== '42P01') {
-      console.warn('[analytics] insert error:', error.message);
+  void (async () => {
+    try {
+      const { error } = await supabase.from('analytics_events').insert({
+        session_id: getSessionId(),
+        event_name: 'pageview',
+        page_path: pathname,
+        referrer: document.referrer || null,
+        utm_source: utm.utm_source || null,
+        utm_medium: utm.utm_medium || null,
+        utm_campaign: utm.utm_campaign || null,
+        locale: locale || null,
+        user_agent: navigator.userAgent?.slice(0, 512) || null,
+      });
+      if (error && !String(error.message || '').includes('relation') && error.code !== '42P01') {
+        console.warn('[analytics] insert error:', error.message);
+      }
+    } catch {
+      /* Missing table, CORS, offline — never block app flows */
     }
-  });
+  })();
 }
 
 /** Fire once on app boot — captures UTM + first pageview. */

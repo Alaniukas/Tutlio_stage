@@ -79,7 +79,13 @@ export default function OrgTutorFinanceSummary() {
 
   const rangeLabel = useMemo(() => {
     if (periodMode === 'month') {
-      return format(new Date(month + '-01'), 'LLLL yyyy', { locale: dateFnsLocale });
+      try {
+        const d = new Date(month + '-01');
+        if (!Number.isFinite(d.getTime())) return '—';
+        return format(d, 'LLLL yyyy', { locale: dateFnsLocale });
+      } catch {
+        return '—';
+      }
     }
     try {
       const a = parseISO(rangeStart);
@@ -104,7 +110,14 @@ export default function OrgTutorFinanceSummary() {
       let endIso: string;
 
       if (periodMode === 'month') {
-        const start = startOfMonth(new Date(month + '-01'));
+        const monthAnchor = new Date(month + '-01');
+        if (!Number.isFinite(monthAnchor.getTime())) {
+          setRangeError(null);
+          setCompletedCount(0);
+          setLoading(false);
+          return;
+        }
+        const start = startOfMonth(monthAnchor);
         const end = endOfMonth(start);
         startIso = start.toISOString();
         endIso = end.toISOString();

@@ -90,6 +90,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ),
         tutor:profiles!sessions_tutor_id_fkey(
           full_name,
+          organization_id,
           payment_timing,
           payment_deadline_hours
         )
@@ -198,6 +199,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           amount: session.price ?? 0,
           paymentLink: paymentUrl,
           payByTime: payBy.toLocaleString('lt-LT', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Europe/Vilnius' }),
+          ...((tutor as any)?.organization_id ? { organizationId: (tutor as any).organization_id } : {}),
         },
       });
 

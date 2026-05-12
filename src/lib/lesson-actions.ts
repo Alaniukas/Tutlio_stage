@@ -41,6 +41,39 @@ export async function cancelSessionAndFillWaitlist({
 
     if (cancelError || !session) return { success: false, error: cancelError };
 
+    // 1a. If group lesson, increment available_spots on sibling sessions
+    let isGroupLesson = false;
+    if (session.subject_id) {
+        const { data: subject } = await supabase
+            .from('subjects')
+            .select('is_group')
+            .eq('id', session.subject_id)
+            .maybeSingle();
+
+        isGroupLesson = !!subject?.is_group;
+
+        if (isGroupLesson) {
+            const { data: otherSessions } = await supabase
+                .from('sessions')
+                .select('id, available_spots')
+                .eq('tutor_id', tutorId)
+                .eq('start_time', session.start_time)
+                .eq('subject_id', session.subject_id)
+                .neq('id', sessionId)
+                .neq('status', 'cancelled');
+
+            if (otherSessions && otherSessions.length > 0) {
+                for (const otherSession of otherSessions) {
+                    const newSpots = (otherSession.available_spots ?? 0) + 1;
+                    await supabase
+                        .from('sessions')
+                        .update({ available_spots: newSpots })
+                        .eq('id', otherSession.id);
+                }
+            }
+        }
+    }
+
     // 1b. Package credit handling with penalty support
     if (session.lesson_package_id) {
         const { data: pkg } = await supabase
@@ -179,19 +212,47 @@ export async function cancelSessionAndFillWaitlist({
         console.log('[Waitlist] Found student in line:', nextInLine);
 
         // 5. Create new active session for the waitlisted student
+        const newSessionData: Record<string, unknown> = {
+            tutor_id: tutorId,
+            student_id: nextInLine.student_id,
+            start_time: session.start_time,
+            end_time: session.end_time,
+            topic: session.topic,
+            status: 'active',
+            price: session.price,
+            payment_status: 'pending',
+            paid: false,
+        };
+
+        if (isGroupLesson && session.subject_id) {
+            const { data: siblings } = await supabase
+                .from('sessions')
+                .select('id, available_spots')
+                .eq('tutor_id', tutorId)
+                .eq('start_time', session.start_time)
+                .eq('subject_id', session.subject_id)
+                .neq('status', 'cancelled');
+
+            const currentSpots = siblings?.[0]?.available_spots ?? 1;
+            const newSpots = Math.max(0, currentSpots - 1);
+
+            newSessionData.subject_id = session.subject_id;
+            newSessionData.available_spots = newSpots;
+
+            if (siblings && siblings.length > 0) {
+                for (const sib of siblings) {
+                    await supabase
+                        .from('sessions')
+                        .update({ available_spots: newSpots })
+                        .eq('id', sib.id);
+                }
+            }
+            console.log(`[Waitlist] Group lesson: set available_spots=${newSpots} on ${(siblings?.length ?? 0) + 1} sessions`);
+        }
+
         const { data: newSession, error: createError } = await supabase
             .from('sessions')
-            .insert([{
-                tutor_id: tutorId,
-                student_id: nextInLine.student_id,
-                start_time: session.start_time,
-                end_time: session.end_time,
-                topic: session.topic,
-                status: 'active',
-                price: session.price,
-                payment_status: 'pending',
-                paid: false
-            }])
+            .insert([newSessionData])
             .select()
             .single();
 

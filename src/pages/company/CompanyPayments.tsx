@@ -205,6 +205,7 @@ export default function CompanyPayments() {
             amount: Number(installment.amount).toFixed(2),
             dueDate: new Date(installment.due_date).toLocaleDateString('lt-LT'),
             ...(paymentUrl ? { paymentUrl } : {}),
+            ...(orgId ? { organizationId: orgId } : {}),
           },
         });
         if (!emailed) {

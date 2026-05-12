@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { useUser } from '@/contexts/UserContext';
 import { useWhiteboardSync } from '@/hooks/useWhiteboardSync';
 import { useTranslation } from '@/lib/i18n';
+import { isWhiteboardOpenForSession } from '@/lib/whiteboardAccess';
 import { ArrowLeft, Download, Loader2, Users, Save } from 'lucide-react';
 import '@excalidraw/excalidraw/index.css';
 type ExcalidrawImperativeAPI = any;
@@ -15,6 +16,8 @@ interface SessionInfo {
   student_id: string;
   topic: string | null;
   start_time: string;
+  status?: string;
+  end_time?: string;
   students: { full_name: string; linked_user_id: string | null } | null;
   profiles: { full_name: string; organization_id: string | null } | null;
 }
@@ -26,6 +29,8 @@ const MATH_SYMBOLS = ['π', '√', '≤', '≥', '×', '÷', '∑', '∫', 'α',
 const EXCALIDRAW_LIBRARY_URLS = [
   'https://libraries.excalidraw.com/libraries/https-github-com-ytrkptl/math-teacher-library.excalidrawlib',
   'https://libraries.excalidraw.com/libraries/aimpizza/3d-coordinate-systems-graphs.excalidrawlib',
+  'https://libraries.excalidraw.com/libraries/jjadup/mathematical-symbols.excalidrawlib',
+  'https://libraries.excalidraw.com/libraries/pgilfernandez/basic-shapes.excalidrawlib',
 ];
 
 export default function WhiteboardPage() {
@@ -220,7 +225,7 @@ export default function WhiteboardPage() {
         // Lightweight query first — no joins, avoids heavy RLS + join overhead
         const { data, error: fetchErr } = await supabase
           .from('sessions')
-          .select('id, tutor_id, student_id, topic, start_time')
+          .select('id, tutor_id, student_id, topic, start_time, end_time, status')
           .eq('whiteboard_room_id', roomId)
           .maybeSingle();
 
@@ -306,12 +311,22 @@ export default function WhiteboardPage() {
           return;
         }
 
+        if (!isWhiteboardOpenForSession(baseSession.status, baseSession.end_time)) {
+          if (!cancelled) {
+            setError(t('whiteboard.closedAfterLesson'));
+            setLoading(false);
+          }
+          return;
+        }
+
         const sess: SessionInfo = {
           id: baseSession.id,
           tutor_id: baseSession.tutor_id,
           student_id: baseSession.student_id,
           topic: baseSession.topic,
           start_time: baseSession.start_time,
+          status: baseSession.status,
+          end_time: baseSession.end_time,
           students: studentRes.data ? { full_name: studentRes.data.full_name, linked_user_id: studentRes.data.linked_user_id } : null,
           profiles: tutorProfileRes.data ? { full_name: tutorProfileRes.data.full_name, organization_id: tutorProfileRes.data.organization_id } : null,
         };
@@ -550,7 +565,10 @@ export default function WhiteboardPage() {
           isCollaborating={participants.length > 1}
           theme="light"
           name={session?.topic || 'Whiteboard'}
-          initialData={libraryItems.length > 0 ? { libraryItems } : undefined}
+          initialData={{
+            ...(libraryItems.length > 0 ? { libraryItems } : {}),
+            appState: { gridModeEnabled: true, gridSize: 20 },
+          }}
           UIOptions={{
             canvasActions: {
               export: false,

@@ -243,7 +243,11 @@ export function ParentLessonDetailModal({
             </a>
           )}
 
-          <WhiteboardButton roomId={(session as any)?.whiteboard_room_id} />
+          <WhiteboardButton
+            roomId={(session as any)?.whiteboard_room_id}
+            sessionStatus={session.status}
+            sessionEndTime={(session as any)?.end_time ?? null}
+          />
 
           {tutorPolicy && session.status === 'active' && (
             <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1.5">

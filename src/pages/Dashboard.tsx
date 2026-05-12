@@ -1979,7 +1979,11 @@ export default function DashboardPage() {
                             </a>
                         )}
 
-                        <WhiteboardButton roomId={(selectedSession as any)?.whiteboard_room_id} />
+                        <WhiteboardButton
+                          roomId={(selectedSession as any)?.whiteboard_room_id}
+                          sessionStatus={(selectedSession as any)?.status}
+                          sessionEndTime={(selectedSession as any)?.end_time ?? null}
+                        />
 
                         {/* Action buttons area */}
                         {isOrgTutor !== true && selectedSession?.payment_status === 'paid_by_student' && !selectedSession?.paid && (

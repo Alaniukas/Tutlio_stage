@@ -24,6 +24,7 @@ import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVis
 import { useUser } from '@/contexts/UserContext';
 import { fetchStudentActiveLessonPackagesDeduped, fetchSubjectNamesByIds } from '@/lib/studentLessonPackagesLight';
 import { tutorUsesManualStudentPayments } from '@/lib/subscription';
+import { hasStudentPaymentModel } from '@/lib/studentPaymentModel';
 
 interface Session {
     id: string;
@@ -788,6 +789,7 @@ export default function StudentSessions() {
 
     // ── Open cancel flow ──────────────────────────────────────────────────────
     const openCancelFlow = () => {
+        setIsModalOpen(false);
         setCancellationReason('');
         setSelectedNewSlot(null);
         setModalStep('cancel-confirm');
@@ -796,6 +798,7 @@ export default function StudentSessions() {
 
     // ── Open reschedule flow ──────────────────────────────────────────────────
     const openRescheduleFlow = () => {
+        setIsModalOpen(false);
         setSelectedNewSlot(null);
         setRescheduleLoading(true);
         setRescheduleError(false);
@@ -979,6 +982,13 @@ export default function StudentSessions() {
                     data: { ...rescheduleEmailData, recipientRole: 'tutor' },
                 }));
             }
+            if (paymentPayer === 'parent' && payerEmail) {
+                emailPromises.push(sendEmail({
+                    type: 'lesson_rescheduled',
+                    to: payerEmail,
+                    data: { ...rescheduleEmailData, recipientRole: 'payer', recipientName: 'Sveiki' },
+                }));
+            }
             await Promise.all(emailPromises);
 
             // Full sync: move lesson and refresh free time slots in Google Calendar
@@ -1008,9 +1018,13 @@ export default function StudentSessions() {
         setSaving(false);
     };
 
+    const isMonthlyBilling = hasStudentPaymentModel(studentPaymentModel, 'monthly_billing');
+    const isPerLesson = hasStudentPaymentModel(studentPaymentModel, 'per_lesson');
+    const showPerLessonStripeButton = !isMonthlyBilling || isPerLesson;
+
     const getSessionPaymentType = (session: Session): 'package' | 'monthly' | 'per_lesson' => {
         if (session.lesson_package_id) return 'package';
-        if (studentPaymentModel === 'monthly_billing') return 'monthly';
+        if (isMonthlyBilling && !isPerLesson) return 'monthly';
         return 'per_lesson';
     };
 
@@ -1485,7 +1499,11 @@ export default function StudentSessions() {
                                                         <span className="text-sm text-green-600 font-bold">{t('stuSess.paid')}</span>
                                                     </div>
                                                 ) : s.price ? (
-                                                    <span className="text-sm font-black text-amber-600">€{s.price} <span className="text-xs text-amber-500/80 font-semibold">(Laukia)</span></span>
+                                                    isMonthlyBilling && !showPerLessonStripeButton ? (
+                                                        <span className="text-sm font-black text-blue-600">€{s.price} <span className="text-xs text-blue-500/80 font-semibold">{t('stuSess.invoiceShort')}</span></span>
+                                                    ) : (
+                                                        <span className="text-sm font-black text-amber-600">€{s.price} <span className="text-xs text-amber-500/80 font-semibold">(Laukia)</span></span>
+                                                    )
                                                 ) : null}
                                             </div>
                                         )}
@@ -1544,7 +1562,7 @@ export default function StudentSessions() {
                                 <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
                                     <p className="text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">Kaina</p>
                                     <p className="font-bold text-gray-900">€{selectedSession?.price ?? '–'}</p>
-                                    {selectedSession?.status === 'active' && !selectedSession.paid && selectedSession.price != null && (
+                                    {selectedSession?.status === 'active' && !selectedSession.paid && selectedSession.price != null && showPerLessonStripeButton && (
                                         <p className="text-[11px] text-gray-500 mt-1 leading-snug">
                                             {t('stuSess.stripeChargeNote', { amount: formatLessonStripeChargeEur(selectedSession.price, tutorOrgIsSchool) })}
                                         </p>
@@ -1602,10 +1620,22 @@ export default function StudentSessions() {
                             )
                         )}
 
-                        <WhiteboardButton roomId={(selectedSession as any)?.whiteboard_room_id} />
+                        <WhiteboardButton
+                          roomId={(selectedSession as any)?.whiteboard_room_id}
+                          sessionStatus={(selectedSession as any)?.status}
+                          sessionEndTime={(selectedSession as any)?.end_time ?? null}
+                        />
 
-                        {/* Credit balance + Stripe payment button for unpaid sessions (only for self-payers) */}
-                        {selectedSession?.status === 'active' && !selectedSession.paid && paymentPayer !== 'parent' && !manualPaymentsOnly && (
+                        {/* Monthly billing info note */}
+                        {selectedSession?.status === 'active' && !selectedSession.paid && isMonthlyBilling && !showPerLessonStripeButton && (
+                            <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-blue-50 border border-blue-100 text-sm text-blue-700">
+                                <CalendarDays className="w-4 h-4 flex-shrink-0" />
+                                <span>{t('stuSess.monthlyBillingNote')}</span>
+                            </div>
+                        )}
+
+                        {/* Credit balance + Stripe payment button for unpaid sessions (only for self-payers, not monthly billing) */}
+                        {selectedSession?.status === 'active' && !selectedSession.paid && paymentPayer !== 'parent' && !manualPaymentsOnly && showPerLessonStripeButton && (
                             <div className="space-y-2">
                                 {creditBalance > 0 && (
                                     <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-green-50 border border-green-200 text-sm">

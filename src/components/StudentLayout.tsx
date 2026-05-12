@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import OrgSuspendedBanner from '@/components/OrgSuspendedBanner';
 import PwaInstallPrompt from '@/components/PwaInstallPrompt';
 import BrandedLogo from '@/components/BrandedLogo';
+import { clearOrgBrandingCache } from '@/contexts/OrgBrandingContext';
 import { useTranslation } from '@/lib/i18n';
 import { useTotalChatUnread } from '@/hooks/useChat';
 import { usePushSubscription } from '@/hooks/usePushSubscription';
@@ -183,6 +184,7 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
     const handleProfileSwitch = (studentProfileId: string) => {
         if (typeof window !== 'undefined') {
             localStorage.setItem(ACTIVE_STUDENT_PROFILE_KEY, studentProfileId);
+            clearOrgBrandingCache();
             window.dispatchEvent(new Event('student-profile-changed'));
             window.location.reload();
         }
@@ -205,7 +207,7 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
         <div className="min-h-screen bg-white flex flex-col relative overflow-x-hidden">
             <OrgSuspendedBanner />
             <PwaInstallPrompt settingsPath="/student/instructions" />
-            <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-50/40 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none" />
+            <div className="absolute top-0 right-0 w-96 h-96 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none bg-[color-mix(in_srgb,var(--org-brand)_12%,#ffffff)]" />
             <div className="absolute bottom-0 left-0 w-96 h-96 bg-slate-50/30 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 pointer-events-none" />
 
             <header className="bg-white/80 backdrop-blur-md border-b border-gray-100 px-3 sm:px-4 py-3 flex items-center justify-between gap-2 sticky top-0 z-40 min-w-0">
@@ -214,13 +216,13 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                         <BrandedLogo size="sm" nameClassName="hidden sm:block" />
                     </Link>
 
-                    <div className="cursor-pointer hover:bg-indigo-50/50 p-1.5 rounded-xl transition-colors min-w-0 flex-1 sm:flex-initial">
+                    <div className="cursor-pointer hover:bg-[color-mix(in_srgb,var(--org-brand)_8%,#ffffff)] p-1.5 rounded-xl transition-colors min-w-0 flex-1 sm:flex-initial">
                         <div className="flex items-center gap-2 min-w-0">
                             <div onClick={() => setIsTutorModalOpen(true)} className="min-w-0">
-                                <p className="text-xs text-indigo-400 font-medium tracking-wide uppercase">{t('studentLayout.tutor')}</p>
+                                <p className="text-xs font-medium tracking-wide uppercase text-[color-mix(in_srgb,var(--org-brand)_52%,#64748b)]">{t('studentLayout.tutor')}</p>
                                 <p className="text-sm font-bold text-gray-900 truncate max-w-[40vw] sm:max-w-[14rem]">{tutor?.full_name || '—'}</p>
                             </div>
-                            <Info className="w-4 h-4 text-indigo-300" onClick={() => setIsTutorModalOpen(true)} />
+                            <Info className="w-4 h-4 text-[color-mix(in_srgb,var(--org-brand)_45%,#94a3b8)]" onClick={() => setIsTutorModalOpen(true)} />
                             {studentProfiles.length > 1 && (
                                 <select
                                     value={activeStudentProfileId || studentProfiles[0]?.id || ''}
@@ -239,11 +241,11 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                 </div>
                 <div className="flex items-center gap-3">
                     {location.pathname !== '/student/sessions' && packageCountLabel != null && packageCountLabel !== '' && (
-                    <span className="hidden sm:inline-flex text-xs font-semibold text-indigo-700 bg-violet-50 border border-violet-200 px-2.5 py-1 rounded-lg">
+                    <span className="hidden sm:inline-flex text-xs font-semibold text-[var(--org-brand)] bg-[color-mix(in_srgb,var(--org-brand)_10%,#ffffff)] border border-[color-mix(in_srgb,var(--org-brand)_22%,#e5e7eb)] px-2.5 py-1 rounded-lg">
                         {packageCountLabel}
                     </span>
                     )}
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-sm shadow-sm ring-2 ring-white">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[var(--org-brand)] to-[var(--org-brand-secondary)] flex items-center justify-center text-white font-bold text-sm shadow-sm ring-2 ring-white">
                         {initials || '?'}
                     </div>
                 </div>
@@ -259,7 +261,7 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                     </DialogHeader>
                     <div className="py-4 space-y-4">
                         <div className="flex items-center gap-4">
-                            <div className="w-14 h-14 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-xl shadow-sm">
+                            <div className="w-14 h-14 rounded-full bg-gradient-to-br from-[var(--org-brand)] to-[var(--org-brand-secondary)] flex items-center justify-center text-white font-bold text-xl shadow-sm">
                                 {tutor?.full_name?.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2) || '?'}
                             </div>
                             <div>
@@ -272,7 +274,7 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                                 <Mail className="w-5 h-5 text-gray-400" />
                                 <div>
                                     <p className="text-xs text-gray-500 font-medium">{t('common.email')}</p>
-                                    <a href={`mailto:${tutor.email}`} className="text-sm font-medium text-indigo-600 hover:underline">
+                                    <a href={`mailto:${tutor.email}`} className="text-sm font-medium text-[var(--org-brand)] hover:underline">
                                         {tutor.email}
                                     </a>
                                 </div>
@@ -300,10 +302,10 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                             <Link
                                 key={item.href}
                                 to={item.href}
-                                className={`relative flex flex-col items-center gap-1 min-w-0 py-1 rounded-2xl transition-all touch-manipulation ${active ? 'text-indigo-700' : highlight ? 'text-indigo-500' : 'text-gray-400 hover:text-gray-700'
+                                className={`relative flex flex-col items-center gap-1 min-w-0 py-1 rounded-2xl transition-all touch-manipulation ${active ? 'text-[var(--org-brand)]' : highlight ? 'text-[color-mix(in_srgb,var(--org-brand)_75%,#64748b)]' : 'text-gray-400 hover:text-gray-700'
                                     }`}
                             >
-                                <div className={`relative p-1 sm:p-1.5 rounded-xl transition-all shrink-0 ${active ? 'bg-indigo-100' : highlight ? 'bg-indigo-50' : ''}`}>
+                                <div className={`relative p-1 sm:p-1.5 rounded-xl transition-all shrink-0 ${active ? 'bg-[color-mix(in_srgb,var(--org-brand)_16%,#ffffff)]' : highlight ? 'bg-[color-mix(in_srgb,var(--org-brand)_10%,#ffffff)]' : ''}`}>
                                     <Icon className="w-5 h-5 mx-auto" />
                                     {showChatBadge && (
                                         <span className="absolute -top-0.5 -right-0.5 min-w-[15px] h-[15px] px-0.5 rounded-full bg-rose-500 text-[8px] font-bold text-white flex items-center justify-center border-2 border-white">
@@ -312,7 +314,7 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                                     )}
                                 </div>
                                 <span
-                                    className={`block w-full text-[10px] sm:text-[11px] font-semibold leading-tight text-center px-0.5 line-clamp-2 break-words ${active ? 'text-indigo-700' : highlight ? 'text-indigo-500' : ''
+                                    className={`block w-full text-[10px] sm:text-[11px] font-semibold leading-tight text-center px-0.5 line-clamp-2 break-words ${active ? 'text-[var(--org-brand)]' : highlight ? 'text-[color-mix(in_srgb,var(--org-brand)_72%,#64748b)]' : ''
                                         }`}
                                 >
                                     {item.label}

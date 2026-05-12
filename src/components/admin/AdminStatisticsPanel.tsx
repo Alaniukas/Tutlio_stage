@@ -167,7 +167,8 @@ export default function AdminStatisticsPanel({ adminSecret }: Props) {
                   cx="50%"
                   cy="50%"
                   outerRadius={100}
-                  label={({ label, percent }) => `${label} ${(percent * 100).toFixed(0)}%`}
+                  label={(props: { name?: string; percent?: number }) =>
+                    `${props.name ?? ''} ${((props.percent ?? 0) * 100).toFixed(0)}%`}
                   labelLine={false}
                 >
                   {localeData.map((_, i) => (

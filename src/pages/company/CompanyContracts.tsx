@@ -511,6 +511,7 @@ export default function CompanyContracts() {
         additionalFeePurpose: params.additionalFeePurpose || undefined,
         annualFee: params.annualFee ? Number(params.annualFee).toFixed(2) : undefined,
         ...(paymentUrl ? { paymentUrl } : {}),
+        ...(orgId ? { organizationId: orgId } : {}),
       },
     });
     if (!emailed) {
@@ -1054,6 +1055,7 @@ export default function CompanyContracts() {
               contractBody: created.filled_body,
               pdfUrl: created.pdf_url || undefined,
               date: new Date().toLocaleDateString('lt-LT'),
+              ...(orgId ? { organizationId: orgId } : {}),
             },
           });
           if (!ok) {
@@ -1178,6 +1180,7 @@ export default function CompanyContracts() {
             contractBody: contract.filled_body,
             pdfUrl: ensuredPdfUrl || undefined,
             date: new Date().toLocaleDateString('lt-LT'),
+            ...(orgId ? { organizationId: orgId } : {}),
           },
         });
 

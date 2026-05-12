@@ -129,7 +129,7 @@ export default function Layout({ children }: LayoutProps) {
     <div className="h-dvh max-h-dvh bg-white flex overflow-hidden relative">
       <OrgSuspendedBanner />
       <PwaInstallPrompt settingsPath="/instructions" />
-      <div className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] bg-indigo-50/40 rounded-full blur-[80px] pointer-events-none z-0" />
+      <div className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full blur-[80px] pointer-events-none z-0 bg-[color-mix(in_srgb,var(--org-brand)_12%,#ffffff)]" />
       <div className="absolute bottom-[-10%] left-[-10%] w-[600px] h-[600px] bg-slate-50/40 rounded-full blur-[100px] pointer-events-none z-0" />
 
       <aside
@@ -173,9 +173,9 @@ export default function Layout({ children }: LayoutProps) {
                   'relative flex items-center rounded-xl text-sm font-semibold transition-all duration-150 min-h-[44px] touch-manipulation',
                   sidebarExpanded ? 'px-3 gap-2.5' : 'px-0 justify-center',
                   active
-                    ? 'bg-indigo-600 text-white shadow-sm'
+                    ? 'bg-[var(--org-brand)] text-white shadow-sm'
                     : highlight
-                      ? 'text-violet-700 hover:bg-violet-50 ring-1 ring-violet-200/60'
+                      ? 'text-[var(--org-brand)] hover:bg-[color-mix(in_srgb,var(--org-brand)_10%,#ffffff)] ring-1 ring-[color-mix(in_srgb,var(--org-brand)_20%,#e5e7eb)]'
                       : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900'
                 )}
                 title={!sidebarExpanded ? item.label : undefined}
@@ -186,7 +186,7 @@ export default function Layout({ children }: LayoutProps) {
                     <span
                       className={cn(
                         'absolute -top-1 -right-1 min-w-[14px] h-3.5 px-0.5 rounded-full bg-rose-500 text-[9px] font-bold text-white flex items-center justify-center border border-white',
-                        active && 'border-indigo-600',
+                        active && 'border-[var(--org-brand)]',
                       )}
                     >
                       {chatUnreadTotal > 9 ? '9+' : chatUnreadTotal}
@@ -207,7 +207,7 @@ export default function Layout({ children }: LayoutProps) {
               sidebarExpanded ? 'flex items-center gap-2 pl-2 pr-3 py-2' : 'flex items-center justify-center'
             )}
           >
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[var(--org-brand)] to-[var(--org-brand-secondary)] flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
               {initials}
             </div>
             {sidebarExpanded && (
@@ -281,9 +281,9 @@ export default function Layout({ children }: LayoutProps) {
                     className={cn(
                       'relative flex items-center gap-2.5 px-3 min-h-[44px] rounded-xl text-sm font-semibold transition-all duration-150 touch-manipulation',
                       active
-                        ? 'bg-indigo-600 text-white shadow-sm'
+                        ? 'bg-[var(--org-brand)] text-white shadow-sm'
                         : highlight
-                          ? 'text-violet-700 hover:bg-violet-50 ring-1 ring-violet-200/60'
+                          ? 'text-[var(--org-brand)] hover:bg-[color-mix(in_srgb,var(--org-brand)_10%,#ffffff)] ring-1 ring-[color-mix(in_srgb,var(--org-brand)_20%,#e5e7eb)]'
                           : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900'
                     )}
                   >
@@ -293,7 +293,7 @@ export default function Layout({ children }: LayoutProps) {
                         <span
                           className={cn(
                             'absolute -top-1 -right-1 min-w-[14px] h-3.5 px-0.5 rounded-full bg-rose-500 text-[9px] font-bold text-white flex items-center justify-center border border-white',
-                            active && 'border-indigo-600',
+                            active && 'border-[var(--org-brand)]',
                           )}
                         >
                           {chatUnreadTotal > 9 ? '9+' : chatUnreadTotal}
@@ -308,7 +308,7 @@ export default function Layout({ children }: LayoutProps) {
 
             <div className="border-t border-gray-100 p-3 space-y-2">
               <div className="flex items-center gap-2 px-2 py-1">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[var(--org-brand)] to-[var(--org-brand-secondary)] flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
                   {initials}
                 </div>
                 <div className="min-w-0">
@@ -347,7 +347,7 @@ export default function Layout({ children }: LayoutProps) {
           <div className="flex items-center gap-2">
             <BrandedLogo size="sm" />
           </div>
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
+          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[var(--org-brand)] to-[var(--org-brand-secondary)] flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
             {initials}
           </div>
         </header>

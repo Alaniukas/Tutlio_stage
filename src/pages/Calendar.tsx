@@ -31,6 +31,7 @@ import { useTranslation } from '@/lib/i18n';
 import { supabase } from '@/lib/supabase';
 import { useUser } from '@/contexts/UserContext';
 import { sendEmail } from '@/lib/email';
+import { resolveStudentNotificationEmail } from '@/lib/studentNotifyEmail';
 import { authHeaders } from '@/lib/apiHelpers';
 import { autoCloseBillingBatchIfAllPaid } from '@/lib/autoCloseBillingBatch';
 import { Button } from '@/components/ui/button';
@@ -157,6 +158,7 @@ interface Student {
   full_name: string;
   grade?: string;
   email?: string;
+  linked_user_id?: string | null;
   payment_payer?: string | null;
   payer_email?: string | null;
   payment_model?: string | null;
@@ -541,6 +543,7 @@ export default function CalendarPage() {
         full_name: row.full_name,
         grade: row.grade,
         email: row.email,
+        linked_user_id: (row.linked_user_id as string | null | undefined) ?? null,
         payment_payer: row.payment_payer,
         payer_email: row.payer_email,
         payment_model: row.payment_model,
@@ -1493,10 +1496,12 @@ export default function CalendarPage() {
           });
 
           // Send consolidated recurring email to each student
+          const orgIdBranding = (tutorProfile as any)?.organization_id as string | undefined;
+
           for (const [studentId, studentSessionList] of Array.from(allStudentSessions)) {
             const { data: studentData } = await supabase
               .from('students')
-              .select('full_name, email, payment_payer, payer_email, payer_name, payment_model')
+              .select('full_name, email, linked_user_id, payment_payer, payer_email, payer_name, payment_model')
               .eq('id', studentId)
               .single();
 
@@ -1515,10 +1520,11 @@ export default function CalendarPage() {
             const payerEmail = String(studentData.payer_email || '').trim();
             const hasPayer = normalizedPayer === 'parent' && payerEmail.length > 0;
 
-            if (studentData.email) {
+            const studentNotifyTo = await resolveStudentNotificationEmail(studentData);
+            if (studentNotifyTo) {
               sendEmail({
                 type: 'recurring_booking_confirmation',
-                to: studentData.email,
+                to: studentNotifyTo,
                 data: {
                   studentName: studentData.full_name,
                   tutorName: tutorProfile?.full_name || '',
@@ -1526,6 +1532,7 @@ export default function CalendarPage() {
                   duration: Math.round(durationMs / 60000),
                   totalLessons: studentSessionList.length,
                   sessions: sessionDates,
+                  ...(orgIdBranding ? { organizationId: orgIdBranding } : {}),
                 },
               }).catch(err => console.error('Error sending recurring booking email:', err));
             }
@@ -1545,6 +1552,7 @@ export default function CalendarPage() {
                   totalLessons: studentSessionList.length,
                   sessions: sessionDates,
                   paymentReminderNote: true,
+                  ...(orgIdBranding ? { organizationId: orgIdBranding } : {}),
                 },
               }).catch(err => console.error('Error sending payer recurring booking email:', err));
             }
@@ -1589,6 +1597,7 @@ export default function CalendarPage() {
                     time: format(firstStart, 'HH:mm'),
                     amount: firstSession.price ?? price,
                     paymentLink: checkoutJson.url,
+                    ...(orgIdBranding ? { organizationId: orgIdBranding } : {}),
                   },
                 }).catch((err) => console.error('Error sending parent payment email (recurring):', err));
               } else {
@@ -1610,16 +1619,17 @@ export default function CalendarPage() {
             }
 
             // 3) Comment email
-            if (newShowCommentToStudent && newTutorComment && studentData.email) {
+            if (newShowCommentToStudent && newTutorComment && studentNotifyTo) {
               sendEmail({
                 type: 'session_comment_added',
-                to: studentData.email,
+                to: studentNotifyTo,
                 data: {
                   studentName: studentData.full_name,
                   tutorName: tutorProfile?.full_name || '',
                   date: format(firstStart, 'yyyy-MM-dd'),
                   time: format(firstStart, 'HH:mm'),
                   comment: newTutorComment,
+                  ...(orgIdBranding ? { organizationId: orgIdBranding } : {}),
                 },
               }).catch(err => console.error('Error sending comment email:', err));
             }
@@ -1780,11 +1790,13 @@ export default function CalendarPage() {
           }
         }
 
+        const orgIdNewSessions = (tutorProfile as any)?.organization_id as string | undefined;
+
         // Send emails to each student
         for (const session of created || []) {
           const { data: studentData } = await supabase
             .from('students')
-            .select('full_name, email, payment_payer, payer_email, payment_model')
+            .select('full_name, email, linked_user_id, payment_payer, payer_email, payment_model')
             .eq('id', session.student_id)
             .single();
 
@@ -1793,12 +1805,13 @@ export default function CalendarPage() {
           const payerEmail = String(studentData?.payer_email || '').trim();
           const hasPayer = normalizedPayer === 'parent' && payerEmail.length > 0;
 
-          if (studentData?.email) {
+          const studentBookingTo = await resolveStudentNotificationEmail(studentData);
+          if (studentBookingTo) {
             sendEmail({
               type: 'booking_confirmation',
-              to: studentData.email,
+              to: studentBookingTo,
               data: {
-                studentName: studentData.full_name,
+                studentName: studentData!.full_name,
                 tutorName: tutorProfile?.full_name || '',
                 date: format(startDate, 'yyyy-MM-dd'),
                 time: format(startDate, 'HH:mm'),
@@ -1810,6 +1823,7 @@ export default function CalendarPage() {
                 paymentStatus: hasPayer ? null : (session.paid ? 'paid' : 'pending'),
                 meetingLink: meetingLink || null,
                 hidePaymentInfo: hasPayer,
+                ...(orgIdNewSessions ? { organizationId: orgIdNewSessions } : {}),
               },
             }).catch(err => console.error('Error sending booking confirmation email:', err));
           }
@@ -1832,6 +1846,7 @@ export default function CalendarPage() {
                 cancellationFeePercent: tutorProfile?.cancellation_fee_percent ?? 0,
                 paymentStatus: session.paid ? 'paid' : 'pending',
                 meetingLink: meetingLink || null,
+                ...(orgIdNewSessions ? { organizationId: orgIdNewSessions } : {}),
               },
             }).catch(err => console.error('Error sending payer booking confirmation email:', err));
           }
@@ -1877,6 +1892,7 @@ export default function CalendarPage() {
                   time: format(startDate, 'HH:mm'),
                   amount: session.price ?? price,
                   paymentLink: checkoutJson.url,
+                  ...(orgIdNewSessions ? { organizationId: orgIdNewSessions } : {}),
                 },
               }).catch((err) => console.error('Error sending parent payment email:', err));
             } else {
@@ -1898,16 +1914,17 @@ export default function CalendarPage() {
           }
 
           // Send comment email to student if "show to student" was checked
-          if (newShowCommentToStudent && newTutorComment && studentData?.email) {
+          if (newShowCommentToStudent && newTutorComment && studentBookingTo) {
             sendEmail({
               type: 'session_comment_added',
-              to: studentData.email,
+              to: studentBookingTo,
               data: {
-                studentName: studentData.full_name || '',
+                studentName: studentData!.full_name || '',
                 tutorName: tutorProfile?.full_name || '',
                 date: format(startDate, 'yyyy-MM-dd'),
                 time: format(startDate, 'HH:mm'),
                 comment: newTutorComment,
+                ...(orgIdNewSessions ? { organizationId: orgIdNewSessions } : {}),
               },
             }).catch(err => console.error('Error sending comment email:', err));
           }
@@ -1966,16 +1983,26 @@ export default function CalendarPage() {
       if (effectiveShowToStudent && viewCommentText.trim()) {
         const alreadySent = selectedEvent.show_comment_to_student && selectedEvent.tutor_comment === viewCommentText.trim();
         if (!alreadySent) {
-          let studentEmail = selectedEvent.student?.email;
+          let studentEmail: string | undefined = selectedEvent.student?.email;
           let payerEmail: string | null = null;
-          if (!studentEmail && selectedEvent.student_id) {
-            const { data: studentRow } = await supabase.from('students').select('email, payer_email, full_name').eq('id', selectedEvent.student_id).single();
-            studentEmail = studentRow?.email;
-            if (studentRow && !updated.student) updated.student = { full_name: studentRow.full_name, email: studentRow.email };
+          if (selectedEvent.student_id) {
+            const { data: studentRow } = await supabase
+              .from('students')
+              .select('email, payer_email, full_name, linked_user_id')
+              .eq('id', selectedEvent.student_id)
+              .single();
             payerEmail = (studentRow?.payer_email || null) as any;
-          } else if (selectedEvent.student_id) {
-            const { data: studentRow } = await supabase.from('students').select('payer_email').eq('id', selectedEvent.student_id).single();
-            payerEmail = (studentRow?.payer_email || null) as any;
+            const resolved = await resolveStudentNotificationEmail(studentRow);
+            if (resolved) studentEmail = resolved;
+            if (studentRow && !updated.student) {
+              updated.student = { full_name: studentRow.full_name, email: studentRow.email ?? undefined };
+            }
+          } else if (selectedEvent.student) {
+            const resolved = await resolveStudentNotificationEmail({
+              email: selectedEvent.student.email,
+              linked_user_id: null,
+            });
+            if (resolved) studentEmail = resolved;
           }
           if (studentEmail) {
             let to: string | string[] = studentEmail;
@@ -1996,6 +2023,7 @@ export default function CalendarPage() {
             } catch {
               /* ignore parent email decision errors */
             }
+            const orgIdComment = (tutorProfile as any)?.organization_id as string | undefined;
             const ok = await sendEmail({
               type: 'session_comment_added',
               to,
@@ -2005,6 +2033,7 @@ export default function CalendarPage() {
                 date: format(selectedEvent.start_time, 'yyyy-MM-dd'),
                 time: format(selectedEvent.start_time, 'HH:mm'),
                 comment: viewCommentText.trim(),
+                ...(orgIdComment ? { organizationId: orgIdComment } : {}),
               },
             }).catch((err) => { console.error('Error sending comment email:', err); return false; });
             if (!ok) alert(t('cal.commentSavedEmailFailed'));
@@ -2164,11 +2193,14 @@ export default function CalendarPage() {
         const normalizedPayer = String(student.payment_payer || '').trim().toLowerCase();
         const payerEmail = String(student.payer_email || '').trim();
         const hasPayer = normalizedPayer === 'parent' && payerEmail.length > 0;
+        const assignSlotMeetingLink = assignMeetingLink || subject?.meeting_link || null;
+        const orgIdAssign = (tutorProfile as any)?.organization_id as string | undefined;
 
-        if (student.email) {
+        const studentAssignTo = await resolveStudentNotificationEmail(student);
+        if (studentAssignTo) {
           sendEmail({
             type: 'booking_confirmation',
-            to: student.email,
+            to: studentAssignTo,
             data: {
               studentName: student.full_name,
               tutorName: tutorProfile?.full_name || '',
@@ -2180,8 +2212,9 @@ export default function CalendarPage() {
               cancellationHours: hasPayer ? null : (tutorProfile?.cancellation_hours || 24),
               cancellationFeePercent: hasPayer ? null : (tutorProfile?.cancellation_fee_percent || 0),
               paymentStatus: hasPayer ? null : (sessionPaid ? 'paid' : 'pending'),
-              meetingLink: meetingLink || null,
+              meetingLink: assignSlotMeetingLink,
               hidePaymentInfo: hasPayer,
+              ...(orgIdAssign ? { organizationId: orgIdAssign } : {}),
             },
           }).catch(err => console.error('Error sending booking email:', err));
         }
@@ -2203,7 +2236,8 @@ export default function CalendarPage() {
               cancellationHours: tutorProfile?.cancellation_hours ?? 24,
               cancellationFeePercent: tutorProfile?.cancellation_fee_percent ?? 0,
               paymentStatus: sessionPaid ? 'paid' : 'pending',
-              meetingLink: meetingLink || null,
+              meetingLink: assignSlotMeetingLink,
+              ...(orgIdAssign ? { organizationId: orgIdAssign } : {}),
             },
           }).catch(err => console.error('Error sending payer booking confirmation email:', err));
 
@@ -2258,6 +2292,7 @@ export default function CalendarPage() {
                     time: assignSelectedSlot,
                     amount: sessionData.price ?? price,
                     paymentLink: checkoutJson.url,
+                    ...(orgIdAssign ? { organizationId: orgIdAssign } : {}),
                   },
                 }).catch(err => console.error('Error sending parent payment email:', err));
               }
@@ -2611,7 +2646,12 @@ export default function CalendarPage() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setSaving(false); return; }
-      const { data: tutorProfile } = await supabase.from('profiles').select('full_name, email').eq('id', user.id).single();
+      const { data: tutorProfile } = await supabase
+        .from('profiles')
+        .select('full_name, email, organization_id')
+        .eq('id', user.id)
+        .single();
+      const orgIdEditSave = (tutorProfile as any)?.organization_id as string | undefined;
 
       const oldStart = selectedEvent.start_time;
       const oldEnd = selectedEvent.end_time;
@@ -2756,10 +2796,15 @@ export default function CalendarPage() {
       if (!error) {
         // Send comment email if checkbox is checked AND it wasn't already checked/sent
         if (editShowCommentToStudent && editTutorComment && (editTutorComment !== selectedEvent.tutor_comment || (!selectedEvent.show_comment_to_student && editShowCommentToStudent))) {
-          let studentEmail = selectedEvent?.student?.email;
-          if (!studentEmail && selectedEvent?.student_id) {
-            const { data: studentRow } = await supabase.from('students').select('email, full_name').eq('id', selectedEvent.student_id).single();
-            studentEmail = studentRow?.email;
+          let studentEmail: string | undefined = selectedEvent?.student?.email;
+          if (selectedEvent?.student_id) {
+            const { data: studentRow } = await supabase
+              .from('students')
+              .select('email, full_name, linked_user_id')
+              .eq('id', selectedEvent.student_id)
+              .single();
+            const resolved = await resolveStudentNotificationEmail(studentRow);
+            if (resolved) studentEmail = resolved;
           }
           if (studentEmail) {
             const ok = await sendEmail({
@@ -2771,6 +2816,7 @@ export default function CalendarPage() {
                 date: format(newStart, 'yyyy-MM-dd'),
                 time: format(newStart, 'HH:mm'),
                 comment: editTutorComment,
+                ...(orgIdEditSave ? { organizationId: orgIdEditSave } : {}),
               },
             }).catch((err) => { console.error('Error sending comment email:', err); return false; });
             if (!ok) alert(t('cal.commentSavedEmailFailed2'));
@@ -2781,11 +2827,16 @@ export default function CalendarPage() {
 
         // Send reschedule email only to student
         if (timeChanged) {
-          const { data: studentData } = await supabase.from('students').select('email').eq('id', selectedEvent.student_id).single();
-          if (studentData?.email) {
+          const { data: studentData } = await supabase
+            .from('students')
+            .select('email, linked_user_id')
+            .eq('id', selectedEvent.student_id)
+            .single();
+          const rescheduleTo = await resolveStudentNotificationEmail(studentData);
+          if (rescheduleTo) {
             await sendEmail({
               type: 'lesson_rescheduled',
-              to: studentData.email,
+              to: rescheduleTo,
               data: {
                 studentName: selectedEvent.student?.full_name || '',
                 tutorName: tutorProfile?.full_name || '',
@@ -2795,6 +2846,7 @@ export default function CalendarPage() {
                 newTime: format(newStart, 'HH:mm'),
                 rescheduledBy: 'tutor',
                 recipientRole: 'student',
+                ...(orgIdEditSave ? { organizationId: orgIdEditSave } : {}),
               }
             });
           }
@@ -2998,9 +3050,10 @@ export default function CalendarPage() {
 
       const { data: tutorProfile } = await supabase
         .from('profiles')
-        .select('full_name, email')
+        .select('full_name, email, organization_id')
         .eq('id', user.id)
         .single();
+      const orgIdGroupAdd = (tutorProfile as any)?.organization_id as string | undefined;
 
       const subject = subjects.find(s => s.id === selectedEvent.subject_id);
       const durationMs = selectedEvent.end_time.getTime() - selectedEvent.start_time.getTime();
@@ -3011,7 +3064,7 @@ export default function CalendarPage() {
       for (const studentId of addToGroupStudentIds) {
         const { data: studentData } = await supabase
           .from('students')
-          .select('full_name, email')
+          .select('full_name, email, linked_user_id')
           .eq('id', studentId)
           .single();
 
@@ -3087,13 +3140,14 @@ export default function CalendarPage() {
               }
             }
 
-            if (studentData?.email && createdSessions && createdSessions.length > 0) {
+            const groupBookingTo = await resolveStudentNotificationEmail(studentData);
+            if (groupBookingTo && createdSessions && createdSessions.length > 0) {
               const firstSession = createdSessions[0];
               await sendEmail({
                 type: 'booking_confirmation',
-                to: studentData.email,
+                to: groupBookingTo,
                 data: {
-                  studentName: studentData.full_name,
+                  studentName: studentData!.full_name,
                   tutorName: tutorProfile?.full_name || '',
                   date: format(new Date(firstSession.start_time), 'yyyy-MM-dd'),
                   time: format(new Date(firstSession.start_time), 'HH:mm'),
@@ -3104,6 +3158,7 @@ export default function CalendarPage() {
                   cancellationFeePercent: 0,
                   paymentStatus: 'pending',
                   meetingLink: selectedEvent.meeting_link || null,
+                  ...(orgIdGroupAdd ? { organizationId: orgIdGroupAdd } : {}),
                 },
               }).catch(err => console.error('Error sending booking confirmation:', err));
             }
@@ -3154,12 +3209,13 @@ export default function CalendarPage() {
               .in('id', sessionsAtTime.map(s => s.id));
           }
 
-          if (studentData?.email && newSession) {
+          const singleGroupBookingTo = await resolveStudentNotificationEmail(studentData);
+          if (singleGroupBookingTo && newSession) {
             await sendEmail({
               type: 'booking_confirmation',
-              to: studentData.email,
+              to: singleGroupBookingTo,
               data: {
-                studentName: studentData.full_name,
+                studentName: studentData!.full_name,
                 tutorName: tutorProfile?.full_name || '',
                 date: format(selectedEvent.start_time, 'yyyy-MM-dd'),
                 time: format(selectedEvent.start_time, 'HH:mm'),
@@ -3170,6 +3226,7 @@ export default function CalendarPage() {
                 cancellationFeePercent: 0,
                 paymentStatus: 'pending',
                 meetingLink: selectedEvent.meeting_link || null,
+                ...(orgIdGroupAdd ? { organizationId: orgIdGroupAdd } : {}),
               },
             }).catch(err => console.error('Error sending booking confirmation:', err));
           }
@@ -3230,23 +3287,36 @@ export default function CalendarPage() {
       }
 
       // Send cancellation email to removed student
-      if (sessionToRemove.student?.email) {
+      let cancelNotifyTo: string | null = sessionToRemove.student?.email
+        ? String(sessionToRemove.student.email).trim()
+        : null;
+      if (!cancelNotifyTo && sessionToRemove.student_id) {
+        const { data: stRow } = await supabase
+          .from('students')
+          .select('email, linked_user_id')
+          .eq('id', sessionToRemove.student_id)
+          .maybeSingle();
+        cancelNotifyTo = await resolveStudentNotificationEmail(stRow);
+      }
+      if (cancelNotifyTo) {
         const { data: tutorProfile } = await supabase
           .from('profiles')
-          .select('full_name, email')
+          .select('full_name, email, organization_id')
           .eq('id', user.id)
           .single();
+        const orgIdRm = (tutorProfile as any)?.organization_id as string | undefined;
 
         await sendEmail({
           type: 'session_cancelled',
-          to: sessionToRemove.student.email,
+          to: cancelNotifyTo,
           data: {
-            studentName: sessionToRemove.student.full_name,
+            studentName: sessionToRemove.student?.full_name || '',
             tutorName: tutorProfile?.full_name || '',
             date: format(selectedEvent.start_time, 'yyyy-MM-dd'),
             time: format(selectedEvent.start_time, 'HH:mm'),
             subject: selectedEvent.topic || '',
             reason: t('cal.removedFromGroup'),
+            ...(orgIdRm ? { organizationId: orgIdRm } : {}),
           },
         }).catch(err => console.error('Error sending cancellation email:', err));
       }
@@ -3309,7 +3379,7 @@ export default function CalendarPage() {
       event.payment_status === 'confirmed';
 
     if (orgPolicy.isOrgTutor) {
-      if (event.status === 'completed' || (event.status === 'active' && hasEnded)) {
+      if (event.status === 'completed') {
         backgroundColor = '#10b981';
       }
     } else {
@@ -3320,7 +3390,7 @@ export default function CalendarPage() {
 
       if (unpaidOccurred) {
         backgroundColor = '#ca8a04';
-      } else if (isPaid || event.status === 'completed') {
+      } else if (event.status === 'completed') {
         backgroundColor = '#10b981';
       }
     }
@@ -4502,7 +4572,17 @@ export default function CalendarPage() {
                   {t('cal.joinVideoCall')}
                 </a>
               )}
-              <WhiteboardButton roomId={(selectedEvent as any)?.whiteboard_room_id} />
+              <WhiteboardButton
+                roomId={(selectedEvent as any)?.whiteboard_room_id}
+                sessionStatus={selectedEvent?.status}
+                sessionEndTime={
+                  selectedEvent?.end_time instanceof Date
+                    ? selectedEvent.end_time.toISOString()
+                    : (selectedEvent as any)?.end_time
+                      ? String((selectedEvent as any).end_time)
+                      : null
+                }
+              />
               {selectedEvent && (
                 <SessionFiles
                   sessionId={selectedEvent.id}

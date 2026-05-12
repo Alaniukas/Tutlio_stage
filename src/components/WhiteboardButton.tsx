@@ -1,9 +1,13 @@
 import { PenLine } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { supabase } from '@/lib/supabase';
+import { isWhiteboardOpenForSession } from '@/lib/whiteboardAccess';
 
 interface WhiteboardButtonProps {
   roomId: string | null | undefined;
+  /** When set with `sessionEndTime`, hides the button after completed session + grace window. */
+  sessionStatus?: string | null;
+  sessionEndTime?: string | Date | number | null;
 }
 
 const WHITEBOARD_AUTH_BOOTSTRAP_KEY = 'tutlio_whiteboard_auth_bootstrap';
@@ -11,10 +15,17 @@ const WB_AUTH_REQUEST = 'tutlio:whiteboard-auth-request';
 const WB_AUTH_RESPONSE = 'tutlio:whiteboard-auth-response';
 const AUTH_BOOTSTRAP_TTL_MS = 2 * 60 * 1000;
 
-export default function WhiteboardButton({ roomId }: WhiteboardButtonProps) {
+export default function WhiteboardButton({ roomId, sessionStatus, sessionEndTime }: WhiteboardButtonProps) {
   const { t } = useTranslation();
 
   if (!roomId) return null;
+  if (
+    sessionStatus != null &&
+    sessionEndTime != null &&
+    !isWhiteboardOpenForSession(sessionStatus, sessionEndTime)
+  ) {
+    return null;
+  }
 
   const handleOpenInNewTab = async (e: React.MouseEvent<HTMLAnchorElement>) => {
     e.preventDefault();

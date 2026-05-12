@@ -47,14 +47,14 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
   return (
     <div className="min-h-screen bg-[#fffefc] flex flex-col relative overflow-x-hidden">
       <PwaInstallPrompt settingsPath="/parent/settings" />
-      <div className="absolute top-0 right-0 w-96 h-96 bg-orange-100/40 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none z-0" />
+      <div className="absolute top-0 right-0 w-96 h-96 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none z-0 bg-[color-mix(in_srgb,var(--org-brand)_14%,#ffffff)]" />
       <div className="absolute bottom-32 left-0 w-96 h-96 bg-rose-100/30 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 pointer-events-none z-0" />
 
-      <header className="sticky top-0 z-40 bg-white/85 backdrop-blur-md border-b border-orange-100/80 px-4 py-2.5 flex items-center justify-between">
+      <header className="sticky top-0 z-40 bg-white/85 backdrop-blur-md border-b border-[color-mix(in_srgb,var(--org-brand)_18%,#ffffff)] px-4 py-2.5 flex items-center justify-between">
         <Link to="/parent" className="flex items-center gap-2 min-w-0">
           <BrandedLogo size="sm" nameClassName="text-sm sm:text-base" />
         </Link>
-        <span className="hidden sm:inline text-[11px] font-semibold tracking-wide text-orange-500 shrink-0">
+        <span className="hidden sm:inline text-[11px] font-semibold tracking-wide text-[color-mix(in_srgb,var(--org-brand)_55%,#64748b)] shrink-0">
           {t('parent.portalLabel')}
         </span>
       </header>
@@ -75,12 +75,12 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
                 key={item.href}
                 to={item.href}
                 className={`relative flex flex-col items-center gap-1 min-w-0 py-1 rounded-2xl transition-all ${
-                  active ? 'text-violet-700' : 'text-gray-400 hover:text-gray-700'
+                  active ? 'text-[var(--org-brand)]' : 'text-gray-400 hover:text-gray-700'
                 }`}
               >
                 <div
                   className={`relative p-1.5 rounded-xl transition-all shrink-0 ${
-                    active ? 'bg-violet-100' : ''
+                    active ? 'bg-[color-mix(in_srgb,var(--org-brand)_14%,#ffffff)]' : ''
                   }`}
                 >
                   <Icon className="w-5 h-5 mx-auto" />
@@ -92,7 +92,7 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
                 </div>
                 <span
                   className={`block w-full text-[11px] sm:text-xs font-semibold leading-tight text-center px-1 ${
-                    active ? 'text-violet-700' : ''
+                    active ? 'text-[var(--org-brand)]' : ''
                   }`}
                 >
                   {item.label}
