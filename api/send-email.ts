@@ -1754,6 +1754,120 @@ function productUpdateSfAndChat(d: any, locale: Locale) {
   };
 }
 
+function productUpdateWhiteboardTutor(d: any, _locale: Locale) {
+  const appUrl = getAppUrl();
+  const locale: Locale = 'lt';
+
+  return {
+    subject: 'Tutlio naujienos: interaktyvi lenta jūsų pamokoms',
+    html: wrap(
+      `
+      <div class="header" style="${headerInlineStyle('#6366f1', '#8b5cf6')}">
+        <h1>Naujiena Tutlio: interaktyvi lenta</h1>
+        <p>${esc(d?.subtitle || 'Naujos galimybės jūsų pamokoms')}</p>
+      </div>
+      <div class="body">
+        <p class="greeting">${t(locale, 'em.hiPlain')}</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6; margin:0 0 14px;">Pridėjome keletą naujienų, kurios turėtų padaryti jūsų pamokas dar patogesnes ir įdomesnes. Atnaujinimai įsigalios šiandien vėlai vakare, todėl rytoj viskas jau bus paruošta.</p>
+        <div class="info-card">
+          <p style="color:#1f2937; font-size:15px; font-weight:700; margin:0 0 10px;">🖊️ Interaktyvi lenta</p>
+          <ul style="margin:0; padding-left:18px; color:#1f2937; font-size:14px; line-height:1.65;">
+            <li style="margin:6px 0;">Rašykite, pieškite ir braižykite kartu su mokiniu realiu laiku — abu matote viską tuo pačiu metu</li>
+            <li style="margin:6px 0;">Įkelkite paveikslėlius, schemas ar nuotraukas tiesiai į lentą</li>
+            <li style="margin:6px 0;">Eksportuokite viską, kas nupiešta, į PDF failą — puikiai tinka, jei norite palikti mokiniui pamokos santrauką</li>
+            <li style="margin:6px 0;">Tinklelis padeda viską laikyti tvarkingai ir aiškiai</li>
+          </ul>
+        </div>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6; margin:14px 0 0;">Taip pat pataisėme keletą smulkių dalykų, kad platforma veiktų sklandžiau ir patikimiau.</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6; margin:14px 0 0;">Jei turite klausimų ar pastabų — visada laukiame jūsų laiškų adresu <a href="mailto:info@tutlio.lt" style="color:#4f46e5; font-weight:700; text-decoration:none;">info@tutlio.lt</a>.</p>
+        <div style="text-align:center; margin-top: 22px;">
+          ${outlookEmailButton(`${appUrl}/dashboard`, 'Atidaryti Tutlio', '#4f46e5', { fontWeight: '700', fontSize: '15px', padding: '14px 36px' })}
+        </div>
+      </div>${footerFor(locale)}`,
+      locale,
+    ),
+  };
+}
+
+function productUpdateWhiteboardStudent(d: any, _locale: Locale) {
+  const appUrl = getAppUrl();
+  const locale: Locale = 'lt';
+
+  return {
+    subject: 'Tutlio naujienos: interaktyvi lenta ir failų atsisiuntimas',
+    html: wrap(
+      `
+      <div class="header" style="${headerInlineStyle('#6366f1', '#8b5cf6')}">
+        <h1>Naujiena Tutlio: lenta + failų atsisiuntimas</h1>
+        <p>${esc(d?.subtitle || 'Naujos galimybės tau')}</p>
+      </div>
+      <div class="body">
+        <p class="greeting">${t(locale, 'em.hiPlain')}</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6; margin:0 0 14px;">Turime keletą naujienų, kurios turėtų padaryti mokymąsi dar patogesnį. Atnaujinimai įsigalios šiandien vėlai vakare, todėl rytoj viskas jau bus paruošta.</p>
+        <div class="info-card">
+          <p style="color:#1f2937; font-size:15px; font-weight:700; margin:0 0 10px;">🖊️ Interaktyvi lenta</p>
+          <ul style="margin:0; padding-left:18px; color:#1f2937; font-size:14px; line-height:1.65;">
+            <li style="margin:6px 0;">Pieškite, rašykite ir braižykite kartu su savo mokytoju realiu laiku — lyg sėdėtumėte prie vieno stalo</li>
+            <li style="margin:6px 0;">Mokytojas gali įkelti paveikslėlių ar schemų, kurias iškart matysite</li>
+          </ul>
+        </div>
+        <div class="info-card">
+          <p style="color:#1f2937; font-size:15px; font-weight:700; margin:0 0 10px;">📥 Failų atsisiuntimas</p>
+          <ul style="margin:0; padding-left:18px; color:#1f2937; font-size:14px; line-height:1.65;">
+            <li style="margin:6px 0;">Pokalbio metu dalinami failai dabar lengvai atsisiunčiami — tiesiog paspauskite ant failo ir jis atsisiųs į jūsų įrenginį</li>
+          </ul>
+        </div>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6; margin:14px 0 0;">Taip pat pataisėme keletą smulkių dalykų, kad viskas veiktų greičiau ir patogiau.</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6; margin:14px 0 0;">Jei kyla klausimų — drąsiai kreipkitės adresu <a href="mailto:info@tutlio.lt" style="color:#4f46e5; font-weight:700; text-decoration:none;">info@tutlio.lt</a>.</p>
+        <div style="text-align:center; margin-top: 22px;">
+          ${outlookEmailButton(`${appUrl}/student/dashboard`, 'Atidaryti Tutlio', '#4f46e5', { fontWeight: '700', fontSize: '15px', padding: '14px 36px' })}
+        </div>
+      </div>${footerFor(locale)}`,
+      locale,
+    ),
+  };
+}
+
+function productUpdateWhiteboardParent(d: any, _locale: Locale) {
+  const appUrl = getAppUrl();
+  const locale: Locale = 'lt';
+
+  return {
+    subject: 'Tutlio naujienos: pamokų informacija ir pranešimų valdymas',
+    html: wrap(
+      `
+      <div class="header" style="${headerInlineStyle('#6366f1', '#8b5cf6')}">
+        <h1>Tutlio naujienos tėvams</h1>
+        <p>${esc(d?.subtitle || 'Patobulinimai jūsų patogumui')}</p>
+      </div>
+      <div class="body">
+        <p class="greeting">${t(locale, 'em.hiPlain')}</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6; margin:0 0 14px;">Padarėme keletą atnaujinimų galvodami apie jus — kad galėtumėte patogiau sekti savo vaiko mokymosi eigą. Atnaujinimai įsigalios šiandien vėlai vakare, todėl rytoj viskas jau bus paruošta.</p>
+        <div class="info-card">
+          <p style="color:#1f2937; font-size:15px; font-weight:700; margin:0 0 10px;">📋 Papildoma pamokos informacija</p>
+          <ul style="margin:0; padding-left:18px; color:#1f2937; font-size:14px; line-height:1.65;">
+            <li style="margin:6px 0;">Pamokų istorijoje dabar galite matyti daugiau informacijos apie kiekvieną pamoką — mokytojo komentarus, pamokos temą ir kitą naudingą informaciją</li>
+            <li style="margin:6px 0;">Tai padės geriau sekti, kaip vyksta jūsų vaiko mokymasis</li>
+          </ul>
+        </div>
+        <div class="info-card">
+          <p style="color:#1f2937; font-size:15px; font-weight:700; margin:0 0 10px;">🔔 Pranešimų valdymas</p>
+          <ul style="margin:0; padding-left:18px; color:#1f2937; font-size:14px; line-height:1.65;">
+            <li style="margin:6px 0;">Jei priminimų apie pamokas gaunate per daug arba jie jums nereikalingi — dabar galite juos lengvai išjungti</li>
+            <li style="margin:6px 0;">Tiesiog eikite į Nustatymus ir ten rasite perjungiklį pamokų priminimams. Galėsite bet kada vėl juos įjungti</li>
+          </ul>
+        </div>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6; margin:14px 0 0;">Taip pat atlikome keletą patobulinimų ir pataisymų, kad platforma veiktų dar patikimiau ir paprasčiau.</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6; margin:14px 0 0;">Jei turite klausimų — mielai padėsime! Rašykite adresu <a href="mailto:info@tutlio.lt" style="color:#4f46e5; font-weight:700; text-decoration:none;">info@tutlio.lt</a>.</p>
+        <div style="text-align:center; margin-top: 22px;">
+          ${outlookEmailButton(`${appUrl}/parent/dashboard`, 'Atidaryti Tutlio', '#4f46e5', { fontWeight: '700', fontSize: '15px', padding: '14px 36px' })}
+        </div>
+      </div>${footerFor(locale)}`,
+      locale,
+    ),
+  };
+}
+
 /** Vidinis HTML (be išorinio wrap) – bodyHtml neescapinamas (tik serverio generuotas turinys). */
 function customHtmlAnnouncement(d: any, locale: Locale) {
   if (!d?.subject || typeof d.subject !== 'string') {
@@ -2072,6 +2186,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'chat_new_message': emailContent = chatNewMessage(data, locale); break;
       case 'chat_message_digest': emailContent = chatMessageDigest(data, locale); break;
       case 'product_update_sf_chat': emailContent = productUpdateSfAndChat(data, locale); break;
+      case 'product_update_whiteboard_tutor': emailContent = productUpdateWhiteboardTutor(data, locale); break;
+      case 'product_update_whiteboard_student': emailContent = productUpdateWhiteboardStudent(data, locale); break;
+      case 'product_update_whiteboard_parent': emailContent = productUpdateWhiteboardParent(data, locale); break;
       case 'custom_html_announcement': emailContent = customHtmlAnnouncement(data, locale); break;
       case 'school_contract': emailContent = schoolContract(data, locale); break;
       case 'school_installment_request': emailContent = schoolInstallmentRequest(data, locale); break;

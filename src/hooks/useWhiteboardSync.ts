@@ -21,6 +21,14 @@ type WhiteboardFile = Record<string, any> & {
   storagePath?: string;
 };
 
+/** Excalidraw may return files as a Map or plain object — normalise to Record. */
+function toPlainFiles(files: unknown): Record<string, WhiteboardFile> {
+  if (!files) return {};
+  if (files instanceof Map) return Object.fromEntries(files);
+  if (typeof files === 'object' && !Array.isArray(files)) return files as Record<string, WhiteboardFile>;
+  return {};
+}
+
 type SceneUpdatePayload = {
   senderId: string;
   revision: number;
@@ -97,6 +105,42 @@ export function useWhiteboardSync(
     }
   }, []);
 
+  const downloadFileAsset = useCallback(
+    async (storagePath: string): Promise<string | undefined> => {
+      const MAX_RETRIES = 3;
+      const BASE_DELAY_MS = 1_000;
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        try {
+          const { data, error } = await supabase.storage.from(WHITEBOARD_BUCKET).download(storagePath);
+          if (error || !data) {
+            console.warn(`[Whiteboard] Storage download attempt ${attempt + 1}/${MAX_RETRIES} failed:`, error?.message, '| path:', storagePath);
+            if (attempt < MAX_RETRIES - 1) {
+              await new Promise((r) => setTimeout(r, BASE_DELAY_MS * Math.pow(2, attempt)));
+              continue;
+            }
+            return undefined;
+          }
+          let dataURL: string | undefined;
+          if (storagePath.endsWith('.json')) {
+            const text = await data.text();
+            const parsed = JSON.parse(text);
+            dataURL = typeof parsed.dataURL === 'string' ? parsed.dataURL : undefined;
+          } else {
+            dataURL = await blobToDataURL(data) || undefined;
+          }
+          return dataURL;
+        } catch (err) {
+          console.warn(`[Whiteboard] Storage download attempt ${attempt + 1}/${MAX_RETRIES} threw:`, err, '| path:', storagePath);
+          if (attempt < MAX_RETRIES - 1) {
+            await new Promise((r) => setTimeout(r, BASE_DELAY_MS * Math.pow(2, attempt)));
+          }
+        }
+      }
+      return undefined;
+    },
+    [blobToDataURL],
+  );
+
   const hydrateFilesFromStorage = useCallback(
     async (files?: Record<string, WhiteboardFile>) => {
       if (!sessionId || !files) return files ?? {};
@@ -114,33 +158,15 @@ export function useWhiteboardSync(
             hydrated[fileId] = { ...file, dataURL: cached };
             return;
           }
-          try {
-            const { data, error } = await supabase.storage.from(WHITEBOARD_BUCKET).download(storagePath);
-            if (error || !data) {
-              console.warn('[Whiteboard] Storage download failed:', error?.message, '| path:', storagePath);
-              return;
-            }
-            let dataURL: string | undefined;
-            if (storagePath.endsWith('.json')) {
-              // JSON-wrapped image asset
-              const text = await data.text();
-              const parsed = JSON.parse(text);
-              dataURL = typeof parsed.dataURL === 'string' ? parsed.dataURL : undefined;
-            } else {
-              // Legacy raw blob asset
-              dataURL = await blobToDataURL(data) || undefined;
-            }
-            if (!dataURL) return;
-            hydratedDataUrlByPathRef.current.set(storagePath, dataURL);
-            hydrated[fileId] = { ...file, dataURL };
-          } catch {
-            // Keep metadata-only entry; Excalidraw will show placeholder until available.
-          }
+          const dataURL = await downloadFileAsset(storagePath);
+          if (!dataURL) return;
+          hydratedDataUrlByPathRef.current.set(storagePath, dataURL);
+          hydrated[fileId] = { ...file, dataURL };
         }),
       );
       return hydrated;
     },
-    [blobToDataURL, sessionId],
+    [downloadFileAsset, sessionId],
   );
 
   const uploadFileAssetIfNeeded = useCallback(
@@ -212,7 +238,7 @@ export function useWhiteboardSync(
       const hydratedFiles = await hydrateFilesFromStorage(payload.files || {});
 
       // Merge with local files: never overwrite a local dataURL with an empty one
-      const localFiles = api.getFiles?.() || {};
+      const localFiles = toPlainFiles(api.getFiles?.());
       const mergedFiles: Record<string, WhiteboardFile> = { ...hydratedFiles };
       for (const [fileId, localFile] of Object.entries(localFiles)) {
         const localDataURL = typeof (localFile as any)?.dataURL === 'string' ? (localFile as any).dataURL : '';
@@ -222,13 +248,16 @@ export function useWhiteboardSync(
         }
       }
 
-      // Only pass files that have a valid image dataURL to updateScene.
-      // Passing a file without dataURL would overwrite a good local copy via Excalidraw's merge.
       const filesToApply: Record<string, WhiteboardFile> = {};
       for (const [fid, f] of Object.entries(mergedFiles)) {
         if (typeof f?.dataURL === 'string' && f.dataURL.startsWith(IMAGE_PREFIX)) {
           filesToApply[fid] = f;
         }
+      }
+      // Register files via addFiles() — updateScene alone doesn't persist them in v0.18
+      const filesArray = Object.values(filesToApply);
+      if (filesArray.length > 0 && typeof api.addFiles === 'function') {
+        api.addFiles(filesArray);
       }
 
       isRemoteUpdateRef.current = true;
@@ -237,13 +266,11 @@ export function useWhiteboardSync(
         const reconciled = reconcileElements(local, payload.elements as any, api.getAppState());
         api.updateScene({
           elements: reconciled,
-          ...(Object.keys(filesToApply).length > 0 ? { files: filesToApply } : {}),
           captureUpdate: CaptureUpdateAction.NEVER,
         });
       } catch {
         api.updateScene({
           elements: payload.elements,
-          ...(Object.keys(filesToApply).length > 0 ? { files: filesToApply } : {}),
           captureUpdate: CaptureUpdateAction.NEVER,
         });
       } finally {
@@ -292,7 +319,7 @@ export function useWhiteboardSync(
 
     const elements = excalidrawAPI.getSceneElementsIncludingDeleted();
     const appState = excalidrawAPI.getAppState();
-    const rawFiles = excalidrawAPI.getFiles();
+    const rawFiles = toPlainFiles(excalidrawAPI.getFiles());
     const files = await prepareFilesForTransport(rawFiles);
     const payload = {
       revision: localRevisionRef.current,
@@ -373,7 +400,6 @@ export function useWhiteboardSync(
         const knownPath = uploadedAssetPathByFileIdRef.current.get(fileId);
 
         if (hasLargeData && !knownPath) {
-          // Snapshot ALL properties now - Excalidraw may mutate the object before async upload runs
           needsUpload.push([fileId, { ...file, dataURL }]);
           continue;
         }
@@ -386,47 +412,51 @@ export function useWhiteboardSync(
         preparedFiles[fileId] = safeFile;
       }
 
-      localRevisionRef.current += 1;
-      channelRef.current.send({
-        type: 'broadcast',
-        event: 'scene-update',
-        payload: {
-          senderId: currentUser.id,
-          revision: localRevisionRef.current,
-          sentAt: Date.now(),
-          elements,
-          files: preparedFiles,
-        } satisfies SceneUpdatePayload,
-      });
-
-      if (needsUpload.length > 0) {
-        (async () => {
-          const followUpFiles: Record<string, WhiteboardFile> = { ...preparedFiles };
-          for (const [fileId, fileSnapshot] of needsUpload) {
-            const uploaded = await uploadFileAssetIfNeeded(fileId, fileSnapshot);
-            if (uploaded.storagePath) {
-              followUpFiles[fileId] = { ...uploaded, dataURL: undefined };
-            } else {
-              console.warn('[Whiteboard] Storage upload failed, sending dataURL inline:', fileId);
-              followUpFiles[fileId] = fileSnapshot;
-            }
-          }
-          if (channelRef.current && !isRemoteUpdateRef.current) {
-            localRevisionRef.current += 1;
-            channelRef.current.send({
-              type: 'broadcast',
-              event: 'scene-update',
-              payload: {
-                senderId: currentUser.id,
-                revision: localRevisionRef.current,
-                sentAt: Date.now(),
-                elements,
-                files: followUpFiles,
-              } satisfies SceneUpdatePayload,
-            });
-          }
-        })();
+      if (needsUpload.length === 0) {
+        localRevisionRef.current += 1;
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'scene-update',
+          payload: {
+            senderId: currentUser.id,
+            revision: localRevisionRef.current,
+            sentAt: Date.now(),
+            elements,
+            files: preparedFiles,
+          } satisfies SceneUpdatePayload,
+        });
+        return;
       }
+
+      (async () => {
+        const allFiles: Record<string, WhiteboardFile> = { ...preparedFiles };
+        for (const [fileId, fileSnapshot] of needsUpload) {
+          const uploaded = await uploadFileAssetIfNeeded(fileId, fileSnapshot);
+          if (uploaded.storagePath) {
+            allFiles[fileId] = { ...uploaded, dataURL: undefined };
+          } else {
+            allFiles[fileId] = fileSnapshot;
+          }
+        }
+        if (!channelRef.current || isRemoteUpdateRef.current) {
+          console.warn('[Whiteboard][broadcast] ABORTED after upload | channel:', !!channelRef.current, '| isRemote:', isRemoteUpdateRef.current);
+          return;
+        }
+        const api = excalidrawApiRef.current;
+        const freshElements = api?.getSceneElementsIncludingDeleted?.() || api?.getSceneElements?.() || elements;
+        localRevisionRef.current += 1;
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'scene-update',
+          payload: {
+            senderId: currentUser.id,
+            revision: localRevisionRef.current,
+            sentAt: Date.now(),
+            elements: freshElements,
+            files: allFiles,
+          } satisfies SceneUpdatePayload,
+        });
+      })();
     },
     [currentUser?.id, uploadFileAssetIfNeeded],
   );
@@ -446,7 +476,7 @@ export function useWhiteboardSync(
       }
       pendingBroadcastRef.current = false;
       const elements = api.getSceneElementsIncludingDeleted?.() || api.getSceneElements?.() || [];
-      const files = api.getFiles?.() || {};
+      const files = toPlainFiles(api.getFiles?.());
       void broadcastUpdate(elements, files);
     }, 120);
   }, [broadcastUpdate]);
@@ -555,12 +585,17 @@ export function useWhiteboardSync(
           validFiles[fid] = f;
         }
       }
+      // Register files via addFiles() before updating scene
+      const validFilesArray = Object.values(validFiles);
+      if (validFilesArray.length > 0 && typeof excalidrawAPI.addFiles === 'function') {
+        excalidrawAPI.addFiles(validFilesArray);
+      }
       excalidrawAPI.updateScene({
         elements: scene.elements,
         appState: scene.appState,
-        ...(Object.keys(validFiles).length > 0 ? { files: validFiles } : {}),
         captureUpdate: CaptureUpdateAction.NEVER,
       });
+      loadedRef.current = true;
       setLoaded(true);
       await flushQueuedPayloads();
     })();
@@ -601,9 +636,10 @@ export function useWhiteboardSync(
   }, [sessionId, excalidrawAPI, currentUser?.id]);
 
   const onChange = useCallback(
-    (elements: readonly any[], appState?: any, files?: Record<string, WhiteboardFile>) => {
+    (elements: readonly any[], appState?: any, rawFiles?: Record<string, WhiteboardFile> | unknown) => {
       if (!loaded) return;
       if (isRemoteUpdateRef.current) return;
+      const files = toPlainFiles(rawFiles);
       pendingBroadcastRef.current = true;
       scheduleStableBroadcast();
       const isLinearInProgress =

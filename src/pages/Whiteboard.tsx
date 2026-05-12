@@ -10,6 +10,8 @@ import '@excalidraw/excalidraw/index.css';
 type ExcalidrawImperativeAPI = any;
 const AUTH_HANDSHAKE_TIMEOUT_MS = 1200;
 
+const PAGE_GUIDE_ID = '__page-guide__';
+
 interface SessionInfo {
   id: string;
   tutor_id: string;
@@ -52,7 +54,12 @@ export default function WhiteboardPage() {
   const [retryKey, setRetryKey] = useState(0);
 
   const currentUser = user && session
-    ? { id: user.id, name: session.profiles?.full_name || user.email || 'User' }
+    ? {
+        id: user.id,
+        name: (user.id === session.students?.linked_user_id
+          ? session.students?.full_name
+          : session.profiles?.full_name) || user.email || 'User',
+      }
     : null;
 
   const { participants, saving, loaded, onChange, saveScene } = useWhiteboardSync(
@@ -350,51 +357,100 @@ export default function WhiteboardPage() {
     if (!excalidrawAPI || !exportToBlobFn || !session) return;
     setExporting(true);
     try {
-      const elements = excalidrawAPI.getSceneElements();
+      const elements = excalidrawAPI.getSceneElements()
+        .filter((el: any) => el.id !== PAGE_GUIDE_ID);
       const appState = excalidrawAPI.getAppState();
       const files = excalidrawAPI.getFiles();
 
+      if (!elements.length) {
+        setExporting(false);
+        return;
+      }
+
+      const EXPORT_SCALE = 2;
       const blob = await exportToBlobFn({
         elements,
-        appState: {
-          ...appState,
-          exportWithDarkMode: false,
-          exportBackground: true,
-        },
+        appState: { ...appState, exportWithDarkMode: false, exportBackground: true },
         files,
         mimeType: 'image/png',
-        getDimensions: (w: number, h: number) => ({ width: w, height: h, scale: 2 }),
+        getDimensions: (w: number, h: number) => ({
+          width: w * EXPORT_SCALE,
+          height: h * EXPORT_SCALE,
+          scale: 1,
+        }),
       });
+
+      const img = new Image();
+      const imgUrl = URL.createObjectURL(blob);
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('Failed to load export image'));
+        img.src = imgUrl;
+      });
+
+      const srcW = img.naturalWidth;
+      const srcH = img.naturalHeight;
+
+      const A4_W_PT = 595;
+      const A4_H_PT = 842;
+      const MARGIN = 30;
+      const usableW = A4_W_PT - MARGIN * 2;
+      const usableH = A4_H_PT - MARGIN * 2;
+
+      const fitScale = usableW / srcW;
+      const totalPdfH = srcH * fitScale;
 
       const { PDFDocument } = await import('pdf-lib');
       const pdfDoc = await PDFDocument.create();
-      const pngBytes = new Uint8Array(await blob.arrayBuffer());
-      const pngImage = await pdfDoc.embedPng(pngBytes);
 
-      const A4_W = 595;
-      const A4_H = 842;
-      const MARGIN = 20;
-      const usableW = A4_W - MARGIN * 2;
-      const usableH = A4_H - MARGIN * 2;
-      const imgScale = Math.min(usableW / pngImage.width, usableH / pngImage.height, 1);
-      const scaledW = pngImage.width * imgScale;
-      const scaledH = pngImage.height * imgScale;
-      const pageW = Math.max(scaledW + MARGIN * 2, A4_W);
-      const pageH = Math.max(scaledH + MARGIN * 2, A4_H);
-      const page = pdfDoc.addPage([pageW, pageH]);
+      if (totalPdfH <= usableH) {
+        const page = pdfDoc.addPage([A4_W_PT, A4_H_PT]);
+        const pngBytes = new Uint8Array(await blob.arrayBuffer());
+        const pngImage = await pdfDoc.embedPng(pngBytes);
+        page.drawImage(pngImage, {
+          x: MARGIN,
+          y: A4_H_PT - MARGIN - totalPdfH,
+          width: usableW,
+          height: totalPdfH,
+        });
+      } else {
+        const sliceSrcH = usableH / fitScale;
+        const pageCount = Math.ceil(srcH / sliceSrcH);
 
-      page.drawImage(pngImage, {
-        x: (pageW - scaledW) / 2,
-        y: (pageH - scaledH) / 2,
-        width: scaledW,
-        height: scaledH,
-      });
+        const sliceCanvas = document.createElement('canvas');
+        sliceCanvas.width = srcW;
+        const ctx = sliceCanvas.getContext('2d')!;
+
+        for (let i = 0; i < pageCount; i++) {
+          const srcY = Math.round(i * sliceSrcH);
+          const thisSliceH = Math.min(Math.round(sliceSrcH), srcH - srcY);
+          if (thisSliceH <= 0) break;
+
+          sliceCanvas.height = thisSliceH;
+          ctx.clearRect(0, 0, srcW, thisSliceH);
+          ctx.drawImage(img, 0, srcY, srcW, thisSliceH, 0, 0, srcW, thisSliceH);
+
+          const sliceBlob = await new Promise<Blob>((res) =>
+            sliceCanvas.toBlob((b) => res(b!), 'image/png'),
+          );
+          const slicePng = await pdfDoc.embedPng(new Uint8Array(await sliceBlob.arrayBuffer()));
+          const pdfSliceH = thisSliceH * fitScale;
+          const page = pdfDoc.addPage([A4_W_PT, A4_H_PT]);
+          page.drawImage(slicePng, {
+            x: MARGIN,
+            y: A4_H_PT - MARGIN - pdfSliceH,
+            width: usableW,
+            height: pdfSliceH,
+          });
+        }
+      }
+
+      URL.revokeObjectURL(imgUrl);
 
       const pdfBytes = await pdfDoc.save();
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const fileName = `whiteboard-${timestamp}.pdf`;
 
-      // Always download locally first so the user gets the file immediately
       const blobUrl = URL.createObjectURL(new Blob([pdfBytes], { type: 'application/pdf' }));
       const a = document.createElement('a');
       a.href = blobUrl;
@@ -402,7 +458,6 @@ export default function WhiteboardPage() {
       a.click();
       URL.revokeObjectURL(blobUrl);
 
-      // Upload to storage in background (best-effort)
       supabase.storage
         .from('session-files')
         .upload(`${session.id}/${fileName}`, pdfBytes, { upsert: false, contentType: 'application/pdf' })
@@ -567,7 +622,7 @@ export default function WhiteboardPage() {
           name={session?.topic || 'Whiteboard'}
           initialData={{
             ...(libraryItems.length > 0 ? { libraryItems } : {}),
-            appState: { gridModeEnabled: true, gridSize: 20 },
+            appState: { gridModeEnabled: true, gridSize: 10 },
           }}
           UIOptions={{
             canvasActions: {
