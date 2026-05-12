@@ -229,6 +229,8 @@ export default function StudentsPage() {
   const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
   const [confirmingPackageId, setConfirmingPackageId] = useState<string | null>(null);
   const [dismissedInvoiceIds, setDismissedInvoiceIds] = useState<string[]>([]);
+  const [markingInvoicePaid, setMarkingInvoicePaid] = useState(false);
+  const [regeneratingInvoice, setRegeneratingInvoice] = useState(false);
   const dismissedInvoicesKey = user?.id ? `dismissed_invoice_batches_${user.id}` : null;
   const cardInvoicePollRef = useRef<{ intervalId: ReturnType<typeof setInterval>; attempts: number } | null>(null);
 
@@ -384,6 +386,62 @@ export default function StudentsPage() {
       }
       return next;
     });
+  };
+
+  const handleMarkInvoicePaid = async (batchId: string) => {
+    setMarkingInvoicePaid(true);
+    try {
+      const { data: { session: authSession } } = await supabase.auth.getSession();
+      const res = await fetch('/api/confirm-monthly-invoice-payment', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authSession?.access_token ? { Authorization: `Bearer ${authSession.access_token}` } : {}),
+        },
+        body: JSON.stringify({ billingBatchId: batchId, manualConfirm: true }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        window.alert(body.error || t('invoices.markPaidFailed'));
+        return;
+      }
+      setSelectedStudent((prev) =>
+        prev ? { ...prev, latest_invoice: prev.latest_invoice ? { ...prev.latest_invoice, paid: true, payment_status: 'paid' } : null } : prev,
+      );
+      fetchStudents();
+    } catch (e) {
+      console.error('[Students] mark invoice paid error:', e);
+    } finally {
+      setMarkingInvoicePaid(false);
+    }
+  };
+
+  const handleRegenerateInvoice = async (batchId: string) => {
+    if (!window.confirm(t('invoices.regenerateConfirm'))) return;
+    setRegeneratingInvoice(true);
+    try {
+      const { data: { session: authSession } } = await supabase.auth.getSession();
+      const res = await fetch('/api/regenerate-monthly-invoice', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authSession?.access_token ? { Authorization: `Bearer ${authSession.access_token}` } : {}),
+        },
+        body: JSON.stringify({ billingBatchId: batchId }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        window.alert(body.error || t('invoices.regenerateFailed'));
+        return;
+      }
+      setSelectedStudent((prev) => prev ? { ...prev, latest_invoice: null } : prev);
+      fetchStudents();
+      window.alert(t('invoices.regenerateSuccess'));
+    } catch (e) {
+      console.error('[Students] regenerate invoice error:', e);
+    } finally {
+      setRegeneratingInvoice(false);
+    }
   };
 
   // While student modal is open and invoice is unpaid, poll briefly.
@@ -2098,6 +2156,34 @@ export default function StudentsPage() {
                                 'w-6 h-6',
                                 selectedStudent.latest_invoice.paid ? 'text-green-700' : 'text-amber-700'
                               )} />
+                              {!selectedStudent.latest_invoice.paid && (
+                                <>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    disabled={markingInvoicePaid}
+                                    className="h-7 px-2 text-xs font-semibold text-green-600 hover:text-green-700 hover:bg-green-50"
+                                    onClick={() => handleMarkInvoicePaid(selectedStudent.latest_invoice!.id)}
+                                    title={t('invoices.markPaid')}
+                                  >
+                                    {markingInvoicePaid ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <CheckCircle className="w-3 h-3 mr-1" />}
+                                    {t('dash.markPaid')}
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    disabled={regeneratingInvoice}
+                                    className="h-7 px-2 text-xs font-semibold text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                                    onClick={() => handleRegenerateInvoice(selectedStudent.latest_invoice!.id)}
+                                    title={t('invoices.regenerate')}
+                                  >
+                                    {regeneratingInvoice ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RotateCcw className="w-3 h-3 mr-1" />}
+                                    {t('stu.regenerate')}
+                                  </Button>
+                                </>
+                              )}
                               <Button
                                 type="button"
                                 variant="ghost"

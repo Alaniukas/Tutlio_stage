@@ -60,8 +60,8 @@ export default function SendPackageModal({
   const [loadingSubjects, setLoadingSubjects] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isManual, setIsManual] = useState(false);
-  const [isIndividualTutor, setIsIndividualTutor] = useState(false);
-  const [isManualOnlyPlan, setIsManualOnlyPlan] = useState(false);
+  const [canUseManual, setCanUseManual] = useState(false);
+  const [isForceManualOnly, setIsForceManualOnly] = useState(false);
   const [expiresAt, setExpiresAt] = useState('');
   /** Stripe: attach S.F. PDF to payment email (default on) */
   const [attachSalesInvoice, setAttachSalesInvoice] = useState(true);
@@ -110,11 +110,15 @@ export default function SendPackageModal({
         .select('organization_id, subscription_plan, manual_subscription_exempt, enable_manual_student_payments')
         .eq('id', effectiveTutorId)
         .single();
-      const individual = !profile?.organization_id;
-      setIsIndividualTutor(individual);
-      const manualOnly = tutorUsesManualStudentPayments(profile);
-      setIsManualOnlyPlan(manualOnly);
-      if (manualOnly) setIsManual(true);
+      const manualEnabled = tutorUsesManualStudentPayments(profile);
+      setCanUseManual(manualEnabled);
+      const forceManual = !profile?.organization_id && (
+        profile?.subscription_plan === 'subscription_only' ||
+        profile?.manual_subscription_exempt === true
+      );
+      setIsForceManualOnly(forceManual);
+      if (forceManual) setIsManual(true);
+      else if (!manualEnabled) setIsManual(false);
     }
 
     const [subjectsResult, pricingResult] = await Promise.all([
@@ -170,7 +174,7 @@ export default function SendPackageModal({
           totalLessons,
           pricePerLesson,
           ...(expiresAt ? { expiresAt } : {}),
-          ...(!isManual ? { attachSalesInvoice } : {}),
+          attachSalesInvoice,
         }),
         signal: controller.signal,
       });
@@ -268,15 +272,15 @@ export default function SendPackageModal({
                 </p>
               </div>
 
-              {(isIndividualTutor || isManualOnlyPlan) && (
+              {canUseManual && (
                 <div>
                   <Label className="text-sm font-semibold text-gray-700">{t('package.paymentMethod')}</Label>
                   <div className="flex mt-1 rounded-lg border border-gray-200 overflow-hidden">
                     <button
                       type="button"
-                      className={`flex-1 py-2 text-sm font-medium transition-colors ${!isManual ? 'bg-violet-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'} ${isManualOnlyPlan ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      className={`flex-1 py-2 text-sm font-medium transition-colors ${!isManual ? 'bg-violet-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'} ${isForceManualOnly ? 'opacity-50 cursor-not-allowed' : ''}`}
                       onClick={() => setIsManual(false)}
-                      disabled={isManualOnlyPlan}
+                      disabled={isForceManualOnly}
                     >
                       Stripe
                     </button>
@@ -288,7 +292,7 @@ export default function SendPackageModal({
                       {t('package.manualPaymentLabel')}
                     </button>
                   </div>
-                  {isManualOnlyPlan && (
+                  {isForceManualOnly && (
                     <p className="text-xs text-amber-700 mt-2">
                       {t('pricing.subscriptionOnlyDesc')}
                     </p>
@@ -347,19 +351,17 @@ export default function SendPackageModal({
                 </div>
               )}
 
-              {!isManual && (
-                <label className="flex items-start gap-3 cursor-pointer rounded-xl border border-violet-100 bg-white/80 px-3 py-2.5">
-                  <Checkbox
-                    className="mt-0.5"
-                    checked={attachSalesInvoice}
-                    onChange={(e) => setAttachSalesInvoice(e.target.checked)}
-                  />
-                  <span className="text-sm text-gray-800">
-                    <span className="font-medium">{t('invoices.includeSfInEmail')}</span>
-                    <span className="block text-xs text-gray-500 mt-0.5">{t('invoices.includeSfInEmailHint')}</span>
-                  </span>
-                </label>
-              )}
+              <label className="flex items-start gap-3 cursor-pointer rounded-xl border border-violet-100 bg-white/80 px-3 py-2.5">
+                <Checkbox
+                  className="mt-0.5"
+                  checked={attachSalesInvoice}
+                  onChange={(e) => setAttachSalesInvoice(e.target.checked)}
+                />
+                <span className="text-sm text-gray-800">
+                  <span className="font-medium">{t('invoices.includeSfInEmail')}</span>
+                  <span className="block text-xs text-gray-500 mt-0.5">{t('invoices.includeSfInEmailHint')}</span>
+                </span>
+              </label>
 
               {error && (
                 <div className="bg-red-50 border border-red-200 rounded-xl p-3">

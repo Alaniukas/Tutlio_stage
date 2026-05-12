@@ -84,9 +84,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Fetch seller invoice profile
     // When isOrgTutor, the tutor is the seller (billing the org), so use tutorId
     const sellerUserId = isOrgTutor ? tutorId : issuingUserId;
-    const sellerProfile = await getSellerProfile(sellerUserId, profile.organization_id, isOrgTutor);
+    let sellerProfile = await getSellerProfile(sellerUserId, profile.organization_id, isOrgTutor);
+
+    // Fallback: build a minimal seller profile from tutor's profile when no invoice_profiles entry exists
     if (!sellerProfile) {
-      return res.status(400).json({ error: 'Invoice settings not configured. Please set up your business details first.' });
+      sellerProfile = {
+        id: `fallback-${sellerUserId}`,
+        user_id: sellerUserId,
+        entity_type: 'individual',
+        business_name: profile.full_name || 'Korepetitorius',
+        company_code: null,
+        vat_code: null,
+        address: null,
+        activity_number: null,
+        personal_code: null,
+        contact_email: profile.email || null,
+        contact_phone: profile.phone || null,
+        invoice_series: 'SF',
+        next_invoice_number: null,
+      };
+      console.log('[generate-invoice] No invoice_profiles entry found, using fallback seller from profile:', profile.full_name);
     }
 
     const sessionSelect = `
@@ -171,7 +188,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .in('id', resolvedPackageIds)
           .eq('tutor_id', tutorId)
           .eq('paid', false)
-          .eq('payment_method', 'stripe')
+          .in('payment_method', ['stripe', 'manual'])
           .is('manual_sales_invoice_id', null);
         if (studentId) pendQ = pendQ.eq('student_id', studentId);
         const { data: pend, error: pendErr } = await pendQ;
@@ -206,7 +223,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (pseudoSessions.length < requested.size) {
         return res.status(400).json({
           error: allowPendingStripePackages
-            ? 'One or more packages are not eligible (must be unpaid Stripe checkout, not already on a sales invoice).'
+            ? 'One or more packages are not eligible (must be unpaid Stripe/manual package, not already on a sales invoice).'
             : 'One or more packages are not eligible (must be manual or Stripe, paid, not already on a sales invoice).',
         });
       }
@@ -646,6 +663,13 @@ function buildLineItems(
 }
 
 async function getNextInvoiceNumber(invoiceProfileId: string): Promise<string> {
+  // Fallback profiles use a timestamp-based number
+  if (invoiceProfileId.startsWith('fallback-')) {
+    const now = new Date();
+    const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+    return `SF-${ts}`;
+  }
+
   const { data: profile } = await supabase
     .from('invoice_profiles')
     .select('invoice_series, next_invoice_number')

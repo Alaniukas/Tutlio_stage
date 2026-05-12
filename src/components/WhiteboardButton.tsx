@@ -15,9 +15,14 @@ const WB_AUTH_REQUEST = 'tutlio:whiteboard-auth-request';
 const WB_AUTH_RESPONSE = 'tutlio:whiteboard-auth-response';
 const AUTH_BOOTSTRAP_TTL_MS = 2 * 60 * 1000;
 
+// Whiteboard access is temporarily disabled platform-wide while we re-test the
+// sync/persistence layer on stage. Re-enabling = remove the early return below.
+const WHITEBOARD_DISABLED = true;
+
 export default function WhiteboardButton({ roomId, sessionStatus, sessionEndTime }: WhiteboardButtonProps) {
   const { t } = useTranslation();
 
+  if (WHITEBOARD_DISABLED) return null;
   if (!roomId) return null;
   if (
     sessionStatus != null &&

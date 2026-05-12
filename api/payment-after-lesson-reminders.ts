@@ -54,7 +54,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     try {
-        const now = new Date().toISOString();
+        const now = new Date();
+        const nowIso = now.toISOString();
+        // Only look back 7 days max — older unpaid sessions are stale
+        const lookback = new Date(now.getTime() - 7 * 24 * 3600000).toISOString();
 
         const { data: sessions, error } = await supabase
             .from('sessions')
@@ -89,8 +92,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             `)
             .eq('status', 'active')
             .eq('paid', false)
-            .lt('end_time', now)
-            .or('payment_after_lesson_reminder_sent.is.null,payment_after_lesson_reminder_sent.eq.false');
+            .lt('end_time', nowIso)
+            .gte('end_time', lookback)
+            .or('payment_after_lesson_reminder_sent.is.null,payment_after_lesson_reminder_sent.eq.false')
+            .limit(200);
 
         if (error) {
             console.error('payment-after-lesson-reminders fetch error:', error);

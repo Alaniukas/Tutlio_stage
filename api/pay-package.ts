@@ -70,7 +70,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const student = pkg.students as any;
         const subject = pkg.subjects as any;
 
-        if (tutorUsesManualStudentPayments(tutor) || pkg.payment_method === 'manual') {
+        if (pkg.payment_method === 'manual') {
             return res.redirect(302, `${APP_URL}/student/sessions`);
         }
 

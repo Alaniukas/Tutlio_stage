@@ -47,7 +47,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       `)
       .eq('status', 'active')
       .gte('start_time', now.toISOString())
-      .lt('start_time', maxFuture);
+      .lt('start_time', maxFuture)
+      .limit(500);
 
     if (error) {
       console.error('[send-reminders] Session query error:', error);

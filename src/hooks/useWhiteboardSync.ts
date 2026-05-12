@@ -4,9 +4,13 @@ import { reconcileElements, CaptureUpdateAction } from '@excalidraw/excalidraw';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 type ExcalidrawImperativeAPI = any;
 
-const SAVE_DEBOUNCE_MS = 6_000;
+const SAVE_DEBOUNCE_MS = 15_000;
+const SAVE_MAX_DELAY_MS = 30_000;
 const SAVE_TIMEOUT_MS = 20_000;
 const SAVE_ERROR_COOLDOWN_MS = 15_000;
+const UPLOAD_ERROR_COOLDOWN_MS = 30_000;
+const UPLOAD_GLOBAL_PAUSE_MS = 60_000;
+const MAX_CONSECUTIVE_UPLOAD_FAILURES = 3;
 const MAX_SCENE_BYTES = 2_000_000;
 const SCENE_FILE = 'scene.json';
 const IMAGE_PREFIX = 'data:image/';
@@ -50,6 +54,7 @@ export function useWhiteboardSync(
 ) {
   const channelRef = useRef<RealtimeChannel | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveMaxDelayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const broadcastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isRemoteUpdateRef = useRef(false);
   const excalidrawApiRef = useRef<ExcalidrawImperativeAPI | null>(null);
@@ -63,6 +68,10 @@ export function useWhiteboardSync(
   const pendingRemotePayloadsRef = useRef<SceneUpdatePayload[]>([]);
   const uploadedAssetPathByFileIdRef = useRef<Map<string, string>>(new Map());
   const hydratedDataUrlByPathRef = useRef<Map<string, string>>(new Map());
+  const uploadInFlightSetRef = useRef<Set<string>>(new Set());
+  const uploadErrorCooldownRef = useRef<Map<string, number>>(new Map());
+  const uploadConsecutiveFailuresRef = useRef(0);
+  const uploadGlobalPauseUntilRef = useRef(0);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -176,36 +185,56 @@ export function useWhiteboardSync(
       if (existingStoragePath) {
         uploadedAssetPathByFileIdRef.current.set(fileId, existingStoragePath);
       }
-      const dataURL = typeof file.dataURL === 'string' ? file.dataURL : '';
-      const isImageDataUrl = dataURL.startsWith(IMAGE_PREFIX);
-      if (!isImageDataUrl) {
-        console.warn('[Whiteboard] Upload skipped - no image dataURL | fileId:', fileId, '| dataURL length:', dataURL.length);
-        return file;
+
+      // Idempotent: if we already uploaded this file in this session, never re-upload.
+      // Excalidraw's getFiles() keeps returning the full dataURL, so without this we
+      // would re-upload the same image on every save.
+      const knownPath = uploadedAssetPathByFileIdRef.current.get(fileId);
+      if (knownPath) {
+        return { ...file, storagePath: knownPath, dataURL: undefined };
       }
 
-      console.log('[Whiteboard] Uploading file asset | fileId:', fileId, '| dataURL size:', Math.round(dataURL.length / 1024), 'KB');
+      const dataURL = typeof file.dataURL === 'string' ? file.dataURL : '';
+      if (!dataURL.startsWith(IMAGE_PREFIX)) return file;
 
-      const knownPath = uploadedAssetPathByFileIdRef.current.get(fileId);
-      const targetPath = knownPath || `${sessionId}/${FILES_PREFIX}/${fileId}.json`;
+      if (uploadInFlightSetRef.current.has(fileId)) return file;
+
+      if (Date.now() < uploadGlobalPauseUntilRef.current) return file;
+
+      const cooldownUntil = uploadErrorCooldownRef.current.get(fileId) || 0;
+      if (Date.now() < cooldownUntil) return file;
+
+      const targetPath = `${sessionId}/${FILES_PREFIX}/${fileId}.json`;
 
       const jsonPayload = JSON.stringify({ dataURL, mimeType: file.mimeType });
       const jsonBlob = new Blob([jsonPayload], { type: 'application/json' });
 
-      const { error } = await supabase.storage.from(WHITEBOARD_BUCKET).upload(targetPath, jsonBlob, {
-        upsert: true,
-        contentType: 'application/json',
-      });
-      if (error) {
-        console.warn('[Whiteboard] Storage upload failed:', error.message, '| fileId:', fileId);
-        return file;
+      uploadInFlightSetRef.current.add(fileId);
+      try {
+        const { error } = await supabase.storage.from(WHITEBOARD_BUCKET).upload(targetPath, jsonBlob, {
+          upsert: true,
+          contentType: 'application/json',
+        });
+        if (error) {
+          uploadConsecutiveFailuresRef.current++;
+          uploadErrorCooldownRef.current.set(fileId, Date.now() + UPLOAD_ERROR_COOLDOWN_MS);
+          if (uploadConsecutiveFailuresRef.current >= MAX_CONSECUTIVE_UPLOAD_FAILURES) {
+            uploadGlobalPauseUntilRef.current = Date.now() + UPLOAD_GLOBAL_PAUSE_MS;
+            console.warn('[Whiteboard] Too many upload failures, pausing for', UPLOAD_GLOBAL_PAUSE_MS / 1000, 's');
+          }
+          return file;
+        }
+        uploadConsecutiveFailuresRef.current = 0;
+        uploadedAssetPathByFileIdRef.current.set(fileId, targetPath);
+        hydratedDataUrlByPathRef.current.set(targetPath, dataURL);
+        return {
+          ...file,
+          storagePath: targetPath,
+          dataURL: undefined,
+        };
+      } finally {
+        uploadInFlightSetRef.current.delete(fileId);
       }
-      uploadedAssetPathByFileIdRef.current.set(fileId, targetPath);
-      hydratedDataUrlByPathRef.current.set(targetPath, dataURL);
-      return {
-        ...file,
-        storagePath: targetPath,
-        dataURL: undefined,
-      };
     },
     [sessionId],
   );
@@ -213,12 +242,11 @@ export function useWhiteboardSync(
   const prepareFilesForTransport = useCallback(
     async (files?: Record<string, WhiteboardFile>) => {
       if (!files) return {};
-      const prepared: Record<string, WhiteboardFile> = {};
       const entries = Object.entries(files);
-      for (const [fileId, file] of entries) {
-        prepared[fileId] = await uploadFileAssetIfNeeded(fileId, file || {});
-      }
-      return prepared;
+      const results = await Promise.all(
+        entries.map(async ([fileId, file]) => [fileId, await uploadFileAssetIfNeeded(fileId, file || {})] as const),
+      );
+      return Object.fromEntries(results);
     },
     [uploadFileAssetIfNeeded],
   );
@@ -316,6 +344,7 @@ export function useWhiteboardSync(
     const now = Date.now();
     if (saveInFlightRef.current) return;
     if (saveCooldownUntilRef.current > now) return;
+    if (uploadGlobalPauseUntilRef.current > now) return;
 
     const elements = excalidrawAPI.getSceneElementsIncludingDeleted();
     const appState = excalidrawAPI.getAppState();
@@ -344,9 +373,6 @@ export function useWhiteboardSync(
     if (serialized === lastSavedPayloadRef.current) return;
     if (serialized.length > MAX_SCENE_BYTES) {
       saveCooldownUntilRef.current = Date.now() + SAVE_ERROR_COOLDOWN_MS;
-      console.warn('[Whiteboard] scene payload is too large, skipping autosave', {
-        bytes: serialized.length,
-      });
       return;
     }
 
@@ -354,27 +380,29 @@ export function useWhiteboardSync(
     setSaving(true);
     try {
       const blob = new Blob([serialized], { type: 'application/json' });
-      let saved = false;
-      for (let attempt = 0; attempt < 2 && !saved; attempt++) {
-        try {
-          const uploadPromise = supabase.storage
-            .from(WHITEBOARD_BUCKET)
-            .upload(`${sessionId}/${SCENE_FILE}`, blob, { upsert: true, contentType: 'application/json' });
-          const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Whiteboard save timeout')), SAVE_TIMEOUT_MS),
-          );
-          const result = await Promise.race([uploadPromise, timeoutPromise]) as Awaited<typeof uploadPromise>;
-          if (result?.error) throw result.error;
-          saved = true;
-        } catch (retryErr) {
-          if (attempt === 1) throw retryErr;
-          await new Promise((r) => setTimeout(r, 2000));
-        }
-      }
+      const uploadPromise = supabase.storage
+        .from(WHITEBOARD_BUCKET)
+        .upload(`${sessionId}/${SCENE_FILE}`, blob, { upsert: true, contentType: 'application/json' });
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Whiteboard save timeout')), SAVE_TIMEOUT_MS),
+      );
+      const result = await Promise.race([uploadPromise, timeoutPromise]) as Awaited<typeof uploadPromise>;
+      if (result?.error) throw result.error;
       lastSavedPayloadRef.current = serialized;
+      uploadConsecutiveFailuresRef.current = 0;
+      if (saveMaxDelayTimerRef.current) {
+        clearTimeout(saveMaxDelayTimerRef.current);
+        saveMaxDelayTimerRef.current = null;
+      }
     } catch (err) {
-      saveCooldownUntilRef.current = Date.now() + SAVE_ERROR_COOLDOWN_MS;
-      console.error('[Whiteboard] save error:', err);
+      uploadConsecutiveFailuresRef.current++;
+      if (uploadConsecutiveFailuresRef.current >= MAX_CONSECUTIVE_UPLOAD_FAILURES) {
+        uploadGlobalPauseUntilRef.current = Date.now() + UPLOAD_GLOBAL_PAUSE_MS;
+        saveCooldownUntilRef.current = Date.now() + UPLOAD_GLOBAL_PAUSE_MS;
+        console.warn('[Whiteboard] Too many save failures, pausing for', UPLOAD_GLOBAL_PAUSE_MS / 1000, 's');
+      } else {
+        saveCooldownUntilRef.current = Date.now() + SAVE_ERROR_COOLDOWN_MS;
+      }
     } finally {
       saveInFlightRef.current = false;
       setSaving(false);
@@ -383,7 +411,24 @@ export function useWhiteboardSync(
 
   const debouncedSave = useCallback(() => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => { saveScene(); }, SAVE_DEBOUNCE_MS);
+    saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null;
+      void saveScene();
+    }, SAVE_DEBOUNCE_MS);
+    // Max-delay guarantee: even during continuous drawing (where the debounce
+    // timer keeps resetting), force a save at most SAVE_MAX_DELAY_MS after the
+    // first dirty change. This caps DB write pressure to ~1 save / 30s per
+    // whiteboard regardless of how much the user is drawing.
+    if (!saveMaxDelayTimerRef.current) {
+      saveMaxDelayTimerRef.current = setTimeout(() => {
+        saveMaxDelayTimerRef.current = null;
+        if (saveTimerRef.current) {
+          clearTimeout(saveTimerRef.current);
+          saveTimerRef.current = null;
+        }
+        void saveScene();
+      }, SAVE_MAX_DELAY_MS);
+    }
   }, [saveScene]);
 
   const broadcastUpdate = useCallback(
@@ -412,36 +457,38 @@ export function useWhiteboardSync(
         preparedFiles[fileId] = safeFile;
       }
 
-      if (needsUpload.length === 0) {
-        localRevisionRef.current += 1;
-        channelRef.current.send({
-          type: 'broadcast',
-          event: 'scene-update',
-          payload: {
-            senderId: currentUser.id,
-            revision: localRevisionRef.current,
-            sentAt: Date.now(),
-            elements,
-            files: preparedFiles,
-          } satisfies SceneUpdatePayload,
-        });
-        return;
-      }
+      // Always broadcast elements immediately so the other user sees changes right away.
+      localRevisionRef.current += 1;
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'scene-update',
+        payload: {
+          senderId: currentUser.id,
+          revision: localRevisionRef.current,
+          sentAt: Date.now(),
+          elements,
+          files: preparedFiles,
+        } satisfies SceneUpdatePayload,
+      });
 
+      if (needsUpload.length === 0) return;
+
+      // Upload pending files in parallel in the background, then send a follow-up
+      // broadcast so the other side can hydrate the images.
       (async () => {
-        const allFiles: Record<string, WhiteboardFile> = { ...preparedFiles };
-        for (const [fileId, fileSnapshot] of needsUpload) {
-          const uploaded = await uploadFileAssetIfNeeded(fileId, fileSnapshot);
-          if (uploaded.storagePath) {
-            allFiles[fileId] = { ...uploaded, dataURL: undefined };
-          } else {
-            allFiles[fileId] = fileSnapshot;
-          }
+        const uploadedFiles: Record<string, WhiteboardFile> = { ...preparedFiles };
+        const results = await Promise.all(
+          needsUpload.map(async ([fileId, fileSnapshot]) => {
+            const uploaded = await uploadFileAssetIfNeeded(fileId, fileSnapshot);
+            return [fileId, uploaded] as const;
+          }),
+        );
+        for (const [fileId, uploaded] of results) {
+          uploadedFiles[fileId] = uploaded.storagePath
+            ? { ...uploaded, dataURL: undefined }
+            : needsUpload.find(([fid]) => fid === fileId)?.[1] || uploaded;
         }
-        if (!channelRef.current || isRemoteUpdateRef.current) {
-          console.warn('[Whiteboard][broadcast] ABORTED after upload | channel:', !!channelRef.current, '| isRemote:', isRemoteUpdateRef.current);
-          return;
-        }
+        if (!channelRef.current || isRemoteUpdateRef.current) return;
         const api = excalidrawApiRef.current;
         const freshElements = api?.getSceneElementsIncludingDeleted?.() || api?.getSceneElements?.() || elements;
         localRevisionRef.current += 1;
@@ -453,7 +500,7 @@ export function useWhiteboardSync(
             revision: localRevisionRef.current,
             sentAt: Date.now(),
             elements: freshElements,
-            files: allFiles,
+            files: uploadedFiles,
           } satisfies SceneUpdatePayload,
         });
       })();
@@ -558,6 +605,10 @@ export function useWhiteboardSync(
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
       }
+      if (saveMaxDelayTimerRef.current) {
+        clearTimeout(saveMaxDelayTimerRef.current);
+        saveMaxDelayTimerRef.current = null;
+      }
       if (broadcastTimerRef.current) {
         clearTimeout(broadcastTimerRef.current);
         broadcastTimerRef.current = null;
@@ -617,6 +668,10 @@ export function useWhiteboardSync(
           clearTimeout(saveTimerRef.current);
           saveTimerRef.current = null;
         }
+        if (saveMaxDelayTimerRef.current) {
+          clearTimeout(saveMaxDelayTimerRef.current);
+          saveMaxDelayTimerRef.current = null;
+        }
         void saveSceneRef.current();
       }
     };
@@ -624,6 +679,10 @@ export function useWhiteboardSync(
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
+      }
+      if (saveMaxDelayTimerRef.current) {
+        clearTimeout(saveMaxDelayTimerRef.current);
+        saveMaxDelayTimerRef.current = null;
       }
       void saveSceneRef.current();
     };

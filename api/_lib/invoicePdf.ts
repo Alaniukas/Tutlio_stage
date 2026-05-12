@@ -42,6 +42,17 @@ const PAGE_HEIGHT = 841.89;
 const MARGIN = 50;
 const COL_WIDTH = PAGE_WIDTH - MARGIN * 2;
 
+const LT_MAP: Record<string, string> = {
+  'ą': 'a', 'č': 'c', 'ę': 'e', 'ė': 'e', 'į': 'i', 'š': 's', 'ų': 'u', 'ū': 'u', 'ž': 'z',
+  'Ą': 'A', 'Č': 'C', 'Ę': 'E', 'Ė': 'E', 'Į': 'I', 'Š': 'S', 'Ų': 'U', 'Ū': 'U', 'Ž': 'Z',
+};
+const LT_RE = new RegExp(`[${Object.keys(LT_MAP).join('')}]`, 'g');
+
+/** Strip Lithuanian diacritics so pdf-lib StandardFonts (WinAnsi) can render the text. */
+function asciify(text: string): string {
+  return text.replace(LT_RE, (ch) => LT_MAP[ch] || ch);
+}
+
 export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
@@ -60,7 +71,7 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
   }) => {
     const f = opts?.bold ? fontBold : font;
     const size = opts?.size || 9;
-    page.drawText(text, { x, y: yPos, size, font: f, color: opts?.color || black });
+    page.drawText(asciify(text), { x, y: yPos, size, font: f, color: opts?.color || black });
   };
 
   const drawLine = (x1: number, yPos: number, x2: number) => {

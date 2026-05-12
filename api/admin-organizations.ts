@@ -131,25 +131,27 @@ async function computeOrgStats(
   organizationId: string,
   adminIds: Set<string>
 ) {
-  const { data: tutorRows } = await supabase.from('profiles').select('id, email').eq('organization_id', organizationId);
-  const { ids: studentProfileIds, emails: studentEmails } = await getOrgStudentProfileExclusions(supabase, organizationId);
-  const tutorIdsNonAdmin = (tutorRows || [])
+  // Run independent queries in parallel to reduce total latency.
+  const [
+    { data: tutorRows },
+    studentExclusions,
+    allProfileIds,
+    { data: rpcStudentCount, error: rpcStudentErr },
+  ] = await Promise.all([
+    supabase.from('profiles').select('id, email').eq('organization_id', organizationId),
+    getOrgStudentProfileExclusions(supabase, organizationId),
+    getOrgTutorProfileIdsForData(supabase, organizationId),
+    supabase.rpc('admin_org_student_count' as any, { p_org_id: organizationId }),
+  ]);
+
+  const { ids: studentProfileIds, emails: studentEmails } = studentExclusions;
+  const tutorCount = (tutorRows || [])
     .filter((r: { id: string; email?: string | null }) => {
       const email = String(r.email || '').trim().toLowerCase();
       return !adminIds.has(r.id) && !studentProfileIds.has(r.id) && !studentEmails.has(email);
-    })
-    .map((r: { id: string }) => r.id);
-  const tutorCount = tutorIdsNonAdmin.length;
-
-  const allProfileIds = await getOrgTutorProfileIdsForData(supabase, organizationId);
+    }).length;
 
   let studentCount = 0;
-  let lessonsOccurred = 0;
-  let paidRevenue = 0;
-
-  const { data: rpcStudentCount, error: rpcStudentErr } = await supabase.rpc('admin_org_student_count' as any, {
-    p_org_id: organizationId,
-  });
   if (!rpcStudentErr && rpcStudentCount != null) {
     studentCount = Number(rpcStudentCount);
   } else if (allProfileIds.length > 0) {
@@ -160,21 +162,26 @@ async function computeOrgStats(
     studentCount = sc ?? 0;
   }
 
-  if (allProfileIds.length > 0) {
-    const { count: lc } = await supabase
-      .from('sessions')
-      .select('id', { count: 'exact', head: true })
-      .in('tutor_id', allProfileIds)
-      .in('status', ['completed', 'no_show']);
-    lessonsOccurred = lc ?? 0;
+  let lessonsOccurred = 0;
+  let paidRevenue = 0;
 
-    const { data: paidRows } = await supabase
-      .from('sessions')
-      .select('price')
-      .in('tutor_id', allProfileIds)
-      .eq('paid', true)
-      .neq('status', 'cancelled');
-    paidRevenue = paidRows?.reduce((s, r) => s + Number((r as { price: number | null }).price ?? 0), 0) ?? 0;
+  if (allProfileIds.length > 0) {
+    const [lessonsRes, paidRes] = await Promise.all([
+      supabase
+        .from('sessions')
+        .select('id', { count: 'exact', head: true })
+        .in('tutor_id', allProfileIds)
+        .in('status', ['completed', 'no_show']),
+      supabase
+        .from('sessions')
+        .select('price')
+        .in('tutor_id', allProfileIds)
+        .eq('paid', true)
+        .neq('status', 'cancelled'),
+    ]);
+    lessonsOccurred = lessonsRes.count ?? 0;
+    paidRevenue = paidRes.error ? 0 :
+      (paidRes.data?.reduce((s: number, r: any) => s + Number(r.price ?? 0), 0) ?? 0);
   }
 
   const platformFee2pct = Math.round(paidRevenue * 0.02 * 100) / 100;
@@ -252,18 +259,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         Number((org as any).tutor_limit) || 0
       );
 
-      const { data: adminRows } = await supabase
-        .from('organization_admins')
-        .select('user_id')
-        .eq('organization_id', idParam);
-      const adminIds = new Set<string>((adminRows || []).map((a: { user_id: string }) => a.user_id));
+      // Fetch independent data in parallel to reduce total response time.
+      const [
+        { data: adminRows },
+        { data: allProfiles },
+        studentExclusions,
+        { data: rpcStudentList, error: rpcListErr },
+        { data: auditRows },
+      ] = await Promise.all([
+        supabase.from('organization_admins').select('user_id').eq('organization_id', idParam),
+        supabase.from('profiles').select('id, full_name, email, phone').eq('organization_id', idParam).order('full_name'),
+        getOrgStudentProfileExclusions(supabase, idParam),
+        supabase.rpc('admin_org_students' as any, { p_org_id: idParam }),
+        supabase.from('platform_admin_audit').select('id, created_at, action, details').eq('organization_id', idParam).order('created_at', { ascending: false }).limit(50),
+      ]);
 
-      const { data: allProfiles } = await supabase
-        .from('profiles')
-        .select('id, full_name, email, phone')
-        .eq('organization_id', idParam)
-        .order('full_name');
-      const { ids: studentProfileIds, emails: studentEmails } = await getOrgStudentProfileExclusions(supabase, idParam);
+      const adminIds = new Set<string>((adminRows || []).map((a: { user_id: string }) => a.user_id));
+      const { ids: studentProfileIds, emails: studentEmails } = studentExclusions;
       const tutors = (allProfiles || []).filter((t) => {
         const email = String((t as any).email || '').trim().toLowerCase();
         return !adminIds.has(t.id) && !studentProfileIds.has(t.id) && !studentEmails.has(email);
@@ -272,23 +284,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       type StudRow = { id: string; full_name: string; email: string | null; tutor_id: string };
       let students: StudRow[] = [];
 
-      const { data: rpcStudentList, error: rpcListErr } = await supabase.rpc('admin_org_students' as any, {
-        p_org_id: idParam,
-      });
       if (!rpcListErr && rpcStudentList && Array.isArray(rpcStudentList)) {
         students = (rpcStudentList as StudRow[]).sort((a, b) =>
           (a.full_name || '').localeCompare(b.full_name || '', 'lt')
         );
       } else {
         const orgProfileIds = await getOrgTutorProfileIdsForData(supabase, idParam);
-        const { data: studByTutor } =
+        const [{ data: studByTutor }, { data: studByOrg, error: studOrgErr }] = await Promise.all([
           orgProfileIds.length > 0
-            ? await supabase.from('students').select('id, full_name, email, tutor_id').in('tutor_id', orgProfileIds)
-            : { data: [] as StudRow[] };
-        const { data: studByOrg, error: studOrgErr } = await supabase
-          .from('students')
-          .select('id, full_name, email, tutor_id')
-          .eq('organization_id', idParam);
+            ? supabase.from('students').select('id, full_name, email, tutor_id').in('tutor_id', orgProfileIds)
+            : Promise.resolve({ data: [] as StudRow[] }),
+          supabase.from('students').select('id, full_name, email, tutor_id').eq('organization_id', idParam),
+        ]);
         const merged = new Map<string, StudRow>();
         for (const s of studByTutor || []) merged.set(s.id, s as StudRow);
         if (!studOrgErr) {
@@ -300,13 +307,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const stats = await computeOrgStats(supabase, idParam, adminIds);
-
-      const { data: auditRows } = await supabase
-        .from('platform_admin_audit')
-        .select('id, created_at, action, details')
-        .eq('organization_id', idParam)
-        .order('created_at', { ascending: false })
-        .limit(50);
 
       const archivedTutorsMap = new Map<string, { id: string; full_name: string | null; email: string | null }>();
       for (const a of auditRows || []) {

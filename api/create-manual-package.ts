@@ -42,29 +42,32 @@ async function postJsonWithTimeout(url: string, payload: unknown, timeoutMs = 70
     }
 }
 
-function resolveSendEmailUrl(req: VercelRequest): string {
+function resolveApiUrl(req: VercelRequest, path: string): string {
     const vu = process.env.VERCEL_URL;
     if (vu && String(vu).trim()) {
         const host = String(vu).replace(/^https?:\/\//, '').replace(/\/$/, '');
-        return `https://${host}/api/send-email`;
+        return `https://${host}${path}`;
     }
     const origin = typeof req.headers.origin === 'string' ? req.headers.origin.trim() : '';
-    if (origin) return `${origin.replace(/\/$/, '')}/api/send-email`;
+    if (origin) return `${origin.replace(/\/$/, '')}${path}`;
     const base = (getEnv('APP_URL') || getEnv('VITE_APP_URL') || 'http://127.0.0.1:3002').replace(/\/$/, '');
-    return `${base}/api/send-email`;
+    return `${base}${path}`;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
 
-    const { tutorId, studentId, subjectId, totalLessons, pricePerLesson: requestedPriceRaw, expiresAt } = req.body as {
+    const { tutorId, studentId, subjectId, totalLessons, pricePerLesson: requestedPriceRaw, expiresAt, attachSalesInvoice } = req.body as {
         tutorId: string;
         studentId: string;
         subjectId: string;
         totalLessons: number;
         pricePerLesson?: number;
         expiresAt?: string;
+        /** Generate S.F. and attach PDF to email */
+        attachSalesInvoice?: boolean;
     };
+    const shouldAttachSf = attachSalesInvoice === true;
 
     if (!tutorId || !studentId || !subjectId || !totalLessons) {
         return json(res, 400, { error: 'Missing required fields' });
@@ -212,28 +215,77 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return json(res, 500, { error: 'Nepavyko sukurti paketo', details: packageErr?.message });
         }
 
+        // Generate S.F. and get PDF for email attachment
+        let invoicePdfBase64: string | null = null;
+        let invoiceNumber: string | null = null;
+        if (shouldAttachSf) {
+            try {
+                console.log(`[create-manual-package] Generating S.F. for package ${lessonPackage.id}`);
+                const invRes = await postJsonWithTimeout(
+                    resolveApiUrl(req, '/api/generate-invoice'),
+                    {
+                        periodStart: new Date().toISOString().slice(0, 10),
+                        periodEnd: new Date().toISOString().slice(0, 10),
+                        groupingType: 'single',
+                        tutorId,
+                        studentId,
+                        packageIds: [lessonPackage.id],
+                        allowPendingStripePackages: true,
+                        issuedByUserId: callerId,
+                    },
+                    20000,
+                );
+                if (invRes.ok) {
+                    const invData = (await invRes.json().catch(() => null)) as any;
+                    if (invData?.invoiceIds?.[0]) {
+                        const invId = invData.invoiceIds[0];
+                        const { data: inv } = await supabase.from('invoices').select('invoice_number, pdf_storage_path').eq('id', invId).single();
+                        if (inv?.pdf_storage_path) {
+                            invoiceNumber = inv.invoice_number;
+                            const { data: blob } = await supabase.storage.from('invoices').download(inv.pdf_storage_path);
+                            if (blob) {
+                                const arrayBuf = await blob.arrayBuffer();
+                                invoicePdfBase64 = Buffer.from(arrayBuf).toString('base64');
+                                console.log(`[create-manual-package] S.F. ${invoiceNumber} PDF ready (${invoicePdfBase64.length} chars)`);
+                            }
+                        }
+                    }
+                } else {
+                    const errText = await invRes.text().catch(() => '');
+                    console.error('[create-manual-package] generate-invoice HTTP', invRes.status, errText);
+                }
+            } catch (e) {
+                console.error('[create-manual-package] S.F. generation error:', e);
+            }
+        }
+
         let emailSent = false;
         const toEmail = (student.payer_email || student.email || '').trim();
         if (toEmail) {
             try {
-                const emailRes = await postJsonWithTimeout(
-                    resolveSendEmailUrl(req),
-                    {
-                        type: 'manual_package_request',
-                        to: toEmail,
-                        data: {
-                            recipientName: student.payer_name || student.full_name,
-                            studentName: student.full_name,
-                            orgName: orgDisplayName || tutorName,
-                            subjectName: subject.name,
-                            totalLessons,
-                            pricePerLesson: pricePerLesson.toFixed(2),
-                            totalPrice: totalPrice.toFixed(2),
-                            bankDetails: (tutor as { manual_payment_bank_details?: string | null }).manual_payment_bank_details || '',
-                            ...(manualPaymentUrl ? { paymentUrl: manualPaymentUrl } : {}),
-                            ...((tutor as any).organization_id ? { organizationId: (tutor as any).organization_id } : {}),
-                        },
+                const emailPayload: Record<string, unknown> = {
+                    type: 'manual_package_request',
+                    to: toEmail,
+                    data: {
+                        recipientName: student.payer_name || student.full_name,
+                        studentName: student.full_name,
+                        orgName: orgDisplayName || tutorName,
+                        subjectName: subject.name,
+                        totalLessons,
+                        pricePerLesson: pricePerLesson.toFixed(2),
+                        totalPrice: totalPrice.toFixed(2),
+                        bankDetails: (tutor as { manual_payment_bank_details?: string | null }).manual_payment_bank_details || '',
+                        ...(manualPaymentUrl ? { paymentUrl: manualPaymentUrl } : {}),
+                        ...((tutor as any).organization_id ? { organizationId: (tutor as any).organization_id } : {}),
                     },
+                };
+                if (invoicePdfBase64 && invoiceNumber) {
+                    emailPayload.attachments = [{ filename: `${invoiceNumber}.pdf`, content: invoicePdfBase64 }];
+                    console.log(`[create-manual-package] Attaching S.F. PDF ${invoiceNumber} to email for ${toEmail}`);
+                }
+                const emailRes = await postJsonWithTimeout(
+                    resolveApiUrl(req, '/api/send-email'),
+                    emailPayload,
                     20000,
                 );
                 emailSent = emailRes.ok;

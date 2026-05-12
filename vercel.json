@@ -142,16 +142,12 @@
             "schedule": "*/5 * * * *"
         },
         {
-            "path": "/api/payment-deadline-warnings",
-            "schedule": "*/5 * * * *"
-        },
-        {
-            "path": "/api/payment-after-lesson-reminders",
-            "schedule": "*/5 * * * *"
-        },
-        {
             "path": "/api/expire-packages",
             "schedule": "0 */6 * * *"
+        },
+        {
+            "path": "/api/cleanup-whiteboard-data",
+            "schedule": "20 * * * *"
         }
     ]
 }

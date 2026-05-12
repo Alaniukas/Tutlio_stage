@@ -39,6 +39,38 @@ const supabase = createClient(
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
+function getEnv(name: string): string | null {
+    const v = process.env[name];
+    return v && String(v).trim().length > 0 ? String(v) : null;
+}
+
+function resolveApiUrl(req: VercelRequest, path: string): string {
+    const vu = process.env.VERCEL_URL;
+    if (vu && String(vu).trim()) {
+        const host = String(vu).replace(/^https?:\/\//, '').replace(/\/$/, '');
+        return `https://${host}${path}`;
+    }
+    const origin = typeof req.headers.origin === 'string' ? req.headers.origin.trim() : '';
+    if (origin) return `${origin.replace(/\/$/, '')}${path}`;
+    const base = (getEnv('APP_URL') || getEnv('VITE_APP_URL') || 'http://127.0.0.1:3002').replace(/\/$/, '');
+    return `${base}${path}`;
+}
+
+async function postInternalJson(url: string, payload: unknown, timeoutMs = 7000) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+        });
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -368,13 +400,71 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             let sfInvoiceNumber: string | null = null;
             if (shouldIncludeSalesInvoice) {
                 try {
+                    console.log(`[create-monthly-invoice] Generating S.F. for batch ${billingBatch.id}, tutor ${tutorId}`);
                     const sfResult = await autoGenerateSF(tutorId, billingBatch.id, periodStartDate, periodEndDate, payerSessions, payerName, payerEmail, tutor);
                     if (sfResult) {
                         sfPdfBase64 = sfResult.pdfBase64 ?? null;
                         sfInvoiceNumber = sfResult.invoiceNumber ?? null;
+                        console.log(`[create-monthly-invoice] S.F. generated: ${sfInvoiceNumber}, pdfBase64 length: ${sfPdfBase64?.length ?? 0}`);
+                    } else {
+                        console.log('[create-monthly-invoice] autoGenerateSF returned null (no invoice profile?)');
                     }
                 } catch (sfErr) {
                     console.error('[create-monthly-invoice] S.F. auto-generation failed (non-blocking):', sfErr);
+                }
+            }
+
+            // Safety net: ensure an invoices row exists for this batch so it appears on /invoices.
+            // autoGenerateSF now always creates one (even without invoice_profiles), but keep as fallback.
+            {
+                const { data: existingInv } = await supabase
+                    .from('invoices')
+                    .select('id')
+                    .eq('billing_batch_id', billingBatch.id)
+                    .maybeSingle();
+                if (!existingInv) {
+                    const fbInvoiceNumber = `BB-${billingBatch.id.slice(0, 8).toUpperCase()}`;
+                    const { data: fbInvoice } = await supabase.from('invoices').insert({
+                        invoice_number: fbInvoiceNumber,
+                        issued_by_user_id: tutorId,
+                        organization_id: (tutor as any).organization_id ?? null,
+                        seller_snapshot: { name: ownerName || 'Korepetitorius' },
+                        buyer_snapshot: { name: payerName || 'Mokinys', email: payerEmail || undefined },
+                        issue_date: new Date().toISOString().slice(0, 10),
+                        period_start: periodStartDate,
+                        period_end: periodEndDate,
+                        grouping_type: 'single',
+                        subtotal: totalLessonPrice,
+                        total_amount: totalLessonPrice,
+                        status: 'issued',
+                        billing_batch_id: billingBatch.id,
+                    }).select('id').single();
+
+                    if (fbInvoice) {
+                        const fbLineItems = payerSessions
+                            .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+                            .map(s => {
+                                const subjectName = (s.subjects as any)?.name || 'Pamoka';
+                                const dt = new Date(s.start_time);
+                                const datePart = dt.toLocaleDateString('lt-LT', { year: 'numeric', month: '2-digit', day: '2-digit' });
+                                const timePart = dt.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' });
+                                const studentFullName = (s.students as any)?.full_name || '';
+                                const desc = studentFullName
+                                    ? `${subjectName} — ${studentFullName} (${datePart} ${timePart})`
+                                    : `${subjectName} (${datePart} ${timePart})`;
+                                return {
+                                    invoice_id: fbInvoice.id,
+                                    description: desc,
+                                    quantity: 1,
+                                    unit_price: Math.round((s.price || 0) * 100) / 100,
+                                    total_price: Math.round((s.price || 0) * 100) / 100,
+                                    session_ids: [s.id],
+                                };
+                            });
+                        if (fbLineItems.length > 0) {
+                            await supabase.from('invoice_line_items').insert(fbLineItems);
+                        }
+                    }
                 }
             }
 
@@ -445,12 +535,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     };
                     if (sfPdfBase64 && sfInvoiceNumber) {
                         (emailPayload as any).attachments = [{ filename: `${sfInvoiceNumber}.pdf`, content: sfPdfBase64 }];
+                        console.log(`[create-monthly-invoice] Attaching S.F. PDF ${sfInvoiceNumber} to email for ${payerEmail}`);
                     }
-                    await fetch(`${APP_URL}/api/send-email`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
-                        body: JSON.stringify(emailPayload),
-                    });
+                    const emailUrl = resolveApiUrl(req, '/api/send-email');
+                    const emailRes = await postInternalJson(emailUrl, emailPayload, 20000);
+                    if (!emailRes.ok) {
+                        const body = await emailRes.text().catch(() => '');
+                        console.error(`[create-monthly-invoice] send-email HTTP ${emailRes.status}:`, body);
+                    }
                 } catch (e) {
                     console.error('[create-monthly-invoice] Error sending email:', e);
                 }
@@ -502,25 +594,51 @@ async function autoGenerateSF(
         invoiceProfile = userProf;
     }
 
-    if (!invoiceProfile) return null;
+    const hasProfile = !!invoiceProfile;
+    if (!hasProfile) {
+        console.log(`[autoGenerateSF] No invoice_profiles for tutor ${tutorId} — using fallback seller info`);
+    }
 
-    const isCompany = ['mb', 'uab', 'ii'].includes(invoiceProfile.entity_type);
-    const biz = typeof invoiceProfile.business_name === 'string' ? invoiceProfile.business_name.trim() : '';
-    const full =
-        tutor?.full_name && typeof tutor.full_name === 'string' ? tutor.full_name.trim() : '';
-    const sellerName = isCompany ? biz || full || 'Įmonė' : full || biz || 'Korepetitorius';
+    // Build seller snapshot from invoice profile or tutor profile as fallback
+    const full = tutor?.full_name && typeof tutor.full_name === 'string' ? tutor.full_name.trim() : '';
+    let sellerSnapshot: Record<string, any>;
+    let invoiceNumber: string;
 
-    const sellerSnapshot = {
-        name: sellerName || 'Korepetitorius',
-        entityType: invoiceProfile.entity_type,
-        companyCode: invoiceProfile.company_code || undefined,
-        vatCode: invoiceProfile.vat_code || undefined,
-        address: invoiceProfile.address || undefined,
-        activityNumber: invoiceProfile.activity_number || undefined,
-        personalCode: invoiceProfile.personal_code || undefined,
-        contactEmail: invoiceProfile.contact_email || undefined,
-        contactPhone: invoiceProfile.contact_phone || undefined,
-    };
+    if (hasProfile) {
+        const isCompany = ['mb', 'uab', 'ii'].includes(invoiceProfile.entity_type);
+        const biz = typeof invoiceProfile.business_name === 'string' ? invoiceProfile.business_name.trim() : '';
+        const sellerName = isCompany ? biz || full || 'Įmonė' : full || biz || 'Korepetitorius';
+
+        sellerSnapshot = {
+            name: sellerName || 'Korepetitorius',
+            entityType: invoiceProfile.entity_type,
+            companyCode: invoiceProfile.company_code || undefined,
+            vatCode: invoiceProfile.vat_code || undefined,
+            address: invoiceProfile.address || undefined,
+            activityNumber: invoiceProfile.activity_number || undefined,
+            personalCode: invoiceProfile.personal_code || undefined,
+            contactEmail: invoiceProfile.contact_email || undefined,
+            contactPhone: invoiceProfile.contact_phone || undefined,
+        };
+
+        const series = invoiceProfile.invoice_series || 'SF';
+        const num = invoiceProfile.next_invoice_number || 1;
+        invoiceNumber = `${series}-${String(num).padStart(3, '0')}`;
+
+        await supabase
+            .from('invoice_profiles')
+            .update({ next_invoice_number: num + 1, updated_at: new Date().toISOString() })
+            .eq('id', invoiceProfile.id);
+    } else {
+        sellerSnapshot = {
+            name: full || 'Korepetitorius',
+            entityType: 'individual',
+        };
+
+        const dateCode = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        const shortBatch = billingBatchId.slice(0, 6).toUpperCase();
+        invoiceNumber = `SF-${dateCode}-${shortBatch}`;
+    }
 
     const buyerSnapshot = {
         name: payerName || 'Mokinys',
@@ -528,14 +646,6 @@ async function autoGenerateSF(
     };
 
     const totalAmount = sessions.reduce((sum, s) => sum + (s.price || 0), 0);
-    const series = invoiceProfile.invoice_series || 'SF';
-    const num = invoiceProfile.next_invoice_number || 1;
-    const invoiceNumber = `${series}-${String(num).padStart(3, '0')}`;
-
-    await supabase
-        .from('invoice_profiles')
-        .update({ next_invoice_number: num + 1, updated_at: new Date().toISOString() })
-        .eq('id', invoiceProfile.id);
 
     const { data: invoice } = await supabase
         .from('invoices')
@@ -559,27 +669,31 @@ async function autoGenerateSF(
 
     if (!invoice) return null;
 
-    const subjectMap = new Map<string, { name: string; sessions: any[] }>();
-    for (const s of sessions) {
-        const subjectName = (s.subjects as any)?.name || 'Pamoka';
-        if (!subjectMap.has(subjectName)) subjectMap.set(subjectName, { name: subjectName, sessions: [] });
-        subjectMap.get(subjectName)!.sessions.push(s);
+    // Build line items: one row per session with date, time, subject, and price
+    const lineItems = sessions
+        .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+        .map(s => {
+            const subjectName = (s.subjects as any)?.name || 'Pamoka';
+            const dt = new Date(s.start_time);
+            const datePart = dt.toLocaleDateString('lt-LT', { year: 'numeric', month: '2-digit', day: '2-digit' });
+            const timePart = dt.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' });
+            const studentName = (s.students as any)?.full_name || '';
+            const desc = studentName
+                ? `${subjectName} — ${studentName} (${datePart} ${timePart})`
+                : `${subjectName} (${datePart} ${timePart})`;
+            return {
+                invoice_id: invoice.id,
+                description: desc,
+                quantity: 1,
+                unit_price: Math.round((s.price || 0) * 100) / 100,
+                total_price: Math.round((s.price || 0) * 100) / 100,
+                session_ids: [s.id],
+            };
+        });
+
+    if (lineItems.length > 0) {
+        await supabase.from('invoice_line_items').insert(lineItems);
     }
-
-    const lineItems = Array.from(subjectMap.values()).map(group => {
-        const total = group.sessions.reduce((sum, s) => sum + (s.price || 0), 0);
-        const avg = group.sessions.length > 0 ? total / group.sessions.length : 0;
-        return {
-            invoice_id: invoice.id,
-            description: `${group.name} - korepetavimo paslaugos`,
-            quantity: group.sessions.length,
-            unit_price: Math.round(avg * 100) / 100,
-            total_price: Math.round(total * 100) / 100,
-            session_ids: group.sessions.map((s: any) => s.id),
-        };
-    });
-
-    await supabase.from('invoice_line_items').insert(lineItems);
 
     // Generate PDF and upload
     try {
@@ -588,7 +702,7 @@ async function autoGenerateSF(
             issueDate: new Date().toLocaleDateString('lt-LT'),
             periodStart: new Date(periodStart).toLocaleDateString('lt-LT'),
             periodEnd: new Date(periodEnd).toLocaleDateString('lt-LT'),
-            seller: sellerSnapshot,
+            seller: sellerSnapshot as InvoicePdfData['seller'],
             buyer: buyerSnapshot,
             lineItems: lineItems.map(li => ({
                 description: li.description,
@@ -612,9 +726,9 @@ async function autoGenerateSF(
 
         return { invoiceNumber, pdfBase64: Buffer.from(pdfBytes).toString('base64') };
     } catch (pdfErr) {
-        console.error('[create-monthly-invoice] PDF generation error:', pdfErr);
+        console.error(`[autoGenerateSF] PDF generation/upload error for ${invoiceNumber}:`, pdfErr);
     }
 
-    console.log(`[create-monthly-invoice] Auto-generated S.F. ${invoiceNumber} for batch ${billingBatchId}`);
+    console.log(`[autoGenerateSF] S.F. ${invoiceNumber} created for batch ${billingBatchId} (PDF: failed/skipped)`);
     return { invoiceNumber, pdfBase64: null };
 }

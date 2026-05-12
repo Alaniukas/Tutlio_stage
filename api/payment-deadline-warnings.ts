@@ -85,11 +85,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const now = new Date();
         const in30min = new Date(now.getTime() + 30 * 60000);
 
-        // Fetch active, unpaid sessions with tutor and student info.
-        // Deadline depends on tutor's payment_timing:
-        // - before_lesson: deadline = start_time - payment_deadline_hours
-        // - after_lesson: deadline = end_time + payment_deadline_hours
-        // We send the warning when 0 ≤ (deadline - now) ≤ 30 minutes.
+        // Only fetch sessions in a relevant time window (max 73h deadline buffer).
+        // Before: deadline = start_time - hours → start_time within [now, now + 73h]
+        // After:  deadline = end_time + hours   → end_time within [now - 73h, now]
+        const maxDeadlineBuffer = 73 * 3600000;
+        const windowStart = new Date(now.getTime() - maxDeadlineBuffer).toISOString();
+        const windowEnd = new Date(now.getTime() + maxDeadlineBuffer).toISOString();
+
         const { data: sessions, error } = await supabase
             .from('sessions')
             .select(`
@@ -127,7 +129,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       `)
             .eq('status', 'active')
             .eq('paid', false)
-            .is('payment_deadline_warning_sent', null);
+            .is('payment_deadline_warning_sent', null)
+            .gte('start_time', windowStart)
+            .lte('start_time', windowEnd)
+            .limit(200);
 
         if (error) {
             console.error('Error fetching sessions:', error);
@@ -249,10 +254,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 }
 
                 if (tutorStepOk) {
-                    await supabase
-                        .from('sessions')
-                        .update({ payment_deadline_warning_sent: true })
-                        .eq('id', session.id);
                     warned.push(session.id);
                 }
 
@@ -314,6 +315,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             } else {
                 skipped.push(session.id);
             }
+        }
+
+        if (warned.length > 0) {
+            await supabase
+                .from('sessions')
+                .update({ payment_deadline_warning_sent: true })
+                .in('id', warned);
         }
 
         return res.status(200).json({
