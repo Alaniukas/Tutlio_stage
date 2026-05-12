@@ -1373,6 +1373,7 @@ export default function StudentSchedule() {
                             const checkoutUrl = typeof json.url === 'string' ? json.url : '';
 
                             if (checkoutUrl) {
+                                const stableLink = `${window.location.origin}/api/pay-session?session=${sessionData.id}`;
                                 const payOk = await sendEmail({
                                     type: 'stripe_payment_forwarding',
                                     to: payerEmail,
@@ -1382,7 +1383,7 @@ export default function StudentSchedule() {
                                         date: format(selectedTime, 'yyyy-MM-dd'),
                                         time: format(selectedTime, 'HH:mm'),
                                         amount: selectedSubject?.price ?? null,
-                                        paymentLink: checkoutUrl,
+                                        paymentLink: stableLink,
                                     },
                                 });
                                 if (!payOk) {

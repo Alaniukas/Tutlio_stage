@@ -1587,6 +1587,7 @@ export default function CalendarPage() {
               if (checkoutJson?.creditFullyCovered) {
                 console.info('[Calendar] Credit fully covered lesson (recurring)');
               } else if (checkoutRes.ok && checkoutJson?.url) {
+                const stableLink = `${window.location.origin}/api/pay-session?session=${firstSession.id}`;
                 sendEmail({
                   type: 'stripe_payment_forwarding',
                   to: payerEmail,
@@ -1596,7 +1597,7 @@ export default function CalendarPage() {
                     date: format(firstStart, 'yyyy-MM-dd'),
                     time: format(firstStart, 'HH:mm'),
                     amount: firstSession.price ?? price,
-                    paymentLink: checkoutJson.url,
+                    paymentLink: stableLink,
                     ...(orgIdBranding ? { organizationId: orgIdBranding } : {}),
                   },
                 }).catch((err) => console.error('Error sending parent payment email (recurring):', err));
@@ -1882,6 +1883,7 @@ export default function CalendarPage() {
             if (checkoutJson?.creditFullyCovered) {
               console.info('[Calendar] Credit fully covered lesson');
             } else if (checkoutRes.ok && checkoutJson?.url) {
+              const stableLink = `${window.location.origin}/api/pay-session?session=${session.id}`;
               sendEmail({
                 type: 'stripe_payment_forwarding',
                 to: payerEmail,
@@ -1891,7 +1893,7 @@ export default function CalendarPage() {
                   date: format(startDate, 'yyyy-MM-dd'),
                   time: format(startDate, 'HH:mm'),
                   amount: session.price ?? price,
-                  paymentLink: checkoutJson.url,
+                  paymentLink: stableLink,
                   ...(orgIdNewSessions ? { organizationId: orgIdNewSessions } : {}),
                 },
               }).catch((err) => console.error('Error sending parent payment email:', err));
@@ -2282,6 +2284,7 @@ export default function CalendarPage() {
               if (checkoutJson?.creditFullyCovered) {
                 console.info('[Calendar] Credit fully covered lesson (assign)');
               } else if (checkoutRes.ok && checkoutJson?.url) {
+                const stableLink = `${window.location.origin}/api/pay-session?session=${sessionData.id}`;
                 sendEmail({
                   type: 'stripe_payment_forwarding',
                   to: payerEmail,
@@ -2291,7 +2294,7 @@ export default function CalendarPage() {
                     date: dateStr,
                     time: assignSelectedSlot,
                     amount: sessionData.price ?? price,
-                    paymentLink: checkoutJson.url,
+                    paymentLink: stableLink,
                     ...(orgIdAssign ? { organizationId: orgIdAssign } : {}),
                   },
                 }).catch(err => console.error('Error sending parent payment email:', err));

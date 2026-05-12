@@ -394,10 +394,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
         }
 
-        // 10. Send email to payer with package details, payment link, and optional invoice PDF
+        // 10. Send email to payer with package details, payment link, and optional invoice PDF.
+        // Use stable /api/pay-package redirect so the link never expires.
+        const stablePackagePaymentLink = `${APP_URL}/api/pay-package?package=${lessonPackage.id}`;
         let emailSent = false;
         const toEmail = (customerEmail || '').trim();
-        if (toEmail && checkoutSession.url) {
+        if (toEmail && (checkoutSession.url || checkoutSession.id)) {
             try {
                 const emailPayload: Record<string, unknown> = {
                     type: 'prepaid_package_request',
@@ -410,7 +412,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         totalLessons,
                         pricePerLesson: pricePerLesson.toFixed(2),
                         totalPrice: payerChargedTotalEur.toFixed(2),
-                        paymentLink: checkoutSession.url,
+                        paymentLink: stablePackagePaymentLink,
                         ...((tutor as any).organization_id ? { organizationId: (tutor as any).organization_id } : {}),
                     },
                 };

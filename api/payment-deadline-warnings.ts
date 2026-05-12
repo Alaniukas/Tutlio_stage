@@ -64,16 +64,8 @@ async function getOrgAdminProfiles(
         .filter((p) => p.email.length > 0);
 }
 
-async function getPaymentUrl(sessionId: string, payerEmail: string | null): Promise<string | null> {
-    const url = `${BASE_URL}/api/stripe-checkout`;
-    const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
-        body: JSON.stringify({ sessionId, payerEmail: payerEmail || undefined }),
-    });
-    if (!res.ok) return null;
-    const json = await res.json();
-    return json.url || null;
+function getStablePaymentUrl(sessionId: string): string {
+    return `${BASE_URL}/api/pay-session?session=${sessionId}`;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -299,25 +291,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                 },
                             });
                         } else {
-                            const paymentUrl = await getPaymentUrl(session.id, rawPayerEmail);
-                            if (paymentUrl) {
-                                await sendWarningEmail({
-                                    type: 'payment_reminder',
-                                    to: rawPayerEmail,
-                                    data: {
-                                        studentName: student.full_name,
-                                        tutorName: tutor.full_name,
-                                        recipientName: studentObj?.payer_name || undefined,
-                                        date: sessionDate,
-                                        time: sessionTime,
-                                        price: session.price ?? 0,
-                                        deadlineHours: deadlineHoursForEmail,
-                                        paymentTiming,
-                                        paymentUrl,
-                                        ...(orgIdForPayer ? { organizationId: orgIdForPayer } : {}),
-                                    },
-                                });
-                            }
+                            const paymentUrl = getStablePaymentUrl(session.id);
+                            await sendWarningEmail({
+                                type: 'payment_reminder',
+                                to: rawPayerEmail,
+                                data: {
+                                    studentName: student.full_name,
+                                    tutorName: tutor.full_name,
+                                    recipientName: studentObj?.payer_name || undefined,
+                                    date: sessionDate,
+                                    time: sessionTime,
+                                    price: session.price ?? 0,
+                                    deadlineHours: deadlineHoursForEmail,
+                                    paymentTiming,
+                                    paymentUrl,
+                                    ...(orgIdForPayer ? { organizationId: orgIdForPayer } : {}),
+                                },
+                            });
                         }
                     }
                 }

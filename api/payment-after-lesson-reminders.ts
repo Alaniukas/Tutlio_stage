@@ -27,16 +27,8 @@ function hasPerLessonModel(value: string | null | undefined): boolean {
         .includes('per_lesson');
 }
 
-async function getPaymentUrl(sessionId: string, payerEmail: string | null): Promise<string | null> {
-    const url = `${BASE_URL}/api/stripe-checkout`;
-    const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
-        body: JSON.stringify({ sessionId, payerEmail: payerEmail || undefined }),
-    });
-    if (!res.ok) return null;
-    const json = await res.json();
-    return json.url || null;
+function getStablePaymentUrl(sessionId: string): string {
+    return `${BASE_URL}/api/pay-session?session=${sessionId}`;
 }
 
 async function sendEmail(payload: any): Promise<boolean> {
@@ -139,18 +131,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
 
             const tutorManual = tutorUsesManualStudentPayments(tutor);
-            let paymentLink: string | null = null;
+            let paymentLink: string;
             if (tutorManual) {
                 paymentLink =
                     student?.payment_payer === 'parent'
                         ? `${BASE_URL}/parent/lessons`
                         : `${BASE_URL}/student/sessions`;
             } else {
-                paymentLink = await getPaymentUrl(session.id, toEmail);
-            }
-            if (!paymentLink) {
-                skipped.push(session.id);
-                continue;
+                paymentLink = getStablePaymentUrl(session.id);
             }
 
             const deadlineHours = resolved.payment_deadline_hours;

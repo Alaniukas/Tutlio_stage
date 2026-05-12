@@ -394,11 +394,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
             const platformFeesEur = payerCheckoutTotalEur - totalLessonPrice;
 
-            // Send invoice email with optional S.F. PDF attachment
-            const monthlyEmailOk = usesManualStudentPayments ? true : Boolean(checkoutSession?.url);
+            // Send invoice email with optional S.F. PDF attachment.
+            // Use /api/pay-invoice redirect URL so the link never expires
+            // (a fresh Stripe Checkout Session is created when the payer clicks).
+            const stablePaymentLink = `${APP_URL}/api/pay-invoice?batch=${billingBatch.id}`;
+            const monthlyEmailOk = usesManualStudentPayments ? true : Boolean(checkoutSession?.url || checkoutSession?.id);
             if (monthlyEmailOk) {
                 try {
                     const invoiceOrgId = (tutor as any).organization_id || null;
+                    const deadlineStr = paymentDeadlineDate.toLocaleDateString('lt-LT', {
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                    });
                     const emailData = usesManualStudentPayments
                         ? {
                               recipientName: payerName,
@@ -409,13 +419,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                               lessonsTotal: totalLessonPrice.toFixed(2),
                               platformFees: platformFeesEur > 0 ? platformFeesEur.toFixed(2) : undefined,
                               totalAmount: payerCheckoutTotalEur.toFixed(2),
-                              paymentDeadline: paymentDeadlineDate.toLocaleDateString('lt-LT', {
-                                  year: 'numeric',
-                                  month: '2-digit',
-                                  day: '2-digit',
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                              }),
+                              paymentDeadline: deadlineStr,
                               manualPaymentInstructions: true,
                               bankDetails: tutorManualBankDetails || undefined,
                               paymentLink: `${APP_URL}/student/sessions`,
@@ -430,14 +434,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                               lessonsTotal: totalLessonPrice.toFixed(2),
                               platformFees: platformFeesEur > 0 ? platformFeesEur.toFixed(2) : undefined,
                               totalAmount: payerCheckoutTotalEur.toFixed(2),
-                              paymentDeadline: paymentDeadlineDate.toLocaleDateString('lt-LT', {
-                                  year: 'numeric',
-                                  month: '2-digit',
-                                  day: '2-digit',
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                              }),
-                              paymentLink: checkoutSession!.url as string,
+                              paymentDeadline: deadlineStr,
+                              paymentLink: stablePaymentLink,
                               ...(invoiceOrgId ? { organizationId: invoiceOrgId } : {}),
                           };
                     const emailPayload: Record<string, unknown> = {

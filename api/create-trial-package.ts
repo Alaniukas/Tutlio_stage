@@ -377,12 +377,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .update({ stripe_checkout_session_id: checkoutSession.id, total_price: payerChargedTotalEur })
       .eq('id', lessonPackage.id);
 
-    // Send email to payer with trial payment link (same template as prepaid packages)
+    // Send email to payer with trial payment link.
+    // Use stable /api/pay-package redirect so the link never expires.
+    const stableTrialPaymentLink = `${APP_URL}/api/pay-package?package=${lessonPackage.id}`;
     const toEmail = (customerEmail || '').trim();
-    if (toEmail && checkoutSession.url) {
+    if (toEmail && (checkoutSession.url || checkoutSession.id)) {
       const requestOrigin = req.headers.origin ? String(req.headers.origin) : null;
       const sendEmailUrl = `${requestOrigin || APP_URL}/api/send-email`;
-      // Important: don't block the request; email sending can be slow.
       void fetch(sendEmailUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
@@ -397,7 +398,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             totalLessons: 1,
             pricePerLesson: trialPriceEur.toFixed(2),
             totalPrice: payerChargedTotalEur.toFixed(2),
-            paymentLink: checkoutSession.url,
+            paymentLink: stableTrialPaymentLink,
             ...((tutor as any).organization_id ? { organizationId: (tutor as any).organization_id } : {}),
           },
         }),
