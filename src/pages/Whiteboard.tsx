@@ -62,10 +62,13 @@ export default function WhiteboardPage() {
       }
     : null;
 
+  const persistSceneToStorage = Boolean(session && user && user.id === session.tutor_id);
+
   const { participants, saving, loaded, onChange, saveScene } = useWhiteboardSync(
     session?.id ?? null,
     excalidrawAPI,
     currentUser,
+    persistSceneToStorage,
   );
 
   useEffect(() => {
