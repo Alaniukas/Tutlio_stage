@@ -26,6 +26,10 @@ import { enUS } from 'date-fns/locale';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 
 import Layout from '@/components/Layout';
+import {
+  allowsPerLessonPaymentForStudent,
+  defaultSessionPaymentStatusForStudent,
+} from '@/lib/studentPaymentModel';
 import { tutorUsesManualStudentPayments } from '@/lib/subscription';
 import { useTranslation } from '@/lib/i18n';
 import { supabase } from '@/lib/supabase';
@@ -1298,7 +1302,6 @@ export default function CalendarPage() {
       const subject = subjects.find((s) => s.id === selectedSubjectId);
       const studentIdsToCreate = isGroupLesson ? selectedStudentIds : [selectedStudentId];
 
-      const tspRecur = getTutorSubjectPrice(subject?.name);
       // Determine which days to create templates for
       const daysToCreate = (recurringFrequency !== 'monthly' && selectedWeekdays.length > 0)
         ? selectedWeekdays
@@ -1317,10 +1320,7 @@ export default function CalendarPage() {
         }
 
         for (const studentId of studentIdsToCreate) {
-          const pricing = individualPricing.find(
-            (p) => p.student_id === studentId && p.subject_id === selectedSubjectId
-          );
-          const studentPrice = pricing?.price ?? tspRecur?.price ?? subject?.price ?? price;
+          const studentPrice = price;
 
           const { data: template } = await supabase
             .from('recurring_individual_sessions')
@@ -1383,16 +1383,17 @@ export default function CalendarPage() {
 
       for (const template of recurringTemplates) {
         let current = new Date(template.firstOccurrence);
-        const pricing = individualPricing.find(
-          (p: any) => p.student_id === template.student_id && p.subject_id === selectedSubjectId
-        );
-        const studentPrice = pricing?.price ?? tspRecur?.price ?? subject?.price ?? price;
+        const studentPrice = price;
 
         while (!isBefore(endLimit, current)) {
           const sessionEnd = new Date(current.getTime() + durationMs);
 
+          const recurStudent = students.find((s) => s.id === template.student_id);
           let sessionPaid = isPaid;
-          let sessionPaymentStatus = isPaid ? 'paid' : 'pending';
+          let sessionPaymentStatus = defaultSessionPaymentStatusForStudent(recurStudent?.payment_model, {
+            paid: isPaid,
+            hasPackage: false,
+          });
           let lessonPackageId = null;
 
           if (!isPaid) {
@@ -1406,7 +1407,17 @@ export default function CalendarPage() {
                 sessionPaid = true;
                 sessionPaymentStatus = 'confirmed';
                 packagesUsage.set(pkg.id, used + 1);
+              } else {
+                sessionPaymentStatus = defaultSessionPaymentStatusForStudent(recurStudent?.payment_model, {
+                  paid: false,
+                  hasPackage: false,
+                });
               }
+            } else {
+              sessionPaymentStatus = defaultSessionPaymentStatusForStudent(recurStudent?.payment_model, {
+                paid: false,
+                hasPackage: false,
+              });
             }
           }
 
@@ -1559,12 +1570,11 @@ export default function CalendarPage() {
 
             // 2) Payment email to parent (only if not paid via package)
             const studentModel = (studentData as any)?.payment_model as string | null | undefined;
-            const allowsPerLessonNow =
-              studentModel === 'per_lesson'
-                ? true
-                : studentModel === 'monthly_billing' || studentModel === 'prepaid_packages'
-                  ? false
-                  : effectiveEnablePerLesson && !effectiveEnableMonthlyBilling;
+            const allowsPerLessonNow = allowsPerLessonPaymentForStudent(
+              studentModel,
+              effectiveEnablePerLesson,
+              effectiveEnableMonthlyBilling,
+            );
 
             const shouldSendParentPaymentNow =
               !firstSession.paid &&
@@ -1676,18 +1686,17 @@ export default function CalendarPage() {
       // Check for lesson packages for each student and prepare sessions
       const sessionsToInsert = [];
       const packagesToUpdate = [];
-      const tspSingle = getTutorSubjectPrice(subject?.name);
 
       for (const studentId of studentIdsToCreate) {
-        // Check for individual pricing for THIS student
-        const pricing = individualPricing.find(
-          (p) => p.student_id === studentId && p.subject_id === selectedSubjectId
-        );
-        const studentPrice = pricing?.price ?? tspSingle?.price ?? subject?.price ?? price;
+        const studentPrice = price;
+        const studentRow = students.find((s) => s.id === studentId);
 
         // Check if student has available lesson package for this subject
         let sessionPaid = isPaid;
-        let sessionPaymentStatus = isPaid ? 'paid' : 'pending';
+        let sessionPaymentStatus = defaultSessionPaymentStatusForStudent(studentRow?.payment_model, {
+          paid: isPaid,
+          hasPackage: false,
+        });
         let lessonPackageId = null;
 
         if (!isPaid && selectedSubjectId) {
@@ -1714,6 +1723,11 @@ export default function CalendarPage() {
               available_lessons: pkg.available_lessons - 1,
               reserved_lessons: pkg.reserved_lessons + 1,
               studentId: studentId
+            });
+          } else {
+            sessionPaymentStatus = defaultSessionPaymentStatusForStudent(studentRow?.payment_model, {
+              paid: false,
+              hasPackage: false,
             });
           }
         }
@@ -1854,12 +1868,11 @@ export default function CalendarPage() {
 
           // 2) Send payment email to parent if needed (only if not paid via package)
           const studentModel = (studentData as any)?.payment_model as string | null | undefined;
-          const allowsPerLessonNow =
-            studentModel === 'per_lesson'
-              ? true
-              : studentModel === 'monthly_billing' || studentModel === 'prepaid_packages'
-                ? false
-                : effectiveEnablePerLesson && !effectiveEnableMonthlyBilling;
+          const allowsPerLessonNow = allowsPerLessonPaymentForStudent(
+            studentModel,
+            effectiveEnablePerLesson,
+            effectiveEnableMonthlyBilling,
+          );
 
           const shouldSendParentPaymentNow =
             !session.paid &&
@@ -2120,7 +2133,10 @@ export default function CalendarPage() {
 
         // Check if student has available lesson package for this subject
         let sessionPaid = false;
-        let sessionPaymentStatus = 'pending';
+        let sessionPaymentStatus = defaultSessionPaymentStatusForStudent(student?.payment_model, {
+          paid: false,
+          hasPackage: false,
+        });
         let lessonPackageId = null;
 
         if (assignSubjectId) {
@@ -2260,12 +2276,11 @@ export default function CalendarPage() {
           }
 
           const studentModel = student.payment_model as string | null | undefined;
-          const allowsPerLessonNow =
-            studentModel === 'per_lesson'
-              ? true
-              : studentModel === 'monthly_billing' || studentModel === 'prepaid_packages'
-                ? false
-                : effectiveEnablePerLesson && !effectiveEnableMonthlyBilling;
+          const allowsPerLessonNow = allowsPerLessonPaymentForStudent(
+            studentModel,
+            effectiveEnablePerLesson,
+            effectiveEnableMonthlyBilling,
+          );
 
           const shouldSendParentPaymentNow =
             !sessionPaid &&

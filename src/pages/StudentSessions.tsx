@@ -8,7 +8,7 @@ import { sendEmail } from '@/lib/email';
 import { authHeaders } from '@/lib/apiHelpers';
 import { format, isAfter, differenceInHours, addDays, getDay } from 'date-fns';
 import { useTranslation } from '@/lib/i18n';
-import { Clock, CheckCircle, XCircle, CalendarDays, RefreshCw, ShieldAlert, ListOrdered, Mail, Video, ChevronLeft, ChevronRight, CreditCard, Loader2, Package, Users, FileText } from 'lucide-react';
+import { Clock, CheckCircle, XCircle, CalendarDays, RefreshCw, ShieldAlert, ListOrdered, Mail, Video, ChevronLeft, ChevronRight, CreditCard, Loader2, Package, Users, FileText, Landmark } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import SessionFiles from '@/components/SessionFiles';
 import WhiteboardButton from '@/components/WhiteboardButton';
@@ -24,7 +24,10 @@ import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVis
 import { useUser } from '@/contexts/UserContext';
 import { fetchStudentActiveLessonPackagesDeduped, fetchSubjectNamesByIds } from '@/lib/studentLessonPackagesLight';
 import { tutorUsesManualStudentPayments } from '@/lib/subscription';
-import { hasStudentPaymentModel } from '@/lib/studentPaymentModel';
+import {
+    isMonthlyBillingOnlyStudent,
+    shouldShowPerLessonPaymentUi,
+} from '@/lib/studentPaymentModel';
 
 interface Session {
     id: string;
@@ -140,9 +143,16 @@ export default function StudentSessions() {
         { kind: 'stripe' } | { kind: 'manual'; contact: 'tutor' | 'org_admin' } | null
     >(null);
     const [studentPaymentModel, setStudentPaymentModel] = useState<string | null>(null);
+    const [studentPaymentOverrideActive, setStudentPaymentOverrideActive] = useState(false);
+    const [tutorPaymentFlags, setTutorPaymentFlags] = useState({
+        enable_per_lesson: true,
+        enable_monthly_billing: false,
+    });
     const [manualPaymentsOnly, setManualPaymentsOnly] = useState(false);
     const [creditBalance, setCreditBalance] = useState(0);
     const [tutorOrgIsSchool, setTutorOrgIsSchool] = useState(false);
+    const [tutorPerlasEnabled, setTutorPerlasEnabled] = useState(false);
+    const [perlasLoading, setPerlasLoading] = useState(false);
     const [activePackages, setActivePackages] = useState<PackageSummary[]>([]);
     const [showAllSessions, setShowAllSessions] = useState(false);
     const [invoicePaidSuccessOpen, setInvoicePaidSuccessOpen] = useState(false);
@@ -403,6 +413,31 @@ export default function StudentSessions() {
         setStripeLoading(false);
     };
 
+    const handlePerlasPayment = async (session: Session) => {
+        setPerlasLoading(true);
+        try {
+            const res = await fetch('/api/perlas-payment-init', {
+                method: 'POST',
+                headers: await authHeaders(),
+                body: JSON.stringify({ sessionId: session.id }),
+            });
+            const json = await res.json().catch(() => ({ error: t('stuSess.paymentConnectFailed') }));
+            if (json.url && json.token) {
+                if ((window as any).PerlasPay) {
+                    (window as any).PerlasPay.init(json.url, json.token);
+                } else {
+                    window.location.href = `${json.url}pay/${json.token}`;
+                }
+                setPerlasLoading(false);
+                return;
+            }
+            alert(json.error || t('stuSess.paymentCreateFailed'));
+        } catch {
+            alert(t('stuSess.paymentConnectFailed'));
+        }
+        setPerlasLoading(false);
+    };
+
     // Auto-open modal when arriving from dashboard / Stripe success with navigation state
     useEffect(() => {
         if (navStateConsumed.current) return;
@@ -594,6 +629,7 @@ export default function StudentSessions() {
             setTutorEmail(null);
         }
         setStudentPaymentModel(st.payment_model || null);
+        setStudentPaymentOverrideActive(!!(st as { payment_override_active?: boolean }).payment_override_active);
         setCreditBalance(Number(st.credit_balance || 0));
         setTutorOrgIsSchool(String((st as { tutor_organization_entity_type?: string }).tutor_organization_entity_type ?? '').trim() === 'school');
         // OPTIMIZED: Limit sessions to recent past + future (6 months range)
@@ -604,7 +640,7 @@ export default function StudentSessions() {
             st.tutor_id
                 ? supabase
                       .from('profiles')
-                      .select('organization_id, subscription_plan, manual_subscription_exempt, enable_manual_student_payments')
+                      .select('organization_id, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, perlas_finance_enabled, enable_per_lesson, enable_monthly_billing')
                       .eq('id', st.tutor_id)
                       .maybeSingle()
                 : Promise.resolve({ data: null });
@@ -631,10 +667,42 @@ export default function StudentSessions() {
                   subscription_plan?: string | null;
                   manual_subscription_exempt?: boolean | null;
                   enable_manual_student_payments?: boolean | null;
+                  perlas_finance_enabled?: boolean | null;
+                  enable_per_lesson?: boolean | null;
+                  enable_monthly_billing?: boolean | null;
               }
             | null
             | undefined;
         setManualPaymentsOnly(tutorUsesManualStudentPayments(tutorSub));
+
+        let enablePerLesson = tutorSub?.enable_per_lesson ?? true;
+        let enableMonthlyBilling = !!tutorSub?.enable_monthly_billing;
+        if (tutorSub?.organization_id) {
+            const { data: orgPay } = await supabase
+                .from('organizations')
+                .select('enable_per_lesson, enable_monthly_billing')
+                .eq('id', tutorSub.organization_id)
+                .maybeSingle();
+            if (orgPay) {
+                enablePerLesson = (orgPay as { enable_per_lesson?: boolean }).enable_per_lesson ?? enablePerLesson;
+                enableMonthlyBilling = !!(orgPay as { enable_monthly_billing?: boolean }).enable_monthly_billing;
+            }
+        }
+        setTutorPaymentFlags({
+            enable_per_lesson: enablePerLesson,
+            enable_monthly_billing: enableMonthlyBilling,
+        });
+
+        let perlasFlag = !!tutorSub?.perlas_finance_enabled;
+        if (!perlasFlag && tutorSub?.organization_id) {
+            const { data: orgP, error: orgPErr } = await supabase
+                .from('organizations')
+                .select('perlas_finance_enabled')
+                .eq('id', tutorSub.organization_id)
+                .maybeSingle();
+            perlasFlag = !!(orgP as any)?.perlas_finance_enabled;
+        }
+        setTutorPerlasEnabled(perlasFlag);
 
         if (sessionsRes.error) {
             console.warn('[StudentSessions] sessions load:', sessionsRes.error.code, sessionsRes.error.message);
@@ -1018,13 +1086,16 @@ export default function StudentSessions() {
         setSaving(false);
     };
 
-    const isMonthlyBilling = hasStudentPaymentModel(studentPaymentModel, 'monthly_billing');
-    const isPerLesson = hasStudentPaymentModel(studentPaymentModel, 'per_lesson');
-    const showPerLessonStripeButton = !isMonthlyBilling || isPerLesson;
+    const showPerLessonStripeButton = shouldShowPerLessonPaymentUi(
+        studentPaymentModel,
+        studentPaymentOverrideActive,
+        tutorPaymentFlags,
+    );
+    const isMonthlyBillingOnly = isMonthlyBillingOnlyStudent(studentPaymentModel);
 
     const getSessionPaymentType = (session: Session): 'package' | 'monthly' | 'per_lesson' => {
         if (session.lesson_package_id) return 'package';
-        if (isMonthlyBilling && !isPerLesson) return 'monthly';
+        if (isMonthlyBillingOnly) return 'monthly';
         return 'per_lesson';
     };
 
@@ -1076,7 +1147,10 @@ export default function StudentSessions() {
             if (filter === 'upcoming') return isAfter(new Date(s.end_time), now) && s.status === 'active';
             if (filter === 'past') return !isAfter(new Date(s.end_time), now) && s.status !== 'cancelled';
             if (filter === 'paid') return s.paid === true && s.status === 'active';
-            if (filter === 'unpaid') return s.paid === false && s.status === 'active';
+            if (filter === 'unpaid') {
+                if (!showPerLessonStripeButton) return false;
+                return s.paid === false && s.status === 'active';
+            }
             if (filter === 'cancelled') return s.status === 'cancelled';
             return true;
         });
@@ -1499,7 +1573,7 @@ export default function StudentSessions() {
                                                         <span className="text-sm text-green-600 font-bold">{t('stuSess.paid')}</span>
                                                     </div>
                                                 ) : s.price ? (
-                                                    isMonthlyBilling && !showPerLessonStripeButton ? (
+                                                    isMonthlyBillingOnly ? (
                                                         <span className="text-sm font-black text-blue-600">€{s.price} <span className="text-xs text-blue-500/80 font-semibold">{t('stuSess.invoiceShort')}</span></span>
                                                     ) : (
                                                         <span className="text-sm font-black text-amber-600">€{s.price} <span className="text-xs text-amber-500/80 font-semibold">(Laukia)</span></span>
@@ -1570,7 +1644,13 @@ export default function StudentSessions() {
                                 </div>
                                 <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100 flex flex-col items-center justify-center">
                                     <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wider">Statusas</p>
-                                    <StatusBadge status={selectedSession?.status || ''} paymentStatus={selectedSession?.payment_status} paid={selectedSession?.paid} endTime={selectedSession?.end_time} />
+                                    <StatusBadge
+                                        status={selectedSession?.status || ''}
+                                        paymentStatus={selectedSession?.payment_status}
+                                        paid={selectedSession?.paid}
+                                        endTime={selectedSession?.end_time}
+                                        treatUnpaidAsReserved={!showPerLessonStripeButton}
+                                    />
                                 </div>
                             </div>
                         )}
@@ -1627,7 +1707,7 @@ export default function StudentSessions() {
                         />
 
                         {/* Monthly billing info note */}
-                        {selectedSession?.status === 'active' && !selectedSession.paid && isMonthlyBilling && !showPerLessonStripeButton && (
+                        {selectedSession?.status === 'active' && !selectedSession.paid && isMonthlyBillingOnly && (
                             <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-blue-50 border border-blue-100 text-sm text-blue-700">
                                 <CalendarDays className="w-4 h-4 flex-shrink-0" />
                                 <span>{t('stuSess.monthlyBillingNote')}</span>
@@ -1655,6 +1735,18 @@ export default function StudentSessions() {
                                             : <><CreditCard className="w-4 h-4" /> {t('stuSess.payStripe', { amount: formatLessonStripeChargeEur(Math.max(0, (selectedSession.price || 0) - creditBalance), tutorOrgIsSchool) })}</>
                                     }
                                 </button>
+                                {tutorPerlasEnabled && (
+                                    <button
+                                        onClick={() => handlePerlasPayment(selectedSession)}
+                                        disabled={perlasLoading}
+                                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 text-white font-semibold hover:from-teal-700 hover:to-emerald-700 transition-all shadow-sm disabled:opacity-60"
+                                    >
+                                        {perlasLoading
+                                            ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
+                                            : <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank')}</>
+                                        }
+                                    </button>
+                                )}
                             </div>
                         )}
 

@@ -68,6 +68,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const tutor = session.profiles as any;
         const student = session.students as any;
 
+        const studentPaymentModelRaw = String(student?.payment_model || '').trim();
+        const allowsPerLessonPayment =
+            !studentPaymentModelRaw ||
+            studentPaymentModelRaw
+                .split(',')
+                .map((part: string) => part.trim())
+                .includes('per_lesson');
+
+        if (!allowsPerLessonPayment) {
+            return res.status(400).send(
+                errorPage(
+                    'Apmokėjimas nereikalingas',
+                    'Šiam mokiniui taikomas mėnesinis arba paketinis atsiskaitymas. Pamoką apmokėsite gavę mėnesinę sąskaitą.',
+                ),
+            );
+        }
+
         if (tutorUsesManualStudentPayments(tutor)) {
             return res.redirect(302, `${APP_URL}/student/sessions`);
         }
