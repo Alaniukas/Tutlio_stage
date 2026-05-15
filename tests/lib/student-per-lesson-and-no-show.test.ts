@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { resolvePerLessonPaymentRules } from '@/lib/studentPaymentModel';
+import {
+  allowsPerLessonPaymentForStudent,
+  defaultSessionPaymentStatusForStudent,
+  resolvePerLessonPaymentRules,
+  shouldRequestPerLessonCheckout,
+  shouldShowPerLessonPaymentUi,
+  studentPerLessonDebtBlocksBooking,
+} from '@/lib/studentPaymentModel';
 import {
   defaultNoShowWhenForNow,
   noShowWhenLabelLt,
@@ -9,6 +16,69 @@ import {
 import { calculateSessionStats, type Session } from '@/lib/session-stats';
 
 const tutorDefaults = { payment_timing: 'before_lesson' as const, payment_deadline_hours: 24 };
+
+describe('studentPerLessonDebtBlocksBooking', () => {
+  it('blocks when payment_model unset (default per-lesson debt)', () => {
+    expect(studentPerLessonDebtBlocksBooking(null)).toBe(true);
+    expect(studentPerLessonDebtBlocksBooking('')).toBe(true);
+  });
+
+  it('does not block for monthly_billing only', () => {
+    expect(studentPerLessonDebtBlocksBooking('monthly_billing')).toBe(false);
+  });
+
+  it('blocks when per_lesson is selected (alone or with monthly)', () => {
+    expect(studentPerLessonDebtBlocksBooking('per_lesson')).toBe(true);
+    expect(studentPerLessonDebtBlocksBooking('monthly_billing,per_lesson')).toBe(true);
+  });
+});
+
+describe('defaultSessionPaymentStatusForStudent', () => {
+  it('uses confirmed for monthly-billing-only unpaid lessons', () => {
+    expect(
+      defaultSessionPaymentStatusForStudent('monthly_billing', { paid: false, hasPackage: false }),
+    ).toBe('confirmed');
+  });
+
+  it('uses pending for per-lesson unpaid lessons', () => {
+    expect(defaultSessionPaymentStatusForStudent('per_lesson', { paid: false, hasPackage: false })).toBe(
+      'pending',
+    );
+  });
+});
+
+describe('shouldShowPerLessonPaymentUi / shouldRequestPerLessonCheckout', () => {
+  it('honors monthly_billing on student even when payment_override_active is false', () => {
+    expect(shouldShowPerLessonPaymentUi('monthly_billing', false)).toBe(false);
+    expect(shouldRequestPerLessonCheckout('monthly_billing', false)).toBe(false);
+  });
+
+  it('shows per-lesson UI when per_lesson is selected', () => {
+    expect(shouldShowPerLessonPaymentUi('per_lesson', true)).toBe(true);
+    expect(shouldShowPerLessonPaymentUi('monthly_billing,per_lesson', true)).toBe(true);
+  });
+
+  it('uses tutor finance flags when override on and student model unset', () => {
+    expect(
+      shouldShowPerLessonPaymentUi(null, true, {
+        enable_per_lesson: false,
+        enable_monthly_billing: true,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('allowsPerLessonPaymentForStudent', () => {
+  it('uses tutor flags when student model unset', () => {
+    expect(allowsPerLessonPaymentForStudent(null, true, false)).toBe(true);
+    expect(allowsPerLessonPaymentForStudent(null, false, true)).toBe(false);
+  });
+
+  it('respects explicit monthly_billing on student', () => {
+    expect(allowsPerLessonPaymentForStudent('monthly_billing', true, false)).toBe(false);
+    expect(allowsPerLessonPaymentForStudent('per_lesson', false, true)).toBe(true);
+  });
+});
 
 describe('resolvePerLessonPaymentRules (individual per-lesson override)', () => {
   it('returns tutor defaults when payment_model is not per_lesson', () => {

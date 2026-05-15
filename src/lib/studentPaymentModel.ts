@@ -131,12 +131,73 @@ export function shouldUsePackageForBooking(
   return selectedModels.has('prepaid_packages');
 }
 
+/**
+ * Whether the student should see per-lesson payment UI (Stripe, bank transfer, pay links).
+ * Explicit `payment_model` on the student record always wins — even when override feature is off.
+ */
+export function shouldShowPerLessonPaymentUi(
+  studentPaymentModel: string | null | undefined,
+  paymentOverrideActive: boolean,
+  tutorFlags?: Pick<TutorPaymentFlags, 'enable_per_lesson' | 'enable_monthly_billing'>,
+): boolean {
+  const selectedModels = parseStudentPaymentModels(studentPaymentModel);
+  if (selectedModels.size > 0) {
+    return selectedModels.has('per_lesson');
+  }
+  if (paymentOverrideActive && tutorFlags) {
+    return allowsPerLessonPaymentForStudent(
+      null,
+      tutorFlags.enable_per_lesson,
+      tutorFlags.enable_monthly_billing,
+    );
+  }
+  return true;
+}
+
 /** Whether booking flow should request immediate Stripe/manual payment for this student. */
 export function shouldRequestPerLessonCheckout(
   studentPaymentModel: string | null | undefined,
   paymentOverrideActive: boolean,
+  tutorFlags?: Pick<TutorPaymentFlags, 'enable_per_lesson' | 'enable_monthly_billing'>,
+): boolean {
+  return shouldShowPerLessonPaymentUi(studentPaymentModel, paymentOverrideActive, tutorFlags);
+}
+
+export function isMonthlyBillingOnlyStudent(studentPaymentModel: string | null | undefined): boolean {
+  const selectedModels = parseStudentPaymentModels(studentPaymentModel);
+  return selectedModels.has('monthly_billing') && !selectedModels.has('per_lesson');
+}
+
+/** Initial `sessions.payment_status` when tutor/org creates a lesson (not yet on invoice). */
+export function defaultSessionPaymentStatusForStudent(
+  studentPaymentModel: string | null | undefined,
+  opts: { paid: boolean; hasPackage: boolean },
+): 'paid' | 'confirmed' | 'pending' {
+  if (opts.paid) return 'paid';
+  if (opts.hasPackage) return 'confirmed';
+  if (isMonthlyBillingOnlyStudent(studentPaymentModel)) return 'confirmed';
+  return 'pending';
+}
+
+/**
+ * Whether overdue unpaid sessions (not yet on invoice/package) should block new bookings.
+ * Matches DB `student_booking_blocked_overdue` session-debt branch.
+ */
+export function studentPerLessonDebtBlocksBooking(
+  studentPaymentModel: string | null | undefined,
 ): boolean {
   const selectedModels = parseStudentPaymentModels(studentPaymentModel);
-  if (!paymentOverrideActive || selectedModels.size === 0) return true;
+  if (selectedModels.size === 0) return true;
   return selectedModels.has('per_lesson');
+}
+
+/** Tutor calendar emails: send per-lesson checkout when student model allows it. */
+export function allowsPerLessonPaymentForStudent(
+  studentPaymentModel: string | null | undefined,
+  tutorEnablePerLesson: boolean,
+  tutorEnableMonthlyBilling: boolean,
+): boolean {
+  const selectedModels = parseStudentPaymentModels(studentPaymentModel);
+  if (selectedModels.size > 0) return selectedModels.has('per_lesson');
+  return tutorEnablePerLesson && !tutorEnableMonthlyBilling;
 }

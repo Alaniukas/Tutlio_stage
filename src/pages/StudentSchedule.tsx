@@ -18,7 +18,12 @@ import WhiteboardButton from '@/components/WhiteboardButton';
 import { useSearchParams, useNavigate, useMatch } from 'react-router-dom';
 import { sendEmail } from '@/lib/email';
 import { useStudentPaymentBlock } from '@/hooks/useStudentPaymentBlock';
-import { shouldRequestPerLessonCheckout, shouldUsePackageForBooking } from '@/lib/studentPaymentModel';
+import {
+    defaultSessionPaymentStatusForStudent,
+    shouldRequestPerLessonCheckout,
+    shouldShowPerLessonPaymentUi,
+    shouldUsePackageForBooking,
+} from '@/lib/studentPaymentModel';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
 import { formatLessonStripeChargeEur } from '@/lib/stripeLessonPricing';
 import { ParentLessonDetailModal } from '@/components/parent/ParentLessonDetailModal';
@@ -1201,7 +1206,12 @@ export default function StudentSchedule() {
             end_time: endDT.toISOString(),
             status: 'active',
             paid: usesPackage,
-            payment_status: usesPackage ? 'paid' : 'pending',
+            payment_status: usesPackage
+                ? 'paid'
+                : defaultSessionPaymentStatusForStudent(studentPaymentModel, {
+                      paid: false,
+                      hasPackage: false,
+                  }),
             topic: selectedSubject?.name || null,
             price: selectedSubject?.price || null,
             meeting_link: studentPersonalMeetingLink || tutorPersonalMeetingLink || selectedSubject?.meeting_link || null,
@@ -1666,6 +1676,11 @@ export default function StudentSchedule() {
         }
         return <StudentLayout>{layoutChildren}</StudentLayout>;
     };
+
+    const showPerLessonPayment = shouldShowPerLessonPaymentUi(
+        studentPaymentModel,
+        studentPaymentOverrideActive,
+    );
 
     return (
         <>
@@ -2196,7 +2211,13 @@ export default function StudentSchedule() {
                                     </div>
                                     <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100 flex flex-col items-center justify-center">
                                         <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wider">{t('studentDash.statusLabel')}</p>
-                                        <StatusBadge status={mySessionData?.status || ''} paymentStatus={mySessionData?.payment_status} paid={mySessionData?.paid} endTime={mySessionData?.end_time} />
+                                        <StatusBadge
+                                            status={mySessionData?.status || ''}
+                                            paymentStatus={mySessionData?.payment_status}
+                                            paid={mySessionData?.paid}
+                                            endTime={mySessionData?.end_time}
+                                            treatUnpaidAsReserved={!showPerLessonPayment}
+                                        />
                                     </div>
                                 </div>
                             )}

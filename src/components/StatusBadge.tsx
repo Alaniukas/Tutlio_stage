@@ -17,6 +17,8 @@ interface StatusBadgeProps {
     noShowDetail?: string | null;
     orgTutorCopy?: boolean;
     hidePaymentStatus?: boolean;
+    /** Unpaid active lessons show "Rezervuota" (e.g. monthly billing — no per-lesson payment). */
+    treatUnpaidAsReserved?: boolean;
     /** When set, past `active` sessions are treated as occurred for display (until marked completed). */
     endTime?: string | Date | null;
 }
@@ -30,6 +32,7 @@ export default function StatusBadge({
     noShowDetail,
     orgTutorCopy,
     hidePaymentStatus,
+    treatUnpaidAsReserved,
     endTime,
 }: StatusBadgeProps) {
     const { t } = useTranslation();
@@ -122,6 +125,21 @@ export default function StatusBadge({
             <span className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-amber-100 text-amber-700 text-xs font-medium", className)}>
                 <CreditCard className="w-3.5 h-3.5" />
                 {t('status.awaitingConfirmation')}
+            </span>
+        );
+    }
+
+    const reservedWithoutPerLessonPayment =
+        !paid &&
+        status === 'active' &&
+        !ended &&
+        (treatUnpaidAsReserved || paymentStatus === 'confirmed');
+
+    if (reservedWithoutPerLessonPayment) {
+        return (
+            <span className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-700 text-xs font-medium", className)}>
+                <Clock className="w-3.5 h-3.5" />
+                {t('status.reserved')}
             </span>
         );
     }
