@@ -1,5 +1,5 @@
 // GET /api/admin-individual-tutors — solo tutors (profiles without org, with subjects or students)
-// PATCH /api/admin-individual-tutors — body: { tutor_id, enable_manual_student_payments }
+// PATCH /api/admin-individual-tutors — body: { tutor_id, enable_manual_student_payments?, perlas_finance_enabled? }
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { timingSafeEqual } from 'crypto';
@@ -90,6 +90,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         subscription_status: string | null;
         manual_subscription_exempt: boolean | null;
         enable_manual_student_payments: boolean | null;
+        perlas_finance_enabled: boolean | null;
         organization_id: string | null;
       };
 
@@ -98,7 +99,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { data, error } = await supabase
           .from('profiles')
           .select(
-            'id, full_name, email, subscription_plan, subscription_status, manual_subscription_exempt, enable_manual_student_payments, organization_id',
+            'id, full_name, email, subscription_plan, subscription_status, manual_subscription_exempt, enable_manual_student_payments, perlas_finance_enabled, organization_id',
           )
           .in('id', part)
           .is('organization_id', null);
@@ -112,6 +113,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const tutors = merged.map((p) => ({
         ...p,
         enable_manual_student_payments: !!p.enable_manual_student_payments,
+        perlas_finance_enabled: !!p.perlas_finance_enabled,
         effective_manual_student_payments: soloTutorUsesManualStudentPayments(p),
       }));
 
@@ -121,9 +123,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method === 'PATCH') {
       const body = (typeof req.body === 'object' && req.body) || {};
       const tutorId = typeof body.tutor_id === 'string' ? body.tutor_id : '';
-      const flag = body.enable_manual_student_payments;
       if (!tutorId) return res.status(400).json({ error: 'Missing tutor_id' });
-      if (typeof flag !== 'boolean') return res.status(400).json({ error: 'enable_manual_student_payments must be boolean' });
+
+      const manualFlag = body.enable_manual_student_payments;
+      const perlasFlag = body.perlas_finance_enabled;
+      if (typeof manualFlag !== 'boolean' && typeof perlasFlag !== 'boolean') {
+        return res.status(400).json({ error: 'At least one toggle (enable_manual_student_payments or perlas_finance_enabled) must be boolean' });
+      }
 
       const idSet = await getSoloRelevantTutorIds(supabase);
       if (!idSet.has(tutorId)) {
@@ -142,25 +148,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: 'Profile belongs to an organization' });
       }
 
+      const patch: Record<string, boolean> = {};
+      if (typeof manualFlag === 'boolean') patch.enable_manual_student_payments = manualFlag;
+      if (typeof perlasFlag === 'boolean') patch.perlas_finance_enabled = perlasFlag;
+
       const { error: upErr } = await supabase
         .from('profiles')
-        .update({ enable_manual_student_payments: flag })
+        .update(patch)
         .eq('id', tutorId)
         .is('organization_id', null);
 
       if (upErr) return res.status(500).json({ error: upErr.message });
 
-      await insertAudit(supabase, 'individual_tutor.manual_student_payments', {
+      await insertAudit(supabase, 'individual_tutor.toggle_update', {
         tutor_id: tutorId,
         tutor_name: prof.full_name,
         tutor_email: prof.email,
-        enable_manual_student_payments: flag,
+        ...patch,
       });
 
       const { data: fresh } = await supabase
         .from('profiles')
         .select(
-          'id, full_name, email, subscription_plan, subscription_status, manual_subscription_exempt, enable_manual_student_payments, organization_id',
+          'id, full_name, email, subscription_plan, subscription_status, manual_subscription_exempt, enable_manual_student_payments, perlas_finance_enabled, organization_id',
         )
         .eq('id', tutorId)
         .maybeSingle();
@@ -169,9 +179,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         tutor: fresh
           ? {
               ...(fresh as object),
+              perlas_finance_enabled: !!(fresh as any).perlas_finance_enabled,
               effective_manual_student_payments: soloTutorUsesManualStudentPayments(fresh as any),
             }
-          : { id: tutorId, enable_manual_student_payments: flag },
+          : { id: tutorId, ...patch },
       });
     }
 

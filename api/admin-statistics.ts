@@ -48,39 +48,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       pageviewCountRes,
       uniqueSessionsRes,
     ] = await Promise.all([
-      // Locale distribution from profiles
       sb.rpc('admin_stats_locale_distribution'),
-
-      // Signup trends (weekly)
       sb.rpc('admin_stats_signup_trends', { since_date: since }),
-
-      // Traffic sources from analytics_events
       sb.rpc('admin_stats_traffic_sources', { since_date: since }),
-
-      // Top pages from analytics_events
       sb.rpc('admin_stats_top_pages', { since_date: since }),
-
-      // Total pageviews in period
       sb.from('analytics_events')
         .select('id', { count: 'exact', head: true })
         .eq('event_name', 'pageview')
         .gte('created_at', since),
-
-      // Unique sessions in period
-      sb.from('analytics_events')
-        .select('session_id')
-        .eq('event_name', 'pageview')
-        .gte('created_at', since),
+      sb.rpc('admin_stats_unique_sessions', { since_date: since }),
     ]);
-
-    const uniqueSessions = new Set(
-      (uniqueSessionsRes.data || []).map((r: any) => r.session_id)
-    ).size;
 
     return res.status(200).json({
       period_days: daysBack,
       total_pageviews: pageviewCountRes.count ?? 0,
-      unique_sessions: uniqueSessions,
+      unique_sessions: uniqueSessionsRes.data ?? 0,
       locale_distribution: localeRes.data || [],
       signup_trends: signupRes.data || [],
       traffic_sources: trafficRes.data || [],

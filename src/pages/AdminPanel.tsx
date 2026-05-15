@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { AlertCircle, CheckCircle2, Building2, Lock, Plus, Eye, EyeOff, ArrowLeft, List, Pencil, FileText, Users, BarChart3 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Building2, Lock, Plus, Eye, EyeOff, ArrowLeft, List, Pencil, FileText, Users, BarChart3, Landmark } from 'lucide-react';
 import { FEATURE_REGISTRY, FEATURE_CATEGORIES, getFeaturesByCategory } from '@/lib/featureRegistry';
 import { useTranslation } from '@/lib/i18n';
 import AdminBlogPanel from '@/components/admin/AdminBlogPanel';
 import AdminStatisticsPanel from '@/components/admin/AdminStatisticsPanel';
+import AdminPerlasPayoutsPanel from '@/components/admin/AdminPerlasPayoutsPanel';
 type Step = 'lock' | 'panel';
 
 interface FormState {
@@ -71,7 +72,7 @@ interface AuditRow {
   details: Record<string, unknown>;
 }
 
-type PanelView = 'list' | 'create' | 'createSchool' | 'detail' | 'blog' | 'soloTutors' | 'statistics';
+type PanelView = 'list' | 'create' | 'createSchool' | 'detail' | 'blog' | 'soloTutors' | 'statistics' | 'perlasPayouts';
 
 interface SoloTutorAdminRow {
   id: string;
@@ -80,6 +81,7 @@ interface SoloTutorAdminRow {
   subscription_plan: string | null;
   subscription_status: string | null;
   enable_manual_student_payments: boolean;
+  perlas_finance_enabled: boolean;
   effective_manual_student_payments: boolean;
 }
 
@@ -123,6 +125,7 @@ export default function AdminPanel() {
   const [editTutorLicenseCount, setEditTutorLicenseCount] = useState(0);
   const [editStatus, setEditStatus] = useState<'active' | 'suspended'>('active');
   const [editFeatures, setEditFeatures] = useState<Record<string, boolean>>({});
+  const [editPerlasFinanceEnabled, setEditPerlasFinanceEnabled] = useState(false);
   const [detailName, setDetailName] = useState('');
   const [saveLoading, setSaveLoading] = useState(false);
   const [archiveLoadingTutorId, setArchiveLoadingTutorId] = useState<string | null>(null);
@@ -270,6 +273,33 @@ export default function AdminPanel() {
     }
   };
 
+  const toggleSoloPerlasFinance = async (row: SoloTutorAdminRow) => {
+    const next = !row.perlas_finance_enabled;
+    setSoloToggleLoadingId(row.id);
+    setResult(null);
+    try {
+      const res = await fetch('/api/admin-individual-tutors', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-secret': platformAdminSecret,
+        },
+        body: JSON.stringify({ tutor_id: row.id, perlas_finance_enabled: next }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setResult({ success: false, message: data.error || tRef.current('admin.failedToSave') });
+      } else {
+        setResult({ success: true, message: tRef.current('admin.saved') });
+        await fetchSoloTutors();
+      }
+    } catch {
+      setResult({ success: false, message: tRef.current('admin.serverError') });
+    } finally {
+      setSoloToggleLoadingId(null);
+    }
+  };
+
   const openDetail = async (id: string) => {
     setDetailId(id);
     setPanelView('detail');
@@ -315,6 +345,7 @@ export default function AdminPanel() {
       setEditManualPaymentUrl(typeof mpUrl === 'string' ? mpUrl : '');
       setEditSlug(org.slug || '');
       setEditLogoUrl(org.logo_url || '');
+      setEditPerlasFinanceEnabled(!!org.perlas_finance_enabled);
       setEditBrandColor(org.brand_color || '#6366f1');
       setEditBrandColorSecondary(org.brand_color_secondary || '#8b5cf6');
       setDetailTutors(data.tutors || []);
@@ -357,6 +388,7 @@ export default function AdminPanel() {
           tutor_license_count: editTutorLicenseCount,
           status: editStatus,
           features: merged,
+          perlas_finance_enabled: editPerlasFinanceEnabled,
           slug: editSlug.trim() || null,
           logo_url: editLogoUrl.trim() || null,
           brand_color: editBrandColor.trim() || '#6366f1',
@@ -654,6 +686,14 @@ export default function AdminPanel() {
             <BarChart3 className="w-4 h-4" />
             Statistics
           </button>
+          <button
+            type="button"
+            onClick={() => { setPanelView('perlasPayouts'); setDetailId(null); }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${panelView === 'perlasPayouts' ? 'bg-teal-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+          >
+            <Landmark className="w-4 h-4" />
+            Perlas Išmokėjimai
+          </button>
         </div>
 
         {result && (
@@ -684,6 +724,7 @@ export default function AdminPanel() {
                         <th className="px-4 py-3 font-medium whitespace-nowrap">{t('admin.platformSubStatus')}</th>
                         <th className="px-4 py-3 font-medium whitespace-nowrap">{t('admin.colManualEffective')}</th>
                         <th className="px-4 py-3 font-medium whitespace-nowrap">{t('admin.colManualPayments')}</th>
+                        <th className="px-4 py-3 font-medium whitespace-nowrap">PerlasFinance</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -710,6 +751,22 @@ export default function AdminPanel() {
                               <span
                                 className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
                                   row.enable_manual_student_payments ? 'translate-x-6' : 'translate-x-1'
+                                }`}
+                              />
+                            </button>
+                          </td>
+                          <td className="px-4 py-3">
+                            <button
+                              type="button"
+                              disabled={soloToggleLoadingId === row.id}
+                              onClick={() => void toggleSoloPerlasFinance(row)}
+                              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0 ${
+                                row.perlas_finance_enabled ? 'bg-teal-600' : 'bg-white/20'
+                              } ${soloToggleLoadingId === row.id ? 'opacity-60' : ''}`}
+                            >
+                              <span
+                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                  row.perlas_finance_enabled ? 'translate-x-6' : 'translate-x-1'
                                 }`}
                               />
                             </button>
@@ -1020,6 +1077,27 @@ export default function AdminPanel() {
                           </div>
                         </div>
                       ))}
+                    </div>
+
+                    {/* PerlasFinance toggle */}
+                    <div className="flex items-center justify-between rounded-xl border border-teal-500/25 bg-teal-500/5 p-4">
+                      <div>
+                        <span className="text-sm font-medium text-white">PerlasFinance</span>
+                        <p className="text-xs text-slate-400 mt-0.5">Banko pavedimų mokėjimai ir išmokėjimai</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setEditPerlasFinanceEnabled(!editPerlasFinanceEnabled)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0 ${
+                          editPerlasFinanceEnabled ? 'bg-teal-600' : 'bg-white/20'
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                            editPerlasFinanceEnabled ? 'translate-x-6' : 'translate-x-1'
+                          }`}
+                        />
+                      </button>
                     </div>
 
                     {editFeatures.custom_branding && (
@@ -1361,6 +1439,10 @@ export default function AdminPanel() {
 
         {panelView === 'statistics' && (
           <AdminStatisticsPanel adminSecret={platformAdminSecret} />
+        )}
+
+        {panelView === 'perlasPayouts' && (
+          <AdminPerlasPayoutsPanel adminSecret={platformAdminSecret} />
         )}
 
         {panelView === 'createSchool' && (

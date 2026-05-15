@@ -14,7 +14,7 @@ import { rpcGetStudentProfilesDeduped } from '@/lib/preload';
 import { useUser } from '@/contexts/UserContext';
 import { format, isAfter, isBefore } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
-import { CalendarDays, Clock, Zap, BookOpen, Settings, Play, XCircle, CheckCircle, RefreshCw, CreditCard, Loader2, Package, Users, ChevronDown, ChevronUp } from 'lucide-react';
+import { CalendarDays, Clock, Zap, BookOpen, Settings, Play, XCircle, CheckCircle, RefreshCw, CreditCard, Loader2, Package, Users, ChevronDown, ChevronUp, Landmark } from 'lucide-react';
 import { cn, normalizeUrl } from '@/lib/utils';
 import { useStudentPaymentBlock } from '@/hooks/useStudentPaymentBlock';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
@@ -66,6 +66,8 @@ export default function StudentDashboard() {
     const [activeStudentId, setActiveStudentId] = useState<string | null>(null);
     const [isSchoolOrgStudent, setIsSchoolOrgStudent] = useState(false);
     const [tutorOrgIsSchool, setTutorOrgIsSchool] = useState(false);
+    const [tutorPerlasEnabled, setTutorPerlasEnabled] = useState(false);
+    const [perlasLoading, setPerlasLoading] = useState(false);
     const { blocked: paymentBookingBlocked, loading: paymentBlockLoading } = useStudentPaymentBlock(activeStudentId);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
     const now = new Date();
@@ -93,6 +95,31 @@ export default function StudentDashboard() {
             alert(t('studentDash.connectionError'));
         }
         setStripeLoading(false);
+    };
+
+    const handlePerlasPayment = async (session: Session) => {
+        setPerlasLoading(true);
+        try {
+            const res = await fetch('/api/perlas-payment-init', {
+                method: 'POST',
+                headers: await authHeaders(),
+                body: JSON.stringify({ sessionId: session.id }),
+            });
+            const json = await res.json().catch(() => ({ error: t('stuSess.paymentConnectFailed') }));
+            if (json.url && json.token) {
+                if ((window as any).PerlasPay) {
+                    (window as any).PerlasPay.init(json.url, json.token);
+                } else {
+                    window.location.href = `${json.url}pay/${json.token}`;
+                }
+                setPerlasLoading(false);
+                return;
+            }
+            alert(json.error || t('stuSess.paymentCreateFailed'));
+        } catch {
+            alert(t('stuSess.paymentConnectFailed'));
+        }
+        setPerlasLoading(false);
     };
 
     // Visada perkrauti iš DB: student_dashboard cache gali būti pasenęs, o StudentSessions
@@ -167,7 +194,7 @@ export default function StudentDashboard() {
             const [tutorResult, sessionsResult, pkgsRows, installmentsResult] = await Promise.all([
                 studentRow.tutor_id
                     ? Promise.all([
-                        supabase.from('profiles').select('email, phone, organization_id').eq('id', studentRow.tutor_id).single(),
+                        supabase.from('profiles').select('email, phone, organization_id, perlas_finance_enabled').eq('id', studentRow.tutor_id).single(),
                         supabase.rpc('get_tutor_contact_visibility_for_student', { p_tutor_id: studentRow.tutor_id }),
                     ])
                     : Promise.resolve(null),
@@ -208,8 +235,20 @@ export default function StudentDashboard() {
                     tutorOrgSchoolResolved = oe?.entity_type === 'school';
                 }
                 setTutorOrgIsSchool(tutorOrgSchoolResolved);
+
+                let perlasFlag = !!(tutorProf as any)?.perlas_finance_enabled;
+                if (!perlasFlag && oid) {
+                    const { data: orgP } = await supabase
+                        .from('organizations')
+                        .select('perlas_finance_enabled')
+                        .eq('id', oid)
+                        .maybeSingle();
+                    perlasFlag = !!(orgP as any)?.perlas_finance_enabled;
+                }
+                setTutorPerlasEnabled(perlasFlag);
             } else {
                 setTutorOrgIsSchool(false);
+                setTutorPerlasEnabled(false);
             }
 
             setStudent({
@@ -654,16 +693,30 @@ export default function StudentDashboard() {
                         />
 
                         {selectedSession?.status === 'active' && !selectedSession.paid && paymentPayer !== 'parent' && isAfter(new Date(selectedSession.end_time), now) && (
-                            <button
-                                onClick={() => handleStripePayment(selectedSession)}
-                                disabled={stripeLoading}
-                                className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
-                            >
-                                {stripeLoading
-                                    ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('common.loading')}</>
-                                    : <><CreditCard className="w-4 h-4" /> {t('studentDash.stripePayBtn', { amount: formatLessonStripeChargeEur(selectedSession.price, tutorOrgIsSchool) })}</>
-                                }
-                            </button>
+                            <div className="space-y-2">
+                                <button
+                                    onClick={() => handleStripePayment(selectedSession)}
+                                    disabled={stripeLoading}
+                                    className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
+                                >
+                                    {stripeLoading
+                                        ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('common.loading')}</>
+                                        : <><CreditCard className="w-4 h-4" /> {t('studentDash.stripePayBtn', { amount: formatLessonStripeChargeEur(selectedSession.price, tutorOrgIsSchool) })}</>
+                                    }
+                                </button>
+                                {tutorPerlasEnabled && (
+                                    <button
+                                        onClick={() => handlePerlasPayment(selectedSession)}
+                                        disabled={perlasLoading}
+                                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 text-white font-semibold hover:from-teal-700 hover:to-emerald-700 transition-all shadow-sm disabled:opacity-60"
+                                    >
+                                        {perlasLoading
+                                            ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
+                                            : <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank')}</>
+                                        }
+                                    </button>
+                                )}
+                            </div>
                         )}
 
                         {student?.tutor && (

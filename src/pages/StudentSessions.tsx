@@ -8,7 +8,7 @@ import { sendEmail } from '@/lib/email';
 import { authHeaders } from '@/lib/apiHelpers';
 import { format, isAfter, differenceInHours, addDays, getDay } from 'date-fns';
 import { useTranslation } from '@/lib/i18n';
-import { Clock, CheckCircle, XCircle, CalendarDays, RefreshCw, ShieldAlert, ListOrdered, Mail, Video, ChevronLeft, ChevronRight, CreditCard, Loader2, Package, Users, FileText } from 'lucide-react';
+import { Clock, CheckCircle, XCircle, CalendarDays, RefreshCw, ShieldAlert, ListOrdered, Mail, Video, ChevronLeft, ChevronRight, CreditCard, Loader2, Package, Users, FileText, Landmark } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import SessionFiles from '@/components/SessionFiles';
 import WhiteboardButton from '@/components/WhiteboardButton';
@@ -143,6 +143,8 @@ export default function StudentSessions() {
     const [manualPaymentsOnly, setManualPaymentsOnly] = useState(false);
     const [creditBalance, setCreditBalance] = useState(0);
     const [tutorOrgIsSchool, setTutorOrgIsSchool] = useState(false);
+    const [tutorPerlasEnabled, setTutorPerlasEnabled] = useState(false);
+    const [perlasLoading, setPerlasLoading] = useState(false);
     const [activePackages, setActivePackages] = useState<PackageSummary[]>([]);
     const [showAllSessions, setShowAllSessions] = useState(false);
     const [invoicePaidSuccessOpen, setInvoicePaidSuccessOpen] = useState(false);
@@ -403,6 +405,31 @@ export default function StudentSessions() {
         setStripeLoading(false);
     };
 
+    const handlePerlasPayment = async (session: Session) => {
+        setPerlasLoading(true);
+        try {
+            const res = await fetch('/api/perlas-payment-init', {
+                method: 'POST',
+                headers: await authHeaders(),
+                body: JSON.stringify({ sessionId: session.id }),
+            });
+            const json = await res.json().catch(() => ({ error: t('stuSess.paymentConnectFailed') }));
+            if (json.url && json.token) {
+                if ((window as any).PerlasPay) {
+                    (window as any).PerlasPay.init(json.url, json.token);
+                } else {
+                    window.location.href = `${json.url}pay/${json.token}`;
+                }
+                setPerlasLoading(false);
+                return;
+            }
+            alert(json.error || t('stuSess.paymentCreateFailed'));
+        } catch {
+            alert(t('stuSess.paymentConnectFailed'));
+        }
+        setPerlasLoading(false);
+    };
+
     // Auto-open modal when arriving from dashboard / Stripe success with navigation state
     useEffect(() => {
         if (navStateConsumed.current) return;
@@ -604,7 +631,7 @@ export default function StudentSessions() {
             st.tutor_id
                 ? supabase
                       .from('profiles')
-                      .select('organization_id, subscription_plan, manual_subscription_exempt, enable_manual_student_payments')
+                      .select('organization_id, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, perlas_finance_enabled')
                       .eq('id', st.tutor_id)
                       .maybeSingle()
                 : Promise.resolve({ data: null });
@@ -631,10 +658,22 @@ export default function StudentSessions() {
                   subscription_plan?: string | null;
                   manual_subscription_exempt?: boolean | null;
                   enable_manual_student_payments?: boolean | null;
+                  perlas_finance_enabled?: boolean | null;
               }
             | null
             | undefined;
         setManualPaymentsOnly(tutorUsesManualStudentPayments(tutorSub));
+
+        let perlasFlag = !!tutorSub?.perlas_finance_enabled;
+        if (!perlasFlag && tutorSub?.organization_id) {
+            const { data: orgP, error: orgPErr } = await supabase
+                .from('organizations')
+                .select('perlas_finance_enabled')
+                .eq('id', tutorSub.organization_id)
+                .maybeSingle();
+            perlasFlag = !!(orgP as any)?.perlas_finance_enabled;
+        }
+        setTutorPerlasEnabled(perlasFlag);
 
         if (sessionsRes.error) {
             console.warn('[StudentSessions] sessions load:', sessionsRes.error.code, sessionsRes.error.message);
@@ -1655,6 +1694,18 @@ export default function StudentSessions() {
                                             : <><CreditCard className="w-4 h-4" /> {t('stuSess.payStripe', { amount: formatLessonStripeChargeEur(Math.max(0, (selectedSession.price || 0) - creditBalance), tutorOrgIsSchool) })}</>
                                     }
                                 </button>
+                                {tutorPerlasEnabled && (
+                                    <button
+                                        onClick={() => handlePerlasPayment(selectedSession)}
+                                        disabled={perlasLoading}
+                                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 text-white font-semibold hover:from-teal-700 hover:to-emerald-700 transition-all shadow-sm disabled:opacity-60"
+                                    >
+                                        {perlasLoading
+                                            ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
+                                            : <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank')}</>
+                                        }
+                                    </button>
+                                )}
                             </div>
                         )}
 

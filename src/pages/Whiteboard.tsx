@@ -370,17 +370,16 @@ export default function WhiteboardPage() {
         return;
       }
 
-      const EXPORT_SCALE = 2;
+      // Export only the content bounding box at 1x with JPEG compression.
+      // Previous 2x PNG export created 4x pixel data and lossless encoding,
+      // causing multi-MB PDFs even for simple whiteboard notes.
       const blob = await exportToBlobFn({
         elements,
         appState: { ...appState, exportWithDarkMode: false, exportBackground: true },
         files,
-        mimeType: 'image/png',
-        getDimensions: (w: number, h: number) => ({
-          width: w * EXPORT_SCALE,
-          height: h * EXPORT_SCALE,
-          scale: 1,
-        }),
+        mimeType: 'image/jpeg',
+        quality: 0.92,
+        exportPadding: 30,
       });
 
       const img = new Image();
@@ -408,9 +407,9 @@ export default function WhiteboardPage() {
 
       if (totalPdfH <= usableH) {
         const page = pdfDoc.addPage([A4_W_PT, A4_H_PT]);
-        const pngBytes = new Uint8Array(await blob.arrayBuffer());
-        const pngImage = await pdfDoc.embedPng(pngBytes);
-        page.drawImage(pngImage, {
+        const jpgBytes = new Uint8Array(await blob.arrayBuffer());
+        const jpgImage = await pdfDoc.embedJpg(jpgBytes);
+        page.drawImage(jpgImage, {
           x: MARGIN,
           y: A4_H_PT - MARGIN - totalPdfH,
           width: usableW,
@@ -434,12 +433,12 @@ export default function WhiteboardPage() {
           ctx.drawImage(img, 0, srcY, srcW, thisSliceH, 0, 0, srcW, thisSliceH);
 
           const sliceBlob = await new Promise<Blob>((res) =>
-            sliceCanvas.toBlob((b) => res(b!), 'image/png'),
+            sliceCanvas.toBlob((b) => res(b!), 'image/jpeg', 0.85),
           );
-          const slicePng = await pdfDoc.embedPng(new Uint8Array(await sliceBlob.arrayBuffer()));
+          const sliceJpg = await pdfDoc.embedJpg(new Uint8Array(await sliceBlob.arrayBuffer()));
           const pdfSliceH = thisSliceH * fitScale;
           const page = pdfDoc.addPage([A4_W_PT, A4_H_PT]);
-          page.drawImage(slicePng, {
+          page.drawImage(sliceJpg, {
             x: MARGIN,
             y: A4_H_PT - MARGIN - pdfSliceH,
             width: usableW,

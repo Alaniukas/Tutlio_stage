@@ -205,7 +205,7 @@ export function tutorFinancePageProfileDeduped(userId: string) {
     supabase
       .from('profiles')
       .select(
-        'organization_id, stripe_account_id, stripe_onboarding_complete, payment_timing, payment_deadline_hours, min_booking_hours, enable_per_lesson, enable_monthly_billing, enable_prepaid_packages, restrict_booking_on_overdue, enable_per_student_payment_override, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, manual_payment_bank_details',
+        'organization_id, stripe_account_id, stripe_onboarding_complete, payment_timing, payment_deadline_hours, min_booking_hours, enable_per_lesson, enable_monthly_billing, enable_prepaid_packages, restrict_booking_on_overdue, enable_per_student_payment_override, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, manual_payment_bank_details, perlas_finance_enabled',
       )
       .eq('id', userId)
       .maybeSingle(),

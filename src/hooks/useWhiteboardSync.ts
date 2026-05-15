@@ -478,6 +478,7 @@ export function useWhiteboardSync(
   const uploadFileAssetIfNeeded = useCallback(
     async (fileId: string, file: WhiteboardFile): Promise<WhiteboardFile> => {
       if (!sessionId) return file;
+      if (!fileId || fileId === 'undefined') return file;
       const existingStoragePath = String(file.storagePath || '').trim();
       if (existingStoragePath) {
         uploadedAssetPathByFileIdRef.current.set(fileId, existingStoragePath);

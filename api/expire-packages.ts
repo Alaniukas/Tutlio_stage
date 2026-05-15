@@ -4,6 +4,8 @@ import { createClient } from '@supabase/supabase-js';
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
+const ANALYTICS_RETENTION_DAYS = 90;
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const cronSecret = process.env.CRON_SECRET;
   if (cronSecret) {
@@ -30,5 +32,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: error.message });
   }
 
-  return res.status(200).json({ expired: expired?.length ?? 0 });
+  // Prune analytics_events older than retention window to bound table growth
+  const cutoff = new Date(Date.now() - ANALYTICS_RETENTION_DAYS * 86_400_000).toISOString();
+  const { count: analyticsDeleted, error: analyticsErr } = await supabase
+    .from('analytics_events')
+    .delete({ count: 'exact' })
+    .lt('created_at', cutoff);
+
+  if (analyticsErr) {
+    console.error('expire-packages analytics cleanup error:', analyticsErr);
+  }
+
+  return res.status(200).json({
+    expired: expired?.length ?? 0,
+    analytics_pruned: analyticsDeleted ?? 0,
+  });
 }

@@ -14,6 +14,7 @@ import { useUser } from '@/contexts/UserContext';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import OrgTutorFinanceSummary from '@/components/OrgTutorFinanceSummary';
 import TutorFinanceReport from '@/components/TutorFinanceReport';
+import PerlasFinanceSection from '@/components/PerlasFinanceSection';
 import { useTranslation } from '@/lib/i18n';
 import { tutorUsesManualStudentPayments } from '@/lib/subscription';
 
@@ -65,6 +66,7 @@ export default function FinancePage() {
   const [savingBankDetails, setSavingBankDetails] = useState(false);
 
   const [isSendInvoiceModalOpen, setIsSendInvoiceModalOpen] = useState(false);
+  const [perlasFinanceEnabled, setPerlasFinanceEnabled] = useState(false);
   const isOrgTutorEffective = orgPolicy.isOrgTutor || !isSoloTutor;
 
   const verifyStripeOnboarding = useCallback(
@@ -141,6 +143,7 @@ export default function FinancePage() {
 
     setIsSoloTutor(!tutorData?.organization_id);
     setSoloManualStudentPayments(tutorUsesManualStudentPayments(tutorData));
+    setPerlasFinanceEnabled(!!(tutorData as any)?.perlas_finance_enabled);
 
     setManualPaymentBankDetails(typeof tutorData?.manual_payment_bank_details === 'string' ? tutorData.manual_payment_bank_details : '');
 
@@ -735,6 +738,12 @@ export default function FinancePage() {
 
         </div>
         </div>
+
+        {perlasFinanceEnabled && userId && (
+          <div className="xl:col-span-12">
+            <PerlasFinanceSection entityType="tutor" entityId={userId} />
+          </div>
+        )}
 
       </div>
 

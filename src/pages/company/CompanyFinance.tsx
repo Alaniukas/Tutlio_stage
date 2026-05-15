@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { useTranslation } from '@/lib/i18n';
 import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
+import PerlasFinanceSection from '@/components/PerlasFinanceSection';
 
 type CompanyFinanceCache = {
   orgId: string;
@@ -48,6 +49,7 @@ export default function CompanyFinance() {
   const [enableMonthlyBilling, setEnableMonthlyBilling] = useState(fc?.enableMonthlyBilling ?? false);
   const [enablePrepaidPackages, setEnablePrepaidPackages] = useState(fc?.enablePrepaidPackages ?? false);
   const [restrictBookingOnOverdue, setRestrictBookingOnOverdue] = useState(fc?.restrictBookingOnOverdue ?? false);
+  const [perlasFinanceEnabled, setPerlasFinanceEnabled] = useState(false);
 
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
@@ -107,7 +109,7 @@ export default function CompanyFinance() {
     const { data: orgData, error: orgError } = await supabase
       .from('organizations')
       .select(
-        'stripe_account_id, stripe_onboarding_complete, payment_timing, payment_deadline_hours, enable_per_lesson, enable_monthly_billing, enable_prepaid_packages, restrict_booking_on_overdue'
+        'stripe_account_id, stripe_onboarding_complete, payment_timing, payment_deadline_hours, enable_per_lesson, enable_monthly_billing, enable_prepaid_packages, restrict_booking_on_overdue, perlas_finance_enabled'
       )
       .eq('id', adminRow.organization_id)
       .single();
@@ -130,6 +132,7 @@ export default function CompanyFinance() {
       enableMonthlyBillingLocal = orgData.enable_monthly_billing ?? false;
       enablePrepaidPackagesLocal = orgData.enable_prepaid_packages ?? false;
       restrictBookingOnOverdueLocal = orgData.restrict_booking_on_overdue ?? false;
+      setPerlasFinanceEnabled(!!(orgData as any).perlas_finance_enabled);
     }
 
     const orgTutorsLocal = await getOrgVisibleTutors(
@@ -570,6 +573,10 @@ export default function CompanyFinance() {
             </Button>
           </div>
         </div>
+
+        {perlasFinanceEnabled && orgId && (
+          <PerlasFinanceSection entityType="org" entityId={orgId} />
+        )}
       </div>
       {/* Org Invoice Dialog */}
       <Dialog
