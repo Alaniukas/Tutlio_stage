@@ -4,10 +4,12 @@ import { useUser } from '@/contexts/UserContext';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from '@/lib/i18n';
 import { format } from 'date-fns';
-import { Download, FileText } from 'lucide-react';
+import { Download, FileText, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import ParentLayout from '@/components/ParentLayout';
+import { authHeaders } from '@/lib/apiHelpers';
+import { computeInvoiceDisplayForChild } from '@/lib/billingBatchStudentSlice';
 
 interface Invoice {
   id: string;
@@ -16,6 +18,10 @@ interface Invoice {
   total_amount: number;
   status: string;
   pdf_storage_path: string | null;
+  display_amount?: number;
+  lesson_count?: number;
+  is_shared?: boolean;
+  invoice_total_amount?: number;
 }
 
 export default function ParentInvoices() {
@@ -26,6 +32,7 @@ export default function ParentInvoices() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) {
@@ -68,7 +75,6 @@ export default function ParentInvoices() {
       /**
        * Jei filtro nėra — skaitome sąskaitas tiesiai (RLS `invoices_parent_select` meta tik susijusias).
        * Filtrą ?studentId=… — paliekame konkrečių vaikų S.F.: paketai pagal manual_sales_invoice_id + eilutės su session_ids (overlap).
-       * Anksčiau: „nėra sessions“ ⇒ tuščiai (paketas be pamokų neberodomas); paketų invoice_line.session_ids laikė paketo UUID, `.cs.{sessionId}` neveikė.
        */
       if (!filterStudentId) {
         const { data: invsOpen, error: openErr } = await supabase
@@ -102,6 +108,7 @@ export default function ParentInvoices() {
 
       const { data: sessRows } = await supabase.from('sessions').select('id').in('student_id', studentIds);
       const sessionIds = [...new Set((sessRows ?? []).map((s) => s.id))];
+      const childSessionIdSet = new Set(sessionIds);
       const chunkSize = 80;
       for (let i = 0; i < sessionIds.length; i += chunkSize) {
         const chunk = sessionIds.slice(i, i + chunkSize);
@@ -135,23 +142,71 @@ export default function ParentInvoices() {
         console.warn('[ParentInvoices] invoices by id:', invListErr);
         setLoadError(invListErr.message);
         setInvoices([]);
-      } else {
-        setInvoices(invs ?? []);
+        setLoading(false);
+        return;
       }
+
+      const { data: lineItems } = await supabase
+        .from('invoice_line_items')
+        .select('invoice_id, total_price, quantity, session_ids')
+        .in('invoice_id', invoiceIds);
+
+      const linesByInvoice = new Map<string, Array<{ total_price?: number | null; quantity?: number | null; session_ids?: string[] | null }>>();
+      for (const li of lineItems ?? []) {
+        const invId = li.invoice_id as string;
+        if (!linesByInvoice.has(invId)) linesByInvoice.set(invId, []);
+        linesByInvoice.get(invId)!.push(li);
+      }
+
+      const enriched: Invoice[] = (invs ?? []).map((inv) => {
+        const invoiceTotal = Number(inv.total_amount || 0);
+        const display = computeInvoiceDisplayForChild(
+          invoiceTotal,
+          linesByInvoice.get(inv.id) ?? [],
+          childSessionIdSet,
+        );
+        return {
+          ...inv,
+          display_amount: display.display_amount,
+          lesson_count: display.lesson_count,
+          is_shared: display.is_shared,
+          invoice_total_amount: display.invoice_total_amount,
+        };
+      });
+
+      setInvoices(enriched);
       setLoading(false);
     })();
   }, [user?.id, filterStudentId]);
 
   const downloadPdf = async (inv: Invoice) => {
-    if (!inv.pdf_storage_path) return;
-    const { data } = await supabase.storage.from('invoices').download(inv.pdf_storage_path);
-    if (data) {
-      const url = URL.createObjectURL(data);
+    setDownloadingId(inv.id);
+    try {
+      if (inv.pdf_storage_path) {
+        const { data } = await supabase.storage.from('invoices').download(inv.pdf_storage_path);
+        if (data) {
+          const url = URL.createObjectURL(data);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${inv.invoice_number}.pdf`;
+          a.click();
+          URL.revokeObjectURL(url);
+          return;
+        }
+      }
+      const res = await fetch(`/api/invoice-pdf?id=${inv.id}`, { headers: await authHeaders() });
+      if (!res.ok) throw new Error('Failed to download PDF');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = `${inv.invoice_number}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
+    } catch (e) {
+      console.warn('[ParentInvoices] PDF download failed:', e);
+    } finally {
+      setDownloadingId(null);
     }
   };
 
@@ -193,28 +248,53 @@ export default function ParentInvoices() {
           {invoices.length === 0 ? (
             <p className="text-gray-500 text-center py-12">{t('parent.noInvoices')}</p>
           ) : (
-            invoices.map((inv) => (
-              <div key={inv.id} className="bg-white rounded-xl border p-4 flex items-center justify-between">
-                <div>
+            invoices.map((inv) => {
+              const amount = filterStudentId && inv.display_amount != null
+                ? inv.display_amount
+                : Number(inv.total_amount);
+              return (
+              <div key={inv.id} className="bg-white rounded-xl border p-4 flex items-center justify-between gap-3">
+                <div className="min-w-0">
                   <p className="font-medium text-gray-900 flex items-center gap-2">
-                    <FileText className="w-4 h-4 text-gray-400" />
+                    <FileText className="w-4 h-4 text-gray-400 shrink-0" />
                     {inv.invoice_number}
                   </p>
                   <p className="text-sm text-gray-500">{format(new Date(inv.issue_date), 'yyyy-MM-dd')}</p>
+                  {filterStudentId && (inv.lesson_count ?? 0) > 0 && (
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {t('invoice.lessonsCount', { count: inv.lesson_count ?? 0 })}
+                    </p>
+                  )}
+                  {filterStudentId && inv.is_shared && (
+                    <p className="text-xs text-amber-700 mt-0.5">
+                      {t('stu.invoiceSharedBatch', {
+                        total: Number(inv.invoice_total_amount ?? inv.total_amount).toFixed(2),
+                      })}
+                    </p>
+                  )}
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="font-medium text-gray-800">{Number(inv.total_amount).toFixed(2)} €</span>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="font-medium text-gray-800">{amount.toFixed(2)} €</span>
                   <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium', statusColor[inv.status] || statusColor.issued)}>
                     {invoiceStatusLabel(inv.status)}
                   </span>
-                  {inv.pdf_storage_path && (
-                    <Button variant="ghost" size="sm" onClick={() => downloadPdf(inv)}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={downloadingId === inv.id}
+                    onClick={() => downloadPdf(inv)}
+                    title={t('stu.openInvoicePdf')}
+                  >
+                    {downloadingId === inv.id ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
                       <Download className="w-4 h-4" />
-                    </Button>
-                  )}
+                    )}
+                  </Button>
                 </div>
               </div>
-            ))
+              );
+            })
           )}
         </div>
       </main>

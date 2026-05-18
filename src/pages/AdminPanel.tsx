@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { AlertCircle, CheckCircle2, Building2, Lock, Plus, Eye, EyeOff, ArrowLeft, List, Pencil, FileText, Users, BarChart3, Landmark } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Building2, Lock, Plus, Eye, EyeOff, ArrowLeft, List, Pencil, FileText, Users, BarChart3, Landmark, Mail } from 'lucide-react';
 import { FEATURE_REGISTRY, FEATURE_CATEGORIES, getFeaturesByCategory } from '@/lib/featureRegistry';
 import { useTranslation } from '@/lib/i18n';
 import AdminBlogPanel from '@/components/admin/AdminBlogPanel';
 import AdminStatisticsPanel from '@/components/admin/AdminStatisticsPanel';
 import AdminPerlasPayoutsPanel from '@/components/admin/AdminPerlasPayoutsPanel';
+import AdminEnterpriseContactsPanel from '@/components/admin/AdminEnterpriseContactsPanel';
 type Step = 'lock' | 'panel';
 
 interface FormState {
@@ -72,7 +73,7 @@ interface AuditRow {
   details: Record<string, unknown>;
 }
 
-type PanelView = 'list' | 'create' | 'createSchool' | 'detail' | 'blog' | 'soloTutors' | 'statistics' | 'perlasPayouts';
+type PanelView = 'list' | 'create' | 'createSchool' | 'detail' | 'blog' | 'soloTutors' | 'statistics' | 'perlasPayouts' | 'enterpriseContacts';
 
 interface SoloTutorAdminRow {
   id: string;
@@ -693,6 +694,14 @@ export default function AdminPanel() {
           >
             <Landmark className="w-4 h-4" />
             Perlas Išmokėjimai
+          </button>
+          <button
+            type="button"
+            onClick={() => { setPanelView('enterpriseContacts'); setDetailId(null); }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${panelView === 'enterpriseContacts' ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+          >
+            <Mail className="w-4 h-4" />
+            Enterprise Užklausos
           </button>
         </div>
 
@@ -1443,6 +1452,10 @@ export default function AdminPanel() {
 
         {panelView === 'perlasPayouts' && (
           <AdminPerlasPayoutsPanel adminSecret={platformAdminSecret} />
+        )}
+
+        {panelView === 'enterpriseContacts' && (
+          <AdminEnterpriseContactsPanel adminSecret={platformAdminSecret} />
         )}
 
         {panelView === 'createSchool' && (

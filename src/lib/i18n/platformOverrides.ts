@@ -20,6 +20,12 @@ const schoolsEn: PlatformLocaleConfig = {
     ['tutor', 'teacher'],
     ['korep', 'teach'],
   ],
+  overrides: {
+    'nav.platform': 'Platform',
+    'nav.forTutors': 'Tutors',
+    'nav.forSchools': 'Schools',
+    'nav.brandSchools': 'Tutlio Schools',
+  },
 };
 
 const schoolsLt: PlatformLocaleConfig = {
@@ -51,6 +57,12 @@ const schoolsLt: PlatformLocaleConfig = {
     ['korepetitorius', 'mokytojas'],
     ['korep', 'mokyt'],
   ],
+  overrides: {
+    'nav.platform': 'Platforma',
+    'nav.forTutors': 'Korepetitoriai',
+    'nav.forSchools': 'Mokykloms',
+    'nav.brandSchools': 'Tutlio Schools',
+  },
 };
 
 const schoolsPl: PlatformLocaleConfig = {
@@ -59,18 +71,36 @@ const schoolsPl: PlatformLocaleConfig = {
     ['korepetytorów', 'nauczycieli'],
     ['korepetytor', 'nauczyciel', 'stem'],
   ],
+  overrides: {
+    'nav.platform': 'Platforma',
+    'nav.forTutors': 'Korepetytorzy',
+    'nav.forSchools': 'Szkoły',
+    'nav.brandSchools': 'Tutlio Schools',
+  },
 };
 
 const schoolsLv: PlatformLocaleConfig = {
   replacements: [
     ['privātskolotāj', 'skolotāj', 'stem'],
   ],
+  overrides: {
+    'nav.platform': 'Platforma',
+    'nav.forTutors': 'Privātskolotāji',
+    'nav.forSchools': 'Skolām',
+    'nav.brandSchools': 'Tutlio Schools',
+  },
 };
 
 const schoolsEe: PlatformLocaleConfig = {
   replacements: [
     ['eraõpetaja', 'õpetaja', 'stem'],
   ],
+  overrides: {
+    'nav.platform': 'Platvorm',
+    'nav.forTutors': 'Õpetajad',
+    'nav.forSchools': 'Koolidele',
+    'nav.brandSchools': 'Tutlio Schools',
+  },
 };
 
 // ── Teachers platform ─────────────────────────────────────────────────
@@ -81,6 +111,12 @@ const teachersEn: PlatformLocaleConfig = {
     ['tutor', 'teacher'],
     ['korep', 'teach'],
   ],
+  overrides: {
+    'nav.platform': 'Platform',
+    'nav.forTutors': 'Tutors',
+    'nav.forSchools': 'Schools',
+    'nav.brandSchools': 'Tutlio Schools',
+  },
 };
 
 const teachersLt: PlatformLocaleConfig = {
@@ -117,6 +153,12 @@ const teachersLt: PlatformLocaleConfig = {
     // Abbreviation (e.g. "korep." in admin labels)
     ['korep', 'mokyt'],
   ],
+  overrides: {
+    'nav.platform': 'Platforma',
+    'nav.forTutors': 'Korepetitoriai',
+    'nav.forSchools': 'Mokykloms',
+    'nav.brandSchools': 'Tutlio Schools',
+  },
 };
 
 const teachersPl: PlatformLocaleConfig = {
@@ -127,18 +169,36 @@ const teachersPl: PlatformLocaleConfig = {
     // Stem replacement handles regular forms (nom, gen, acc, instr, adj)
     ['korepetytor', 'nauczyciel', 'stem'],
   ],
+  overrides: {
+    'nav.platform': 'Platforma',
+    'nav.forTutors': 'Korepetytorzy',
+    'nav.forSchools': 'Szkoły',
+    'nav.brandSchools': 'Tutlio Schools',
+  },
 };
 
 const teachersLv: PlatformLocaleConfig = {
   replacements: [
     ['privātskolotāj', 'skolotāj', 'stem'],
   ],
+  overrides: {
+    'nav.platform': 'Platforma',
+    'nav.forTutors': 'Privātskolotāji',
+    'nav.forSchools': 'Skolām',
+    'nav.brandSchools': 'Tutlio Schools',
+  },
 };
 
 const teachersEe: PlatformLocaleConfig = {
   replacements: [
     ['eraõpetaja', 'õpetaja', 'stem'],
   ],
+  overrides: {
+    'nav.platform': 'Platvorm',
+    'nav.forTutors': 'Õpetajad',
+    'nav.forSchools': 'Koolidele',
+    'nav.brandSchools': 'Tutlio Schools',
+  },
 };
 
 // ── Registry ──────────────────────────────────────────────────────────

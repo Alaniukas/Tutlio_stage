@@ -240,8 +240,9 @@ export default function StudentSchedule() {
             cancellationFeePercent,
             paymentTiming,
             paymentDeadlineHours,
+            perlasEnabled: tutorPerlasEnabled,
         };
-    }, [isParentRoute, tutorId, tutorModalContact, cancellationHours, cancellationFeePercent, paymentTiming, paymentDeadlineHours]);
+    }, [isParentRoute, tutorId, tutorModalContact, cancellationHours, cancellationFeePercent, paymentTiming, paymentDeadlineHours, tutorPerlasEnabled]);
 
     const manualPaymentInBookingModal =
         tutorSoloManualPayments || pendingPaymentSession?.tutorSoloManual === true;
@@ -1320,6 +1321,7 @@ export default function StudentSchedule() {
                             meetingLink: studentPersonalMeetingLink || tutorPersonalMeetingLink || selectedSubject?.meeting_link || null,
                             hidePaymentInfo: hasPayer,
                             paymentLink: selfPayLink,
+                            perlasEnabled: tutorPerlasEnabled,
                         },
                     });
                 }
@@ -1362,6 +1364,8 @@ export default function StudentSchedule() {
                                 tutorPersonalMeetingLink ||
                                 selectedSubject?.meeting_link ||
                                 null,
+                            perlasEnabled: tutorPerlasEnabled,
+                            payerIsParent: true,
                         },
                     });
                     if (!bookingToParentOk) {
@@ -1397,6 +1401,8 @@ export default function StudentSchedule() {
                                         time: format(selectedTime, 'HH:mm'),
                                         amount: selectedSubject?.price ?? null,
                                         paymentLink: stableLink,
+                                        perlasEnabled: tutorPerlasEnabled,
+                                        payerIsParent: true,
                                     },
                                 });
                                 if (!payOk) {
@@ -1418,6 +1424,7 @@ export default function StudentSchedule() {
                                         bankDetails: tutorBankDetails || undefined,
                                         paymentLink: sessionsPath,
                                         payerIsParent: true,
+                                        perlasEnabled: tutorPerlasEnabled,
                                     },
                                 });
                                 if (!payOk) {
@@ -2100,7 +2107,7 @@ export default function StudentSchedule() {
                     />
                 ) : (
                 <Dialog open={isMySessionModalOpen} onOpenChange={setIsMySessionModalOpen}>
-                    <DialogContent className="w-[95vw] sm:max-w-[440px] max-h-[90vh] overflow-y-auto">
+                    <DialogContent className="w-[95vw] sm:max-w-[440px] max-h-[90vh] overflow-y-auto" onOpenAutoFocus={(e) => e.preventDefault()}>
                         <DialogHeader>
                             <DialogTitle className="flex items-center gap-2">
                                 <CalendarDays className="w-5 h-5 text-violet-600" />
@@ -2218,18 +2225,24 @@ export default function StudentSchedule() {
                                                 </button>
                                             );
                                         })()}
-                                        {tutorPerlasEnabled && (
-                                            <button
-                                                onClick={() => handlePerlasPayment(mySessionData.id)}
-                                                disabled={perlasLoading}
-                                                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 text-white font-semibold hover:from-teal-700 hover:to-emerald-700 transition-all shadow-sm disabled:opacity-60"
-                                            >
-                                                {perlasLoading
-                                                    ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
-                                                    : <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank')}</>
-                                                }
-                                            </button>
-                                        )}
+                                        {tutorPerlasEnabled && (() => {
+                                            const sp = Number(mySessionData.price || 0);
+                                            const pf = Math.round(sp * 2) / 100;
+                                            const bf = 0.18;
+                                            const tot = Math.round((sp + pf + bf) * 100) / 100;
+                                            return (
+                                                <button
+                                                    onClick={() => handlePerlasPayment(mySessionData.id)}
+                                                    disabled={perlasLoading}
+                                                    className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 text-white font-semibold hover:from-teal-700 hover:to-emerald-700 transition-all shadow-sm disabled:opacity-60"
+                                                >
+                                                    {perlasLoading
+                                                        ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
+                                                        : <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank', { amount: tot.toFixed(2) })}</>
+                                                    }
+                                                </button>
+                                            );
+                                        })()}
                                     </div>
                                 ) : (
                                     <div className="flex items-start gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
@@ -2289,7 +2302,7 @@ export default function StudentSchedule() {
 
             {/* Payment modal after booking */}
             <Dialog open={showPaymentModal} onOpenChange={setShowPaymentModal}>
-                <DialogContent className="w-[95vw] sm:max-w-[420px] max-h-[90vh] overflow-y-auto">
+                <DialogContent className="w-[95vw] sm:max-w-[420px] max-h-[90vh] overflow-y-auto" onOpenAutoFocus={(e) => e.preventDefault()}>
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2 text-emerald-700">
                             <Check className="w-5 h-5" /> {t('stuSched.lessonBooked')}
@@ -2392,19 +2405,25 @@ export default function StudentSchedule() {
                                                 </>
                                             )}
                                         </button>
-                                        {tutorPerlasEnabled && pendingPaymentSession && (
-                                            <button
-                                                type="button"
-                                                onClick={() => handlePerlasPayment(pendingPaymentSession.id)}
-                                                disabled={perlasLoading}
-                                                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 text-white font-semibold hover:from-teal-700 hover:to-emerald-700 transition-all shadow-sm disabled:opacity-60"
-                                            >
-                                                {perlasLoading
-                                                    ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
-                                                    : <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank')}</>
-                                                }
-                                            </button>
-                                        )}
+                                        {tutorPerlasEnabled && pendingPaymentSession && (() => {
+                                            const sp = Number(pendingPaymentSession.price || 0);
+                                            const pf = Math.round(sp * 2) / 100;
+                                            const bf = 0.18;
+                                            const tot = Math.round((sp + pf + bf) * 100) / 100;
+                                            return (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handlePerlasPayment(pendingPaymentSession.id)}
+                                                    disabled={perlasLoading}
+                                                    className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 text-white font-semibold hover:from-teal-700 hover:to-emerald-700 transition-all shadow-sm disabled:opacity-60"
+                                                >
+                                                    {perlasLoading
+                                                        ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
+                                                        : <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank', { amount: tot.toFixed(2) })}</>
+                                                    }
+                                                </button>
+                                            );
+                                        })()}
                                     </div>
                                 )}
                             </>

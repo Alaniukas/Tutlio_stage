@@ -1,103 +1,33 @@
-import type { VercelRequest } from '../types';
-import { lt } from '../../src/lib/i18n/lt.js';
-import { en } from '../../src/lib/i18n/en.js';
-import { pl } from '../../src/lib/i18n/pl.js';
-import { lv } from '../../src/lib/i18n/lv.js';
-import { ee } from '../../src/lib/i18n/ee.js';
-import { fr } from '../../src/lib/i18n/fr.js';
-import { es } from '../../src/lib/i18n/es.js';
-import { de } from '../../src/lib/i18n/de.js';
-import { se } from '../../src/lib/i18n/se.js';
-import { dk } from '../../src/lib/i18n/dk.js';
-import { fi } from '../../src/lib/i18n/fi.js';
-import { no } from '../../src/lib/i18n/no.js';
+export {
+  type Locale,
+  LOCALES,
+  type DomainKey,
+  type HreflangLink,
+  esc,
+  detectDomain,
+  getDefaultLocale,
+  detectLocale,
+  buildPath,
+  buildFullUrl,
+  canonicalDomain,
+  buildCanonicalUrl,
+  generateHreflangLinks,
+  hreflangTags,
+} from './seo-routing.js';
 
-export type Locale = 'lt' | 'en' | 'pl' | 'lv' | 'ee' | 'fr' | 'es' | 'de' | 'se' | 'dk' | 'fi' | 'no';
-export const LOCALES: Locale[] = ['lt', 'en', 'pl', 'lv', 'ee', 'fr', 'es', 'de', 'se', 'dk', 'fi', 'no'];
+export { preloadSsrLocales, t } from './ssr-i18n.js';
 
-const DOMAINS = {
-  lt: 'https://www.tutlio.lt',
-  com: 'https://www.tutlio.com',
-} as const;
-
-const translations: Record<Locale, Record<string, string>> = { lt, en, pl, lv, ee, fr, es, de, se, dk, fi, no };
-
-export function t(locale: Locale, key: string, params?: Record<string, string | number>): string {
-  let text = translations[locale]?.[key] ?? translations.en[key] ?? translations.lt[key] ?? key;
-  if (params) {
-    for (const [k, v] of Object.entries(params)) {
-      text = text.replaceAll(`{${k}}`, String(v));
-    }
-  }
-  return text;
-}
-
-export function esc(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-export type DomainKey = 'lt' | 'com';
-
-export function detectDomain(req: VercelRequest): DomainKey {
-  const host = (req.headers['x-forwarded-host'] as string) || (req.headers.host as string) || '';
-  if (host.includes('tutlio.com')) return 'com';
-  return 'lt';
-}
-
-export function getDefaultLocale(domain: DomainKey): Locale {
-  return domain === 'com' ? 'en' : 'lt';
-}
-
-export function detectLocale(req: VercelRequest): Locale {
-  const q = typeof req.query.locale === 'string' ? req.query.locale : '';
-  if (LOCALES.includes(q as Locale)) return q as Locale;
-  const domain = detectDomain(req);
-  return getDefaultLocale(domain);
-}
-
-export function buildPath(path: string, locale: Locale, domain: DomainKey): string {
-  const defaultLocale = getDefaultLocale(domain);
-  const normalizedPath = path === '/' ? '' : path;
-  if (locale === defaultLocale) return normalizedPath || '/';
-  return `/${locale}${normalizedPath}`;
-}
-
-export function buildFullUrl(path: string, locale: Locale, domain: DomainKey): string {
-  const base = DOMAINS[domain];
-  const built = buildPath(path, locale, domain);
-  return `${base}${built}`;
-}
-
-export interface HreflangLink {
-  lang: string;
-  href: string;
-}
-
-export function generateHreflangLinks(path: string): HreflangLink[] {
-  const links: HreflangLink[] = [];
-
-  for (const locale of LOCALES) {
-    links.push({ lang: locale, href: buildFullUrl(path, locale, 'lt') });
-    links.push({ lang: locale, href: buildFullUrl(path, locale, 'com') });
-  }
-
-  links.push({ lang: 'x-default', href: buildFullUrl(path, 'en', 'com') });
-  return links;
-}
-
-export function hreflangTags(path: string): string {
-  const links = generateHreflangLinks(path);
-  const seen = new Set<string>();
-  return links
-    .filter((l) => {
-      const key = `${l.lang}:${l.href}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .map((l) => `<link rel="alternate" hreflang="${l.lang}" href="${esc(l.href)}" />`)
-    .join('\n');
-}
+import {
+  type Locale,
+  type DomainKey,
+  LOCALES,
+  esc,
+  buildPath,
+  buildFullUrl,
+  buildCanonicalUrl,
+  hreflangTags,
+} from './seo-routing.js';
+import { t } from './ssr-i18n.js';
 
 const OG_LOCALE_MAP: Record<Locale, string> = {
   lt: 'lt_LT',
@@ -128,8 +58,9 @@ export interface ShellOptions {
 }
 
 export function renderShell(opts: ShellOptions): string {
-  const { locale, domain, path, title, description, ogImage, body, jsonLd, extraHead, breadcrumbs } = opts;
-  const canonicalUrl = buildFullUrl(path, locale, domain);
+  const { locale, domain, path, title, description, body, jsonLd, extraHead, breadcrumbs } = opts;
+  const ogImage = opts.ogImage || DEFAULT_OG_IMAGE;
+  const canonicalUrl = buildCanonicalUrl(path, locale);
 
   const ogLocaleAlternates = LOCALES
     .filter((l) => l !== locale)
@@ -165,12 +96,16 @@ ${ogLocaleAlternates}
 <meta property="og:description" content="${esc(description)}" />
 <meta property="og:url" content="${esc(canonicalUrl)}" />
 <meta property="og:site_name" content="Tutlio" />
-${ogImage ? `<meta property="og:image" content="${esc(ogImage)}" />` : ''}
+<meta property="og:image" content="${esc(ogImage)}" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="${esc(title)}" />
 <meta name="twitter:description" content="${esc(description)}" />
-${ogImage ? `<meta name="twitter:image" content="${esc(ogImage)}" />` : ''}
+<meta name="twitter:image" content="${esc(ogImage)}" />
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="theme-color" content="#4f46e5" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -220,14 +155,31 @@ ${body}
 </html>`;
 }
 
+export const DEFAULT_OG_IMAGE = 'https://www.tutlio.com/og-image.png';
+
 export function organizationJsonLd(): string {
   return JSON.stringify({
     '@context': 'https://schema.org',
     '@type': 'Organization',
     name: 'Tutlio',
     url: 'https://www.tutlio.com',
-    logo: 'https://www.tutlio.com/pwa-512x512.png',
+    logo: {
+      '@type': 'ImageObject',
+      url: 'https://www.tutlio.com/pwa-512x512.png',
+      width: 512,
+      height: 512,
+    },
+    description: 'Tutoring management platform for private tutors and tutoring schools — smart calendar, waitlist, payments, and automation.',
+    email: 'info@tutlio.lt',
+    foundingDate: '2024',
+    areaServed: 'Worldwide',
     sameAs: ['https://www.tutlio.lt'],
+    contactPoint: {
+      '@type': 'ContactPoint',
+      email: 'info@tutlio.lt',
+      contactType: 'customer support',
+      availableLanguage: ['English', 'Lithuanian'],
+    },
   });
 }
 
@@ -260,13 +212,21 @@ export function softwareAppJsonLd(locale: Locale): string {
     '@type': 'SoftwareApplication',
     name: 'Tutlio',
     applicationCategory: 'BusinessApplication',
+    applicationSubCategory: 'EducationApplication',
     operatingSystem: 'Web',
     description: t(locale, 'landing.heroBadge'),
-    offers: {
-      '@type': 'Offer',
-      price: '19.99',
-      priceCurrency: 'EUR',
+    url: 'https://www.tutlio.com',
+    image: DEFAULT_OG_IMAGE,
+    featureList: 'Smart Calendar, Student Waitlist, Stripe Payments, Automated Reminders, Cancellation Rules, Lesson Notes, Invoicing, Parent Portals, Real-time Messaging, Multi-language',
+    offers: [
+      { '@type': 'Offer', name: 'Monthly', price: '19.99', priceCurrency: 'EUR', url: 'https://www.tutlio.com/pricing' },
+      { '@type': 'Offer', name: 'Yearly', price: '14.99', priceCurrency: 'EUR', url: 'https://www.tutlio.com/pricing' },
+      { '@type': 'Offer', name: 'Subscription Only', price: '9.99', priceCurrency: 'EUR', url: 'https://www.tutlio.com/pricing' },
+    ],
+    publisher: {
+      '@type': 'Organization',
+      name: 'Tutlio',
+      url: 'https://www.tutlio.com',
     },
-    publisher: { '@type': 'Organization', name: 'Tutlio' },
   });
 }

@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
+import { CheckCircle2, Loader2 } from 'lucide-react';
 import Reveal from './Reveal';
 import type { LandingVariant } from './HeroSection';
 
@@ -15,6 +17,9 @@ export default function IntegrationsSection({ variant = 'tutor' }: { variant?: L
   const { t, locale } = useTranslation();
   const p = variant === 'schools' ? 'schoolsLanding' : 'landing';
   const ctaLink = variant === 'schools' ? buildLocalizedPath('/kontaktai', locale) : undefined;
+  const [leadEmail, setLeadEmail] = useState('');
+  const [leadLoading, setLeadLoading] = useState(false);
+  const [leadSubmitted, setLeadSubmitted] = useState(false);
 
   return (
     <section className="relative py-16 sm:py-24 lg:py-32 bg-white overflow-hidden">
@@ -47,18 +52,46 @@ export default function IntegrationsSection({ variant = 'tutor' }: { variant?: L
                 {t(`${p}.integCta`)}
               </Link>
             </div>
+          ) : leadSubmitted ? (
+            <div className="flex items-center justify-center gap-2 max-w-sm mx-auto mb-16 h-11 text-sm text-emerald-600 font-medium">
+              <CheckCircle2 className="w-4 h-4" />
+              {t('landing.leadSuccess')}
+            </div>
           ) : (
-            <div className="flex items-center max-w-sm mx-auto mb-16 rounded-full overflow-hidden bg-white border border-gray-200 shadow-sm">
+            <form
+              className="flex items-center max-w-sm mx-auto mb-16 rounded-full overflow-hidden bg-white border border-gray-200 shadow-sm"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!leadEmail.trim()) return;
+                setLeadLoading(true);
+                try {
+                  await fetch('/api/landing-lead', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: leadEmail.trim(), source: 'landing_integrations' }),
+                  });
+                  setLeadSubmitted(true);
+                } catch { /* silently fail */ }
+                setLeadLoading(false);
+              }}
+            >
               <input
                 type="email"
+                required
                 placeholder={t(`${p}.integEmail`)}
+                value={leadEmail}
+                onChange={(e) => setLeadEmail(e.target.value)}
                 className="flex-1 h-11 px-5 text-sm text-gray-600 placeholder-gray-400 bg-transparent focus:outline-none"
-                readOnly
               />
-              <button className="h-11 px-6 bg-[#4f46e5] text-white font-semibold text-[13px] hover:bg-[#4338ca] transition-all duration-200 rounded-full -ml-1 hover:scale-[1.03] active:scale-[0.98]">
+              <button
+                type="submit"
+                disabled={leadLoading}
+                className="h-11 px-6 bg-[#4f46e5] text-white font-semibold text-[13px] hover:bg-[#4338ca] transition-all duration-200 rounded-full -ml-1 hover:scale-[1.03] active:scale-[0.98] disabled:opacity-60 flex items-center gap-1.5"
+              >
+                {leadLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                 {t(`${p}.integCta`)}
               </button>
-            </div>
+            </form>
           )}
         </Reveal>
 

@@ -31,7 +31,7 @@ function CheckItem({ text, color }: { text: string; color: string }) {
 export default function ShowcaseCards({ variant = 'tutor' }: { variant?: LandingVariant }) {
   const { t, locale } = useTranslation();
   const p = variant === 'schools' ? 'schoolsLanding' : 'landing';
-  const ctaLink = variant === 'schools' ? buildLocalizedPath('/kontaktai', locale) : '/register';
+  const ctaLink = variant === 'schools' ? buildLocalizedPath('/kontaktai', locale) : buildLocalizedPath('/pricing', locale);
 
   const checks1 = [
     t(`${p}.showcase1Check1`),

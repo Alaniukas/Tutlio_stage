@@ -1,14 +1,66 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
+import { defaultLocaleForOrigin, publicOriginFromRequest } from './_lib/public-origin.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
-const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'http://localhost:3000';
 const DEFAULT_SUBSCRIPTION_ONLY_PRODUCT_ID = 'prod_UOWf5Nqxf1wPIg';
+const DEFAULT_YEARLY_PRODUCT_ID = 'prod_U9DYSN7YFtsyBI';
+
+type CheckoutAudience = 'tutor' | 'schools';
+
+function buildPublicPath(
+  pathname: string,
+  locale: string | undefined,
+  audience: CheckoutAudience,
+  appOrigin: string,
+): string {
+  const normalized = pathname.startsWith('/') ? pathname : `/${pathname}`;
+  const platformPrefix = audience === 'schools' ? '/schools' : '';
+  const defaultLocale = defaultLocaleForOrigin(appOrigin);
+  const localeSeg = locale && locale !== defaultLocale ? `/${locale}` : '';
+  return `${platformPrefix}${localeSeg}${normalized}`;
+}
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
+
+async function resolveYearlyPriceId(stripeClient: Stripe): Promise<string | undefined> {
+  if (process.env.STRIPE_YEARLY_PRICE_ID) {
+    return process.env.STRIPE_YEARLY_PRICE_ID;
+  }
+
+  const productIds = [
+    process.env.STRIPE_YEARLY_PRODUCT_ID,
+    DEFAULT_YEARLY_PRODUCT_ID,
+    process.env.STRIPE_MONTHLY_PRODUCT_ID,
+  ].filter(Boolean) as string[];
+  const uniqueProductIds = [...new Set(productIds)];
+
+  const monthlyPriceId = process.env.STRIPE_MONTHLY_PRICE_ID;
+  if (monthlyPriceId) {
+    try {
+      const monthly = await stripeClient.prices.retrieve(monthlyPriceId);
+      const product = typeof monthly.product === 'string' ? monthly.product : monthly.product?.id;
+      if (product && !uniqueProductIds.includes(product)) uniqueProductIds.push(product);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  for (const productId of uniqueProductIds) {
+    const prices = await stripeClient.prices.list({ product: productId, active: true, limit: 20 });
+    const yearlyRecurring = prices.data.find(
+      (p) => p.type === 'recurring' && p.recurring?.interval === 'year',
+    );
+    if (yearlyRecurring?.id) return yearlyRecurring.id;
+    const oneTime = prices.data.find((p) => p.type === 'one_time');
+    if (oneTime?.id) return oneTime.id;
+  }
+
+  return undefined;
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -16,23 +68,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { plan, couponCode, successRedirect } = req.body as {
+    const { plan, couponCode, successRedirect, locale, audience } = req.body as {
       plan: 'monthly' | 'yearly' | 'subscription_only';
       couponCode?: string;
       successRedirect?: 'dashboard' | 'register';
+      locale?: string;
+      audience?: CheckoutAudience;
     };
 
     if (!plan || !['monthly', 'yearly', 'subscription_only'].includes(plan)) {
       return res.status(400).json({ error: 'Neteisingas planas' });
     }
 
+    const appOrigin = publicOriginFromRequest(req);
+    const checkoutAudience: CheckoutAudience = audience === 'schools' ? 'schools' : 'tutor';
+    const localeCode = typeof locale === 'string' && locale.trim() ? locale.trim() : undefined;
+    const pricingPath = buildPublicPath('/pricing', localeCode, checkoutAudience, appOrigin);
+    const cancelUrl = `${appOrigin}${pricingPath}?canceled=1`;
+
     const toDashboard = successRedirect === 'dashboard';
     const successUrl = toDashboard
-      ? `${APP_URL}/dashboard?subscription_success=1&session_id={CHECKOUT_SESSION_ID}`
-      : `${APP_URL}/register?subscription_success=true&session_id={CHECKOUT_SESSION_ID}`;
-    const cancelUrl = toDashboard
-      ? `${APP_URL}/registration/subscription?canceled=1`
-      : `${APP_URL}/tutor-subscribe?canceled=true`;
+      ? `${appOrigin}/dashboard?subscription_success=1&session_id={CHECKOUT_SESSION_ID}`
+      : checkoutAudience === 'schools'
+        ? `${appOrigin}${buildPublicPath('/login', localeCode, 'schools', appOrigin)}?subscription_success=1&session_id={CHECKOUT_SESSION_ID}`
+        : `${appOrigin}/register?subscription_success=true&session_id={CHECKOUT_SESSION_ID}`;
 
     // For authenticated users – reuse the same Stripe customer so re-subscribe stays on the same account
     let customerEmail: string | undefined;
@@ -65,16 +124,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    if (!priceId) {
-      console.error(`Missing price ID for plan: ${plan}`);
-      return res.status(500).json({ error: 'Configuration error - contact support' });
+    if (!priceId && plan === 'yearly') {
+      priceId = await resolveYearlyPriceId(stripe);
     }
 
-    // Yearly = one-time payment, 12 months access. Monthly and subscription_only = recurring subscription.
-    const isYearlyOneTime = plan === 'yearly';
+    if (!priceId) {
+      console.error(`Missing price ID for plan: ${plan}`);
+      const message =
+        plan === 'yearly'
+          ? 'Metinis planas Stripe nėra sukonfigūruotas. Nustatykite STRIPE_YEARLY_PRICE_ID.'
+          : 'Configuration error - contact support';
+      return res.status(500).json({ error: message });
+    }
 
-    if (isYearlyOneTime) {
-      // Yearly: one-time payment (mode: 'payment'), price must be One-time in Stripe
+    const price = await stripe.prices.retrieve(priceId);
+
+    // Legacy yearly: one-time payment for 12 months. New yearly product uses recurring (interval: year).
+    if (plan === 'yearly' && price.type === 'one_time') {
       const sessionParams: Stripe.Checkout.SessionCreateParams = {
         mode: 'payment',
         payment_method_types: ['card', 'link', 'revolut_pay'],
@@ -105,12 +171,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ url: session.url });
     }
 
-    // Monthly: recurring subscription – price must be Recurring
-    const price = await stripe.prices.retrieve(priceId);
     if (price.type !== 'recurring' || !price.recurring) {
       console.error(`Price ${priceId} is not recurring (type: ${price.type})`);
       return res.status(500).json({
-        error: 'Monthly plan: Stripe price must be Recurring. Update STRIPE_MONTHLY_PRICE_ID in .env.',
+        error: plan === 'yearly'
+          ? 'Metinis planas: Stripe kaina turi būti periodinė (year). Patikrinkite STRIPE_YEARLY_PRICE_ID.'
+          : 'Monthly plan: Stripe price must be Recurring. Update STRIPE_MONTHLY_PRICE_ID in .env.',
       });
     }
 

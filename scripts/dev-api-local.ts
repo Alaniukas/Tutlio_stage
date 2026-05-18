@@ -33,14 +33,21 @@ function loadEnvFile(name: string) {
     ) {
       value = value.slice(1, -1);
     }
-    if (process.env[key] === undefined) process.env[key] = value;
+    // .env.local is loaded after .env so local overrides win
+    if (process.env[key] === undefined || name === '.env.local') process.env[key] = value;
   }
 }
 
-loadEnvFile('.env.local');
 loadEnvFile('.env');
+loadEnvFile('.env.local');
 /** Let API handlers infer browser origin on localhost even if VERCEL=1 leaked into .env */
 process.env.TUTLIO_DEV_API_LOCAL = '1';
+
+if (process.env.STRIPE_YEARLY_PRICE_ID) {
+  console.log('[dev-api-local] STRIPE_YEARLY_PRICE_ID loaded');
+} else {
+  console.warn('[dev-api-local] STRIPE_YEARLY_PRICE_ID missing — restart after editing .env.local');
+}
 
 function buildQuery(url: URL): Record<string, string | string[]> {
   const out: Record<string, string | string[]> = {};

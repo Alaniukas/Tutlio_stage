@@ -1,8 +1,8 @@
 import type { VercelRequest, VercelResponse } from './types';
-import { detectDomain } from './_lib/ssr-shell';
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
-  const domain = detectDomain(req);
+  const host = (req.headers['x-forwarded-host'] as string) || (req.headers.host as string) || '';
+  const domain = host.includes('tutlio.com') ? 'com' : 'lt';
   const sitemapUrl =
     domain === 'com'
       ? 'https://www.tutlio.com/sitemap.xml'
@@ -11,13 +11,18 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
   const body = `User-agent: *
 Allow: /
 Allow: /apie-mus
+Allow: /about
 Allow: /kontaktai
+Allow: /contacts
 Allow: /pricing
 Allow: /privacy-policy
 Allow: /terms
 Allow: /dpa
 Allow: /blog
 Allow: /blog/
+Allow: /features/
+Allow: /llms.txt
+Allow: /llms-full.txt
 
 Disallow: /login
 Disallow: /register

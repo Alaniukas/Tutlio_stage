@@ -95,7 +95,7 @@ async function handleSettings(req: VercelRequest, sb: any, res: VercelResponse) 
 
   if (req.method === 'POST') {
     const body = req.body as Record<string, string>;
-    const allowed = ['perlas_platform_fee_percent', 'perlas_provider_fee_percent', 'perlas_platform_fee_fixed', 'perlas_provider_fee_fixed'];
+    const allowed = ['perlas_platform_fee_percent', 'perlas_provider_fee_percent', 'perlas_platform_fee_fixed', 'perlas_provider_fee_fixed', 'perlas_payout_fee_fixed'];
     const updates = Object.entries(body).filter(([k]) => allowed.includes(k));
     for (const [key, value] of updates) {
       const num = Number(value);
@@ -149,14 +149,27 @@ async function handleGenerateXml(sb: any, req: VercelRequest, res: VercelRespons
   for (const p of profiles || []) entityMap[`tutor:${p.id}`] = p;
   for (const o of orgs || []) entityMap[`org:${o.id}`] = o;
 
-  // Filter out entities missing IBAN or with zero/negative net amount
+  // Load per-payout bank transfer fee
+  const { data: payoutFeeRow } = await sb
+    .from('platform_settings')
+    .select('value')
+    .eq('key', 'perlas_payout_fee_fixed')
+    .maybeSingle();
+  const payoutFee = Number(payoutFeeRow?.value || 0);
+
+  // Filter out entities missing IBAN or with insufficient net amount after payout fee
   const validEntities = entities.filter(e => {
     const info = entityMap[`${e.entity_type}:${e.entity_id}`];
-    return info?.payout_iban && info?.payout_recipient_name && e.total_net > 0;
+    return info?.payout_iban && info?.payout_recipient_name && (e.total_net - payoutFee) > 0;
   });
 
   if (validEntities.length === 0) {
-    return res.status(400).json({ error: 'No entities have valid IBAN/name configured' });
+    return res.status(400).json({ error: 'No entities have valid IBAN/name configured or sufficient balance after payout fee' });
+  }
+
+  // Apply per-payout fee: each entity pays one bank transfer fee
+  for (const e of validEntities) {
+    e.total_net = Math.round((e.total_net - payoutFee) * 100) / 100;
   }
 
   const allLedgerIds = validEntities.flatMap(e => e.ledger_ids);
@@ -190,7 +203,7 @@ async function handleGenerateXml(sb: any, req: VercelRequest, res: VercelRespons
 
   // Generate SEPA pain.001 XML
   const batchId = batch.id;
-  const now = new Date().toISOString();
+  const now = new Date().toISOString().slice(0, 19); // pain.001 ISODateTime: no millis/Z
   const xml = generateSepaXml(batchId, now, validEntities, entityMap, roundedTotal);
 
   res.setHeader('Content-Type', 'application/xml');
@@ -211,6 +224,10 @@ function generateSepaXml(
 ): string {
   const nbOfTxs = entities.length;
   const execDate = creationTime.slice(0, 10);
+  // pain.001 MsgId & PmtInfId are Max35Text — UUID (36 chars) exceeds this
+  const shortId = batchId.replace(/-/g, ''); // 32-char hex
+  const msgId = `MSG${shortId}`.slice(0, 35);
+  const pmtInfId = `PMT${shortId}`.slice(0, 35);
 
   const txEntries = entities.map((e, i) => {
     const info = entityMap[`${e.entity_type}:${e.entity_id}`];
@@ -219,49 +236,46 @@ function generateSepaXml(
     const iban = escapeXml(info.payout_iban || '');
     const bic = info.payout_bank_bic ? escapeXml(info.payout_bank_bic) : '';
 
-    let entry = '';
-    entry += '            <CdtTrfTxInf>\n';
-    entry += '                <PmtId>\n';
-    entry += `                    <EndToEndId>PAYMENT-${String(i + 1).padStart(3, '0')}</EndToEndId>\n`;
-    entry += '                </PmtId>\n';
-    entry += '\n';
-    entry += '                <Amt>\n';
-    entry += `                    <InstdAmt Ccy="EUR">${amount}</InstdAmt>\n`;
-    entry += '                </Amt>\n';
+    const lines = [
+      '            <CdtTrfTxInf>',
+      '                <PmtId>',
+      `                    <EndToEndId>PAYMENT-${String(i + 1).padStart(3, '0')}</EndToEndId>`,
+      '                </PmtId>',
+      '                <Amt>',
+      `                    <InstdAmt Ccy="EUR">${amount}</InstdAmt>`,
+      '                </Amt>',
+    ];
     if (bic) {
-      entry += '\n';
-      entry += '                <CdtrAgt>\n';
-      entry += '                    <FinInstnId>\n';
-      entry += `                        <BIC>${bic}</BIC>\n`;
-      entry += '                    </FinInstnId>\n';
-      entry += '                </CdtrAgt>\n';
+      lines.push(
+        '                <CdtrAgt>',
+        '                    <FinInstnId>',
+        `                        <BIC>${bic}</BIC>`,
+        '                    </FinInstnId>',
+        '                </CdtrAgt>',
+      );
     }
-    entry += '\n';
-    entry += '                <Cdtr>\n';
-    entry += `                    <Nm>${name}</Nm>\n`;
-    entry += '                </Cdtr>\n';
-    entry += '\n';
-    entry += '                <CdtrAcct>\n';
-    entry += '                    <Id>\n';
-    entry += `                        <IBAN>${iban}</IBAN>\n`;
-    entry += '                    </Id>\n';
-    entry += '                </CdtrAcct>\n';
-    entry += '\n';
-    entry += '                <RmtInf>\n';
-    entry += `                    <Ustrd>Tutlio ismokejimas</Ustrd>\n`;
-    entry += '                </RmtInf>\n';
-    entry += '\n';
-    entry += '            </CdtTrfTxInf>';
-    return entry;
-  }).join('\n\n');
+    lines.push(
+      '                <Cdtr>',
+      `                    <Nm>${name}</Nm>`,
+      '                </Cdtr>',
+      '                <CdtrAcct>',
+      '                    <Id>',
+      `                        <IBAN>${iban}</IBAN>`,
+      '                    </Id>',
+      '                </CdtrAcct>',
+      '                <RmtInf>',
+      `                    <Ustrd>Tutlio ismokejimas</Ustrd>`,
+      '                </RmtInf>',
+      '            </CdtTrfTxInf>',
+    );
+    return lines.join('\n');
+  }).join('\n');
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.001.001.03">
-
     <CstmrCdtTrfInitn>
-
         <GrpHdr>
-            <MsgId>${escapeXml(batchId)}</MsgId>
+            <MsgId>${msgId}</MsgId>
             <CreDtTm>${creationTime}</CreDtTm>
             <NbOfTxs>${nbOfTxs}</NbOfTxs>
             <CtrlSum>${controlSum.toFixed(2)}</CtrlSum>
@@ -269,46 +283,35 @@ function generateSepaXml(
                 <Nm>${DEBTOR_NAME}</Nm>
             </InitgPty>
         </GrpHdr>
-
         <PmtInf>
-            <PmtInfId>PMT-${escapeXml(batchId.slice(0, 30))}</PmtInfId>
+            <PmtInfId>${pmtInfId}</PmtInfId>
             <PmtMtd>TRF</PmtMtd>
             <BtchBookg>true</BtchBookg>
             <NbOfTxs>${nbOfTxs}</NbOfTxs>
             <CtrlSum>${controlSum.toFixed(2)}</CtrlSum>
-
             <PmtTpInf>
                 <SvcLvl>
                     <Cd>SEPA</Cd>
                 </SvcLvl>
             </PmtTpInf>
-
             <ReqdExctnDt>${execDate}</ReqdExctnDt>
-
             <Dbtr>
                 <Nm>${DEBTOR_NAME}</Nm>
             </Dbtr>
-
             <DbtrAcct>
                 <Id>
                     <IBAN>${DEBTOR_IBAN}</IBAN>
                 </Id>
             </DbtrAcct>
-
             <DbtrAgt>
                 <FinInstnId>
                     <BIC>${DEBTOR_BIC}</BIC>
                 </FinInstnId>
             </DbtrAgt>
-
             <ChrgBr>SLEV</ChrgBr>
-
 ${txEntries}
-
         </PmtInf>
-
     </CstmrCdtTrfInitn>
-
 </Document>`;
 }
 

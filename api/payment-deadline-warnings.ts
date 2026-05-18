@@ -124,7 +124,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           subscription_plan,
           manual_subscription_exempt,
           enable_manual_student_payments,
-          manual_payment_bank_details
+          manual_payment_bank_details,
+          perlas_finance_enabled
         )
       `)
             .eq('status', 'active')
@@ -141,6 +142,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const warned: string[] = [];
         const skipped: string[] = [];
+
+        const orgIdsForPerlas = [...new Set(
+            (sessions || [])
+                .map((s: any) => (s.tutor as any)?.organization_id)
+                .filter((id: any) => typeof id === 'string' && id.length > 0) as string[]
+        )];
+        const orgPerlasMap = new Map<string, boolean>();
+        if (orgIdsForPerlas.length > 0) {
+            const { data: orgs } = await supabase
+                .from('organizations')
+                .select('id, perlas_finance_enabled')
+                .in('id', orgIdsForPerlas);
+            for (const o of orgs ?? []) {
+                orgPerlasMap.set(o.id, !!(o as any).perlas_finance_enabled);
+            }
+        }
 
         for (const session of sessions || []) {
             const tutor = session.tutor as any;
@@ -271,6 +288,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         const bankDetails = trimManualPaymentBankDetails(tutor.manual_payment_bank_details);
 
                         const orgIdForPayer = tutor.organization_id || null;
+                        const perlasEnabled = !!(tutor as any)?.perlas_finance_enabled ||
+                            (orgIdForPayer ? !!orgPerlasMap.get(orgIdForPayer) : false);
                         if (tutorUsesManualStudentPayments(tutor)) {
                             await sendWarningEmail({
                                 type: 'payment_reminder',
@@ -288,6 +307,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                     bankDetails: bankDetails || undefined,
                                     paymentUrl: `${BASE_URL}/student/sessions`,
                                     payerIsParent: studentObj?.payment_payer === 'parent',
+                                    perlasEnabled,
                                     ...(orgIdForPayer ? { organizationId: orgIdForPayer } : {}),
                                 },
                             });
@@ -306,6 +326,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                     deadlineHours: deadlineHoursForEmail,
                                     paymentTiming,
                                     paymentUrl,
+                                    perlasEnabled,
+                                    payerIsParent: studentObj?.payment_payer === 'parent',
                                     ...(orgIdForPayer ? { organizationId: orgIdForPayer } : {}),
                                 },
                             });

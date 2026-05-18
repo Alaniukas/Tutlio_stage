@@ -85,8 +85,9 @@ async function handlePaymentCallback(decoded: Record<string, unknown>, supabase:
   const tutor = session.profiles as any;
 
   // Insert perlas_ledger row for balance tracking (idempotent: skip if already exists)
-  const price = Number(session.price ?? 0);
-  if (price > 0) {
+  const sessionPrice = Number(session.price ?? 0);
+  const paidAmount = Number(decoded.amount ?? 0) || sessionPrice;
+  if (sessionPrice > 0) {
     const { data: existingLedger } = await supabase
       .from('perlas_ledger')
       .select('id')
@@ -109,19 +110,21 @@ async function handlePaymentCallback(decoded: Record<string, unknown>, supabase:
       for (const r of feeRows || []) settings[r.key] = Number(r.value || 0);
 
       const platformFee = Math.round(
-        (price * (settings.perlas_platform_fee_percent || 0) / 100 + (settings.perlas_platform_fee_fixed || 0)) * 100
+        (sessionPrice * (settings.perlas_platform_fee_percent || 0) / 100 + (settings.perlas_platform_fee_fixed || 0)) * 100
       ) / 100;
       const perlasFee = Math.round(
-        (price * (settings.perlas_provider_fee_percent || 0) / 100 + (settings.perlas_provider_fee_fixed || 0)) * 100
+        (sessionPrice * (settings.perlas_provider_fee_percent || 0) / 100 + (settings.perlas_provider_fee_fixed || 0)) * 100
       ) / 100;
-      const netAmount = Math.round((price - platformFee - perlasFee) * 100) / 100;
+      // volume = total collected; net = tutor's balance (session price)
+      const volume = Math.round(Math.max(paidAmount, sessionPrice) * 100) / 100;
+      const netAmount = Math.round((volume - platformFee - perlasFee) * 100) / 100;
 
       const { error: ledgerErr } = await supabase.from('perlas_ledger').insert({
         entity_type: entityType,
         entity_id: entityId,
         session_id: session.id,
         perlas_transaction_id: transactionId,
-        volume: price,
+        volume,
         net_amount: Math.max(netAmount, 0),
         platform_fee: platformFee,
         perlas_fee: perlasFee,

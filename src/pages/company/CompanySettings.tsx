@@ -552,7 +552,6 @@ export default function CompanySettings() {
       trial_lesson_comment_mode: trialCommentMode,
       trial_comment_required: trialCommentRequired,
       notify_tutors_on_student_assign: notifyTutorsOnAssign,
-      manual_payments: enableManualStudentPayments,
       enable_manual_student_payments: enableManualStudentPayments,
     };
 
@@ -1074,6 +1073,7 @@ export default function CompanySettings() {
                 </div>
               </div>
 
+              {orgFeaturesSnapshot['manual_payments'] === true && (
               <div className="p-4 bg-sky-50 border border-sky-100 rounded-xl mb-6 space-y-3">
                 <div>
                   <Label className="text-sm font-semibold text-gray-900">
@@ -1100,6 +1100,7 @@ export default function CompanySettings() {
                   </p>
                 )}
               </div>
+              )}
 
               <h2 className="text-lg font-semibold text-gray-900 mb-4">{t('compSet.tutorPay')}</h2>
               <div className="space-y-2">

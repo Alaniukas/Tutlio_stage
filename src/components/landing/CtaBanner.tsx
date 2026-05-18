@@ -6,7 +6,7 @@ import type { LandingVariant } from './HeroSection';
 export default function CtaBanner({ variant = 'tutor' }: { variant?: LandingVariant }) {
   const { t, locale } = useTranslation();
   const p = variant === 'schools' ? 'schoolsLanding' : 'landing';
-  const ctaLink = variant === 'schools' ? buildLocalizedPath('/kontaktai', locale) : '/register';
+  const ctaLink = variant === 'schools' ? buildLocalizedPath('/kontaktai', locale) : buildLocalizedPath('/pricing', locale);
 
   return (
     <section className="py-10 sm:py-16 lg:py-20">

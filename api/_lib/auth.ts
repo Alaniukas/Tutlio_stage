@@ -1,5 +1,6 @@
 import type { VercelRequest } from '../types';
 import { createClient } from '@supabase/supabase-js';
+import { timingSafeEqual } from 'crypto';
 
 /**
  * Verifies that the request is either from an authenticated user (Bearer token)
@@ -12,8 +13,12 @@ export async function verifyRequestAuth(
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
   const internalKey = typeof req.headers['x-internal-key'] === 'string' ? req.headers['x-internal-key'] : '';
-  if (internalKey && serviceKey && internalKey === serviceKey) {
-    return { userId: null, isInternal: true };
+  if (internalKey && serviceKey && internalKey.length === serviceKey.length) {
+    try {
+      if (timingSafeEqual(Buffer.from(internalKey, 'utf8'), Buffer.from(serviceKey, 'utf8'))) {
+        return { userId: null, isInternal: true };
+      }
+    } catch { /* length mismatch — fall through */ }
   }
 
   const authHeader = typeof req.headers.authorization === 'string' ? req.headers.authorization : '';

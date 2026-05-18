@@ -6,11 +6,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AlertCircle, ArrowLeft, Building2 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
-import { buildPlatformPath } from '@/lib/platform';
+import { buildPlatformPath, detectPlatformFromPathname } from '@/lib/platform';
+import { usePlatform } from '@/contexts/PlatformContext';
 import { getOrgAdminDashboardPath } from '@/lib/orgAdminDashboardPath';
 
 export default function CompanyLogin() {
   const { t } = useTranslation();
+  const { platform } = usePlatform();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -19,8 +21,12 @@ export default function CompanyLogin() {
   const [resetSent, setResetSent] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  /** Tik `/school` (ne `/schools` landing). */
-  const isSchoolLogin = location.pathname === '/school/login' || location.pathname.startsWith('/school/');
+  const isSchoolLogin =
+    platform === 'schools' ||
+    platform === 'teachers' ||
+    detectPlatformFromPathname(location.pathname) === 'schools' ||
+    location.pathname === '/school/login' ||
+    location.pathname.startsWith('/school/');
   const heroTitle = isSchoolLogin ? t('school.loginHeroTitle') : t('companyLogin.title');
   const heroSubtitle = isSchoolLogin ? t('school.loginHeroSubtitle') : t('companyLogin.subtitle');
   const portalBadge = isSchoolLogin ? t('school.loginPortalBadge') : t('companyLogin.adminLogin');

@@ -27,13 +27,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { useTranslation } from '@/lib/i18n';
+import { useTranslation, buildLocalizedPath } from '@/lib/i18n';
 
 const APP_URL = import.meta.env.VITE_APP_URL || window.location.origin;
 const DEPLOY_MARKER = 'egg-2026-04-02-a';
 
 export default function TutorSubscribe() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const location = useLocation();
   const isRegistrationSubscription = location.pathname === '/registration/subscription';
   const [searchParams] = useSearchParams();
@@ -56,6 +56,12 @@ export default function TutorSubscribe() {
       setSelectedPlan(requestedPlan);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    if (canceled) {
+      navigate(`${buildLocalizedPath('/pricing', locale)}?canceled=1`, { replace: true });
+    }
+  }, [canceled, locale, navigate]);
 
   useEffect(() => {
     if (!isRegistrationSubscription) return;
@@ -195,6 +201,8 @@ export default function TutorSubscribe() {
           plan,
           couponCode: effectiveCoupon,
           successRedirect: isRegistrationSubscription ? 'dashboard' : undefined,
+          locale,
+          audience: 'tutor',
         }),
       });
 

@@ -36,6 +36,7 @@ interface FeeSettings {
   perlas_provider_fee_percent: string;
   perlas_platform_fee_fixed: string;
   perlas_provider_fee_fixed: string;
+  perlas_payout_fee_fixed: string;
 }
 
 const DEFAULT_SETTINGS: FeeSettings = {
@@ -43,6 +44,7 @@ const DEFAULT_SETTINGS: FeeSettings = {
   perlas_provider_fee_percent: '0',
   perlas_platform_fee_fixed: '0',
   perlas_provider_fee_fixed: '0',
+  perlas_payout_fee_fixed: '0',
 };
 
 export default function AdminPerlasPayoutsPanel({ adminSecret }: Props) {
@@ -156,8 +158,10 @@ export default function AdminPerlasPayoutsPanel({ adminSecret }: Props) {
     }
   };
 
+  const payoutFee = Number(settings.perlas_payout_fee_fixed) || 0;
   const totalPendingNet = entities.reduce((s, e) => s + e.total_net, 0);
   const totalPendingVolume = entities.reduce((s, e) => s + e.total_volume, 0);
+  const totalPayout = entities.reduce((s, e) => s + Math.max(0, e.total_net - payoutFee), 0);
 
   return (
     <div className="space-y-6">
@@ -208,6 +212,16 @@ export default function AdminPerlasPayoutsPanel({ adminSecret }: Props) {
               className="bg-white/10 border-white/20 text-white rounded-xl"
             />
           </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label className="text-slate-400 text-xs">Išmokėjimo mokestis per pavedimą (EUR)</Label>
+            <Input
+              type="number" step="0.01" min="0"
+              value={settings.perlas_payout_fee_fixed}
+              onChange={e => setSettings(s => ({ ...s, perlas_payout_fee_fixed: e.target.value }))}
+              className="bg-white/10 border-white/20 text-white rounded-xl max-w-xs"
+            />
+            <p className="text-[11px] text-slate-500">Ši suma atskaitoma kiekvienam gavėjui XML faile (ne per pamoką, o per pavedimą)</p>
+          </div>
         </div>
         <button
           type="button"
@@ -243,6 +257,7 @@ export default function AdminPerlasPayoutsPanel({ adminSecret }: Props) {
                     <th className="px-3 py-2 font-medium">IBAN</th>
                     <th className="px-3 py-2 font-medium text-right">Apimtis (EUR)</th>
                     <th className="px-3 py-2 font-medium text-right">Grynai (EUR)</th>
+                    <th className="px-3 py-2 font-medium text-right">Išmokama (EUR)</th>
                     <th className="px-3 py-2 font-medium text-right">Įrašų</th>
                   </tr>
                 </thead>
@@ -258,6 +273,7 @@ export default function AdminPerlasPayoutsPanel({ adminSecret }: Props) {
                       <td className="px-3 py-2 text-slate-300 font-mono text-xs">{e.entity?.payout_iban || '—'}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-slate-300">{e.total_volume.toFixed(2)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-emerald-300 font-semibold">{e.total_net.toFixed(2)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-teal-300 font-semibold">{Math.max(0, e.total_net - payoutFee).toFixed(2)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-slate-400">{e.entry_count}</td>
                     </tr>
                   ))}
@@ -267,6 +283,7 @@ export default function AdminPerlasPayoutsPanel({ adminSecret }: Props) {
                     <td colSpan={3} className="px-3 py-2">Viso</td>
                     <td className="px-3 py-2 text-right tabular-nums">{totalPendingVolume.toFixed(2)}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-emerald-300">{totalPendingNet.toFixed(2)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-teal-300">{totalPayout.toFixed(2)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{entities.reduce((s, e) => s + e.entry_count, 0)}</td>
                   </tr>
                 </tfoot>

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Calendar,
   CreditCard,
@@ -16,14 +16,53 @@ import {
   FileText,
   UserCheck,
   CircleHelp,
+  Loader2,
 } from 'lucide-react';
-import { useTranslation, buildLocalizedPath } from '@/lib/i18n';
+import { useTranslation } from '@/lib/i18n';
+import { usePlatform } from '@/contexts/PlatformContext';
 import LandingNavbar from '@/components/LandingNavbar';
 import LandingFooter from '@/components/LandingFooter';
+import EnterpriseContactModal from '@/components/EnterpriseContactModal';
 
 export default function Pricing() {
   const { t, locale } = useTranslation();
+  const { platform } = usePlatform();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [isYearly, setIsYearly] = useState(true);
+  const [enterpriseOpen, setEnterpriseOpen] = useState(false);
+  const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+
+  const checkoutAudience = platform === 'schools' || platform === 'teachers' ? 'schools' : 'tutor';
+
+  useEffect(() => {
+    if (searchParams.get('canceled') === '1') {
+      const next = new URLSearchParams(searchParams);
+      next.delete('canceled');
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
+  const startCheckout = async (plan: 'monthly' | 'yearly' | 'subscription_only') => {
+    setCheckoutLoading(plan);
+    setCheckoutError(null);
+    try {
+      const res = await fetch('/api/create-subscription-checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan, locale, audience: checkoutAudience }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.url) {
+        window.location.href = data.url;
+        return;
+      }
+      setCheckoutError(data.error || t('common.error'));
+    } catch {
+      setCheckoutError(t('common.error'));
+    }
+    setCheckoutLoading(null);
+  };
 
   const features = [
     { icon: Calendar, text: t('pricing.feature.calendar'), included: true },
@@ -55,6 +94,12 @@ export default function Pricing() {
             <p className="text-[15px] lg:text-base text-gray-500 max-w-lg mx-auto mb-10 leading-relaxed">
               {t('pricing.subtitle')}
             </p>
+
+            {checkoutError && (
+              <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 max-w-md mx-auto mb-6">
+                {checkoutError}
+              </p>
+            )}
 
             {/* Billing toggle */}
             <div className="flex items-center justify-center gap-3 mb-4">
@@ -120,12 +165,15 @@ export default function Pricing() {
                 <li className="flex items-center gap-2 text-white text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-300 shrink-0" />{t('pricing.freeTrial')}</li>
                 <li className="flex items-center gap-2 text-white text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-300 shrink-0" />{isYearly ? t('pricing.saveYearly') : t('pricing.cancelAnytime')}</li>
               </ul>
-              <Link
-                to="/register"
-                className="flex items-center justify-center w-full h-11 rounded-full bg-white text-[#4f46e5] font-semibold text-[13px] transition-all duration-200 hover:scale-[1.02] hover:shadow-md active:scale-[0.98]"
+              <button
+                type="button"
+                disabled={!!checkoutLoading}
+                onClick={() => startCheckout(isYearly ? 'yearly' : 'monthly')}
+                className="flex items-center justify-center gap-2 w-full h-11 rounded-full bg-white text-[#4f46e5] font-semibold text-[13px] transition-all duration-200 hover:scale-[1.02] hover:shadow-md active:scale-[0.98] disabled:opacity-70"
               >
+                {checkoutLoading === (isYearly ? 'yearly' : 'monthly') && <Loader2 className="w-4 h-4 animate-spin" />}
                 {t('pricing.startNow')}
-              </Link>
+              </button>
             </div>
 
             {/* Subscription Only */}
@@ -147,12 +195,15 @@ export default function Pricing() {
                 <li className="flex items-center gap-2 text-gray-700 text-[13px]"><CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />{t('pricing.noCommission')}</li>
                 <li className="flex items-center gap-2 text-gray-700 text-[13px]"><CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />{t('pricing.cancelAnytime')}</li>
               </ul>
-              <Link
-                to="/register?plan=subscription_only"
-                className="flex items-center justify-center w-full h-11 rounded-full bg-gray-900 hover:bg-gray-800 text-white font-semibold text-[13px] transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+              <button
+                type="button"
+                disabled={!!checkoutLoading}
+                onClick={() => startCheckout('subscription_only')}
+                className="flex items-center justify-center gap-2 w-full h-11 rounded-full bg-gray-900 hover:bg-gray-800 text-white font-semibold text-[13px] transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-70"
               >
+                {checkoutLoading === 'subscription_only' && <Loader2 className="w-4 h-4 animate-spin" />}
                 {t('pricing.startNow')}
-              </Link>
+              </button>
             </div>
 
             {/* Enterprise */}
@@ -173,12 +224,13 @@ export default function Pricing() {
                 <li className="flex items-center gap-2 text-gray-300 text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />{t('pricing.enterpriseCustom')}</li>
                 <li className="flex items-center gap-2 text-gray-300 text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />{t('pricing.enterpriseSupport')}</li>
               </ul>
-              <Link
-                to={buildLocalizedPath('/kontaktai', locale)}
+              <button
+                type="button"
+                onClick={() => setEnterpriseOpen(true)}
                 className="flex items-center justify-center w-full h-11 rounded-full bg-white text-gray-900 font-semibold text-[13px] transition-all duration-200 hover:scale-[1.02] hover:bg-gray-100 active:scale-[0.98]"
               >
                 {t('pricing.contactUs')}
-              </Link>
+              </button>
             </div>
           </div>
         </section>
@@ -229,19 +281,23 @@ export default function Pricing() {
           <div className="text-center bg-[#f9f9f8] border border-gray-100 rounded-2xl p-12 max-w-[700px] mx-auto">
             <h2 className="font-display text-2xl font-bold text-gray-900 mb-3">{t('pricing.readyToStart')}</h2>
             <p className="text-gray-500 text-[15px] mb-8 leading-relaxed">{t('pricing.readyToStartDesc')}</p>
-            <Link
-              to="/register"
-              className="inline-flex items-center justify-center h-12 px-8 text-sm rounded-full bg-[#4f46e5] hover:bg-[#4338ca] text-white font-semibold transition-all duration-200 hover:scale-[1.03] hover:shadow-lg active:scale-[0.98]"
+            <button
+              type="button"
+              disabled={!!checkoutLoading}
+              onClick={() => startCheckout('monthly')}
+              className="inline-flex items-center justify-center h-12 px-8 text-sm rounded-full bg-[#4f46e5] hover:bg-[#4338ca] text-white font-semibold transition-all duration-200 hover:scale-[1.03] hover:shadow-lg active:scale-[0.98] disabled:opacity-70"
             >
+              {checkoutLoading === 'monthly' && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
               {t('pricing.start7DayTrial')}
               <ArrowRight className="w-4 h-4 ml-2" />
-            </Link>
+            </button>
             <p className="text-[12px] text-gray-400 mt-4">{t('pricing.createAccountFirst')}</p>
           </div>
         </section>
       </main>
 
       <LandingFooter />
+      <EnterpriseContactModal open={enterpriseOpen} onOpenChange={setEnterpriseOpen} />
     </div>
   );
 }

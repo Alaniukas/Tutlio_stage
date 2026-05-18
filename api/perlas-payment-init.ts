@@ -42,6 +42,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(404).json({ error: 'Session not found' });
     }
 
+    if (!auth.isInternal && auth.userId) {
+      const isTutor = auth.userId === session.tutor_id;
+      if (!isTutor) {
+        const { count: studentLink } = await supabase
+          .from('students')
+          .select('id', { count: 'exact', head: true })
+          .eq('id', session.student_id)
+          .eq('linked_user_id', auth.userId);
+
+        let authorized = (studentLink ?? 0) > 0;
+
+        if (!authorized) {
+          const { data: parentProfiles } = await supabase
+            .from('parent_profiles')
+            .select('id')
+            .eq('user_id', auth.userId)
+            .limit(1);
+          if (parentProfiles && parentProfiles.length > 0) {
+            const { count: parentLink } = await supabase
+              .from('parent_students')
+              .select('id', { count: 'exact', head: true })
+              .eq('student_id', session.student_id)
+              .in('parent_id', parentProfiles.map(p => p.id));
+            authorized = (parentLink ?? 0) > 0;
+          }
+        }
+
+        if (!authorized) {
+          return res.status(403).json({ error: 'Not authorized for this session' });
+        }
+      }
+    }
+
     if (session.paid) {
       return res.status(400).json({ error: 'Session is already paid' });
     }
@@ -67,13 +100,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Session has no valid price' });
     }
 
+    const { data: feeRows } = await supabase
+      .from('platform_settings')
+      .select('key, value')
+      .in('key', ['perlas_platform_fee_percent', 'perlas_provider_fee_fixed']);
+    const fees: Record<string, number> = {};
+    for (const r of feeRows || []) fees[r.key] = Number(r.value || 0);
+
+    const platformFeePercent = fees.perlas_platform_fee_percent || 0;
+    const bankFeeFixed = fees.perlas_provider_fee_fixed || 0;
+    const platformFee = Math.round(price * platformFeePercent / 100 * 100) / 100;
+    const totalAmount = Math.round((price + platformFee + bankFeeFixed) * 100) / 100;
+
     const transactionId = session.perlas_transaction_id || generateTransactionId();
     const ownerName = tutor?.full_name || 'Korepetitorius';
     const paymentPurpose = `Tutlio pamoka – ${ownerName}`.slice(0, 100);
     const returnUrl = `${APP_URL}/perlas-success?tutlio_session=${sessionId}`;
 
     const token = signPerlasToken({
-      amount: price.toFixed(2),
+      amount: totalAmount.toFixed(2),
       paymentPurpose,
       transactionId,
       currency: 'EUR',
@@ -91,9 +136,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       token,
       url: PERLAS_API_URL,
       transactionId,
+      sessionPrice: price,
+      platformFee,
+      bankFee: bankFeeFixed,
+      totalAmount,
     });
   } catch (err: any) {
     console.error('[perlas-payment-init] Error:', err);
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: 'Payment initialization failed' });
   }
 }

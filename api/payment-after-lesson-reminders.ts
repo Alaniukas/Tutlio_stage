@@ -87,7 +87,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     subscription_plan,
                     manual_subscription_exempt,
                     enable_manual_student_payments,
-                    manual_payment_bank_details
+                    manual_payment_bank_details,
+                    perlas_finance_enabled
                 )
             `)
             .eq('status', 'active')
@@ -104,6 +105,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const sent: string[] = [];
         const skipped: string[] = [];
+
+        const orgIdsForPerlas = [...new Set(
+            (sessions || [])
+                .map((s: any) => s.tutor?.organization_id)
+                .filter((id: any) => typeof id === 'string' && id.length > 0) as string[]
+        )];
+        const orgPerlasMap = new Map<string, boolean>();
+        if (orgIdsForPerlas.length > 0) {
+            const { data: orgs } = await supabase
+                .from('organizations')
+                .select('id, perlas_finance_enabled')
+                .in('id', orgIdsForPerlas);
+            for (const o of orgs ?? []) {
+                orgPerlasMap.set(o.id, !!(o as any).perlas_finance_enabled);
+            }
+        }
 
         for (const session of sessions || []) {
             const tutor = session.tutor as any;
@@ -174,6 +191,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
             const bankDetails = trimManualPaymentBankDetails(tutor.manual_payment_bank_details);
             const orgIdForEmail = (tutor as any)?.organization_id || null;
+            const perlasEnabled = !!(tutor as any)?.perlas_finance_enabled ||
+                (orgIdForEmail ? !!orgPerlasMap.get(orgIdForEmail) : false);
             const ok = await sendEmail({
                 type: 'payment_after_lesson_reminder',
                 to: toEmail,
@@ -186,11 +205,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     amount: session.price ?? 0,
                     paymentLink,
                     payByTime: payByStr,
+                    perlasEnabled,
+                    payerIsParent: student?.payment_payer === 'parent',
                     ...(tutorManual
                         ? {
                               manualPaymentInstructions: true,
                               bankDetails: bankDetails || undefined,
-                              payerIsParent: student?.payment_payer === 'parent',
                           }
                         : {}),
                     ...(orgIdForEmail ? { organizationId: orgIdForEmail } : {}),
