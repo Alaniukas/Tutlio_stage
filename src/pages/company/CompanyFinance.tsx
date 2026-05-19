@@ -259,6 +259,7 @@ export default function CompanyFinance() {
             periodEndDate: invoicePeriodEnd,
             paymentDeadlineDays: invoiceDeadlineDays,
             sessionIds: groupedByTutor[tutorId].sessionIds,
+            includeSalesInvoice: invoiceIncludeSalesInvoice,
           }),
         });
         const json = await response.json();

@@ -38,6 +38,8 @@ interface GenerateInvoiceBody {
   allowPendingStripePackages?: boolean;
   /** Who issues the invoice on internal calls (org admin or tutor JWT subject). Required with internal auth unless tutorId alone is enough for your flow. */
   issuedByUserId?: string;
+  /** Link invoice to a monthly billing batch (payer invoice email). */
+  billingBatchId?: string;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -369,6 +371,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           subtotal: totalAmount,
           total_amount: totalAmount,
           status: 'issued',
+          ...(body.billingBatchId ? { billing_batch_id: body.billingBatchId } : {}),
         })
         .select('id')
         .single();
@@ -479,23 +482,14 @@ async function getSellerProfile(userId: string, orgId: string | null, isOrgTutor
     return data;
   }
 
-  // Org admin (or same org) issuing to students/payers: seller is the organization.
+  // Org admin or org tutor issuing to students/payers: seller is the organization when configured.
   if (orgId) {
-    const { data: adminRow } = await supabase
-      .from('organization_admins')
-      .select('id')
-      .eq('user_id', userId)
+    const { data: orgInvoiceProfile } = await supabase
+      .from('invoice_profiles')
+      .select('*')
       .eq('organization_id', orgId)
       .maybeSingle();
-
-    if (adminRow) {
-      const { data } = await supabase
-        .from('invoice_profiles')
-        .select('*')
-        .eq('organization_id', orgId)
-        .maybeSingle();
-      if (data) return data;
-    }
+    if (orgInvoiceProfile) return orgInvoiceProfile;
   }
 
   // Fallback: user's personal profile

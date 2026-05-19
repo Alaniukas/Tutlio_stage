@@ -2962,6 +2962,8 @@ export const pl: Record<string, string> = {
   'stuSess.cancelReasonPlaceholder': 'Dlaczego chcesz anulować lekcję? (min. 5 znaków)',
   'stuSess.cancelSession': 'Anulować lekcję?',
   'stuSess.cancelled': 'Anulowane',
+  'stuSess.joinLesson': 'Dołącz',
+  'stuSess.paymentPendingShort': 'Oczekuje',
   'stuSess.tabLessons': 'Lekcje',
   'stuSess.tabFiles': 'Pliki',
   'stuSess.filesFilterLesson': 'Lekcja',
