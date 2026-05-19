@@ -620,6 +620,7 @@ export default function TutorSubscribe() {
             </a>
           </p>
         </div>
+      </div>
     </div>
   );
 }
