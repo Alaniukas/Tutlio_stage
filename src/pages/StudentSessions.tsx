@@ -1541,7 +1541,7 @@ export default function StudentSessions() {
                                                     isMonthlyBilling && !showPerLessonStripeButton ? (
                                                         <span className="text-sm font-black text-blue-600">€{s.price} <span className="text-xs text-blue-500/80 font-semibold">{t('stuSess.invoiceShort')}</span></span>
                                                     ) : (
-                                                        <span className="text-sm font-black text-amber-600">€{s.price} <span className="text-xs text-amber-500/80 font-semibold">(Laukia)</span></span>
+                                                        <span className="text-sm font-black text-amber-600">€{s.price} <span className="text-xs text-amber-500/80 font-semibold">({t('compSess.pendingShort')})</span></span>
                                                     )
                                                 ) : null}
                                             </div>

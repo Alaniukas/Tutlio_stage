@@ -677,6 +677,7 @@ export const fi: Record<string, string> = {
   'dash.viewAll': 'Kaikki',
   'dash.revenue': 'Liikevaihto',
   'dash.pending': 'Odottaa',
+  'dash.attentionCount': '{count} odottaa',
   'dash.updates': 'Päivitykset',
   'dash.totalRevenue': 'Kokonaisliikevaihto',
   'dash.pendingPayments': 'Odottaa',

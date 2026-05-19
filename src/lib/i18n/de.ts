@@ -636,6 +636,7 @@ export const de: Record<string, string> = {
   'dash.updates': 'Aktualisierungen',
   'dash.revenue': 'Einnahmen',
   'dash.pending': 'Ausstehend',
+  'dash.attentionCount': '{count} ausstehend',
   'dash.totalRevenue': 'Gesamteinnahmen',
   'dash.showMore': 'Alle anzeigen ({count})',
   'dash.showLess': 'Weniger anzeigen',

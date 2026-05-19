@@ -677,6 +677,7 @@ export const dk: Record<string, string> = {
   'dash.viewAll': 'Alle',
   'dash.revenue': 'Omsætning',
   'dash.pending': 'Afventende',
+  'dash.attentionCount': '{count} afventer',
   'dash.updates': 'Opdateringer',
   'dash.totalRevenue': 'Samlet omsætning',
   'dash.pendingPayments': 'Afventende',

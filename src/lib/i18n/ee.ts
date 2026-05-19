@@ -1696,6 +1696,7 @@ export const ee: Record<string, string> = {
   'dash.trialBadge': 'Proovitund',
   'dash.revenue': 'Tulu',
   'dash.pending': 'Ootel',
+  'dash.attentionCount': '{count} ootab',
   'dash.updates': 'Uuendused',
   'dash.totalRevenue': 'Kogutulu',
   'dash.pendingPayments': 'Ootel',

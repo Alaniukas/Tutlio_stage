@@ -62,19 +62,59 @@ async function resolveYearlyPriceId(stripeClient: Stripe): Promise<string | unde
   return undefined;
 }
 
+const TRIAL_CODES = ['TRIAL7D', 'TRIAL', 'BANDYMAS'] as const;
+const TRIAL_PERIOD_DAYS = 7;
+
+function isTrialCode(code?: string): boolean {
+  if (!code?.trim()) return false;
+  return TRIAL_CODES.includes(code.trim().toUpperCase() as (typeof TRIAL_CODES)[number]);
+}
+
+async function assertTrialEligible(
+  authHeader: string | undefined,
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  if (!authHeader) {
+    return { ok: false, status: 401, error: 'You must be logged in to use the free trial.' };
+  }
+  const { data: { user }, error: authError } = await supabase.auth.getUser(
+    authHeader.replace(/^Bearer\s+/i, ''),
+  );
+  if (authError || !user) {
+    return { ok: false, status: 401, error: 'Neautorizuota' };
+  }
+  const { data: profile, error: profileErr } = await supabase
+    .from('profiles')
+    .select('trial_used')
+    .eq('id', user.id)
+    .single();
+  if (!profileErr && profile?.trial_used) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        'Free trial has already been used with this account. You can subscribe without trial or use a different account.',
+    };
+  }
+  return { ok: true };
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    const { plan, couponCode, successRedirect, locale, audience } = req.body as {
+    const { plan, couponCode, startTrial, successRedirect, locale, audience } = req.body as {
       plan: 'monthly' | 'yearly' | 'subscription_only';
       couponCode?: string;
-      successRedirect?: 'dashboard' | 'register';
+      /** 7-day trial via Stripe subscription_data.trial_period_days — no Dashboard promotion code needed */
+      startTrial?: boolean;
+      successRedirect?: 'dashboard' | 'register' | 'registration';
       locale?: string;
       audience?: CheckoutAudience;
     };
+
+    const wantsTrial = startTrial === true || isTrialCode(couponCode);
 
     if (!plan || !['monthly', 'yearly', 'subscription_only'].includes(plan)) {
       return res.status(400).json({ error: 'Neteisingas planas' });
@@ -87,16 +127,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const cancelUrl = `${appOrigin}${pricingPath}?canceled=1`;
 
     const toDashboard = successRedirect === 'dashboard';
-    const successUrl = toDashboard
-      ? `${appOrigin}/dashboard?subscription_success=1&session_id={CHECKOUT_SESSION_ID}`
-      : checkoutAudience === 'schools'
-        ? `${appOrigin}${buildPublicPath('/login', localeCode, 'schools', appOrigin)}?subscription_success=1&session_id={CHECKOUT_SESSION_ID}`
-        : `${appOrigin}/register?subscription_success=true&session_id={CHECKOUT_SESSION_ID}`;
+    const toRegistration = successRedirect === 'registration';
+    const successUrl = toRegistration
+      ? `${appOrigin}/registration/subscription?subscription_success=1&session_id={CHECKOUT_SESSION_ID}`
+      : toDashboard
+        ? `${appOrigin}/dashboard?subscription_success=1&session_id={CHECKOUT_SESSION_ID}`
+        : checkoutAudience === 'schools'
+          ? `${appOrigin}${buildPublicPath('/login', localeCode, 'schools', appOrigin)}?subscription_success=1&session_id={CHECKOUT_SESSION_ID}`
+          : `${appOrigin}/register?subscription_success=true&session_id={CHECKOUT_SESSION_ID}`;
 
     // For authenticated users – reuse the same Stripe customer so re-subscribe stays on the same account
     let customerEmail: string | undefined;
     let existingCustomerId: string | undefined;
-    if (toDashboard && req.headers.authorization) {
+    if ((toDashboard || toRegistration) && req.headers.authorization) {
       const { data: { user } } = await supabase.auth.getUser(req.headers.authorization.replace('Bearer ', ''));
       if (user) {
         if (user.email) customerEmail = user.email;
@@ -180,54 +223,53 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
+    const checkoutLocale =
+      localeCode === 'en' ? 'en'
+        : localeCode === 'pl' ? 'pl'
+          : 'lt';
+
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
       mode: 'subscription',
       payment_method_types: ['card', 'link', 'revolut_pay'],
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: successUrl,
       cancel_url: cancelUrl,
-      locale: 'lt',
+      locale: checkoutLocale,
       ...(existingCustomerId ? { customer: existingCustomerId } : customerEmail ? { customer_email: customerEmail } : {}),
     };
 
-    if (couponCode) {
-      const trialCodes = ['TRIAL7D', 'TRIAL', 'BANDYMAS'];
-      if (trialCodes.includes(couponCode.toUpperCase())) {
-        // Vienas nemokamas trial vienai paskyrai – reikia prisijungimo ir tikriname trial_used
-        const authHeader = req.headers.authorization;
-        if (!authHeader) {
-          return res.status(401).json({ error: 'You must be logged in to use the free trial.' });
+    if (wantsTrial) {
+      if (plan !== 'monthly') {
+        return res.status(400).json({
+          error: '7-day free trial is only available for the monthly plan.',
+        });
+      }
+      const trialCheck = await assertTrialEligible(req.headers.authorization);
+      if (!trialCheck.ok) {
+        return res.status(trialCheck.status).json({ error: trialCheck.error });
+      }
+      // Stripe native trial — no promotion code in Dashboard required
+      sessionParams.subscription_data = {
+        trial_period_days: TRIAL_PERIOD_DAYS,
+        metadata: { tutlio_trial_days: String(TRIAL_PERIOD_DAYS) },
+      };
+      sessionParams.payment_method_collection = 'always';
+      sessionParams.metadata = { ...(sessionParams.metadata || {}), tutlio_trial: '7d' };
+    } else if (couponCode?.trim()) {
+      try {
+        const code = couponCode.trim();
+        const promotionCodes = await stripe.promotionCodes.list({ code, active: true, limit: 1 });
+        if (promotionCodes.data.length > 0) {
+          sessionParams.discounts = [{ promotion_code: promotionCodes.data[0].id }];
+        } else {
+          const coupons = await stripe.coupons.list({ limit: 100 });
+          const matchingCoupon = coupons.data.find((c) => c.id === code || c.name === code);
+          if (matchingCoupon) sessionParams.discounts = [{ coupon: matchingCoupon.id }];
+          else return res.status(400).json({ error: 'Nuolaidos kodas nerastas arba nebegalioja' });
         }
-        const { data: { user }, error: authError } = await supabase.auth.getUser(authHeader.replace('Bearer ', ''));
-        if (authError || !user) {
-          return res.status(401).json({ error: 'Neautorizuota' });
-        }
-        const { data: profile, error: profileErr } = await supabase
-          .from('profiles')
-          .select('trial_used')
-          .eq('id', user.id)
-          .single();
-        if (!profileErr && profile?.trial_used) {
-          return res.status(400).json({
-            error: 'Free trial has already been used with this account. You can subscribe without trial or use a different account.',
-          });
-        }
-        sessionParams.subscription_data = { trial_period_days: 7 };
-      } else {
-        try {
-          const promotionCodes = await stripe.promotionCodes.list({ code: couponCode, active: true, limit: 1 });
-          if (promotionCodes.data.length > 0) {
-            sessionParams.discounts = [{ promotion_code: promotionCodes.data[0].id }];
-          } else {
-            const coupons = await stripe.coupons.list({ limit: 100 });
-            const matchingCoupon = coupons.data.find(c => c.id === couponCode || c.name === couponCode);
-            if (matchingCoupon) sessionParams.discounts = [{ coupon: matchingCoupon.id }];
-            else return res.status(400).json({ error: 'Nuolaidos kodas nerastas arba nebegalioja' });
-          }
-        } catch (err) {
-          console.error('Error applying coupon:', err);
-          return res.status(400).json({ error: 'Nepavyko pritaikyti nuolaidos kodo' });
-        }
+      } catch (err) {
+        console.error('Error applying coupon:', err);
+        return res.status(400).json({ error: 'Nepavyko pritaikyti nuolaidos kodo' });
       }
     } else {
       sessionParams.allow_promotion_codes = true;
@@ -235,7 +277,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const session = await stripe.checkout.sessions.create(sessionParams);
 
-    res.status(200).json({ url: session.url });
+    res.status(200).json({
+      url: session.url,
+      trialApplied: wantsTrial,
+      trialDays: wantsTrial ? TRIAL_PERIOD_DAYS : 0,
+    });
   } catch (error: any) {
     console.error('Error creating subscription checkout:', error);
     res.status(500).json({ error: error.message || 'Failed to create checkout session' });

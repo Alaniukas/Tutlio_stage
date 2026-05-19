@@ -677,6 +677,7 @@ export const se: Record<string, string> = {
   'dash.viewAll': 'Alla',
   'dash.revenue': 'Intäkter',
   'dash.pending': 'Väntande',
+  'dash.attentionCount': '{count} väntar',
   'dash.updates': 'Uppdateringar',
   'dash.totalRevenue': 'Total intäkt',
   'dash.pendingPayments': 'Väntande',

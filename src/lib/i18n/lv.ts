@@ -3318,6 +3318,7 @@ export const lv: Record<string, string> = {
   'dash.trialBadge': 'Izmēģinājums',
   'dash.revenue': 'Ieņēmumi',
   'dash.pending': 'Gaida',
+  'dash.attentionCount': '{count} gaida',
   'dash.updates': 'Jaunumi',
   'dash.totalRevenue': 'Kopējie ieņēmumi',
   'dash.pendingPayments': 'Gaida',
