@@ -3739,6 +3739,9 @@ export const en: Record<string, string> = {
   'invoiceCreate.title': 'Issue invoice',
   'invoiceCreate.titleForStudent': 'Issue invoice – {name}',
   'invoiceCreate.titleOrgTutor': 'Issue invoice to company',
+  'invoiceCreate.titleOrgTutorFor': 'Issue invoice for {name}',
+  'invoiceCreate.orgAdminTutorInfo':
+    'Select a period — the invoice will be issued to your company for the selected tutor\'s completed lessons (the tutor will not issue it themselves).',
   'invoiceCreate.fillDates': 'Please select a period',
   'invoiceCreate.noSessions': 'No sessions found in the selected period',
   'invoiceCreate.noOrgTutors': 'No tutors found in the organization — add tutors before issuing invoices.',
@@ -3803,6 +3806,7 @@ export const en: Record<string, string> = {
   'invoices.lessons': 'lessons',
   'invoices.generating': 'Generating...',
   'invoices.generateForTutors': 'Generate invoices ({count} tutors)',
+  'invoices.issueForTutor': 'Issue invoice',
   'invoices.alreadyIssuedForPeriod': 'Invoices are already issued for these tutors in period {from} – {to}:',
   'invoices.checkingIssuedStatus': 'Checking if invoices are already issued for this period...',
   'invoices.downloadAll': 'Download all ({count})',

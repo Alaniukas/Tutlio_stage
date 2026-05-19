@@ -3739,6 +3739,9 @@ export const lt: Record<string, string> = {
   'invoiceCreate.title': 'Išrašyti sąskaitą faktūrą',
   'invoiceCreate.titleForStudent': 'Išrašyti S.F. – {name}',
   'invoiceCreate.titleOrgTutor': 'Išrašyti S.F. įmonei',
+  'invoiceCreate.titleOrgTutorFor': 'Išrašyti S.F. už {name}',
+  'invoiceCreate.orgAdminTutorInfo':
+    'Pasirinkite laikotarpį – S.F. bus išrašyta įmonei už pasirinkto korepetitoriaus atliktas pamokas (korepetitorius pats jos neišrašys).',
   'invoiceCreate.fillDates': 'Pasirinkite laikotarpį',
   'invoiceCreate.noSessions': 'Nerasta pamokų pasirinktame laikotarpyje',
   'invoiceCreate.noOrgTutors': 'Organizacijoje nėra korepetitorių — prieš išrašant S.F. pridėkite korepetitorius.',
@@ -3803,6 +3806,7 @@ export const lt: Record<string, string> = {
   'invoices.lessons': 'pamokos',
   'invoices.generating': 'Generuojama...',
   'invoices.generateForTutors': 'Generuoti S.F. ({count} korepetitorių)',
+  'invoices.issueForTutor': 'Išrašyti S.F.',
   'invoices.alreadyIssuedForPeriod': 'Šiems korepetitoriams už laikotarpį {from} – {to} S.F. jau išrašyta:',
   'invoices.checkingIssuedStatus': 'Tikrinama, ar už šį laikotarpį jau išrašyta S.F...',
   'invoices.downloadAll': 'Atsisiųsti visas ({count})',

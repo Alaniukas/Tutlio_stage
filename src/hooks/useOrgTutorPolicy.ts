@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { orgTutorPolicyRowDeduped, tutorSidebarProfileDeduped } from '@/lib/preload';
+import { orgAdminRowByUserDeduped, orgTutorPolicyRowDeduped, tutorSidebarProfileDeduped } from '@/lib/preload';
 import { useUser } from '@/contexts/UserContext';
 import { parseOrgLessonEditScope, anyOrgLessonEdit, type OrgLessonEditScope } from '@/lib/orgTutorLessonEdit';
 
@@ -75,6 +75,18 @@ export function useOrgTutorPolicy(): OrgTutorPolicy {
             : null;
 
       if (!effectiveOrgId) {
+        setState({
+          ...defaultPolicy,
+          loading: false,
+          isOrgTutor: false,
+        });
+        return;
+      }
+
+      // Org admins share organization_id on profile but are not org tutors — skip license gating.
+      const adminRow = await orgAdminRowByUserDeduped(user.id);
+      if (cancelled) return;
+      if (adminRow?.organization_id) {
         setState({
           ...defaultPolicy,
           loading: false,

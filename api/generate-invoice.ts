@@ -3,6 +3,14 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { generateInvoicePdf, type InvoicePdfData } from './_lib/invoicePdf.js';
 
+/** EUR per lesson for org-tutor → company invoices (see profiles.company_commission_percent). */
+function orgTutorLessonPayEur(tutorPayRate: number | null | undefined, sessionPrice: number | null | undefined): number {
+  const rate = Number(tutorPayRate);
+  if (Number.isFinite(rate) && rate > 0) return rate;
+  const price = Number(sessionPrice);
+  return Number.isFinite(price) && price > 0 ? price : 0;
+}
+
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -578,19 +586,20 @@ function buildLineItems(
   groupingType: GroupingType,
   opts?: { orgTutorRateEur: number | null }
 ): LineItemData[] {
-  const orgTutorRateEur = opts?.orgTutorRateEur ?? null;
-  if (orgTutorRateEur != null) {
-    // Org tutor → invoice to organization: quantity = occurred lessons, unit price = org rate.
-    // GroupingType only affects aggregation, not the rate.
+  const orgTutorPayRate = opts?.orgTutorRateEur ?? null;
+  if (orgTutorPayRate != null) {
+    const linePay = (s: any) => orgTutorLessonPayEur(orgTutorPayRate, s.price);
+
     if (groupingType === 'per_payment') {
       return sessions.map(s => {
         const subject = (s.subjects as any)?.name || 'Pamoka';
         const date = new Date(s.start_time).toLocaleDateString('lt-LT');
+        const amount = linePay(s);
         return {
           description: `${subject} (${date})`,
           quantity: 1,
-          unitPrice: orgTutorRateEur,
-          totalPrice: orgTutorRateEur,
+          unitPrice: amount,
+          totalPrice: amount,
           sessionIds: [s.id],
         };
       });
@@ -604,11 +613,12 @@ function buildLineItems(
     }
     return Array.from(subjectMap.values()).map(group => {
       const qty = group.sessions.length;
-      const totalPrice = qty * orgTutorRateEur;
+      const totalPrice = group.sessions.reduce((sum, s) => sum + linePay(s), 0);
+      const unitPrice = qty > 0 ? Math.round((totalPrice / qty) * 100) / 100 : 0;
       return {
         description: `${group.name} - korepetavimo paslaugos`,
         quantity: qty,
-        unitPrice: Math.round(orgTutorRateEur * 100) / 100,
+        unitPrice,
         totalPrice: Math.round(totalPrice * 100) / 100,
         sessionIds: group.sessions.map((s: any) => s.id),
       };

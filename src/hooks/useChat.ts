@@ -192,10 +192,31 @@ export function useTotalChatUnread() {
   return total;
 }
 
+type ChatMessageListener = (conversationId: string, message: ChatMessage) => void;
+const chatMessageListeners = new Set<ChatMessageListener>();
+
+function mergeChatMessage(prev: ChatMessage[], incoming: ChatMessage): ChatMessage[] {
+  if (prev.some((m) => m.id === incoming.id)) return prev;
+  const next = [...prev, incoming];
+  next.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+  return next;
+}
+
+function broadcastChatMessage(conversationId: string, message: ChatMessage): void {
+  chatMessageListeners.forEach((listener) => listener(conversationId, message));
+}
+
 export function useChatMessages(conversationId: string | null) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const channelRef = useRef<RealtimeChannel | null>(null);
+  const conversationIdRef = useRef(conversationId);
+  conversationIdRef.current = conversationId;
+
+  const appendMessage = useCallback((message: ChatMessage) => {
+    if (!conversationIdRef.current || message.conversation_id !== conversationIdRef.current) return;
+    setMessages((prev) => mergeChatMessage(prev, message));
+  }, []);
 
   const fetchMessages = useCallback(async () => {
     if (!conversationId) return;
@@ -210,15 +231,27 @@ export function useChatMessages(conversationId: string | null) {
   }, [conversationId]);
 
   useEffect(() => {
+    const listener: ChatMessageListener = (cid, msg) => {
+      if (cid === conversationIdRef.current) {
+        setMessages((prev) => mergeChatMessage(prev, msg));
+      }
+    };
+    chatMessageListeners.add(listener);
+    return () => {
+      chatMessageListeners.delete(listener);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!conversationId) {
       setMessages([]);
       return;
     }
 
-    fetchMessages();
+    void fetchMessages();
 
-    channelRef.current = supabase
-      .channel(`chat:${conversationId}`)
+    const channel = supabase
+      .channel(`chat-messages:${conversationId}`)
       .on(
         'postgres_changes',
         {
@@ -229,23 +262,26 @@ export function useChatMessages(conversationId: string | null) {
         },
         (payload) => {
           const newMsg = payload.new as ChatMessage;
-          setMessages((prev) => {
-            if (prev.some((m) => m.id === newMsg.id)) return prev;
-            return [...prev, newMsg];
-          });
+          setMessages((prev) => mergeChatMessage(prev, newMsg));
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          void fetchMessages();
+        }
+      });
+
+    channelRef.current = channel;
 
     return () => {
       if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
+        void supabase.removeChannel(channelRef.current);
         channelRef.current = null;
       }
     };
   }, [conversationId, fetchMessages]);
 
-  return { messages, loading, refetch: fetchMessages };
+  return { messages, loading, refetch: fetchMessages, appendMessage };
 }
 
 export async function sendMessage(
@@ -259,6 +295,13 @@ export async function sendMessage(
 
   // Org tutor license gating: allow read-only inbox for unlicensed org tutors.
   try {
+    const { data: adminRow } = await supabase
+      .from('organization_admins')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (!adminRow) {
     const { data: prof } = await supabase
       .from('profiles')
       .select('organization_id, has_active_license')
@@ -279,6 +322,7 @@ export async function sendMessage(
         console.warn('[useChat] sendMessage blocked: org tutor not licensed');
         return null;
       }
+    }
     }
   } catch (e) {
     // Non-critical: if the check fails, fall through to the normal send attempt.
@@ -307,6 +351,9 @@ export async function sendMessage(
     .eq('id', conversationId);
 
   const inserted = data as ChatMessage;
+  broadcastChatMessage(conversationId, inserted);
+  scheduleBroadcastConversations();
+
   void (async () => {
     try {
       const headers = await authHeaders();
