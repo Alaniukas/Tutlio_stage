@@ -746,7 +746,7 @@ export const fr: Record<string, string> = {
   'login.rememberMe': 'Se souvenir de moi',
   'login.resetError': 'Erreur lors de l\'envoi du lien de réinitialisation : ',
   'login.resetLinkSent': 'Un lien a été envoyé à {email}. Vérifiez votre boîte de réception.',
-  'login.sendResetLink': 'Envoi…',
+  'login.sendResetLink': 'Envoyer le lien de réinitialisation',
   'login.studentDesc': 'Réservez des cours avec votre code tuteur',
   'login.parentRole': 'Parents / tuteurs légaux',
   'login.parentRoleDesc': 'Connectez-vous avec votre compte parent (e-mail et mot de passe)',

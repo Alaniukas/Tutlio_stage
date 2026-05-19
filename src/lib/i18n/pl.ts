@@ -1211,7 +1211,7 @@ export const pl: Record<string, string> = {
   'login.rememberMe': 'Zapamiętaj mnie',
   'login.resetError': 'Błąd wysyłania linku resetowania: ',
   'login.resetLinkSent': 'Wysłaliśmy link na adres {email}. Sprawdź swoją skrzynkę pocztową.',
-  'login.sendResetLink': 'Wysyłanie...',
+  'login.sendResetLink': 'Wyślij link do resetowania',
   'login.studentDesc': 'Rezerwuj lekcje kodem korepetytora',
   'login.parentRole': 'Rodzice / opiekunowie',
   'login.parentRoleDesc': 'Zaloguj się kontem rodzica (e-mail i hasło)',

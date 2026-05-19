@@ -1772,7 +1772,7 @@ export const de: Record<string, string> = {
   'login.parentNoAccount': 'Noch kein Konto?',
   'login.parentRegisterLink': 'Registrieren Sie sich mit dem per E-Mail erhaltenen Code',
   'login.resetError': 'Fehler beim Senden des Links: ',
-  'login.sendResetLink': 'Wird gesendet…',
+  'login.sendResetLink': 'Link zum Zurücksetzen senden',
   'payment.confirmFailed': 'Zahlungsbestätigung fehlgeschlagen.',
   'payment.confirmFailed2': 'Bestätigung der Paketzahlung fehlgeschlagen.',
   'payment.confirmFailed3': 'Zahlung fehlgeschlagen. Bitte versuchen Sie es erneut.',

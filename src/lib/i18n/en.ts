@@ -2659,7 +2659,7 @@ export const en: Record<string, string> = {
   'login.unexpectedError': 'Something went wrong while signing in. Please try again.',
   'login.resetError': 'Error sending reset link: ',
   'login.resetLinkSent': 'We sent a link to {email}. Check your inbox.',
-  'login.sendResetLink': 'Sending...',
+  'login.sendResetLink': 'Send reset link',
   'login.studentDesc': 'Book lessons with your tutor code',
   'login.parentRole': 'Parents / guardians',
   'login.parentRoleDesc': 'Log in with your parent account (email and password)',

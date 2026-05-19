@@ -932,7 +932,7 @@ export default function Login() {
                       <Input
                         id="email"
                         type="email"
-                        placeholder="vardas@pavyzdys.lt"
+                        placeholder={t('register.emailPlaceholder')}
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         required
@@ -974,7 +974,7 @@ export default function Login() {
                       <Input
                         id="email"
                         type="email"
-                        placeholder="vardas@pavyzdys.lt"
+                        placeholder={t('register.emailPlaceholder')}
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         required
@@ -986,7 +986,7 @@ export default function Login() {
                         <Label htmlFor="password" className="text-sm font-medium text-gray-700">{t('common.password')}</Label>
                         <button
                           type="button"
-                          onClick={() => { setIsForgotPassword(true); setError(null); }}
+                          onClick={() => { setIsForgotPassword(true); setError(null); setLoading(false); }}
                           className="text-sm text-indigo-600 hover:underline font-medium"
                         >
                           {t('login.forgotPassword')}
@@ -1109,7 +1109,7 @@ export default function Login() {
                       <Input
                         id="p-email"
                         type="email"
-                        placeholder="vardas@pavyzdys.lt"
+                        placeholder={t('register.emailPlaceholder')}
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         required
@@ -1148,7 +1148,7 @@ export default function Login() {
                       <Input
                         id="p-email2"
                         type="email"
-                        placeholder="vardas@pavyzdys.lt"
+                        placeholder={t('register.emailPlaceholder')}
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         required
@@ -1160,7 +1160,7 @@ export default function Login() {
                         <Label htmlFor="p-password" className="text-sm font-medium text-gray-700">{t('common.password')}</Label>
                         <button
                           type="button"
-                          onClick={() => { setIsForgotPassword(true); setError(null); }}
+                          onClick={() => { setIsForgotPassword(true); setError(null); setLoading(false); }}
                           className="text-sm text-violet-600 hover:underline font-medium"
                         >
                           {t('login.forgotPassword')}
@@ -1293,7 +1293,7 @@ export default function Login() {
                         <Input
                           id="s-email"
                           type="email"
-                          placeholder="vardas@pavyzdys.lt"
+                          placeholder={t('register.emailPlaceholder')}
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
                           required
@@ -1332,7 +1332,7 @@ export default function Login() {
                         <Input
                           id="s-email"
                           type="email"
-                          placeholder="vardas@pavyzdys.lt"
+                          placeholder={t('register.emailPlaceholder')}
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
                           required
@@ -1344,7 +1344,7 @@ export default function Login() {
                           <Label htmlFor="s-password" className="text-sm font-medium text-gray-700">{t('common.password')}</Label>
                           <button
                             type="button"
-                            onClick={() => { setIsForgotPassword(true); setError(null); }}
+                            onClick={() => { setIsForgotPassword(true); setError(null); setLoading(false); }}
                             className="text-sm text-violet-600 hover:underline font-medium"
                           >
                             {t('login.forgotPassword')}

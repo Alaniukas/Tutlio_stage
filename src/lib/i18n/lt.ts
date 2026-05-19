@@ -2658,7 +2658,7 @@ export const lt: Record<string, string> = {
   'login.unexpectedError': 'Įvyko klaida prisijungiant. Bandykite dar kartą.',
   'login.resetError': 'Klaida siunčiant atstatymo nuorodą: ',
   'login.resetLinkSent': 'Išsiuntėme nuorodą į {email}. Patikrinkite pašto dėžutę.',
-  'login.sendResetLink': 'Siunčiama...',
+  'login.sendResetLink': 'Siųsti atkūrimo nuorodą',
   'login.studentDesc': 'Rezervuokite pamokas korepetitoriaus kodu',
   'login.parentRole': 'Tėvai / globėjai',
   'login.parentRoleDesc': 'Prisijunkite su tėvų paskyra (el. paštas ir slaptažodis)',

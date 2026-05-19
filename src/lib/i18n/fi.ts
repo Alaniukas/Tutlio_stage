@@ -772,7 +772,7 @@ export const fi: Record<string, string> = {
   'login.registrationLabel': 'Rekisteröinti',
   'login.rememberMe': 'Muista minut',
   'login.resetLinkSent': 'Lähetimme linkin osoitteeseen {email}. Tarkista postilaatikkosi.',
-  'login.sendResetLink': 'Lähetetään...',
+  'login.sendResetLink': 'Lähetä palautuslinkki',
   'login.studentDesc': 'Varaa tunteja tutorin koodilla',
   'login.parentRole': 'Vanhemmat / huoltajat',
   'login.parentRoleDesc': 'Kirjaudu vanhemman tilillä (sähköposti ja salasana)',

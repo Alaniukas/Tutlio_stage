@@ -184,7 +184,7 @@ export const ee: Record<string, string> = {
   'login.rememberMe': 'Jäta mind meelde',
   'login.resetError': 'Viga lähtestamislingi saatmisel: ',
   'login.resetLinkSent': 'Saatsime lingi aadressile {email}. Kontrollige oma e-posti.',
-  'login.sendResetLink': 'Saatmine...',
+  'login.sendResetLink': 'Saada taastamislink',
   'login.studentDesc': 'Broneeri tunde eraõpetaja koodiga',
   'login.tutorDesc': 'Haldage tunde, õpilasi ja graafikut',
   'login.welcomeBack': 'Tere tulemast tagasi!',
