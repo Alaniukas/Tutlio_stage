@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase, setRememberMe } from '@/lib/supabase';
 import { getPasswordResetRedirectTo } from '@/lib/auth-redirects';
+import { detectAuthLocaleFromHost } from '@/lib/auth-locale';
 import { hasActiveSubscription, tutorHasPlatformSubscriptionAccess } from '@/lib/subscription';
 import { getOrgAdminDashboardPath } from '@/lib/orgAdminDashboardPath';
 import { orgAdminRowByUserDeduped } from '@/lib/preload';
@@ -582,11 +583,19 @@ export default function Login() {
     }
     setLoading(true);
     setError(null);
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: getPasswordResetRedirectTo(import.meta.env.VITE_APP_URL, window.location.origin),
+    const redirectTo = getPasswordResetRedirectTo(import.meta.env.VITE_APP_URL, window.location.origin);
+    const resetRes = await fetch('/api/request-password-reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: email.trim(),
+        locale: detectAuthLocaleFromHost(),
+        redirectTo,
+      }),
     });
-    if (error) {
-      setError(t('login.resetError') + error.message);
+    const resetBody = await resetRes.json().catch(() => ({}));
+    if (!resetRes.ok) {
+      setError(t('login.resetError') + (resetBody?.error || resetRes.statusText));
     } else {
       setResetSent(true);
     }
