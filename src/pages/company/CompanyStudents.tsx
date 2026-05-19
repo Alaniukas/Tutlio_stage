@@ -583,20 +583,56 @@ export default function CompanyStudents() {
 
     setTutors(tutorsList);
 
-    // Fetch ALL org students, regardless of where the tutor profile lives.
-    const { data: fetchedStudents, error: studentsErr } = await supabase
-      .from('students')
-      .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
-      .eq('organization_id', adminRow.organization_id)
-      .order('created_at', { ascending: false });
+    const tutorIds = tutorsList.map((t) => t.id);
+    let fetchedStudents: Student[] = [];
+    let studentsErr: { message: string } | null = null;
+
+    // Match preload + RLS: org students via tutor_id in org, not only students.organization_id
+    // (legacy rows may have tutor_id set but organization_id NULL).
+    if (tutorIds.length > 0) {
+      const [byTutorRes, unassignedRes] = await Promise.all([
+        supabase
+          .from('students')
+          .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
+          .in('tutor_id', tutorIds)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('students')
+          .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
+          .is('tutor_id', null)
+          .eq('organization_id', adminRow.organization_id)
+          .order('created_at', { ascending: false }),
+      ]);
+      studentsErr = byTutorRes.error || unassignedRes.error;
+      const merged = [...(byTutorRes.data || []), ...(unassignedRes.data || [])] as Student[];
+      const seen = new Set<string>();
+      fetchedStudents = merged.filter((s) => {
+        if (seen.has(s.id)) return false;
+        seen.add(s.id);
+        return true;
+      });
+      fetchedStudents.sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      );
+    } else {
+      const { data, error } = await supabase
+        .from('students')
+        .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
+        .is('tutor_id', null)
+        .eq('organization_id', adminRow.organization_id)
+        .order('created_at', { ascending: false });
+      studentsErr = error;
+      fetchedStudents = (data || []) as Student[];
+    }
+
     if (studentsErr) {
       console.error('Error fetching students:', studentsErr);
       setStudents([]);
     } else {
-      setStudents((fetchedStudents || []) as any);
+      setStudents(fetchedStudents);
     }
 
-    setCache('company_students', { students: (fetchedStudents || []) as any, tutors: tutorsList });
+    setCache('company_students', { students: fetchedStudents, tutors: tutorsList });
     setLoading(false);
   };
 
