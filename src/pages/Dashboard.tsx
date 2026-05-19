@@ -1414,7 +1414,7 @@ export default function DashboardPage() {
                                 const attentionCount = listCount + setupCount;
                                 return (
                                     <span className="text-xs font-medium bg-amber-100 text-amber-700 px-2 py-1 rounded-md">
-                                        {attentionCount} laukia
+                                        {t('dash.attentionCount', { count: String(attentionCount) })}
                                     </span>
                                 );
                             })()}

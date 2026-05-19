@@ -673,6 +673,7 @@ export const no: Record<string, string> = {
   'dash.viewAll': 'Alle',
   'dash.revenue': 'Omsetning',
   'dash.pending': 'Ventende',
+  'dash.attentionCount': '{count} venter',
   'dash.updates': 'Oppdateringer',
   'dash.totalRevenue': 'Total omsetning',
   'dash.pendingPayments': 'Ventende',

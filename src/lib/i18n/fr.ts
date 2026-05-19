@@ -1782,6 +1782,7 @@ export const fr: Record<string, string> = {
   'dash.updates': 'Mises à jour',
   'dash.revenue': 'Revenus',
   'dash.pending': 'En attente',
+  'dash.attentionCount': '{count} en attente',
   'dash.totalRevenue': 'Revenu total',
   'dash.pendingPayments': 'En attente',
   'dash.showMore': 'Voir tout ({count})',
