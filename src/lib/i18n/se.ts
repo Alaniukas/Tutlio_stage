@@ -768,7 +768,7 @@ export const se: Record<string, string> = {
   'login.registrationLabel': 'Registrering',
   'login.rememberMe': 'Kom ihåg mig',
   'login.resetLinkSent': 'Vi skickade en länk till {email}. Kolla din inkorg.',
-  'login.sendResetLink': 'Skickar...',
+  'login.sendResetLink': 'Skicka återställningslänk',
   'login.studentDesc': 'Boka lektioner med din lärarkod',
   'login.parentRole': 'Föräldrar / vårdnadshavare',
   'login.parentRoleDesc': 'Logga in med ditt föräldrakonto (e-post och lösenord)',

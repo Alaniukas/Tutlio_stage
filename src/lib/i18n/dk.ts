@@ -768,7 +768,7 @@ export const dk: Record<string, string> = {
   'login.registrationLabel': 'Registrering',
   'login.rememberMe': 'Husk mig',
   'login.resetLinkSent': 'Vi sendte et link til {email}. Tjek din indbakke.',
-  'login.sendResetLink': 'Sender...',
+  'login.sendResetLink': 'Send nulstillingslink',
   'login.studentDesc': 'Book lektioner med din tutorkode',
   'login.parentRole': 'Forældre / værger',
   'login.parentRoleDesc': 'Log ind med din forældrekonto (e-mail og adgangskode)',

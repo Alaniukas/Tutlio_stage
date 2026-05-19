@@ -184,7 +184,7 @@ export const lv: Record<string, string> = {
   'login.rememberMe': 'Atcerēties mani',
   'login.resetError': 'Kļūda sūtot atiestatīšanas saiti: ',
   'login.resetLinkSent': 'Nosūtījām saiti uz {email}. Pārbaudiet savu e-pastu.',
-  'login.sendResetLink': 'Sūta...',
+  'login.sendResetLink': 'Sūtīt atiestatīšanas saiti',
   'login.studentDesc': 'Rezervējiet nodarbības ar privātskolotāja kodu',
   'login.tutorDesc': 'Pārvaldiet nodarbības, skolēnus un grafiku',
   'login.welcomeBack': 'Laipni lūgti atpakaļ!',

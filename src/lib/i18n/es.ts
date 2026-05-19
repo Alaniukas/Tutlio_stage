@@ -1772,7 +1772,7 @@ export const es: Record<string, string> = {
   'login.parentNoAccount': '¿Aún no tiene cuenta?',
   'login.parentRegisterLink': 'Regístrese con el código recibido por correo',
   'login.resetError': 'Error al enviar el enlace: ',
-  'login.sendResetLink': 'Enviando…',
+  'login.sendResetLink': 'Enviar enlace de restablecimiento',
   'payment.confirmFailed': 'Error al confirmar el pago.',
   'payment.confirmFailed2': 'Error al confirmar el pago del paquete.',
   'payment.confirmFailed3': 'Pago fallido. Inténtelo de nuevo.',
