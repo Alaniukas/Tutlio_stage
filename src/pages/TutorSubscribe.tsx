@@ -18,8 +18,6 @@ import {
   Tag,
   ShieldCheck,
   CircleHelp,
-  Gift,
-  Sparkles,
 } from 'lucide-react';
 import {
   Dialog,
@@ -45,7 +43,6 @@ export default function TutorSubscribe() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [trialUsed, setTrialUsed] = useState<boolean | null>(null);
-  const [codeCopied, setCodeCopied] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
   const [manualSecret, setManualSecret] = useState('');
   const [manualLoading, setManualLoading] = useState(false);
@@ -233,17 +230,6 @@ export default function TutorSubscribe() {
     }
   };
 
-  const copyTrialCode = async () => {
-    try {
-      await navigator.clipboard.writeText(TRIAL_DISPLAY_CODE);
-      setCodeCopied(true);
-      setCouponCode(TRIAL_DISPLAY_CODE);
-      setTimeout(() => setCodeCopied(false), 2000);
-    } catch {
-      setCouponCode(TRIAL_DISPLAY_CODE);
-    }
-  };
-
   const primaryButtonLabel = (() => {
     if (loading) return t('subscribe.preparing');
     if (selectedPlan === 'monthly' && isTrialCoupon) return t('subscribe.tryFreeBtn');
@@ -311,86 +297,23 @@ export default function TutorSubscribe() {
             <p className="text-lg sm:text-xl text-indigo-200 max-w-2xl mx-auto">
               {t('subscribe.allYouNeed')}
             </p>
+            {isRegistrationSubscription && (
+              <button
+                type="button"
+                onClick={() => navigate('/dashboard', { replace: true })}
+                className="mt-4 text-sm text-indigo-200/90 underline hover:text-white transition-colors"
+              >
+                {t('subscribe.skipToDashboard')}
+              </button>
+            )}
           </div>
         </div>
 
-        {trialAvailable && (
-          <div className="max-w-3xl mx-auto mb-10">
-            <div className="relative overflow-hidden rounded-3xl border border-emerald-400/30 bg-gradient-to-br from-emerald-500/20 via-indigo-500/10 to-violet-600/20 p-6 sm:p-8 shadow-2xl">
-              <div className="absolute -top-12 -right-12 w-40 h-40 bg-emerald-400/20 rounded-full blur-3xl pointer-events-none" />
-              <div className="absolute -bottom-8 -left-8 w-32 h-32 bg-indigo-400/20 rounded-full blur-2xl pointer-events-none" />
-
-              <div className="relative flex flex-col sm:flex-row sm:items-start gap-6">
-                <div className="flex-shrink-0 w-14 h-14 rounded-2xl bg-emerald-500/30 border border-emerald-400/40 flex items-center justify-center">
-                  <Gift className="w-7 h-7 text-emerald-200" />
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-emerald-200 bg-emerald-500/25 border border-emerald-400/30 px-3 py-1 rounded-full mb-3">
-                    <Sparkles className="w-3.5 h-3.5" />
-                    {t('subscribe.trialHeroBadge')}
-                  </div>
-                  <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">
-                    {t('subscribe.trialHeroTitle')}
-                  </h2>
-                  <p className="text-indigo-100/90 text-sm sm:text-base leading-relaxed mb-4">
-                    {t('subscribe.trialHeroSubtitle')}
-                  </p>
-
-                  <ul className="space-y-2 mb-5">
-                    {[t('subscribe.trialBullet1'), t('subscribe.trialBullet2'), t('subscribe.trialBullet3')].map((line) => (
-                      <li key={line} className="flex items-start gap-2 text-sm text-indigo-100">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                        {line}
-                      </li>
-                    ))}
-                  </ul>
-
-                  <div className="rounded-2xl bg-black/25 border border-white/15 p-4 mb-5">
-                    <p className="text-xs font-medium text-indigo-200 mb-2">{t('subscribe.trialCodeLabel')}</p>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <code className="text-2xl sm:text-3xl font-bold font-mono tracking-[0.2em] text-white">
-                        {TRIAL_DISPLAY_CODE}
-                      </code>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        className="bg-white/90 text-indigo-900 hover:bg-white"
-                        onClick={() => void copyTrialCode()}
-                      >
-                        {codeCopied ? t('subscribe.trialCodeCopied') : t('subscribe.trialCodeCopy')}
-                      </Button>
-                    </div>
-                    <p className="text-xs text-indigo-200/80 mt-2">{t('subscribe.trialCodeHint')}</p>
-                  </div>
-
-                  <Button
-                    type="button"
-                    onClick={() => {
-                      setSelectedPlan('monthly');
-                      void handleSubscribe(true);
-                    }}
-                    disabled={loading}
-                    className="w-full sm:w-auto px-8 py-6 text-base sm:text-lg font-semibold bg-emerald-500 hover:bg-emerald-400 text-white rounded-2xl shadow-lg shadow-emerald-900/30"
-                  >
-                    {loading ? t('subscribe.preparing') : t('subscribe.startTrialCta')}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
         {trialUsed === true && (
-          <div className="max-w-3xl mx-auto mb-8 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-center text-amber-100 text-sm">
+          <div className="max-w-3xl mx-auto mb-6 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-center text-amber-100 text-sm">
             {t('subscribe.trialUsed')}
           </div>
         )}
-
-        <p className="text-center text-indigo-200/90 text-sm font-medium mb-6 uppercase tracking-wide">
-          {t('subscribe.orChoosePlan')}
-        </p>
 
         <div className="grid md:grid-cols-3 gap-6 mb-12 max-w-5xl mx-auto">
           <button
@@ -402,11 +325,6 @@ export default function TutorSubscribe() {
                 : 'shadow-xl hover:shadow-2xl'
             }`}
           >
-            {trialAvailable && (
-              <div className="absolute -top-3 left-6 bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-xs font-bold px-4 py-1.5 rounded-full shadow-lg">
-                {t('subscribe.monthlyTrialBadge')}
-              </div>
-            )}
             {selectedPlan === 'monthly' && (
               <div className="absolute -top-3 right-6 bg-indigo-600 text-white text-xs font-bold px-4 py-1.5 rounded-full">
                 {t('subscribe.selected')}
@@ -572,7 +490,9 @@ export default function TutorSubscribe() {
 
           {trialAvailable && selectedPlan === 'monthly' && (
             <p className="text-center text-xs text-indigo-200/80 mt-3">
-              {t('subscribe.trialCodeHint')}
+              <a href={buildLocalizedPath('/pricing', locale)} className="underline hover:text-white">
+                {t('subscribe.trialSeePricing')}
+              </a>
             </p>
           )}
 

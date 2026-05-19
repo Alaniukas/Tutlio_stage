@@ -213,7 +213,7 @@ export default function Register() {
     } else {
       // Email confirmation must land on a route that can consume the auth hash.
       // Then we continue to subscription flow via ?next=...
-      const emailRedirectTo = `${appOrigin}/auth/callback?next=${encodeURIComponent('/registration/subscription')}`;
+      const emailRedirectTo = `${appOrigin}/auth/callback?next=${encodeURIComponent('/dashboard')}`;
       const signUpResult = await supabase.auth.signUp({
         email,
         password,
@@ -299,11 +299,12 @@ export default function Register() {
         console.error('[Register] Profile upsert error:', upsertError);
       }
 
-      const hasAccess = orgToken || profileData.subscription_status;
-      const subPath = requestedPlan
-        ? `/registration/subscription?plan=${encodeURIComponent(requestedPlan)}`
-        : '/registration/subscription';
-      navigate(hasAccess ? '/dashboard' : subPath);
+      // Account first — subscription is offered on dashboard / pricing, not a hard gate at sign-up.
+      if (requestedPlan && !orgToken) {
+        navigate(`/registration/subscription?plan=${encodeURIComponent(requestedPlan)}`);
+        return;
+      }
+      navigate('/dashboard');
       return;
     }
 
