@@ -2402,6 +2402,8 @@ export default function CalendarPage() {
     const { data: tutorProfile } = await supabase.from('profiles').select('full_name, email').eq('id', user?.id).single();
 
     try {
+      let cancelSucceeded = false;
+
       if (groupCancelChoice === 'all_future' && (isGroupSession || selectedEvent.recurring_session_id)) {
         // Cancel all future sessions in the same recurring/group scope
         let futureQuery = supabase
@@ -2439,14 +2441,19 @@ export default function CalendarPage() {
           }
 
           if (successCount > 0) {
+            cancelSucceeded = true;
             alert(t('cal.cancelledCount', { count: String(successCount) }));
+          } else {
+            setToastMessage({ message: t('cal.errorCancelling'), type: 'error' });
           }
+        } else {
+          setToastMessage({ message: t('cal.errorCancelling'), type: 'error' });
         }
       } else {
         // Cancel single session
         const { data: studentData } = await supabase.from('students').select('email').eq('id', selectedEvent.student_id).single();
 
-        const { success } = await cancelSessionAndFillWaitlist({
+        const { success, error } = await cancelSessionAndFillWaitlist({
           sessionId: selectedEvent.id,
           tutorId: user?.id || '',
           reason: cancellationReason.trim(),
@@ -2457,31 +2464,35 @@ export default function CalendarPage() {
           tutorEmail: tutorProfile?.email || null,
         });
 
-        if (!success) {
-          alert(t('cal.errorCancelling'));
+        if (success) {
+          cancelSucceeded = true;
+        } else {
+          setToastMessage({ message: error || t('cal.errorCancelling'), type: 'error' });
         }
       }
 
-      setIsEventModalOpen(false);
-      setCancelConfirmId(null);
-      setCancellationReason('');
-      setGroupCancelChoice(null);
-      fetchData();
-      // Update Google Calendar – remove cancelled session and update free time blocks
-      try {
-        if (user?.id) {
-          await fetch('/api/google-calendar-sync', {
-            method: 'POST',
-            headers: await authHeaders(),
-            body: JSON.stringify({ userId: user.id }),
-          });
+      if (cancelSucceeded) {
+        setIsEventModalOpen(false);
+        setCancelConfirmId(null);
+        setCancellationReason('');
+        setGroupCancelChoice(null);
+        fetchData();
+        // Update Google Calendar – remove cancelled session and update free time blocks
+        try {
+          if (user?.id) {
+            await fetch('/api/google-calendar-sync', {
+              method: 'POST',
+              headers: await authHeaders(),
+              body: JSON.stringify({ userId: user.id }),
+            });
+          }
+        } catch (err) {
+          console.error('Google Calendar sync after cancel:', err);
         }
-      } catch (err) {
-        console.error('Google Calendar sync after cancel:', err);
       }
     } catch (error) {
       console.error('Error cancelling session:', error);
-      alert(t('cal.errorCancelling'));
+      setToastMessage({ message: t('cal.errorCancelling'), type: 'error' });
     }
 
     setSaving(false);

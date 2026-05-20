@@ -963,6 +963,7 @@ export const lv: Record<string, string> = {
   'onboard.codeNotFound': 'Kods nav atrasts',
   'onboard.confirmEmail': 'Apstipriniet e-pastu',
   'onboard.confirmEmailDesc': 'Mēs nosūtījām apstiprinājuma e-pastu uz {email}. Atveriet pastkasti un nospiediet apstiprinājuma saiti, lai aktivizētu kontu.',
+  'onboard.accountReady': 'Jūsu konts ir gatavs! Tagad varat pieteikties ar tikko izveidoto e-pastu un paroli.',
   'onboard.confirmPassword': 'Apstipriniet paroli *',
   'onboard.continue': 'Turpināt',
   'onboard.createAccountBtn': 'Izveidot kontu',

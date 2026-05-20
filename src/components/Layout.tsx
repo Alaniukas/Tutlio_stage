@@ -344,12 +344,11 @@ export default function Layout({ children }: LayoutProps) {
           >
             <Menu className="w-5 h-5" />
           </button>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-1 justify-center">
             <BrandedLogo size="sm" />
           </div>
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[var(--org-brand)] to-[var(--org-brand-secondary)] flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
-            {initials}
-          </div>
+          {/* Spacer balances the menu button so the logo stays centered */}
+          <div className="min-h-[44px] min-w-[44px] flex-shrink-0" aria-hidden />
         </header>
 
         <main

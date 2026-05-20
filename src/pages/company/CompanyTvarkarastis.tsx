@@ -38,6 +38,7 @@ import { sendEmail } from '@/lib/email';
 import { assertTutorSlotsFree, runOrgAdminCreateSession } from '@/pages/company/orgAdminSessionCreate';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
 import { authHeaders } from '@/lib/apiHelpers';
+import { cancelSessionAndFillWaitlist } from '@/lib/lesson-actions';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { Button } from '@/components/ui/button';
 import {
@@ -1342,28 +1343,45 @@ export default function CompanyTvarkarastis() {
     if (!selectedEvent || cancellationReason.trim().length < 3) return;
     setSaving(true);
     try {
-      const { error } = await supabase
-        .from('sessions')
-        .update({
-          status: 'cancelled',
-          cancellation_reason: cancellationReason.trim(),
-          cancelled_by: 'tutor',
-          cancelled_at: new Date().toISOString(),
-        })
-        .eq('id', selectedEvent.id);
+      const tutorId = selectedEvent.tutor_id;
+      if (!tutorId) {
+        alert(t('compSch.errorCancelling', { msg: 'Missing tutor' }));
+        return;
+      }
 
-      if (!error) {
+      const { success, error } = await cancelSessionAndFillWaitlist({
+        sessionId: selectedEvent.id,
+        tutorId,
+        reason: cancellationReason.trim(),
+        cancelledBy: 'tutor',
+        studentName: selectedEvent.student?.full_name || '',
+        tutorName: selectedEvent.tutor?.full_name || '',
+        studentEmail: null,
+        tutorEmail: null,
+      });
+
+      if (success) {
         setCancelConfirmOpen(false);
         setIsEventDetailOpen(false);
         setCancellationReason('');
         fetchData();
+        try {
+          await fetch('/api/google-calendar-sync', {
+            method: 'POST',
+            headers: await authHeaders(),
+            body: JSON.stringify({ userId: tutorId }),
+          });
+        } catch (err) {
+          console.error('Google Calendar sync after org cancel:', err);
+        }
       } else {
-        alert(t('compSch.errorCancelling', { msg: error.message }));
+        alert(t('compSch.errorCancelling', { msg: error || t('compSch.errorGeneric', { msg: '' }) }));
       }
     } catch (err: any) {
       alert(t('compSch.errorGeneric', { msg: err.message }));
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   const confirmMarkStudentNoShowSchedule = async (when: NoShowWhen) => {

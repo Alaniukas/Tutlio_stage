@@ -798,6 +798,7 @@ export const ee: Record<string, string> = {
   'onboard.backToLogin': 'Tagasi sisselogimisele',
   'onboard.confirmEmail': 'Kinnitage e-post',
   'onboard.confirmEmailDesc': 'Saatsime kinnituskirja aadressile {email}. Avage postkast ja klõpsake kinnituslingil, et konto aktiveerida.',
+  'onboard.accountReady': 'Teie konto on valmis! Nüüd saate sisse logida äsja loodud e-posti ja parooliga.',
   'onboard.continue': 'Jätka',
   'onboard.createAccountBtn': 'Loo konto',
   'onboard.createAccountTitle': 'Loo konto',

@@ -628,11 +628,10 @@ export default function StudentOnboarding() {
                         <p className="text-gray-500 text-sm mb-4">
                             {t('onboard.doneDesc')}
                         </p>
-                        <div className="bg-violet-50 p-4 border border-violet-100 rounded-xl mb-6 text-sm text-violet-800 text-left flex items-start gap-3 shadow-inner">
-                            <AlertCircle className="w-5 h-5 flex-shrink-0 text-violet-600 mt-0.5" />
+                        <div className="bg-green-50 p-4 border border-green-100 rounded-xl mb-6 text-sm text-green-800 text-left flex items-start gap-3 shadow-inner">
+                            <Check className="w-5 h-5 flex-shrink-0 text-green-600 mt-0.5" />
                             <div>
-                                <span className="font-bold">{t('onboard.confirmEmail')}</span><br />
-                                {t('onboard.confirmEmailDesc', { email: studentData?.email || '' })}
+                                {t('onboard.accountReady')}
                             </div>
                         </div>
 

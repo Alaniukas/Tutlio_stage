@@ -2234,6 +2234,7 @@ export const pl: Record<string, string> = {
   'onboard.codeNotFound': 'Kod nie znaleziony',
   'onboard.confirmEmail': 'Potwierdź e-mail',
   'onboard.confirmEmailDesc': 'Wysłaliśmy e-mail z potwierdzeniem na adres {email}. Otwórz skrzynkę i kliknij link potwierdzający, aby aktywować konto.',
+  'onboard.accountReady': 'Twoje konto jest gotowe! Możesz się teraz zalogować za pomocą podanego e-maila i hasła.',
   'onboard.confirmPassword': 'Potwierdź hasło *',
   'onboard.continue': 'Kontynuuj',
   'onboard.createAccountBtn': 'Utwórz konto',

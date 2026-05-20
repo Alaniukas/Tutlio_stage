@@ -33,7 +33,14 @@ function loadEnvFile(name: string) {
     ) {
       value = value.slice(1, -1);
     }
-    // .env.local is loaded after .env so local overrides win
+    // .env.local overrides .env, but dev:test / dev:prod pre-export Supabase vars — keep those.
+    const preserveFromParent =
+      name === '.env.local' &&
+      (key === 'SUPABASE_URL' ||
+        key === 'SUPABASE_SERVICE_ROLE_KEY' ||
+        key === 'VITE_SUPABASE_URL' ||
+        key === 'VITE_SUPABASE_ANON_KEY');
+    if (preserveFromParent && process.env[key] !== undefined) continue;
     if (process.env[key] === undefined || name === '.env.local') process.env[key] = value;
   }
 }
@@ -43,10 +50,28 @@ loadEnvFile('.env.local');
 /** Let API handlers infer browser origin on localhost even if VERCEL=1 leaked into .env */
 process.env.TUTLIO_DEV_API_LOCAL = '1';
 
+// Many .env.local files only define VITE_* — API auth must use the same project URL.
+if (!process.env.SUPABASE_URL && process.env.VITE_SUPABASE_URL) {
+  process.env.SUPABASE_URL = process.env.VITE_SUPABASE_URL;
+}
+
 if (process.env.STRIPE_YEARLY_PRICE_ID) {
   console.log('[dev-api-local] STRIPE_YEARLY_PRICE_ID loaded');
 } else {
   console.warn('[dev-api-local] STRIPE_YEARLY_PRICE_ID missing — restart after editing .env.local');
+}
+
+const apiSupabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+const viteSupabaseUrl = process.env.VITE_SUPABASE_URL || '';
+if (apiSupabaseUrl && viteSupabaseUrl && apiSupabaseUrl !== viteSupabaseUrl) {
+  console.warn(
+    '[dev-api-local] SUPABASE_URL and VITE_SUPABASE_URL differ — /api/* auth will 401. Use npm run dev:test or dev:prod, or align .env.local.',
+  );
+} else if (apiSupabaseUrl) {
+  console.log('[dev-api-local] Supabase auth URL:', apiSupabaseUrl.replace(/^https?:\/\//, '').slice(0, 40));
+}
+if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  console.warn('[dev-api-local] SUPABASE_SERVICE_ROLE_KEY missing — /api/cancel-session will fail');
 }
 
 function buildQuery(url: URL): Record<string, string | string[]> {

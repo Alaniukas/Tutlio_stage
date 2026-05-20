@@ -1406,6 +1406,7 @@ export const fr: Record<string, string> = {
   'onboard.codeNotFound': 'Code introuvable',
   'onboard.confirmEmail': 'Confirmer l\'e-mail',
   'onboard.confirmEmailDesc': 'Un e-mail de confirmation a été envoyé à {email}. Ouvrez votre boîte de réception et cliquez sur le lien de confirmation pour activer votre compte.',
+  'onboard.accountReady': 'Votre compte est prêt ! Vous pouvez maintenant vous connecter avec l\'e-mail et le mot de passe que vous venez de créer.',
   'onboard.confirmPassword': 'Confirmer le mot de passe *',
   'onboard.continue': 'Continuer',
   'onboard.createAccountBtn': 'Créer le compte',

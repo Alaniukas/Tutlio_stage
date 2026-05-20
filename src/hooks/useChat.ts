@@ -192,22 +192,53 @@ export function useTotalChatUnread() {
   return total;
 }
 
+function mergeChatMessages(prev: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
+  if (incoming.length === 0) return prev;
+  if (
+    prev.length === incoming.length &&
+    prev[prev.length - 1]?.id === incoming[incoming.length - 1]?.id
+  ) {
+    return prev;
+  }
+  const byId = new Map<string, ChatMessage>();
+  for (const m of prev) byId.set(m.id, m);
+  for (const m of incoming) byId.set(m.id, m);
+  return [...byId.values()].sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+  );
+}
+
 export function useChatMessages(conversationId: string | null) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const channelRef = useRef<RealtimeChannel | null>(null);
+  const conversationIdRef = useRef(conversationId);
+  conversationIdRef.current = conversationId;
 
-  const fetchMessages = useCallback(async () => {
-    if (!conversationId) return;
-    setLoading(true);
-    const { data } = await supabase
+  const appendMessage = useCallback((msg: ChatMessage) => {
+    setMessages((prev) => {
+      if (prev.some((m) => m.id === msg.id)) return prev;
+      return mergeChatMessages(prev, [msg]);
+    });
+  }, []);
+
+  const fetchMessages = useCallback(async (opts?: { silent?: boolean }) => {
+    const cid = conversationIdRef.current;
+    if (!cid) return;
+    if (!opts?.silent) setLoading(true);
+    const { data, error } = await supabase
       .from('chat_messages')
       .select('*')
-      .eq('conversation_id', conversationId)
+      .eq('conversation_id', cid)
       .order('created_at', { ascending: true });
-    setMessages((data ?? []) as ChatMessage[]);
-    setLoading(false);
-  }, [conversationId]);
+    if (error) {
+      console.error('[useChat] fetchMessages:', error.message);
+    } else {
+      const rows = (data ?? []) as ChatMessage[];
+      setMessages((prev) => mergeChatMessages(prev, rows));
+    }
+    if (!opts?.silent) setLoading(false);
+  }, []);
 
   useEffect(() => {
     if (!conversationId) {
@@ -215,10 +246,12 @@ export function useChatMessages(conversationId: string | null) {
       return;
     }
 
-    fetchMessages();
+    void fetchMessages();
 
-    channelRef.current = supabase
-      .channel(`chat:${conversationId}`)
+    const channel = supabase
+      .channel(`chat:${conversationId}`, {
+        config: { broadcast: { self: true } },
+      })
       .on(
         'postgres_changes',
         {
@@ -229,23 +262,37 @@ export function useChatMessages(conversationId: string | null) {
         },
         (payload) => {
           const newMsg = payload.new as ChatMessage;
-          setMessages((prev) => {
-            if (prev.some((m) => m.id === newMsg.id)) return prev;
-            return [...prev, newMsg];
-          });
+          appendMessage(newMsg);
         },
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        if (import.meta.env?.DEV && status === 'SUBSCRIBED') {
+          console.log('[useChat] realtime subscribed', conversationId);
+        }
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn('[useChat] realtime channel', status, err?.message);
+          void fetchMessages({ silent: true });
+        }
+      });
+
+    channelRef.current = channel;
+
+    // Fallback when Realtime is slow/unavailable (common with RLS until setAuth + replica are correct).
+    const poll = setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      void fetchMessages({ silent: true });
+    }, 4000);
 
     return () => {
+      clearInterval(poll);
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
         channelRef.current = null;
       }
     };
-  }, [conversationId, fetchMessages]);
+  }, [conversationId, fetchMessages, appendMessage]);
 
-  return { messages, loading, refetch: fetchMessages };
+  return { messages, loading, refetch: fetchMessages, appendMessage };
 }
 
 export async function sendMessage(

@@ -803,6 +803,7 @@ export const se: Record<string, string> = {
   'onboard.backToLogin': 'Tillbaka till inloggning',
   'onboard.confirmEmail': 'Bekräfta e-post',
   'onboard.confirmEmailDesc': 'Vi skickade ett bekräftelsemail till {email}. Öppna din inkorg och klicka på bekräftelselänken för att aktivera ditt konto.',
+  'onboard.accountReady': 'Ditt konto är redo! Du kan nu logga in med e-postadressen och lösenordet du just skapade.',
   'onboard.confirmPassword': 'Bekräfta lösenord *',
   'onboard.continue': 'Fortsätt',
   'onboard.createAccountBtn': 'Skapa konto',

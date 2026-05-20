@@ -803,6 +803,7 @@ export const fi: Record<string, string> = {
   'onboard.backToLogin': 'Takaisin kirjautumiseen',
   'onboard.confirmEmail': 'Vahvista sähköposti',
   'onboard.confirmEmailDesc': 'Lähetimme vahvistusviestin osoitteeseen {email}. Avaa postilaatikkosi ja napsauta vahvistuslinkkiä aktivoidaksesi tilisi.',
+  'onboard.accountReady': 'Tilisi on valmis! Voit nyt kirjautua sisään juuri luomallasi sähköpostilla ja salasanalla.',
   'onboard.confirmPassword': 'Vahvista salasana *',
   'onboard.continue': 'Jatka',
   'onboard.createAccountBtn': 'Luo tili',

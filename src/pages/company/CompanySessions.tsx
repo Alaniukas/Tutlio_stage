@@ -5,6 +5,7 @@ import { calculateSessionStats } from '@/lib/session-stats';
 import { supabase } from '@/lib/supabase';
 import { getCached, setCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
+import { cancelSessionAndFillWaitlist } from '@/lib/lesson-actions';
 import { format } from 'date-fns';
 import { useTranslation } from '@/lib/i18n';
 import { CalendarDays, Search, ChevronDown, ListOrdered, UserX, XCircle, CheckCircle, Pencil, Ban, Loader2, MessageSquare, Trash2 } from 'lucide-react';
@@ -233,25 +234,23 @@ export default function CompanySessions() {
     if (!selectedSession || cancellationReason.trim().length < 5) return;
     setCancellingSession(true);
     try {
-      const res = await fetch('/api/cancel-session', {
-        method: 'POST',
-        headers: await authHeaders(),
-        body: JSON.stringify({
-          sessionId: selectedSession.id,
-          tutorId: selectedSession.tutor_id,
-          reason: cancellationReason.trim(),
-          cancelledBy: 'tutor',
-          studentName: selectedSession.student_name,
-          tutorName: selectedSession.tutor_name,
-          studentEmail: null,
-          tutorEmail: null,
-        }),
+      const { success, error } = await cancelSessionAndFillWaitlist({
+        sessionId: selectedSession.id,
+        tutorId: selectedSession.tutor_id,
+        reason: cancellationReason.trim(),
+        cancelledBy: 'tutor',
+        studentName: selectedSession.student_name,
+        tutorName: selectedSession.tutor_name,
+        studentEmail: null,
+        tutorEmail: null,
       });
-      if (res.ok) {
+      if (success) {
         setSelectedSession(null);
         setCancelMode(false);
         setCancellationReason('');
         loadData();
+      } else {
+        alert(error || t('compSch.errorCancelling', { msg: '' }));
       }
     } finally {
       setCancellingSession(false);

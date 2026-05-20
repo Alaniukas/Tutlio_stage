@@ -803,6 +803,7 @@ export const no: Record<string, string> = {
   'onboard.backToLogin': 'Tilbake til innlogging',
   'onboard.confirmEmail': 'Bekreft e-post',
   'onboard.confirmEmailDesc': 'Vi sendte en bekreftelses-e-post til {email}. Åpne innboksen og klikk på bekreftelseslenken for å aktivere kontoen.',
+  'onboard.accountReady': 'Kontoen din er klar! Du kan nå logge inn med e-posten og passordet du nettopp opprettet.',
   'onboard.confirmPassword': 'Bekreft passord *',
   'onboard.continue': 'Fortsett',
   'onboard.createAccountBtn': 'Opprett konto',

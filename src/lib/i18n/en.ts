@@ -2755,6 +2755,7 @@ export const en: Record<string, string> = {
   'onboard.codeNotFound': 'Code not found',
   'onboard.confirmEmail': 'Confirm email',
   'onboard.confirmEmailDesc': 'We sent a confirmation email to {email}. Open your inbox and click the confirmation link to activate your account.',
+  'onboard.accountReady': 'Your account is ready! You can now log in with the email and password you just created.',
   'onboard.confirmPassword': 'Confirm password *',
   'onboard.continue': 'Continue',
   'onboard.createAccountBtn': 'Create account',

@@ -95,8 +95,23 @@ if (typeof window !== 'undefined') {
   // Supabase autoRefreshToken is sufficient and this prevents auth-lock contention storms
   // in React StrictMode (seen as "Lock broken by another request with steal option").
 
+  // Realtime postgres_changes with RLS requires the current JWT on the socket.
+  const syncRealtimeAuth = (accessToken: string | undefined) => {
+    try {
+      void supabase.realtime.setAuth(accessToken ?? '');
+    } catch (err) {
+      console.warn('[Supabase Client] realtime.setAuth failed:', err);
+    }
+  };
+
+  void supabase.auth.getSession().then(({ data: { session } }) => {
+    syncRealtimeAuth(session?.access_token);
+  });
+
   // Add global auth event logger to track all auth events
   supabase.auth.onAuthStateChange((event, session) => {
+    syncRealtimeAuth(session?.access_token);
+
     // Log all auth events for debugging
     if (event !== 'TOKEN_REFRESHED') {
       console.log('[Supabase Client] Auth event:', event, {

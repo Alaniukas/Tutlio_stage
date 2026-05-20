@@ -1,7 +1,7 @@
-// ─── Vercel Serverless Function: Register Student (with confirmation email) ───
+// ─── Vercel Serverless Function: Register Student ───
 // POST /api/register-student
-// Creates a Supabase auth user with email_confirm: false so verification
-// email is sent. Then updates the students table with onboarding data.
+// Creates a Supabase auth user via admin API with email pre-confirmed
+// (student already proved ownership by clicking the invite link).
 
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
@@ -15,10 +15,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
     const appUrl = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
-    if (!supabaseUrl || !serviceKey || !anonKey) {
+    if (!supabaseUrl || !serviceKey) {
       return res.status(500).json({ error: 'Missing Supabase env vars' });
     }
 
@@ -45,9 +44,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const supabase = createClient(supabaseUrl, serviceKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
-    const publicSupabase = createClient(supabaseUrl, anonKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
@@ -102,13 +98,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       accepted_terms_at: acceptedAt || null,
     };
 
-    const { data: authData, error: authError } = await publicSupabase.auth.signUp({
+    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email,
       password,
-      options: {
-        emailRedirectTo: `${appUrl}/login`,
-        data: signupPayload,
-      },
+      email_confirm: true,
+      user_metadata: signupPayload,
     });
 
     if (authError || !authData.user) {

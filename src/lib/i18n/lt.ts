@@ -2755,6 +2755,7 @@ export const lt: Record<string, string> = {
   'onboard.codeNotFound': 'Kodas nerastas',
   'onboard.confirmEmail': 'Patvirtinkite el. paštą',
   'onboard.confirmEmailDesc': 'Išsiuntėme patvirtinimo laišką į {email}. Atidarykite laišką ir spustelėkite patvirtinimo nuorodą, kad aktyvuotumėte paskyrą.',
+  'onboard.accountReady': 'Jūsų paskyra paruošta! Dabar galite prisijungti su ką tik sukurtu el. paštu ir slaptažodžiu.',
   'onboard.confirmPassword': 'Patvirtinkite slaptažodį *',
   'onboard.continue': 'Tęsti',
   'onboard.createAccountBtn': 'Sukurti paskyrą',

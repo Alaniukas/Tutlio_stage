@@ -848,6 +848,7 @@ export const es: Record<string, string> = {
   'onboard.backToLogin': 'Volver al inicio de sesión',
   'onboard.confirmEmail': 'Confirmar correo',
   'onboard.confirmEmailDesc': 'Enviamos un correo de confirmación a {email}. Abra su bandeja de entrada y haga clic en el enlace para activar su cuenta.',
+  'onboard.accountReady': '¡Tu cuenta está lista! Ahora puedes iniciar sesión con el correo y la contraseña que acabas de crear.',
   'onboard.confirmPassword': 'Confirmar contraseña *',
   'onboard.continue': 'Continuar',
   'onboard.createAccountBtn': 'Crear cuenta',
