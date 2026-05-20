@@ -12,6 +12,7 @@ import { format, subDays } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { fetchPaidSalesInvoiceCandidates } from '@/lib/manualSalesInvoicePreview';
 import { fetchOrgTutorInvoicesDeduped } from '@/lib/fetchOrgTutorInvoicesDeduped';
+import { orgTutorLessonPayEur } from '@/lib/orgTutorLessonPay';
 
 type GroupingType = 'per_payment' | 'per_week' | 'single';
 
@@ -80,7 +81,7 @@ export default function CreateInvoiceModal({
       checkInvoiceProfile();
       if (isOrgTutor) fetchOrgBuyerInfo();
     }
-  }, [isOpen]);
+  }, [isOpen, isOrgTutor, billingTutorId]);
 
   const fetchOrgBuyerInfo = async () => {
     try {
@@ -106,13 +107,25 @@ export default function CreateInvoiceModal({
   const checkInvoiceProfile = async () => {
     try {
       const headers = await authHeaders();
-      const [userRes, orgRes] = await Promise.all([
-        fetch('/api/invoice-settings?scope=user', { headers }),
-        !isOrgTutor ? fetch('/api/invoice-settings?scope=organization', { headers }) : Promise.resolve(null),
-      ]);
-      const userJson = await userRes.json();
-      const orgJson = orgRes ? await orgRes.json() : null;
-      const profileData = (orgJson?.data || userJson.data) as SellerInfo | null | undefined;
+      let profileData: SellerInfo | null | undefined;
+
+      if (isOrgTutor && billingTutorId) {
+        const tutorRes = await fetch(
+          `/api/invoice-settings?scope=tutor&tutorId=${encodeURIComponent(billingTutorId)}`,
+          { headers },
+        );
+        const tutorJson = await tutorRes.json();
+        profileData = tutorJson.data as SellerInfo | null | undefined;
+      } else {
+        const [userRes, orgRes] = await Promise.all([
+          fetch('/api/invoice-settings?scope=user', { headers }),
+          !isOrgTutor ? fetch('/api/invoice-settings?scope=organization', { headers }) : Promise.resolve(null),
+        ]);
+        const userJson = await userRes.json();
+        const orgJson = orgRes ? await orgRes.json() : null;
+        profileData = (orgJson?.data || userJson.data) as SellerInfo | null | undefined;
+      }
+
       setHasInvoiceProfile(!!profileData);
 
       let previewName: string | null | undefined;
@@ -122,10 +135,9 @@ export default function CreateInvoiceModal({
 
       if (needsTutorName) {
         try {
-          const { data: auth } = await supabase.auth.getUser();
-          const uid = auth?.user?.id;
-          if (uid) {
-            const { data: pf } = await supabase.from('profiles').select('full_name').eq('id', uid).maybeSingle();
+          const nameUserId = billingTutorId ?? (await supabase.auth.getUser()).data.user?.id;
+          if (nameUserId) {
+            const { data: pf } = await supabase.from('profiles').select('full_name').eq('id', nameUserId).maybeSingle();
             previewName = (pf?.full_name || '').trim() || null;
           }
         } catch {
@@ -170,18 +182,44 @@ export default function CreateInvoiceModal({
 
       if (isOrgTutor) {
         // Org tutor → invoice to organization: show occurred lessons (not student/payer sales invoices).
-        const tutorId = tutorIdsForQuery[0];
+        const tutorId = tutorScopeId;
         if (!tutorId) throw new Error(t('invoiceCreate.noSessions'));
 
-        const periodInvoiceKey = `periodStart=${encodeURIComponent(periodStart)}&periodEnd=${encodeURIComponent(periodEnd)}`;
-        const periodInvoiceRes = await fetchOrgTutorInvoicesDeduped(periodInvoiceKey);
-        if (periodInvoiceRes.ok) {
-          const periodInvoiceJson = periodInvoiceRes.data;
-          const periodInvoices = (periodInvoiceJson.periodInvoices || []) as Array<{ invoice_number?: string; total_amount?: number }>;
-          if (periodInvoices.length > 0) {
-            const totalIssued = periodInvoices.reduce((sum, inv) => sum + Number(inv.total_amount || 0), 0);
-            const nums = periodInvoices.map((inv) => inv.invoice_number).filter(Boolean).join(', ');
-            setError(`Už laikotarpį ${periodStart} – ${periodEnd} sąskaita jau išrašyta (${nums || 'be numerio'}), suma: €${totalIssued.toFixed(2)}.`);
+        const issuingForAnotherTutor = !!billingTutorId && billingTutorId !== user.id;
+        if (!issuingForAnotherTutor) {
+          const periodInvoiceKey = `periodStart=${encodeURIComponent(periodStart)}&periodEnd=${encodeURIComponent(periodEnd)}`;
+          const periodInvoiceRes = await fetchOrgTutorInvoicesDeduped(periodInvoiceKey);
+          if (periodInvoiceRes.ok) {
+            const periodInvoiceJson = periodInvoiceRes.data;
+            const periodInvoices = (periodInvoiceJson.periodInvoices || []) as Array<{ invoice_number?: string; total_amount?: number }>;
+            if (periodInvoices.length > 0) {
+              const totalIssued = periodInvoices.reduce((sum, inv) => sum + Number(inv.total_amount || 0), 0);
+              const nums = periodInvoices.map((inv) => inv.invoice_number).filter(Boolean).join(', ');
+              setError(`Už laikotarpį ${periodStart} – ${periodEnd} sąskaita jau išrašyta (${nums || 'be numerio'}), suma: €${totalIssued.toFixed(2)}.`);
+              setSessions([]);
+              setPreviewMode(false);
+              return;
+            }
+          }
+        } else {
+          const precheckResp = await fetch('/api/generate-invoice', {
+            method: 'POST',
+            headers: await authHeaders(),
+            body: JSON.stringify({
+              tutorId,
+              periodStart,
+              periodEnd,
+              groupingType: 'single',
+              isOrgTutor: true,
+              precheckOnly: true,
+            }),
+          });
+          const precheckJson = await precheckResp.json().catch(() => ({}));
+          if (precheckResp.ok && precheckJson?.reason === 'duplicate') {
+            setError(
+              (precheckJson.error as string) ||
+                `Už laikotarpį ${periodStart} – ${periodEnd} sąskaita jau išrašyta.`,
+            );
             setSessions([]);
             setPreviewMode(false);
             return;
@@ -192,7 +230,7 @@ export default function CreateInvoiceModal({
           supabase.from('profiles').select('company_commission_percent').eq('id', tutorId).maybeSingle(),
           supabase
             .from('sessions')
-            .select('id, tutor_id, start_time, end_time, status, subject_id, students(full_name, email), subjects(name)')
+            .select('id, tutor_id, start_time, end_time, status, subject_id, price, students(full_name, email), subjects(name)')
             .eq('tutor_id', tutorId)
             .neq('status', 'cancelled')
             .neq('status', 'no_show')
@@ -202,8 +240,11 @@ export default function CreateInvoiceModal({
         ]);
 
         if (sessErr) throw sessErr;
-        const rate = Number((prof as any)?.company_commission_percent) || 0;
-        const rows = (sessRows || []).map((s: any) => ({ ...s, price: rate }));
+        const tutorPayRate = Number((prof as any)?.company_commission_percent) || 0;
+        const rows = (sessRows || []).map((s: any) => ({
+          ...s,
+          price: orgTutorLessonPayEur(tutorPayRate, s.price),
+        }));
         if (!rows.length) {
           setError(t('invoiceCreate.noSessions'));
           setSessions([]);
@@ -343,7 +384,11 @@ export default function CreateInvoiceModal({
           <DialogTitle className="flex items-center gap-2">
             <FileText className="w-5 h-5 text-indigo-600" />
             {isOrgTutor
-              ? t('invoiceCreate.titleOrgTutor')
+              ? billingTutorId && orgTutors?.find((tu) => tu.id === billingTutorId)
+                ? t('invoiceCreate.titleOrgTutorFor', {
+                    name: orgTutors.find((tu) => tu.id === billingTutorId)!.full_name,
+                  })
+                : t('invoiceCreate.titleOrgTutor')
               : studentName
                 ? t('invoiceCreate.titleForStudent', { name: studentName })
                 : t('invoiceCreate.title')}
@@ -363,10 +408,12 @@ export default function CreateInvoiceModal({
               <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
                 <p className="text-sm text-blue-900">
                   {isOrgTutor
-                    ? t('invoiceCreate.orgTutorInfo')
-                      : orgTutors && orgTutors.length > 0
-                        ? t('invoiceCreate.orgAdminInfo')
-                        : t('invoiceCreate.selectPeriodInfo')}
+                    ? billingTutorId
+                      ? t('invoiceCreate.orgAdminTutorInfo')
+                      : t('invoiceCreate.orgTutorInfo')
+                    : orgTutors && orgTutors.length > 0
+                      ? t('invoiceCreate.orgAdminInfo')
+                      : t('invoiceCreate.selectPeriodInfo')}
                 </p>
               </div>
 

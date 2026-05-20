@@ -24,7 +24,7 @@ const HL_FEATURES = [
   { key: 'stats', icon: BarChart3 },
   { key: 'waitlist', icon: Clock },
   { key: 'whiteLabel', icon: Palette },
-  { key: 'whiteboard', icon: PenTool, comingSoon: true },
+  { key: 'whiteboard', icon: PenTool },
 ];
 
 const TAB_STYLES = [
@@ -64,7 +64,7 @@ export default function FeaturesSection({ variant = 'tutor' }: { variant?: Landi
   const [active, setActive] = useState(0);
   const p = variant === 'schools' ? 'schoolsLanding' : 'landing';
   const ICONS = variant === 'schools' ? SCHOOLS_ICONS : TUTOR_ICONS;
-  const ctaLink = variant === 'schools' ? buildLocalizedPath('/kontaktai', locale) : '/register';
+  const ctaLink = variant === 'schools' ? buildLocalizedPath('/kontaktai', locale) : buildLocalizedPath('/pricing', locale);
 
   const features = [
     {

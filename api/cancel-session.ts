@@ -1,6 +1,10 @@
 // ─── Vercel Serverless Function: Cancel Session + Fill Waitlist ───────────────
 // POST /api/cancel-session
 // Uses service role key to bypass RLS so waitlist can be read regardless of who cancels.
+//
+// Production (Vercel): set SUPABASE_SERVICE_ROLE_KEY and SUPABASE_URL (or VITE_SUPABASE_URL)
+// to the SAME Supabase project the browser uses (VITE_SUPABASE_URL / anon key). Auth validates
+// the caller's Bearer token against that project via verifyRequestAuth in api/_lib/auth.ts.
 
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
@@ -8,6 +12,7 @@ import { format } from 'date-fns';
 import { lt } from 'date-fns/locale';
 import { deleteSessionFromGoogle, syncSessionToGoogle } from './_lib/google-calendar.js';
 import { verifyRequestAuth } from './_lib/auth.js';
+import { canStudentSideCancelSession, canTutorSideCancelSession } from './_lib/cancel-session-access.js';
 
 async function sendEmail(body: object) {
     const baseUrl = process.env.VERCEL_URL
@@ -74,6 +79,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: 'Missing sessionId or tutorId' });
     }
 
+    const reasonTrimmed = String(reason || '').trim();
+    if (reasonTrimmed.length < 3) {
+        return res.status(400).json({ error: 'Cancellation reason is required (min 3 characters)' });
+    }
+
     const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
@@ -83,12 +93,102 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    const { data: existingSession, error: loadSessionError } = await supabase
+        .from('sessions')
+        .select('tutor_id, student_id')
+        .eq('id', sessionId)
+        .maybeSingle();
+
+    if (loadSessionError || !existingSession) {
+        return res.status(404).json({ error: 'Session not found' });
+    }
+
+    if (existingSession.tutor_id !== tutorId) {
+        return res.status(400).json({ error: 'tutorId does not match session' });
+    }
+
+    if (!auth.isInternal) {
+        const userId = auth.userId;
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+
+        if (cancelledBy === 'tutor') {
+            let isOrgAdminForTutorOrg = false;
+            const { data: tutorRow } = await supabase
+                .from('profiles')
+                .select('organization_id')
+                .eq('id', tutorId)
+                .maybeSingle();
+            const orgId = (tutorRow as { organization_id?: string | null } | null)?.organization_id;
+            if (orgId) {
+                const { data: orgAdmin } = await supabase
+                    .from('organization_admins')
+                    .select('id')
+                    .eq('user_id', userId)
+                    .eq('organization_id', orgId)
+                    .maybeSingle();
+                isOrgAdminForTutorOrg = !!orgAdmin;
+            }
+            if (!canTutorSideCancelSession(userId, tutorId, isOrgAdminForTutorOrg)) {
+                return res.status(403).json({ error: 'Forbidden' });
+            }
+        } else {
+            if (!existingSession.student_id) {
+                return res.status(400).json({ error: 'Session has no student' });
+            }
+
+            const { data: studentRow } = await supabase
+                .from('students')
+                .select('linked_user_id')
+                .eq('id', existingSession.student_id)
+                .maybeSingle();
+
+            const parentUserIds: string[] = [];
+            const { data: parentLinks } = await supabase
+                .from('parent_students')
+                .select('parent_profiles(user_id)')
+                .eq('student_id', existingSession.student_id);
+
+            for (const row of parentLinks || []) {
+                const pp = (row as { parent_profiles?: { user_id?: string } | { user_id?: string }[] })
+                    .parent_profiles;
+                const profile = Array.isArray(pp) ? pp[0] : pp;
+                if (profile?.user_id) parentUserIds.push(profile.user_id);
+            }
+
+            // Fallback if embed shape differs — direct parent_profiles + parent_students lookup
+            if (!canStudentSideCancelSession(userId, studentRow?.linked_user_id, parentUserIds)) {
+                const { data: parentProfile } = await supabase
+                    .from('parent_profiles')
+                    .select('id')
+                    .eq('user_id', userId)
+                    .maybeSingle();
+
+                let parentAllowed = false;
+                if (parentProfile?.id) {
+                    const { data: link } = await supabase
+                        .from('parent_students')
+                        .select('id')
+                        .eq('parent_id', parentProfile.id)
+                        .eq('student_id', existingSession.student_id)
+                        .maybeSingle();
+                    parentAllowed = !!link;
+                }
+
+                if (!parentAllowed) {
+                    return res.status(403).json({ error: 'Forbidden' });
+                }
+            }
+        }
+    }
+
     // 1. Mark session as cancelled
     const { data: session, error: cancelError } = await supabase
         .from('sessions')
         .update({
             status: 'cancelled',
-            cancellation_reason: reason,
+            cancellation_reason: reasonTrimmed,
             cancelled_by: cancelledBy,  // Track who cancelled (tutor or student)
             cancelled_at: new Date().toISOString()  // Track when cancelled for auto-hide
         })
@@ -192,14 +292,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const hideStudentRefund = willHavePendingPenalty || willHaveEarlyRefundChoice;
 
     const cancellationEmailTasks: Promise<unknown>[] = [];
-    if (resolvedTutorEmail && cancelledBy === 'student') {
+    if (resolvedTutorEmail && (cancelledBy === 'student' || cancelledBy === 'tutor')) {
         cancellationEmailTasks.push(
             sendEmailWithTimeout({
                 type: 'session_cancelled',
                 to: resolvedTutorEmail,
                 data: {
-                    studentName, tutorName, date: emailDate, time: emailTime, cancelledBy, reason,
-                    hideRefund: true,
+                    studentName, tutorName, date: emailDate, time: emailTime, cancelledBy, reason: reasonTrimmed,
+                    hideRefund: cancelledBy === 'student',
                     locale: 'lt',
                     ...(orgId ? { organizationId: orgId } : {}),
                 },
@@ -212,7 +312,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 type: 'session_cancelled',
                 to: resolvedStudentEmail,
                 data: {
-                    studentName, tutorName, date: emailDate, time: emailTime, cancelledBy, reason,
+                    studentName, tutorName, date: emailDate, time: emailTime, cancelledBy, reason: reasonTrimmed,
                     isPaid: hideStudentRefund ? false : isPaid,
                     sessionPrice: hideStudentRefund ? null : sessionPrice,
                     locale: 'lt',
@@ -238,7 +338,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     date: emailDate,
                     time: emailTime,
                     cancelledBy,
-                    reason,
+                    reason: reasonTrimmed,
                     locale: 'lt',
                     ...(orgId ? { organizationId: orgId } : {}),
                 },

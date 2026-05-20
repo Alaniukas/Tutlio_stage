@@ -63,6 +63,9 @@ export function useOrgFeatures(): OrgFeaturesState {
           if (featureId === 'manual_payments' && v === undefined) {
             v = org.features?.enable_manual_student_payments as boolean | undefined;
           }
+          if (featureId === 'perlas_finance' && v === undefined) {
+            v = (org as { perlas_finance_enabled?: boolean }).perlas_finance_enabled;
+          }
           mergedFeatures[featureId] = v ?? definition.defaultValue;
         });
 

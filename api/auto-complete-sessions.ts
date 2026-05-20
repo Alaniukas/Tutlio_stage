@@ -38,11 +38,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // - their end time has already passed
     // - are not yet marked as completed
     // - are not cancelled
+    // Only look back 7 days — anything older is likely stale
+    const lookback = new Date(Date.now() - 7 * 24 * 3600000).toISOString();
     const { data: sessions, error } = await supabase
       .from('sessions')
       .select('id, tutor_id, end_time, status, paid, payment_status, lesson_package_id')
       .eq('status', 'active')
-      .lt('end_time', now);
+      .lt('end_time', now)
+      .gte('end_time', lookback)
+      .limit(500);
 
     if (error) {
       console.error('[auto-complete-sessions] fetch error:', error);

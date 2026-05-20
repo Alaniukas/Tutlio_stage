@@ -10,7 +10,7 @@ import { lt } from 'date-fns/locale';
 import { useTranslation } from '@/lib/i18n';
 import { Calendar as BigCalendar, dateFnsLocalizer, Views, View } from 'react-big-calendar';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
-import { ChevronLeft, ChevronRight, LayoutGrid, CalendarDays, List, Check, CalendarIcon, XCircle, ShieldAlert, Clock, Wallet, Info, CreditCard, Loader2, Users } from 'lucide-react';
+import { ChevronLeft, ChevronRight, LayoutGrid, CalendarDays, List, Check, CalendarIcon, XCircle, ShieldAlert, Clock, Wallet, Info, CreditCard, Loader2, Users, Landmark } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { cn, normalizeUrl } from '@/lib/utils';
@@ -225,6 +225,8 @@ export default function StudentSchedule() {
     const [activePackages, setActivePackages] = useState<LessonPackageSummary[]>([]);
     const [tutorOrgIsSchool, setTutorOrgIsSchool] = useState(false);
     const [tutorSoloManualPayments, setTutorSoloManualPayments] = useState(false);
+    const [tutorPerlasEnabled, setTutorPerlasEnabled] = useState(false);
+    const [perlasLoading, setPerlasLoading] = useState(false);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
 
     const parentLessonTutorPolicy = useMemo(() => {
@@ -238,8 +240,9 @@ export default function StudentSchedule() {
             cancellationFeePercent,
             paymentTiming,
             paymentDeadlineHours,
+            perlasEnabled: tutorPerlasEnabled,
         };
-    }, [isParentRoute, tutorId, tutorModalContact, cancellationHours, cancellationFeePercent, paymentTiming, paymentDeadlineHours]);
+    }, [isParentRoute, tutorId, tutorModalContact, cancellationHours, cancellationFeePercent, paymentTiming, paymentDeadlineHours, tutorPerlasEnabled]);
 
     const manualPaymentInBookingModal =
         tutorSoloManualPayments || pendingPaymentSession?.tutorSoloManual === true;
@@ -594,7 +597,7 @@ export default function StudentSchedule() {
         const studentGrade = parseStudentGrade(st.grade);
 
         const [tutorProfile, subs, individualPricing, availabilityRes, sessionsRes] = await Promise.all([
-            supabase.from('profiles').select('full_name, email, phone, cancellation_hours, cancellation_fee_percent, min_booking_hours, break_between_lessons, payment_timing, payment_deadline_hours, organization_id, has_active_license, personal_meeting_link, subscription_plan, manual_subscription_exempt, enable_manual_student_payments').eq('id', st.tutor_id).single(),
+            supabase.from('profiles').select('full_name, email, phone, cancellation_hours, cancellation_fee_percent, min_booking_hours, break_between_lessons, payment_timing, payment_deadline_hours, organization_id, has_active_license, personal_meeting_link, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, perlas_finance_enabled').eq('id', st.tutor_id).single(),
             supabase.from('subjects').select('*').eq('tutor_id', st.tutor_id).order('name'),
             supabase
                 .from('student_individual_pricing')
@@ -638,6 +641,17 @@ export default function StudentSchedule() {
             setBreakBetweenLessons((td.break_between_lessons as number) ?? 0);
             setPaymentTiming((td.payment_timing as 'before_lesson' | 'after_lesson') ?? 'before_lesson');
             setPaymentDeadlineHours(rawPaymentDeadline);
+
+            let perlasFlag = !!(td.perlas_finance_enabled);
+            if (!perlasFlag && td.organization_id) {
+                const { data: orgP } = await supabase
+                    .from('organizations')
+                    .select('perlas_finance_enabled')
+                    .eq('id', td.organization_id as string)
+                    .maybeSingle();
+                perlasFlag = !!(orgP as any)?.perlas_finance_enabled;
+            }
+            setTutorPerlasEnabled(perlasFlag);
         }
 
         {
@@ -1307,6 +1321,7 @@ export default function StudentSchedule() {
                             meetingLink: studentPersonalMeetingLink || tutorPersonalMeetingLink || selectedSubject?.meeting_link || null,
                             hidePaymentInfo: hasPayer,
                             paymentLink: selfPayLink,
+                            perlasEnabled: tutorPerlasEnabled,
                         },
                     });
                 }
@@ -1349,6 +1364,8 @@ export default function StudentSchedule() {
                                 tutorPersonalMeetingLink ||
                                 selectedSubject?.meeting_link ||
                                 null,
+                            perlasEnabled: tutorPerlasEnabled,
+                            payerIsParent: true,
                         },
                     });
                     if (!bookingToParentOk) {
@@ -1384,6 +1401,8 @@ export default function StudentSchedule() {
                                         time: format(selectedTime, 'HH:mm'),
                                         amount: selectedSubject?.price ?? null,
                                         paymentLink: stableLink,
+                                        perlasEnabled: tutorPerlasEnabled,
+                                        payerIsParent: true,
                                     },
                                 });
                                 if (!payOk) {
@@ -1405,6 +1424,7 @@ export default function StudentSchedule() {
                                         bankDetails: tutorBankDetails || undefined,
                                         paymentLink: sessionsPath,
                                         payerIsParent: true,
+                                        perlasEnabled: tutorPerlasEnabled,
                                     },
                                 });
                                 if (!payOk) {
@@ -1477,6 +1497,31 @@ export default function StudentSchedule() {
         }
         setFetchingStripe(false);
         setRedirectingToStripe(false);
+    };
+
+    const handlePerlasPayment = async (sessionId: string) => {
+        setPerlasLoading(true);
+        try {
+            const res = await fetch('/api/perlas-payment-init', {
+                method: 'POST',
+                headers: await authHeaders(),
+                body: JSON.stringify({ sessionId }),
+            });
+            const json = await res.json().catch(() => ({ error: t('stuSess.paymentConnectFailed') }));
+            if (json.url && json.token) {
+                if ((window as any).PerlasPay) {
+                    (window as any).PerlasPay.init(json.url, json.token);
+                } else {
+                    window.location.href = `${json.url}pay/${json.token}`;
+                }
+                setPerlasLoading(false);
+                return;
+            }
+            alert(json.error || t('stuSess.paymentCreateFailed'));
+        } catch {
+            alert(t('stuSess.paymentConnectFailed'));
+        }
+        setPerlasLoading(false);
     };
 
     const handleWaitlist = async () => {
@@ -2062,7 +2107,7 @@ export default function StudentSchedule() {
                     />
                 ) : (
                 <Dialog open={isMySessionModalOpen} onOpenChange={setIsMySessionModalOpen}>
-                    <DialogContent className="w-[95vw] sm:max-w-[440px] max-h-[90vh] overflow-y-auto">
+                    <DialogContent className="w-[95vw] sm:max-w-[440px] max-h-[90vh] overflow-y-auto" onOpenAutoFocus={(e) => e.preventDefault()}>
                         <DialogHeader>
                             <DialogTitle className="flex items-center gap-2">
                                 <CalendarDays className="w-5 h-5 text-violet-600" />
@@ -2156,29 +2201,49 @@ export default function StudentSchedule() {
 
                             {mySessionData?.status === 'active' && !mySessionData.paid && (studentPaymentPayer !== 'parent' || isParentRoute) &&
                                 (!tutorSoloManualPayments ? (
-                                    (() => {
-                                        const { remaining } = lessonCreditBreakdown(mySessionData.price);
-                                        return (
-                                            <button
-                                                onClick={() => handleGoToStripe(mySessionData.id)}
-                                                disabled={fetchingStripe}
-                                                className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
-                                            >
-                                                {fetchingStripe ? (
-                                                    <>
-                                                        <Loader2 className="w-4 h-4 animate-spin" /> {t('common.loading')}
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <CreditCard className="w-4 h-4" />
-                                                        {remaining > 0
-                                                            ? `${t('stuSched.payStripe')} — €${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}`
-                                                            : `${t('stuSched.payStripe')} — ${t('stuSess.payWithCredit')}`}
-                                                    </>
-                                                )}
-                                            </button>
-                                        );
-                                    })()
+                                    <div className="space-y-2">
+                                        {(() => {
+                                            const { remaining } = lessonCreditBreakdown(mySessionData.price);
+                                            return (
+                                                <button
+                                                    onClick={() => handleGoToStripe(mySessionData.id)}
+                                                    disabled={fetchingStripe}
+                                                    className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
+                                                >
+                                                    {fetchingStripe ? (
+                                                        <>
+                                                            <Loader2 className="w-4 h-4 animate-spin" /> {t('common.loading')}
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <CreditCard className="w-4 h-4" />
+                                                            {remaining > 0
+                                                                ? `${t('stuSched.payStripe')} — €${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}`
+                                                                : `${t('stuSched.payStripe')} — ${t('stuSess.payWithCredit')}`}
+                                                        </>
+                                                    )}
+                                                </button>
+                                            );
+                                        })()}
+                                        {tutorPerlasEnabled && (() => {
+                                            const sp = Number(mySessionData.price || 0);
+                                            const pf = Math.round(sp * 2) / 100;
+                                            const bf = 0.18;
+                                            const tot = Math.round((sp + pf + bf) * 100) / 100;
+                                            return (
+                                                <button
+                                                    onClick={() => handlePerlasPayment(mySessionData.id)}
+                                                    disabled={perlasLoading}
+                                                    className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 text-white font-semibold hover:from-teal-700 hover:to-emerald-700 transition-all shadow-sm disabled:opacity-60"
+                                                >
+                                                    {perlasLoading
+                                                        ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
+                                                        : <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank', { amount: tot.toFixed(2) })}</>
+                                                    }
+                                                </button>
+                                            );
+                                        })()}
+                                    </div>
                                 ) : (
                                     <div className="flex items-start gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
                                         <Info className="w-5 h-5 text-slate-500 flex-shrink-0 mt-0.5" />
@@ -2237,7 +2302,7 @@ export default function StudentSchedule() {
 
             {/* Payment modal after booking */}
             <Dialog open={showPaymentModal} onOpenChange={setShowPaymentModal}>
-                <DialogContent className="w-[95vw] sm:max-w-[420px] max-h-[90vh] overflow-y-auto">
+                <DialogContent className="w-[95vw] sm:max-w-[420px] max-h-[90vh] overflow-y-auto" onOpenAutoFocus={(e) => e.preventDefault()}>
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2 text-emerald-700">
                             <Check className="w-5 h-5" /> {t('stuSched.lessonBooked')}
@@ -2315,30 +2380,51 @@ export default function StudentSchedule() {
                                         <p className="text-sm text-slate-800 leading-snug">{t('stuSched.manualPaymentBookingHint')}</p>
                                     </div>
                                 ) : (
-                                    <button
-                                        type="button"
-                                        onClick={() => pendingPaymentSession && handleGoToStripe(pendingPaymentSession.id)}
-                                        disabled={fetchingStripe}
-                                        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
-                                    >
-                                        {fetchingStripe ? (
-                                            <>
-                                                <Loader2 className="w-4 h-4 animate-spin" /> Jungiamasi...
-                                            </>
-                                        ) : (
-                                            <>
-                                                <CreditCard className="w-4 h-4" />
-                                                {pendingPaymentSession?.price != null
-                                                    ? (() => {
-                                                        const { remaining } = lessonCreditBreakdown(pendingPaymentSession.price);
-                                                        return remaining > 0
-                                                            ? `${t('stuSched.payStripe')} — €${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}`
-                                                            : `${t('stuSched.payStripe')} — ${t('stuSess.payWithCredit')}`;
-                                                    })()
-                                                    : t('stuSched.payStripe')}
-                                            </>
-                                        )}
-                                    </button>
+                                    <div className="space-y-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => pendingPaymentSession && handleGoToStripe(pendingPaymentSession.id)}
+                                            disabled={fetchingStripe}
+                                            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
+                                        >
+                                            {fetchingStripe ? (
+                                                <>
+                                                    <Loader2 className="w-4 h-4 animate-spin" /> Jungiamasi...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <CreditCard className="w-4 h-4" />
+                                                    {pendingPaymentSession?.price != null
+                                                        ? (() => {
+                                                            const { remaining } = lessonCreditBreakdown(pendingPaymentSession.price);
+                                                            return remaining > 0
+                                                                ? `${t('stuSched.payStripe')} — €${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}`
+                                                                : `${t('stuSched.payStripe')} — ${t('stuSess.payWithCredit')}`;
+                                                        })()
+                                                        : t('stuSched.payStripe')}
+                                                </>
+                                            )}
+                                        </button>
+                                        {tutorPerlasEnabled && pendingPaymentSession && (() => {
+                                            const sp = Number(pendingPaymentSession.price || 0);
+                                            const pf = Math.round(sp * 2) / 100;
+                                            const bf = 0.18;
+                                            const tot = Math.round((sp + pf + bf) * 100) / 100;
+                                            return (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handlePerlasPayment(pendingPaymentSession.id)}
+                                                    disabled={perlasLoading}
+                                                    className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 text-white font-semibold hover:from-teal-700 hover:to-emerald-700 transition-all shadow-sm disabled:opacity-60"
+                                                >
+                                                    {perlasLoading
+                                                        ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
+                                                        : <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank', { amount: tot.toFixed(2) })}</>
+                                                    }
+                                                </button>
+                                            );
+                                        })()}
+                                    </div>
                                 )}
                             </>
                         )}

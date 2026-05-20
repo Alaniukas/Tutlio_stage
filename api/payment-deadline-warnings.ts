@@ -85,11 +85,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const now = new Date();
         const in30min = new Date(now.getTime() + 30 * 60000);
 
-        // Fetch active, unpaid sessions with tutor and student info.
-        // Deadline depends on tutor's payment_timing:
-        // - before_lesson: deadline = start_time - payment_deadline_hours
-        // - after_lesson: deadline = end_time + payment_deadline_hours
-        // We send the warning when 0 ≤ (deadline - now) ≤ 30 minutes.
+        // Only fetch sessions in a relevant time window (max 73h deadline buffer).
+        // Before: deadline = start_time - hours → start_time within [now, now + 73h]
+        // After:  deadline = end_time + hours   → end_time within [now - 73h, now]
+        const maxDeadlineBuffer = 73 * 3600000;
+        const windowStart = new Date(now.getTime() - maxDeadlineBuffer).toISOString();
+        const windowEnd = new Date(now.getTime() + maxDeadlineBuffer).toISOString();
+
         const { data: sessions, error } = await supabase
             .from('sessions')
             .select(`
@@ -122,12 +124,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           subscription_plan,
           manual_subscription_exempt,
           enable_manual_student_payments,
-          manual_payment_bank_details
+          manual_payment_bank_details,
+          perlas_finance_enabled
         )
       `)
             .eq('status', 'active')
             .eq('paid', false)
-            .is('payment_deadline_warning_sent', null);
+            .is('payment_deadline_warning_sent', null)
+            .gte('start_time', windowStart)
+            .lte('start_time', windowEnd)
+            .limit(200);
 
         if (error) {
             console.error('Error fetching sessions:', error);
@@ -136,6 +142,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const warned: string[] = [];
         const skipped: string[] = [];
+
+        const orgIdsForPerlas = [...new Set(
+            (sessions || [])
+                .map((s: any) => (s.tutor as any)?.organization_id)
+                .filter((id: any) => typeof id === 'string' && id.length > 0) as string[]
+        )];
+        const orgPerlasMap = new Map<string, boolean>();
+        if (orgIdsForPerlas.length > 0) {
+            const { data: orgs } = await supabase
+                .from('organizations')
+                .select('id, perlas_finance_enabled')
+                .in('id', orgIdsForPerlas);
+            for (const o of orgs ?? []) {
+                orgPerlasMap.set(o.id, !!(o as any).perlas_finance_enabled);
+            }
+        }
 
         for (const session of sessions || []) {
             const tutor = session.tutor as any;
@@ -249,10 +271,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 }
 
                 if (tutorStepOk) {
-                    await supabase
-                        .from('sessions')
-                        .update({ payment_deadline_warning_sent: true })
-                        .eq('id', session.id);
                     warned.push(session.id);
                 }
 
@@ -270,6 +288,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         const bankDetails = trimManualPaymentBankDetails(tutor.manual_payment_bank_details);
 
                         const orgIdForPayer = tutor.organization_id || null;
+                        const perlasEnabled = !!(tutor as any)?.perlas_finance_enabled ||
+                            (orgIdForPayer ? !!orgPerlasMap.get(orgIdForPayer) : false);
                         if (tutorUsesManualStudentPayments(tutor)) {
                             await sendWarningEmail({
                                 type: 'payment_reminder',
@@ -287,6 +307,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                     bankDetails: bankDetails || undefined,
                                     paymentUrl: `${BASE_URL}/student/sessions`,
                                     payerIsParent: studentObj?.payment_payer === 'parent',
+                                    perlasEnabled,
                                     ...(orgIdForPayer ? { organizationId: orgIdForPayer } : {}),
                                 },
                             });
@@ -305,6 +326,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                     deadlineHours: deadlineHoursForEmail,
                                     paymentTiming,
                                     paymentUrl,
+                                    perlasEnabled,
+                                    payerIsParent: studentObj?.payment_payer === 'parent',
                                     ...(orgIdForPayer ? { organizationId: orgIdForPayer } : {}),
                                 },
                             });
@@ -314,6 +337,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             } else {
                 skipped.push(session.id);
             }
+        }
+
+        if (warned.length > 0) {
+            await supabase
+                .from('sessions')
+                .update({ payment_deadline_warning_sent: true })
+                .in('id', warned);
         }
 
         return res.status(200).json({

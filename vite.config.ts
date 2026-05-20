@@ -31,8 +31,14 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         navigateFallback: 'index.html',
+        navigateFallbackDenylist: [/^\/api\//],
         importScripts: ['/push-sw.js'],
         runtimeCaching: [
+          // Storage object GET/POST must not be served stale from SW during whiteboard collaboration.
+          {
+            urlPattern: /^https:\/\/[^/]+\.supabase\.co\/storage\/v1\//i,
+            handler: 'NetworkOnly',
+          },
           {
             urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
             handler: 'NetworkFirst',

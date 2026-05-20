@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { useTranslation } from '@/lib/i18n';
 import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
+import PerlasFinanceSection from '@/components/PerlasFinanceSection';
 
 type CompanyFinanceCache = {
   orgId: string;
@@ -31,6 +32,7 @@ export default function CompanyFinance() {
   const { t } = useTranslation();
   const fc = getCached<CompanyFinanceCache>('company_finance');
   const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
+  const perlasFeatureOn = hasFeature('perlas_finance');
   const location = useLocation();
   const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
   const [loading, setLoading] = useState(!fc);
@@ -571,6 +573,10 @@ export default function CompanyFinance() {
             </Button>
           </div>
         </div>
+
+        {perlasFeatureOn && orgId && (
+          <PerlasFinanceSection entityType="org" entityId={orgId} />
+        )}
       </div>
       {/* Org Invoice Dialog */}
       <Dialog

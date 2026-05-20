@@ -4,6 +4,7 @@ import {
   Clock,
   CreditCard,
   Info,
+  Landmark,
   Loader2,
   Mail,
   Phone,
@@ -36,6 +37,7 @@ export type ParentTutorContactPolicy = {
   cancellationFeePercent: number;
   paymentTiming: 'before_lesson' | 'after_lesson';
   paymentDeadlineHours: number;
+  perlasEnabled?: boolean;
 };
 
 /** Session row shape for the shared parent lesson modal. */
@@ -81,6 +83,7 @@ export function ParentLessonDetailModal({
   dateFnsLocale: Locale | undefined;
   /** Prefer parent login email so Stripe Checkout matches payer; fallback is student payer_email server-side */
   stripePayerEmail?: string | null;
+  perlasEnabled?: boolean;
 }) {
   const headline =
     session?.subjectName ||
@@ -88,6 +91,37 @@ export function ParentLessonDetailModal({
     (session ? t('common.lesson') : '');
 
   const [stripeLoading, setStripeLoading] = useState(false);
+  const [perlasLoading, setPerlasLoading] = useState(false);
+
+  const payWithPerlas = async () => {
+    if (!session) return;
+    setPerlasLoading(true);
+    try {
+      const res = await fetch('/api/perlas-payment-init', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ sessionId: session.id }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        url?: string;
+        token?: string;
+        error?: string;
+      };
+      if (json.url && json.token) {
+        if ((window as any).PerlasPay) {
+          (window as any).PerlasPay.init(json.url, json.token);
+        } else {
+          window.location.href = `${json.url}pay/${json.token}`;
+        }
+        setPerlasLoading(false);
+        return;
+      }
+      alert(typeof json.error === 'string' ? json.error : t('stuSess.paymentCreateFailed'));
+    } catch {
+      alert(t('stuSess.paymentConnectFailed'));
+    }
+    setPerlasLoading(false);
+  };
 
   const payWithStripe = async () => {
     if (!session) return;
@@ -156,7 +190,7 @@ export function ParentLessonDetailModal({
 
   return (
     <Dialog open={open && !!session} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] sm:max-w-xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[95vw] sm:max-w-xl max-h-[90vh] overflow-y-auto" onOpenAutoFocus={(e) => e.preventDefault()}>
         {!session ? null : (
           <>
             <DialogHeader>
@@ -306,20 +340,44 @@ export function ParentLessonDetailModal({
           {session.status === 'active' &&
             !session.paid &&
             isAfter(new Date(session.end_time), now) && (
-              <button
-                type="button"
-                disabled={stripeLoading}
-                onClick={() => void payWithStripe()}
-                className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
-              >
-                {stripeLoading ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <CreditCard className="w-4 h-4" />
-                )}
-                {t('studentDash.pay')}
-                {session.price != null ? ` · €${session.price}` : ''}
-              </button>
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  disabled={stripeLoading}
+                  onClick={() => void payWithStripe()}
+                  className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
+                >
+                  {stripeLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <CreditCard className="w-4 h-4" />
+                  )}
+                  {t('studentDash.pay')}
+                  {session.price != null ? ` · €${session.price}` : ''}
+                </button>
+                {(perlasEnabled ?? tutorPolicy?.perlasEnabled) && session.price != null && (() => {
+                  const sp = Number(session.price || 0);
+                  const pf = Math.round(sp * 2) / 100;
+                  const bf = 0.18;
+                  const tot = Math.round((sp + pf + bf) * 100) / 100;
+                  return (
+                    <>
+                      <button
+                        type="button"
+                        disabled={perlasLoading}
+                        onClick={() => void payWithPerlas()}
+                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 text-white font-semibold hover:from-teal-700 hover:to-emerald-700 transition-all shadow-sm disabled:opacity-60"
+                      >
+                        {perlasLoading ? (
+                          <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
+                        ) : (
+                          <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank', { amount: tot.toFixed(2) })}</>
+                        )}
+                      </button>
+                    </>
+                  );
+                })()}
+              </div>
             )}
 
           {tutorPolicy && (

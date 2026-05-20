@@ -6,9 +6,9 @@ import {
   LOCALES,
   detectDomain,
   buildPath,
-  buildFullUrl,
+  buildCanonicalUrl,
   hreflangTags,
-} from './_lib/ssr-shell';
+} from './_lib/seo-routing.js';
 
 function getSupabase() {
   const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -108,10 +108,39 @@ const LABELS: Record<Locale, { blog: string; back: string; home: string; read: s
   no: { blog: 'Blogg', back: 'Alle artikler', home: 'Forside', read: 'Les mer' },
 };
 
-function shell(locale: Locale, domain: DomainKey, blogPath: string, title: string, description: string, url: string, image: string, body: string, jsonLd?: string): string {
+interface BlogShellOpts {
+  locale: Locale;
+  domain: DomainKey;
+  blogPath: string;
+  title: string;
+  description: string;
+  url: string;
+  image: string;
+  body: string;
+  jsonLd?: string;
+  publishedTime?: string;
+  modifiedTime?: string;
+  tag?: string;
+}
+
+const DEFAULT_OG = 'https://www.tutlio.com/og-image.png';
+
+function shell(opts: BlogShellOpts): string {
+  const { locale, domain, blogPath, title, description, url, body, jsonLd, publishedTime, modifiedTime, tag } = opts;
+  const image = opts.image || DEFAULT_OG;
   const l = LABELS[locale];
   const homePath = buildPath('/', locale, domain);
   const blogListPath = buildPath('/blog', locale, domain);
+
+  const articleMeta = publishedTime
+    ? [
+        `<meta property="article:published_time" content="${esc(publishedTime)}" />`,
+        modifiedTime ? `<meta property="article:modified_time" content="${esc(modifiedTime)}" />` : '',
+        `<meta property="article:author" content="Tutlio" />`,
+        tag ? `<meta property="article:section" content="${esc(tag)}" />` : '',
+      ].filter(Boolean).join('\n')
+    : '';
+
   return `<!DOCTYPE html>
 <html lang="${locale}">
 <head>
@@ -126,12 +155,17 @@ ${hreflangTags(blogPath)}
 <meta property="og:description" content="${esc(description)}" />
 <meta property="og:url" content="${esc(url)}" />
 <meta property="og:site_name" content="Tutlio" />
-${image ? `<meta property="og:image" content="${esc(image)}" />` : ''}
+<meta property="og:image" content="${esc(image)}" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+${articleMeta}
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="${esc(title)}" />
 <meta name="twitter:description" content="${esc(description)}" />
-${image ? `<meta name="twitter:image" content="${esc(image)}" />` : ''}
+<meta name="twitter:image" content="${esc(image)}" />
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="theme-color" content="#4f46e5" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -205,7 +239,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const content = resolve(post, 'content', locale);
     const date = fmtDate(post.published_at as string, locale);
     const blogPath = `/blog/${post.slug}`;
-    const url = buildFullUrl(blogPath, locale, domain);
+    const url = buildCanonicalUrl(blogPath, locale);
     const image = (post.cover_image as string) || '';
 
     const LANG_MAP: Record<Locale, string> = {
@@ -238,8 +272,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 </article>`;
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Language', locale);
     res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400');
-    return res.status(200).send(shell(locale, domain, blogPath, `${title} | Tutlio`, excerpt, url, image, body, jsonLd));
+    return res.status(200).send(shell({
+      locale, domain, blogPath, title: `${title} | Tutlio`, description: excerpt, url, image, body, jsonLd,
+      publishedTime: post.published_at as string,
+      modifiedTime: (post.updated_at as string) || undefined,
+      tag: (post.tag as string) || undefined,
+    }));
   }
 
   // Blog listing
@@ -251,7 +291,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const items = posts || [];
   const blogPath = '/blog';
-  const url = buildFullUrl(blogPath, locale, domain);
+  const url = buildCanonicalUrl(blogPath, locale);
 
   const cards = items.map((p: Record<string, unknown>) => {
     const t = resolve(p, 'title', locale);
@@ -303,6 +343,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   });
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Content-Language', locale);
   res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400');
-  return res.status(200).send(shell(locale, domain, blogPath, `${l.blog} | Tutlio`, blogDesc, url, '', body, blogListJsonLd));
+  return res.status(200).send(shell({
+    locale, domain, blogPath, title: `${l.blog} | Tutlio`, description: blogDesc, url, image: '', body, jsonLd: blogListJsonLd,
+  }));
 }

@@ -21,7 +21,13 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Trash2, Copy, Mail, ExternalLink, Check, User, UserX, Clock, CalendarDays, Wallet, CheckCircle, XCircle, Euro, Sparkles, Package, FileText, Edit2, RotateCcw, Loader2 } from 'lucide-react';
+import { Plus, Trash2, Copy, Mail, ExternalLink, Check, User, UserX, Clock, CalendarDays, Wallet, CheckCircle, XCircle, Euro, Sparkles, Package, FileText, Edit2, RotateCcw, Loader2, Download } from 'lucide-react';
+import {
+  loadBatchStudentSlices,
+  mergeBatchIntoStudentInvoice,
+  fetchBatchStudentSlice,
+  type StudentLatestInvoiceFields,
+} from '@/lib/billingBatchStudentSlice';
 import SendPackageModal from '@/components/SendPackageModal';
 import SendInvoiceModal from '@/components/SendInvoiceModal';
 import { format, isAfter, isBefore } from 'date-fns';
@@ -38,6 +44,7 @@ import {
 } from '@/lib/studentPaymentModel';
 import StudentPaymentModelSection from '@/components/StudentPaymentModelSection';
 import { sendEmail } from '@/lib/email';
+import { cancelSessionAndFillWaitlist } from '@/lib/lesson-actions';
 import { copyTextToClipboard } from '@/lib/copyToClipboard';
 import StatusBadge from '@/components/StatusBadge';
 import Toast from '@/components/Toast';
@@ -75,29 +82,14 @@ interface Student {
   used_lessons?: number;
   total_lessons?: number;
   has_package?: boolean;
-  latest_invoice?: {
-    id: string;
-    sent_at: string;
-    paid: boolean;
-    payment_status: string;
-    total_amount: number;
-    payment_deadline_date: string;
-    payer_name?: string | null;
-    payer_email?: string | null;
-  } | null;
+  latest_invoice?: StudentLatestInvoiceFields | null;
 }
 
 type StudentLatestInvoice = NonNullable<Student['latest_invoice']>;
 
-function normInvoiceEmail(value: string | null | undefined): string {
-  return String(value ?? '').trim().toLowerCase();
-}
-
 /**
- * Latest invoice badge on student cards: map student_id → batch.
- * Uses billing_batch_sessions AND sessions.payment_batch_id so cards stay in sync
- * with per-student modal logic (which reads payment_batch_id) even if the junction rows are missing.
- * Also maps by payer email (same rule as monthly invoice grouping) so siblings / same household see the batch.
+ * Latest invoice badge on student cards: map student_id → their slice of the batch.
+ * Only students with sessions in the batch get an entry (no payer-email sibling fallback).
  */
 async function buildLatestInvoiceByStudentIdForTutor(tutorId: string): Promise<Map<string, StudentLatestInvoice>> {
   const latestInvoiceByStudentId = new Map<string, StudentLatestInvoice>();
@@ -112,83 +104,15 @@ async function buildLatestInvoiceByStudentIdForTutor(tutorId: string): Promise<M
   if (!billingBatches?.length) return latestInvoiceByStudentId;
 
   const batchIds = billingBatches.map((b: { id: string }) => b.id);
-  const sessionIdsByBatch = new Map<string, Set<string>>();
-  const addSessionToBatch = (batchId: string | null | undefined, sessionId: string | null | undefined) => {
-    if (!batchId || !sessionId) return;
-    if (!sessionIdsByBatch.has(batchId)) sessionIdsByBatch.set(batchId, new Set());
-    sessionIdsByBatch.get(batchId)!.add(sessionId);
-  };
-
-  const { data: batchSessions } = await supabase
-    .from('billing_batch_sessions')
-    .select('billing_batch_id, session_id')
-    .in('billing_batch_id', batchIds);
-
-  (batchSessions || []).forEach((bs: { billing_batch_id?: string; session_id?: string }) => {
-    addSessionToBatch(bs.billing_batch_id, bs.session_id);
-  });
-
-  const { data: sessionsWithBatch } = await supabase
-    .from('sessions')
-    .select('id, student_id, payment_batch_id')
-    .eq('tutor_id', tutorId)
-    .in('payment_batch_id', batchIds);
-
-  const studentBySessionId = new Map<string, string>();
-  (sessionsWithBatch || []).forEach((s: { id?: string; student_id?: string; payment_batch_id?: string }) => {
-    if (s.payment_batch_id && s.id) addSessionToBatch(s.payment_batch_id, s.id);
-    if (s.id && s.student_id) studentBySessionId.set(s.id, s.student_id);
-  });
-
-  const junctionSessionIds = new Set(
-    (batchSessions || []).map((bs: { session_id?: string }) => bs.session_id).filter(Boolean) as string[],
-  );
-  const missingForStudent = [...junctionSessionIds].filter((id) => !studentBySessionId.has(id));
-  if (missingForStudent.length > 0) {
-    const { data: extraSessions } = await supabase
-      .from('sessions')
-      .select('id, student_id')
-      .in('id', missingForStudent);
-    (extraSessions || []).forEach((s: { id?: string; student_id?: string }) => {
-      if (s.id && s.student_id) studentBySessionId.set(s.id, s.student_id);
-    });
-  }
-
-  const { data: tutorStudents } = await supabase
-    .from('students')
-    .select('id, email, payer_email')
-    .eq('tutor_id', tutorId);
+  const { slices, salesInvoiceByBatch } = await loadBatchStudentSlices(batchIds, tutorId);
 
   for (const batch of billingBatches as any[]) {
-    const invoice: StudentLatestInvoice = {
-      id: batch.id,
-      sent_at: batch.sent_at,
-      paid: !!(batch.paid || batch.payment_status === 'paid'),
-      payment_status: batch.payment_status,
-      total_amount: Number(batch.total_amount || 0),
-      payment_deadline_date: batch.payment_deadline_date,
-      payer_name: batch.payer_name ?? null,
-      payer_email: batch.payer_email ?? null,
-    };
-
-    const ids = sessionIdsByBatch.get(batch.id);
-    if (ids?.size) {
-      for (const sessionId of ids) {
-        const studentId = studentBySessionId.get(sessionId);
-        if (!studentId) continue;
-        if (latestInvoiceByStudentId.has(studentId)) continue;
-        latestInvoiceByStudentId.set(studentId, invoice);
-      }
-    }
-
-    const batchPayer = normInvoiceEmail(batch.payer_email);
-    if (batchPayer && tutorStudents?.length) {
-      for (const stu of tutorStudents as { id: string; email?: string | null; payer_email?: string | null }[]) {
-        const billingEmail = normInvoiceEmail(stu.payer_email || stu.email);
-        if (!billingEmail || billingEmail !== batchPayer) continue;
-        if (latestInvoiceByStudentId.has(stu.id)) continue;
-        latestInvoiceByStudentId.set(stu.id, invoice);
-      }
+    for (const [key, slice] of slices) {
+      if (!key.startsWith(`${batch.id}:`) || slice.lesson_count === 0) continue;
+      const studentId = key.slice(batch.id.length + 1);
+      if (latestInvoiceByStudentId.has(studentId)) continue;
+      const merged = mergeBatchIntoStudentInvoice(batch, studentId, slices, salesInvoiceByBatch);
+      if (merged) latestInvoiceByStudentId.set(studentId, merged);
     }
   }
 
@@ -229,6 +153,9 @@ export default function StudentsPage() {
   const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
   const [confirmingPackageId, setConfirmingPackageId] = useState<string | null>(null);
   const [dismissedInvoiceIds, setDismissedInvoiceIds] = useState<string[]>([]);
+  const [markingInvoicePaid, setMarkingInvoicePaid] = useState(false);
+  const [regeneratingInvoice, setRegeneratingInvoice] = useState(false);
+  const [downloadingInvoicePdf, setDownloadingInvoicePdf] = useState(false);
   const dismissedInvoicesKey = user?.id ? `dismissed_invoice_batches_${user.id}` : null;
   const cardInvoicePollRef = useRef<{ intervalId: ReturnType<typeof setInterval>; attempts: number } | null>(null);
 
@@ -386,6 +313,83 @@ export default function StudentsPage() {
     });
   };
 
+  const handleMarkInvoicePaid = async (batchId: string) => {
+    setMarkingInvoicePaid(true);
+    try {
+      const { data: { session: authSession } } = await supabase.auth.getSession();
+      const res = await fetch('/api/confirm-monthly-invoice-payment', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authSession?.access_token ? { Authorization: `Bearer ${authSession.access_token}` } : {}),
+        },
+        body: JSON.stringify({ billingBatchId: batchId, manualConfirm: true }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        window.alert(body.error || t('invoices.markPaidFailed'));
+        return;
+      }
+      setSelectedStudent((prev) =>
+        prev ? { ...prev, latest_invoice: prev.latest_invoice ? { ...prev.latest_invoice, paid: true, payment_status: 'paid' } : null } : prev,
+      );
+      fetchStudents();
+    } catch (e) {
+      console.error('[Students] mark invoice paid error:', e);
+    } finally {
+      setMarkingInvoicePaid(false);
+    }
+  };
+
+  const handleRegenerateInvoice = async (batchId: string) => {
+    if (!window.confirm(t('invoices.regenerateConfirm'))) return;
+    setRegeneratingInvoice(true);
+    try {
+      const { data: { session: authSession } } = await supabase.auth.getSession();
+      const res = await fetch('/api/regenerate-monthly-invoice', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authSession?.access_token ? { Authorization: `Bearer ${authSession.access_token}` } : {}),
+        },
+        body: JSON.stringify({ billingBatchId: batchId }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        window.alert(body.error || t('invoices.regenerateFailed'));
+        return;
+      }
+      setSelectedStudent((prev) => prev ? { ...prev, latest_invoice: null } : prev);
+      fetchStudents();
+      window.alert(t('invoices.regenerateSuccess'));
+    } catch (e) {
+      console.error('[Students] regenerate invoice error:', e);
+    } finally {
+      setRegeneratingInvoice(false);
+    }
+  };
+
+  const handleDownloadInvoicePdf = async (salesInvoiceId: string) => {
+    setDownloadingInvoicePdf(true);
+    try {
+      const res = await fetch(`/api/invoice-pdf?id=${salesInvoiceId}`, {
+        headers: await authHeaders(),
+      });
+      if (!res.ok) throw new Error('Failed to download PDF');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `invoice-${salesInvoiceId}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('[Students] invoice PDF download error:', e);
+    } finally {
+      setDownloadingInvoicePdf(false);
+    }
+  };
+
   // While student modal is open and invoice is unpaid, poll briefly.
   // Webhook updates billing_batches - here we just read from DB.
   useEffect(() => {
@@ -435,15 +439,24 @@ export default function StudentsPage() {
         if (!batches || batches.length === 0) return;
 
         const b = batches[0] as any;
+        const { slice, salesInvoice } = await fetchBatchStudentSlice(b.id, selectedStudent.id, user.id);
+        if (!slice || slice.lesson_count === 0) return;
+
         const updatedInvoice: Student['latest_invoice'] = {
           id: b.id,
           sent_at: b.sent_at,
           paid: !!(b.paid || b.payment_status === 'paid'),
           payment_status: b.payment_status,
-          total_amount: Number(b.total_amount || 0),
+          total_amount: slice.student_amount,
           payment_deadline_date: b.payment_deadline_date,
           payer_name: b.payer_name ?? null,
           payer_email: b.payer_email ?? null,
+          lesson_count: slice.lesson_count,
+          batch_total_amount: slice.batch_total_amount,
+          is_shared_batch: slice.is_shared_batch,
+          sales_invoice_id: salesInvoice?.sales_invoice_id ?? null,
+          invoice_number: salesInvoice?.invoice_number ?? null,
+          pdf_storage_path: salesInvoice?.pdf_storage_path ?? null,
         };
 
         setSelectedStudent((prev) => {
@@ -742,21 +755,30 @@ export default function StudentsPage() {
             .order('sent_at', { ascending: false })
             .limit(1);
 
-          if (!batchErr && batches && batches[0]) {
+          if (!batchErr && batches && batches[0] && user?.id) {
             const b = batches[0] as any;
-            setSelectedStudent((prev) => prev ? {
-              ...prev,
-              latest_invoice: {
-                id: b.id,
-                sent_at: b.sent_at,
-                paid: !!(b.paid || b.payment_status === 'paid'),
-                payment_status: b.payment_status,
-                total_amount: Number(b.total_amount || 0),
-                payment_deadline_date: b.payment_deadline_date,
-                payer_name: b.payer_name ?? null,
-                payer_email: b.payer_email ?? null,
-              },
-            } : prev);
+            const { slice, salesInvoice } = await fetchBatchStudentSlice(b.id, student.id, user.id);
+            if (slice && slice.lesson_count > 0) {
+              setSelectedStudent((prev) => prev ? {
+                ...prev,
+                latest_invoice: {
+                  id: b.id,
+                  sent_at: b.sent_at,
+                  paid: !!(b.paid || b.payment_status === 'paid'),
+                  payment_status: b.payment_status,
+                  total_amount: slice.student_amount,
+                  payment_deadline_date: b.payment_deadline_date,
+                  payer_name: b.payer_name ?? null,
+                  payer_email: b.payer_email ?? null,
+                  lesson_count: slice.lesson_count,
+                  batch_total_amount: slice.batch_total_amount,
+                  is_shared_batch: slice.is_shared_batch,
+                  sales_invoice_id: salesInvoice?.sales_invoice_id ?? null,
+                  invoice_number: salesInvoice?.invoice_number ?? null,
+                  pdf_storage_path: salesInvoice?.pdf_storage_path ?? null,
+                },
+              } : prev);
+            }
           }
         }
       }
@@ -937,51 +959,45 @@ export default function StudentsPage() {
     if (cancellationReason.trim().length < 5) return;
 
     setSavingSession(true);
-    const { error } = await supabase.from('sessions').update({
-      status: 'cancelled',
-      cancellation_reason: cancellationReason.trim(),
-      cancelled_by: 'tutor'  // Track who cancelled
-    }).eq('id', selectedSessionForModal.id);
-    if (!error) {
-      // Send cancellation emails
-      const emailDate = format(new Date(selectedSessionForModal.start_time), 'yyyy-MM-dd');
-      const emailTime = format(new Date(selectedSessionForModal.start_time), 'HH:mm');
-      const studentName = selectedSessionForModal.student?.full_name || '';
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const studentName = selectedSessionForModal.student?.full_name || '';
+    const { data: studentData } = await supabase
+      .from('students')
+      .select('email')
+      .eq('id', selectedSessionForModal.student_id || '')
+      .single();
 
-      const { data: studentData } = await supabase.from('students').select('email').eq('id', selectedSessionForModal.student_id || '').single();
+    const { success, error } = await cancelSessionAndFillWaitlist({
+      sessionId: selectedSessionForModal.id,
+      tutorId: authUser?.id || user?.id || '',
+      reason: cancellationReason.trim(),
+      cancelledBy: 'tutor',
+      studentName,
+      tutorName: profile?.full_name || '',
+      studentEmail: studentData?.email || null,
+      tutorEmail: profile?.email || null,
+    });
 
-      if (studentData?.email && user) {
-        sendEmail({
-          type: 'session_cancelled',
-          to: studentData.email,
-          data: { studentName, tutorName: profile?.full_name || '', date: emailDate, time: emailTime, cancelledBy: 'tutor', reason: cancellationReason.trim() },
-        });
-      }
-      if (profile?.email) {
-        sendEmail({
-          type: 'session_cancelled',
-          to: profile.email,
-          data: { studentName, tutorName: profile.full_name || '', date: emailDate, time: emailTime, cancelledBy: 'tutor', reason: cancellationReason.trim() },
-        });
-      }
-
+    if (success) {
       setIsSessionModalOpen(false);
       setCancelConfirmId(null);
       setCancellationReason('');
       fetchAllSessions();
-      // Full sync: remove cancelled lesson and refresh free time in Google Calendar
       try {
-        if (user) {
+        const tutorId = authUser?.id || user?.id;
+        if (tutorId) {
           await fetch('/api/google-calendar-sync', {
             method: 'POST',
             headers: await authHeaders(),
-            body: JSON.stringify({ userId: user.id }),
+            body: JSON.stringify({ userId: tutorId }),
           });
         }
       } catch (err) {
         console.error('Failed to full-sync Google Calendar after tutor cancellation:', err);
       }
       syncSessionToGoogleCalendar(selectedSessionForModal.id);
+    } else {
+      setToastMessage({ message: error || t('dash.cancelFailed'), type: 'error' });
     }
     setSavingSession(false);
   };
@@ -2087,9 +2103,19 @@ export default function StudentsPage() {
                               <p className="text-xs text-gray-600">
                                 {t('stu.sentTo')} {selectedStudent.latest_invoice.payer_name || selectedStudent.latest_invoice.payer_email || '—'}
                               </p>
+                              <p className="text-xs text-gray-600">
+                                {t('invoice.lessonsCount', { count: selectedStudent.latest_invoice.lesson_count ?? 0 })}
+                              </p>
                               {!orgPolicy.hideMoney && (
                               <p className="text-xs text-gray-600">
                                 {t('stu.invoiceAmount')} €{Number(selectedStudent.latest_invoice.total_amount || 0).toFixed(2)}
+                              </p>
+                              )}
+                              {selectedStudent.latest_invoice.is_shared_batch && !orgPolicy.hideMoney && (
+                              <p className="text-xs text-amber-800/90 mt-1">
+                                {t('stu.invoiceSharedBatch', {
+                                  total: Number(selectedStudent.latest_invoice.batch_total_amount || 0).toFixed(2),
+                                })}
                               </p>
                               )}
                             </div>
@@ -2098,6 +2124,52 @@ export default function StudentsPage() {
                                 'w-6 h-6',
                                 selectedStudent.latest_invoice.paid ? 'text-green-700' : 'text-amber-700'
                               )} />
+                              {selectedStudent.latest_invoice.sales_invoice_id && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  disabled={downloadingInvoicePdf}
+                                  className="h-7 px-2 text-xs font-semibold text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
+                                  onClick={() => handleDownloadInvoicePdf(selectedStudent.latest_invoice!.sales_invoice_id!)}
+                                  title={t('stu.openInvoicePdf')}
+                                >
+                                  {downloadingInvoicePdf ? (
+                                    <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                                  ) : (
+                                    <Download className="w-3 h-3 mr-1" />
+                                  )}
+                                  {t('stu.openInvoicePdf')}
+                                </Button>
+                              )}
+                              {!selectedStudent.latest_invoice.paid && (
+                                <>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    disabled={markingInvoicePaid}
+                                    className="h-7 px-2 text-xs font-semibold text-green-600 hover:text-green-700 hover:bg-green-50"
+                                    onClick={() => handleMarkInvoicePaid(selectedStudent.latest_invoice!.id)}
+                                    title={t('invoices.markPaid')}
+                                  >
+                                    {markingInvoicePaid ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <CheckCircle className="w-3 h-3 mr-1" />}
+                                    {t('dash.markPaid')}
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    disabled={regeneratingInvoice}
+                                    className="h-7 px-2 text-xs font-semibold text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                                    onClick={() => handleRegenerateInvoice(selectedStudent.latest_invoice!.id)}
+                                    title={t('invoices.regenerate')}
+                                  >
+                                    {regeneratingInvoice ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RotateCcw className="w-3 h-3 mr-1" />}
+                                    {t('stu.regenerate')}
+                                  </Button>
+                                </>
+                              )}
                               <Button
                                 type="button"
                                 variant="ghost"

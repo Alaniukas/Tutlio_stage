@@ -50,11 +50,10 @@ export default function LandingNavbar() {
   }, [mobileOpen]);
 
   const isSchools = platform === 'schools' || platform === 'teachers';
-  const orgAdminLoginHref = isSchools ? '/school/login' : '/login';
-  const brandName = isSchools ? 'Tutlio Schools' : 'Tutlio';
-  const dropdownLabel = isSchools
-    ? (locale === 'lt' ? 'Mokykloms' : 'Schools')
-    : (locale === 'lt' ? 'Korepetitoriai' : 'Tutors');
+  const orgAdminLoginHref = buildLocalizedPath('/login', locale);
+  const brandName = isSchools ? t('nav.brandSchools') : 'Tutlio';
+  const dropdownLabel = isSchools ? t('nav.forSchools') : t('nav.forTutors');
+  const pricingHref = buildLocalizedPath('/pricing', locale);
 
   const navLinks = [
     { to: buildLocalizedPath('/apie-mus', locale), label: t('nav.aboutUs') },
@@ -107,10 +106,10 @@ export default function LandingNavbar() {
               {platformOpen && (
                 <div className="absolute left-0 top-full mt-2 w-44 bg-white rounded-xl shadow-lg border border-gray-100 py-1 z-50">
                   <button type="button" onClick={() => { setPlatformOpen(false); navigateToPlatform('tutors', locale); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 text-gray-700">
-                    {locale === 'lt' ? 'Korepetitoriai' : 'Tutors'}
+                    {t('nav.forTutors')}
                   </button>
                   <button type="button" onClick={() => { setPlatformOpen(false); navigateToPlatform('schools', locale); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 text-gray-700">
-                    {locale === 'lt' ? 'Mokykloms' : 'Schools'}
+                    {t('nav.forSchools')}
                   </button>
                 </div>
               )}
@@ -125,7 +124,7 @@ export default function LandingNavbar() {
               {t('common.login')}
             </Link>
             <Link
-              to="/register"
+              to={pricingHref}
               className="hidden sm:flex rounded-full bg-[#4f46e5] hover:bg-[#4338ca] text-white font-semibold items-center transition-all duration-200 hover:scale-[1.03] hover:shadow-lg active:scale-[0.98] h-[34px] px-4 text-[12px]"
             >
               {t('landing.startFree')}
@@ -180,20 +179,20 @@ export default function LandingNavbar() {
           </div>
 
           <div className="mt-4 pt-4 border-t border-gray-100">
-            <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">{locale === 'lt' ? 'Platforma' : 'Platform'}</p>
+            <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">{t('nav.platform')}</p>
             <button
               type="button"
               onClick={() => { setMobileOpen(false); navigateToPlatform('tutors', locale); }}
               className="block w-full text-left py-2.5 text-[14px] text-gray-600 hover:text-gray-900 transition-colors"
             >
-              {locale === 'lt' ? 'Korepetitoriai' : 'Tutors'}
+              {t('nav.forTutors')}
             </button>
             <button
               type="button"
               onClick={() => { setMobileOpen(false); navigateToPlatform('schools', locale); }}
               className="block w-full text-left py-2.5 text-[14px] text-gray-600 hover:text-gray-900 transition-colors"
             >
-              {locale === 'lt' ? 'Mokykloms' : 'Schools'}
+              {t('nav.forSchools')}
             </button>
           </div>
 
@@ -211,7 +210,7 @@ export default function LandingNavbar() {
             {t('common.login')}
           </Link>
           <Link
-            to="/register"
+            to={pricingHref}
             onClick={() => setMobileOpen(false)}
             className="block w-full text-center py-2.5 text-[14px] font-semibold text-white bg-[#4f46e5] hover:bg-[#4338ca] rounded-full transition-colors"
           >

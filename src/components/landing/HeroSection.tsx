@@ -60,7 +60,7 @@ function scrollToFeaturesSection() {
 export default function HeroSection({ variant = 'tutor' }: { variant?: LandingVariant }) {
   const { t, locale } = useTranslation();
   const p = variant === 'schools' ? 'schoolsLanding' : 'landing';
-  const ctaLink = variant === 'schools' ? buildLocalizedPath('/kontaktai', locale) : '/register';
+  const ctaLink = variant === 'schools' ? buildLocalizedPath('/kontaktai', locale) : buildLocalizedPath('/pricing', locale);
   const spotIcons = variant === 'schools' ? HERO_SPOT_ICONS_SCHOOLS : HERO_SPOT_ICONS_TUTOR;
 
   const [lessonCount, setLessonCount] = useState<number | null>(null);

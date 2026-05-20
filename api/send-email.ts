@@ -216,6 +216,17 @@ const formatMoney = (value: string | number, currency = 'EUR', loc: Locale = 'lt
   }).format(num);
 };
 
+function bankTransferEmailButton(d: any, locale: Locale): string {
+  if (!d.perlasEnabled) return '';
+  const appUrl = getAppUrl();
+  const payerIsParent = d.payerIsParent || d.payment_payer === 'parent';
+  const sessionsUrl = payerIsParent ? `${appUrl}/parent/lessons` : `${appUrl}/student/sessions`;
+  return `<p style="color:#6b7280; font-size:13px; text-align:center; margin:20px 0 8px;">${t(locale, 'em.orPayViaBank')}</p>
+    <div style="text-align:center;">
+      ${outlookEmailButton(sessionsUrl, t(locale, 'em.btnPayViaBank'), '#0d9488', { fontSize: '15px', padding: '14px 32px' })}
+    </div>`;
+}
+
 // ─── Email Templates ─────────────────────────────────────────────────────────
 
 function bookingPlannerIntroKey(bookedBy: unknown): 'em.bookingPayerIntroStudent' | 'em.bookingPayerIntroTutor' | 'em.bookingPayerIntroOrgAdmin' {
@@ -274,6 +285,7 @@ function bookingConfirmation(d: any, locale: Locale) {
           paymentRows
         )}
         ${paymentButton}
+        ${bankTransferEmailButton(d, locale)}
         <div style="text-align:center; margin-top: 24px;">
           ${outlookEmailButton(`${appUrl}/student/sessions`, t(locale, 'em.btnViewLessons'), '#4f46e5', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
         </div>
@@ -876,6 +888,7 @@ function stripePaymentForwarding(d: any, locale: Locale) {
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.stripePayBody', { student: d.studentName, tutor: d.tutorName })}</p>
         ${tableBlock}
         ${payBlock}
+        ${bankTransferEmailButton(d, locale)}
       </div>${footerFor(locale)}`, locale),
   };
 }
@@ -914,6 +927,7 @@ function paymentAfterLessonReminder(d: any, locale: Locale) {
       td(t(locale, 'em.labelPayBy'), d.payByTime, false)
     )}
         ${payBlock}
+        ${bankTransferEmailButton(d, locale)}
       </div>${footerFor(locale)}`, locale),
   };
 }
@@ -1169,6 +1183,7 @@ function paymentReminderEmail(d: any, locale: Locale) {
           ${t(locale, 'em.payReminderUrgent')}
         </p>
         ${payBlock}
+        ${bankTransferEmailButton(d, locale)}
       </div>
       ${footerFor(locale)}
     `, locale),

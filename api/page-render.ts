@@ -6,14 +6,16 @@ import {
   detectLocale,
   buildPath,
   buildFullUrl,
+  buildCanonicalUrl,
   renderShell,
+  preloadSsrLocales,
   t,
   esc,
   organizationJsonLd,
   webPageJsonLd,
   faqJsonLd,
   softwareAppJsonLd,
-} from './_lib/ssr-shell';
+} from './_lib/ssr-shell.js';
 
 type PageId = 'landing' | 'pricing' | 'about' | 'contacts';
 
@@ -36,25 +38,55 @@ function renderLanding(locale: Locale, domain: DomainKey): string {
     )
     .join('\n');
 
-  const registerPath = buildPath('/register', locale, domain);
+  const stepsHtml = [1, 2, 3]
+    .map(
+      (n) => `<div class="card">
+    <h3>${n}. ${esc(t(locale, `landing.step${n}Title`))}</h3>
+    <p>${esc(t(locale, `landing.step${n}Desc`))}</p>
+  </div>`,
+    )
+    .join('\n');
+
+  const faqItems = ['whatIs', 'whoFor', 'waitlist', 'freeTrial', 'languages'];
+  const faqHtml = faqItems
+    .map(
+      (f) => `<details>
+    <summary>${esc(t(locale, `landing.faq.${f}Q`))}</summary>
+    <p>${esc(t(locale, `landing.faq.${f}A`))}</p>
+  </details>`,
+    )
+    .join('\n');
+
+  const pricingPath = buildPath('/pricing', locale, domain);
 
   return `
 <div class="hero">
   <h1>${esc(t(locale, 'landing.heroTitle'))}${esc(t(locale, 'landing.heroTitleHighlight'))}</h1>
   <p>${t(locale, 'landing.heroDesc')}</p>
-  <a href="${registerPath}" class="btn">${esc(t(locale, 'landing.ctaButton'))}</a>
+  <a href="${pricingPath}" class="btn">${esc(t(locale, 'landing.ctaButton'))}</a>
 </div>
 <div class="section">
   <h2>${esc(t(locale, 'landing.featuresTitle'))}</h2>
   <p>${esc(t(locale, 'landing.featuresDesc'))}</p>
   <div class="grid">${featuresHtml}</div>
 </div>
+<div class="section">
+  <h2>${esc(t(locale, 'landing.stepsTitle'))}</h2>
+  <p>${esc(t(locale, 'landing.stepsDesc'))}</p>
+  <div class="grid">${stepsHtml}</div>
+</div>
+<div class="section">
+  <h2>${esc(t(locale, 'landing.faqTitle'))}</h2>
+</div>
+<div class="faq">${faqHtml}</div>
 <div class="section" style="text-align:center;padding:60px 24px">
   <h2>${esc(t(locale, 'landing.ctaTitle'))}</h2>
   <p>${esc(t(locale, 'landing.ctaDesc'))}</p>
-  <a href="${registerPath}" class="btn">${esc(t(locale, 'landing.startFree'))}</a>
+  <a href="${pricingPath}" class="btn">${esc(t(locale, 'landing.startFree'))}</a>
 </div>`;
 }
+
+const LANDING_FAQ_KEYS = ['whatIs', 'whoFor', 'waitlist', 'freeTrial', 'languages'];
 
 function renderPricing(locale: Locale, domain: DomainKey): string {
   const features = [
@@ -203,7 +235,7 @@ const PAGE_DESC_KEYS: Record<PageId, string> = {
   contacts: 'contact.description',
 };
 
-export default function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') return res.status(405).send('Method not allowed');
 
   const page = (typeof req.query.page === 'string' ? req.query.page : 'landing') as PageId;
@@ -211,6 +243,7 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
 
   const domain = detectDomain(req);
   const locale = detectLocale(req);
+  await preloadSsrLocales(locale, 'en', 'lt');
   const renderer = PAGE_RENDERERS[page];
   const path = PAGE_PATHS[page];
 
@@ -224,29 +257,34 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
 
   let jsonLd: string;
   if (page === 'landing') {
-    jsonLd = `${organizationJsonLd()}</script><script type="application/ld+json">${softwareAppJsonLd(locale)}`;
+    const landingFaq = LANDING_FAQ_KEYS.map((f) => ({
+      question: t(locale, `landing.faq.${f}Q`),
+      answer: t(locale, `landing.faq.${f}A`),
+    }));
+    jsonLd = `${organizationJsonLd()}</script><script type="application/ld+json">${softwareAppJsonLd(locale)}</script><script type="application/ld+json">${faqJsonLd(landingFaq)}`;
   } else if (page === 'pricing') {
     const faqItems = ['trial', 'cancel', 'limit', 'payment', 'switch'].map((f) => ({
       question: t(locale, `pricing.faq.${f}Q`),
       answer: t(locale, `pricing.faq.${f}A`),
     }));
-    jsonLd = `${webPageJsonLd({ name: title, description, url: buildFullUrl(path, locale, domain) })}</script><script type="application/ld+json">${faqJsonLd(faqItems)}`;
+    jsonLd = `${webPageJsonLd({ name: title, description, url: buildCanonicalUrl(path, locale) })}</script><script type="application/ld+json">${faqJsonLd(faqItems)}`;
   } else {
-    jsonLd = webPageJsonLd({ name: title, description, url: buildFullUrl(path, locale, domain) });
+    jsonLd = webPageJsonLd({ name: title, description, url: buildCanonicalUrl(path, locale) });
   }
 
-  const homeUrl = buildFullUrl('/', locale, domain);
+  const homeUrl = buildCanonicalUrl('/', locale);
   const breadcrumbs = page === 'landing'
     ? undefined
     : [
         { name: 'Tutlio', url: homeUrl },
-        { name: rawTitle, url: buildFullUrl(path, locale, domain) },
+        { name: rawTitle, url: buildCanonicalUrl(path, locale) },
       ];
 
   const body = renderer(locale, domain);
   const html = renderShell({ locale, domain, path, title, description, body, jsonLd, extraHead, breadcrumbs });
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Content-Language', locale);
   res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400');
   return res.status(200).send(html);
 }

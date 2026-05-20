@@ -40,7 +40,7 @@ export default function ChatWindow({ conversation, onBack, onMessageSent, partic
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const { messages, loading } = useChatMessages(conversation?.conversation_id ?? null);
+  const { messages, loading, appendMessage } = useChatMessages(conversation?.conversation_id ?? null);
 
   useEffect(() => {
     if (!conversation?.conversation_id || !user?.id) return;
@@ -177,6 +177,7 @@ export default function ChatWindow({ conversation, onBack, onMessageSent, partic
     setSending(true);
     const result = await sendMessage(conversation.conversation_id, text.trim());
     if (result) {
+      appendMessage(result);
       setText('');
       onMessageSent?.();
     } else {
@@ -204,8 +205,10 @@ export default function ChatWindow({ conversation, onBack, onMessageSent, partic
         'file',
         { storage_path: result.path, file_name: file.name, file_size: file.size },
       );
-      if (sent) onMessageSent?.();
-      else window.alert(t('chat.failedToSend'));
+      if (sent) {
+        appendMessage(sent);
+        onMessageSent?.();
+      } else window.alert(t('chat.failedToSend'));
     }
     setUploading(false);
   };

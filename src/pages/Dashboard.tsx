@@ -620,7 +620,7 @@ export default function DashboardPage() {
         const { data: studentData } = await supabase.from('students').select('email').eq('id', selectedSession.student_id || '').single();
         const studentName = selectedSession.student?.full_name || '';
 
-        const { success } = await cancelSessionAndFillWaitlist({
+        const { success, error } = await cancelSessionAndFillWaitlist({
             sessionId: selectedSession.id,
             tutorId: user?.id || '',
             reason: cancellationReason.trim(),
@@ -652,7 +652,7 @@ export default function DashboardPage() {
                 }
             }
         } else {
-            setToastMessage({ message: t('dash.cancelFailed'), type: 'error' });
+            setToastMessage({ message: error || t('dash.cancelFailed'), type: 'error' });
         }
         setSaving(false);
     };
@@ -1440,7 +1440,7 @@ export default function DashboardPage() {
                                 const attentionCount = listCount + setupCount;
                                 return (
                                     <span className="text-xs font-medium bg-amber-100 text-amber-700 px-2 py-1 rounded-md">
-                                        {t('dash.attentionCount', { count: String(attentionCount) })}
+                                        {attentionCount} laukia
                                     </span>
                                 );
                             })()}

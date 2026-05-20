@@ -24,6 +24,7 @@ import {
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
+import { orgTutorLessonPayEur } from '@/lib/orgTutorLessonPay';
 
 interface Invoice {
   id: string;
@@ -78,7 +79,11 @@ export default function CompanyInvoices() {
   const [tutorSessions, setTutorSessions] = useState<Record<string, { count: number; total: number }>>({});
   const [loadingTutorSessions, setLoadingTutorSessions] = useState(false);
   const [invoiceIssuerMode, setInvoiceIssuerMode] = useState<string>('both');
+  const [tutorInvoiceTarget, setTutorInvoiceTarget] = useState<{ id: string; full_name: string } | null>(null);
   const [checkingAlreadyIssued, setCheckingAlreadyIssued] = useState(false);
+
+  const companyCanIssueTutorInvoices =
+    invoiceIssuerMode === 'company' || invoiceIssuerMode === 'both';
   const [sortAsc, setSortAsc] = useState(true);
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
 
@@ -188,20 +193,29 @@ export default function CompanyInvoices() {
     if (!orgId || tutors.length === 0) return;
     setLoadingTutorSessions(true);
     const tutorIds = tutors.map(t => t.id);
-    const { data: sessions } = await supabase
-      .from('sessions')
-      .select('tutor_id, price, status, paid, payment_status')
-      .in('tutor_id', tutorIds)
-      .gte('start_time', tutorEffectiveRange.start)
-      .lte('start_time', tutorEffectiveRange.end + 'T23:59:59')
-      .neq('status', 'cancelled');
+    const [{ data: sessions }, { data: tutorProfiles }] = await Promise.all([
+      supabase
+        .from('sessions')
+        .select('tutor_id, price, status, paid, payment_status')
+        .in('tutor_id', tutorIds)
+        .gte('start_time', tutorEffectiveRange.start)
+        .lte('start_time', tutorEffectiveRange.end + 'T23:59:59')
+        .neq('status', 'cancelled'),
+      supabase.from('profiles').select('id, company_commission_percent').in('id', tutorIds),
+    ]);
+    const payRateByTutor = new Map(
+      (tutorProfiles || []).map((p: { id: string; company_commission_percent?: number | null }) => [
+        p.id,
+        p.company_commission_percent,
+      ]),
+    );
     const map: Record<string, { count: number; total: number }> = {};
     for (const s of sessions || []) {
       const isCountedAsPaid = s.status === 'completed' || s.paid === true || ['paid', 'confirmed'].includes(String(s.payment_status || ''));
       if (!isCountedAsPaid) continue;
       if (!map[s.tutor_id]) map[s.tutor_id] = { count: 0, total: 0 };
       map[s.tutor_id].count++;
-      map[s.tutor_id].total += Number(s.price) || 0;
+      map[s.tutor_id].total += orgTutorLessonPayEur(payRateByTutor.get(s.tutor_id), s.price);
     }
     setTutorSessions(map);
     setLoadingTutorSessions(false);
@@ -452,12 +466,14 @@ export default function CompanyInvoices() {
           >
             <FileText className="w-4 h-4 inline mr-1.5" />{t('invoices.tabInvoices')}
           </button>
-          <button
-            onClick={() => setActiveTab('tutors')}
-            className={cn('flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-colors', activeTab === 'tutors' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-600 hover:text-gray-900')}
-          >
-            <Users className="w-4 h-4 inline mr-1.5" />{t('invoices.tabTutors')}
-          </button>
+          {companyCanIssueTutorInvoices && (
+            <button
+              onClick={() => setActiveTab('tutors')}
+              className={cn('flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-colors', activeTab === 'tutors' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-600 hover:text-gray-900')}
+            >
+              <Users className="w-4 h-4 inline mr-1.5" />{t('invoices.tabTutors')}
+            </button>
+          )}
         </div>
 
         <div className={showSettings ? '' : 'hidden'}>
@@ -472,7 +488,7 @@ export default function CompanyInvoices() {
         </div>
 
         {/* Tutors tab */}
-        {activeTab === 'tutors' && (
+        {activeTab === 'tutors' && companyCanIssueTutorInvoices && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-4">
             <h2 className="text-lg font-semibold text-gray-900">{t('invoices.tutorEarnings')}</h2>
             <div className="space-y-2">
@@ -602,6 +618,16 @@ export default function CompanyInvoices() {
                         <p className="font-medium text-sm text-gray-900">{tutor.full_name}</p>
                         <p className="text-xs text-gray-500">{data.count} {t('invoices.lessons')} &middot; &euro;{data.total.toFixed(2)}</p>
                       </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="rounded-lg shrink-0 text-indigo-700 border-indigo-200 hover:bg-indigo-50"
+                        onClick={() => setTutorInvoiceTarget({ id: tutor.id, full_name: tutor.full_name })}
+                      >
+                        <FileText className="w-3.5 h-3.5 mr-1" />
+                        {t('invoices.issueForTutor')}
+                      </Button>
                     </div>
                   );
                 })}
@@ -1035,6 +1061,18 @@ export default function CompanyInvoices() {
           setIsCreateOpen(false);
           void loadData();
         }}
+        orgTutors={tutors}
+      />
+      <CreateInvoiceModal
+        isOpen={!!tutorInvoiceTarget}
+        onClose={() => setTutorInvoiceTarget(null)}
+        onSuccess={() => {
+          setTutorInvoiceTarget(null);
+          void loadData();
+          void loadTutorSessions();
+        }}
+        isOrgTutor
+        billingTutorId={tutorInvoiceTarget?.id}
         orgTutors={tutors}
       />
     </>

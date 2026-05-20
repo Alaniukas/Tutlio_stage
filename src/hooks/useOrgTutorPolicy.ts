@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { orgTutorPolicyRowDeduped, tutorSidebarProfileDeduped } from '@/lib/preload';
+import { orgAdminRowByUserDeduped, orgTutorPolicyRowDeduped, tutorSidebarProfileDeduped } from '@/lib/preload';
 import { useUser } from '@/contexts/UserContext';
 import { parseOrgLessonEditScope, anyOrgLessonEdit, type OrgLessonEditScope } from '@/lib/orgTutorLessonEdit';
 
@@ -83,6 +83,18 @@ export function useOrgTutorPolicy(): OrgTutorPolicy {
         return;
       }
 
+      // Org admins share organization_id on profile but are not org tutors — skip license gating.
+      const adminRow = await orgAdminRowByUserDeduped(user.id);
+      if (cancelled) return;
+      if (adminRow?.organization_id) {
+        setState({
+          ...defaultPolicy,
+          loading: false,
+          isOrgTutor: false,
+        });
+        return;
+      }
+
       setState({
         ...defaultPolicy,
         loading: true,
@@ -118,8 +130,7 @@ export function useOrgTutorPolicy(): OrgTutorPolicy {
       const pay = Number(prof?.company_commission_percent) || 0;
 
       const issuerMode = (org?.invoice_issuer_mode as 'company' | 'tutor' | 'both') || 'both';
-      // Backwards-compat: older orgs used tutor_limit to mean license count.
-      const licenseCount = Math.max(Number(org?.tutor_license_count) || 0, Number((org as any)?.tutor_limit) || 0);
+      const licenseCount = Number(org?.tutor_license_count) || 0;
       const orgUsesLicenses = licenseCount > 0;
       const hasActiveLicense = prof?.has_active_license !== false;
 

@@ -41,6 +41,7 @@ import Landing from '@/pages/Landing';
 import AboutUs from '@/pages/AboutUs';
 import Contact from '@/pages/Contact';
 import StripeSuccess from '@/pages/StripeSuccess';
+import PerlasSuccess from '@/pages/PerlasSuccess';
 import PackagePaymentSuccess from '@/pages/PackagePaymentSuccess';
 import PackagePaymentCancelled from '@/pages/PackagePaymentCancelled';
 import SchoolPaymentSuccess from '@/pages/SchoolPaymentSuccess';
@@ -194,6 +195,7 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/parent-register" element={<ParentRegister />} />
         <Route path="/school-contract-complete" element={<SchoolContractComplete />} />
         <Route path="/stripe-success" element={<StripeSuccess />} />
+        <Route path="/perlas-success" element={<PerlasSuccess />} />
         <Route path="/package-success" element={<PackagePaymentSuccess />} />
         <Route path="/package-cancelled" element={<PackagePaymentCancelled />} />
         <Route path="/school-payment-success" element={<SchoolPaymentSuccess />} />

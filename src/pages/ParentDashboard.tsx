@@ -154,7 +154,7 @@ export default function ParentDashboard() {
           ? supabase
               .from('profiles')
               .select(
-                'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, payment_timing, payment_deadline_hours',
+                'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, payment_timing, payment_deadline_hours, perlas_finance_enabled, organization_id',
               )
               .in('id', tutorIds)
           : Promise.resolve({ data: [], error: null } as any),
@@ -167,7 +167,10 @@ export default function ParentDashboard() {
       }
 
       const tutorById = new Map<string, ChildTutorPolicy>();
+      const orgIdsToCheck: string[] = [];
+      const tutorProfilesList: any[] = [];
       for (const tp of (tutorProfilesRes as any).data ?? []) {
+        tutorProfilesList.push(tp);
         tutorById.set(tp.id, {
           tutorId: tp.id,
           tutorName: tp.full_name ?? null,
@@ -179,7 +182,24 @@ export default function ParentDashboard() {
             | 'before_lesson'
             | 'after_lesson',
           paymentDeadlineHours: tp.payment_deadline_hours ?? 24,
+          perlasEnabled: !!tp.perlas_finance_enabled,
         });
+        if (!tp.perlas_finance_enabled && tp.organization_id) {
+          orgIdsToCheck.push(tp.organization_id);
+        }
+      }
+      if (orgIdsToCheck.length > 0) {
+        const { data: orgs } = await supabase
+          .from('organizations')
+          .select('id, perlas_finance_enabled')
+          .in('id', [...new Set(orgIdsToCheck)]);
+        const orgPerlas = new Map((orgs ?? []).map((o: any) => [o.id, !!o.perlas_finance_enabled]));
+        for (const tp of tutorProfilesList) {
+          if (!tp.perlas_finance_enabled && tp.organization_id && orgPerlas.get(tp.organization_id)) {
+            const existing = tutorById.get(tp.id);
+            if (existing) existing.perlasEnabled = true;
+          }
+        }
       }
 
       const byStudent = new Map<string, ChildSession[]>();

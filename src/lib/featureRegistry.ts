@@ -126,6 +126,20 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     requiresSetup: true,
     pricingTier: 'enterprise',
   },
+
+  perlas_finance: {
+    id: 'perlas_finance',
+    name: 'PerlasFinance banko pavedimai',
+    nameEn: 'PerlasFinance bank transfers',
+    description:
+      'Mokėjimai banko pavedimu (PerlasFinance) ir išmokėjimų skiltis organizacijos finansuose. Įjungti tik testuojamoms organizacijoms.',
+    descriptionEn:
+      'Bank transfer payments (PerlasFinance) and payout section in org finance. Enable only for pilot organizations.',
+    category: 'payments',
+    defaultValue: false,
+    requiresSetup: true,
+    pricingTier: 'enterprise',
+  },
 };
 
 /**
