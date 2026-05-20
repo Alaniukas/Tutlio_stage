@@ -9,12 +9,12 @@ import { getCached, setCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
 import { autoCloseBillingBatchIfAllPaid } from '@/lib/autoCloseBillingBatch';
 import { useUser } from '@/contexts/UserContext';
-import { tutorHasPlatformSubscriptionAccess, tutorUsesManualStudentPayments } from '@/lib/subscription';
+import { tutorUsesManualStudentPayments } from '@/lib/subscription';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { sendEmail } from '@/lib/email';
 import { format, isAfter, isBefore, addDays, subDays, parseISO, startOfDay } from 'date-fns';
 import type { Locale as DateFnsLocale } from 'date-fns';
-import { useTranslation, buildLocalizedPath } from '@/lib/i18n';
+import { useTranslation } from '@/lib/i18n';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import Toast from '@/components/Toast';
 import {
@@ -130,7 +130,7 @@ function nextYmdForDow(dow: number): string {
 }
 
 export default function DashboardPage() {
-    const { t, dateFnsLocale, locale } = useTranslation();
+    const { t, dateFnsLocale } = useTranslation();
     const navigate = useNavigate();
     const location = useLocation();
     const { user: ctxUser, profile: ctxProfile } = useUser();
@@ -620,7 +620,7 @@ export default function DashboardPage() {
         const { data: studentData } = await supabase.from('students').select('email').eq('id', selectedSession.student_id || '').single();
         const studentName = selectedSession.student?.full_name || '';
 
-        const { success } = await cancelSessionAndFillWaitlist({
+        const { success, error } = await cancelSessionAndFillWaitlist({
             sessionId: selectedSession.id,
             tutorId: user?.id || '',
             reason: cancellationReason.trim(),
@@ -652,7 +652,7 @@ export default function DashboardPage() {
                 }
             }
         } else {
-            setToastMessage({ message: t('dash.cancelFailed'), type: 'error' });
+            setToastMessage({ message: error || t('dash.cancelFailed'), type: 'error' });
         }
         setSaving(false);
     };
@@ -977,9 +977,6 @@ export default function DashboardPage() {
         return t('dash.greetEvening');
     };
 
-    const needsPlatformSubscription =
-        isOrgTutor === false && ctxProfile && !tutorHasPlatformSubscriptionAccess(ctxProfile);
-
     return (
         <Layout>
             {toastMessage && (
@@ -1009,29 +1006,6 @@ export default function DashboardPage() {
                         )}
                     </p>
                 </div>
-
-                {needsPlatformSubscription && (
-                    <div className="rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                        <div>
-                            <p className="font-semibold text-indigo-950">{t('dash.subscribeBannerTitle')}</p>
-                            <p className="text-sm text-indigo-800 mt-1">{t('dash.subscribeBannerText')}</p>
-                        </div>
-                        <div className="flex flex-wrap gap-2 shrink-0">
-                            <Link
-                                to="/registration/subscription"
-                                className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-                            >
-                                {t('dash.subscribeBannerCta')}
-                            </Link>
-                            <Link
-                                to={buildLocalizedPath('/pricing', locale)}
-                                className="inline-flex items-center justify-center rounded-xl border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100"
-                            >
-                                {t('dash.subscribeBannerPricing')}
-                            </Link>
-                        </div>
-                    </div>
-                )}
 
                 {/* Top stats – centered when few cards (e.g. org_tutor) */}
                 <div className={cn(
@@ -1440,7 +1414,7 @@ export default function DashboardPage() {
                                 const attentionCount = listCount + setupCount;
                                 return (
                                     <span className="text-xs font-medium bg-amber-100 text-amber-700 px-2 py-1 rounded-md">
-                                        {t('dash.attentionCount', { count: String(attentionCount) })}
+                                        {attentionCount} laukia
                                     </span>
                                 );
                             })()}

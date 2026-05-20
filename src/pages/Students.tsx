@@ -44,6 +44,7 @@ import {
 } from '@/lib/studentPaymentModel';
 import StudentPaymentModelSection from '@/components/StudentPaymentModelSection';
 import { sendEmail } from '@/lib/email';
+import { cancelSessionAndFillWaitlist } from '@/lib/lesson-actions';
 import { copyTextToClipboard } from '@/lib/copyToClipboard';
 import StatusBadge from '@/components/StatusBadge';
 import Toast from '@/components/Toast';
@@ -958,51 +959,45 @@ export default function StudentsPage() {
     if (cancellationReason.trim().length < 5) return;
 
     setSavingSession(true);
-    const { error } = await supabase.from('sessions').update({
-      status: 'cancelled',
-      cancellation_reason: cancellationReason.trim(),
-      cancelled_by: 'tutor'  // Track who cancelled
-    }).eq('id', selectedSessionForModal.id);
-    if (!error) {
-      // Send cancellation emails
-      const emailDate = format(new Date(selectedSessionForModal.start_time), 'yyyy-MM-dd');
-      const emailTime = format(new Date(selectedSessionForModal.start_time), 'HH:mm');
-      const studentName = selectedSessionForModal.student?.full_name || '';
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const studentName = selectedSessionForModal.student?.full_name || '';
+    const { data: studentData } = await supabase
+      .from('students')
+      .select('email')
+      .eq('id', selectedSessionForModal.student_id || '')
+      .single();
 
-      const { data: studentData } = await supabase.from('students').select('email').eq('id', selectedSessionForModal.student_id || '').single();
+    const { success, error } = await cancelSessionAndFillWaitlist({
+      sessionId: selectedSessionForModal.id,
+      tutorId: authUser?.id || user?.id || '',
+      reason: cancellationReason.trim(),
+      cancelledBy: 'tutor',
+      studentName,
+      tutorName: profile?.full_name || '',
+      studentEmail: studentData?.email || null,
+      tutorEmail: profile?.email || null,
+    });
 
-      if (studentData?.email && user) {
-        sendEmail({
-          type: 'session_cancelled',
-          to: studentData.email,
-          data: { studentName, tutorName: profile?.full_name || '', date: emailDate, time: emailTime, cancelledBy: 'tutor', reason: cancellationReason.trim() },
-        });
-      }
-      if (profile?.email) {
-        sendEmail({
-          type: 'session_cancelled',
-          to: profile.email,
-          data: { studentName, tutorName: profile.full_name || '', date: emailDate, time: emailTime, cancelledBy: 'tutor', reason: cancellationReason.trim() },
-        });
-      }
-
+    if (success) {
       setIsSessionModalOpen(false);
       setCancelConfirmId(null);
       setCancellationReason('');
       fetchAllSessions();
-      // Full sync: remove cancelled lesson and refresh free time in Google Calendar
       try {
-        if (user) {
+        const tutorId = authUser?.id || user?.id;
+        if (tutorId) {
           await fetch('/api/google-calendar-sync', {
             method: 'POST',
             headers: await authHeaders(),
-            body: JSON.stringify({ userId: user.id }),
+            body: JSON.stringify({ userId: tutorId }),
           });
         }
       } catch (err) {
         console.error('Failed to full-sync Google Calendar after tutor cancellation:', err);
       }
       syncSessionToGoogleCalendar(selectedSessionForModal.id);
+    } else {
+      setToastMessage({ message: error || t('dash.cancelFailed'), type: 'error' });
     }
     setSavingSession(false);
   };

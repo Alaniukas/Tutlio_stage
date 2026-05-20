@@ -130,8 +130,7 @@ export function useOrgTutorPolicy(): OrgTutorPolicy {
       const pay = Number(prof?.company_commission_percent) || 0;
 
       const issuerMode = (org?.invoice_issuer_mode as 'company' | 'tutor' | 'both') || 'both';
-      // Backwards-compat: older orgs used tutor_limit to mean license count.
-      const licenseCount = Math.max(Number(org?.tutor_license_count) || 0, Number((org as any)?.tutor_limit) || 0);
+      const licenseCount = Number(org?.tutor_license_count) || 0;
       const orgUsesLicenses = licenseCount > 0;
       const hasActiveLicense = prof?.has_active_license !== false;
 

@@ -1,20 +1,6 @@
-import { supabase } from '@/lib/supabase';
-import { sendEmail } from '@/lib/email';
-import { format } from 'date-fns';
-import { t, detectLocaleFromHost } from '@/lib/i18n/core';
+import { authHeaders } from '@/lib/apiHelpers';
 
-export async function cancelSessionAndFillWaitlist({
-    sessionId,
-    tutorId,
-    reason,
-    cancelledBy,
-    studentName,
-    tutorName,
-    studentEmail,
-    tutorEmail,
-    cancellationHours,
-    cancellationFeePercent,
-}: {
+export type CancelSessionParams = {
     sessionId: string;
     tutorId: string;
     reason: string;
@@ -25,285 +11,67 @@ export async function cancelSessionAndFillWaitlist({
     tutorEmail: string | null;
     cancellationHours?: number;
     cancellationFeePercent?: number;
-}) {
-    // 1. Mark session as cancelled
-    const { data: session, error: cancelError } = await supabase
-        .from('sessions')
-        .update({
-            status: 'cancelled',
-            cancellation_reason: reason,
-            cancelled_by: cancelledBy,
-            cancelled_at: new Date().toISOString()
-        })
-        .eq('id', sessionId)
-        .select('*')
-        .single();
+    payerEmail?: string | null;
+    penaltyPaidViaStripe?: boolean;
+};
 
-    if (cancelError || !session) return { success: false, error: cancelError };
+/**
+ * Cancel via POST /api/cancel-session (service role).
+ * Server handles: DB update, group spots, package credits, penalties, emails,
+ * waitlist auto-fill (with day/time preference matching), Google Calendar delete.
+ * All tutor/student/org-admin UIs should use this — not direct Supabase updates.
+ */
+export type CancelSessionApiResult = {
+    success: boolean;
+    error?: string;
+    needsPenaltyChoice?: boolean;
+    penaltyAmount?: number;
+    isLate?: boolean;
+};
 
-    // 1a. If group lesson, increment available_spots on sibling sessions
-    let isGroupLesson = false;
-    if (session.subject_id) {
-        const { data: subject } = await supabase
-            .from('subjects')
-            .select('is_group')
-            .eq('id', session.subject_id)
-            .maybeSingle();
-
-        isGroupLesson = !!subject?.is_group;
-
-        if (isGroupLesson) {
-            const { data: otherSessions } = await supabase
-                .from('sessions')
-                .select('id, available_spots')
-                .eq('tutor_id', tutorId)
-                .eq('start_time', session.start_time)
-                .eq('subject_id', session.subject_id)
-                .neq('id', sessionId)
-                .neq('status', 'cancelled');
-
-            if (otherSessions && otherSessions.length > 0) {
-                for (const otherSession of otherSessions) {
-                    const newSpots = (otherSession.available_spots ?? 0) + 1;
-                    await supabase
-                        .from('sessions')
-                        .update({ available_spots: newSpots })
-                        .eq('id', otherSession.id);
-                }
-            }
-        }
-    }
-
-    // 1b. Package credit handling with penalty support
-    if (session.lesson_package_id) {
-        const { data: pkg } = await supabase
-            .from('lesson_packages')
-            .select('available_lessons, reserved_lessons')
-            .eq('id', session.lesson_package_id)
-            .single();
-
-        if (pkg) {
-            // Tutor-initiated cancels: always return full credit (no penalty)
-            // Student-initiated with penalty: fractional credit deduction
-            const hoursValue = Number(cancellationHours ?? 24);
-            const feePercent = Number(cancellationFeePercent ?? 0);
-            const hoursLeft = (new Date(session.start_time).getTime() - Date.now()) / 3600000;
-            const isLate = cancelledBy === 'student' && hoursLeft < hoursValue;
-            const hasPenalty = isLate && feePercent > 0;
-            const penaltyCredits = hasPenalty ? feePercent / 100 : 0;
-            const creditsToReturn = 1 - penaltyCredits;
-
-            await supabase
-                .from('lesson_packages')
-                .update({
-                    available_lessons: Number(pkg.available_lessons || 0) + creditsToReturn,
-                    reserved_lessons: Math.max(0, Number(pkg.reserved_lessons || 0) - 1),
-                })
-                .eq('id', session.lesson_package_id);
-
-            if (hasPenalty) {
-                const penaltyAmount = ((session.price ?? 0) * feePercent) / 100;
-                await supabase.from('sessions').update({
-                    is_late_cancelled: true,
-                    cancellation_fee_percent_applied: feePercent,
-                    cancellation_penalty_amount: penaltyAmount,
-                    penalty_resolution: 'paid',
-                }).eq('id', sessionId);
-            }
-
-            console.log(`[Cancel] Returned ${creditsToReturn} lesson credit(s) to package ${session.lesson_package_id}`);
-        }
-    }
-
-    // 2. Send cancellation emails for original session
-    const emailDate = format(new Date(session.start_time), 'yyyy-MM-dd');
-    const emailTime = format(new Date(session.start_time), 'HH:mm');
-
-    const isPaid = session.paid;
-    const sessionPrice = session.price;
-    const locale = typeof window !== 'undefined' ? detectLocaleFromHost(window.location.hostname) : 'lt';
-
-    if (tutorEmail && cancelledBy === 'student') {
-        sendEmail({
-            type: 'session_cancelled',
-            to: tutorEmail,
-            data: {
-                studentName, tutorName, date: emailDate, time: emailTime, cancelledBy, reason,
-                hideRefund: true,
-                locale,
-            },
+export async function cancelSessionViaApi(
+    params: CancelSessionParams
+): Promise<CancelSessionApiResult> {
+    try {
+        const res = await fetch('/api/cancel-session', {
+            method: 'POST',
+            headers: await authHeaders(),
+            body: JSON.stringify(params),
         });
-    }
-    if (studentEmail) {
-        sendEmail({
-            type: 'session_cancelled',
-            to: studentEmail,
-            data: {
-                studentName, tutorName, date: emailDate, time: emailTime, cancelledBy, reason,
-                isPaid, sessionPrice,
-                locale,
-            },
-        });
-    }
-
-    // 3. Fetch tutor settings (min_booking_hours) and bank details
-    const { data: tutorProfile } = await supabase
-        .from('profiles')
-        .select('min_booking_hours')
-        .eq('id', tutorId)
-        .single();
-
-    // Only skip auto-fill if session is starting in less than 1 hour (relaxed from min_booking_hours)
-    const oneHourBeforeSession = new Date(new Date(session.start_time).getTime() - 1 * 3600000);
-    if (oneHourBeforeSession < new Date()) {
-        console.log('[Waitlist] Session starts in less than 1 hour - skipping auto-fill');
-        return { success: true };
-    }
-
-    console.log('[Waitlist] Looking for waitlist entries for session:', sessionId, 'tutor:', tutorId);
-
-    // 4. Find waitlist entries - try specific session first, then generic queue
-    // First try: exact session match
-    let { data: waitlist } = await supabase
-        .from('waitlists')
-        .select(`
-            id,
-            student_id,
-            session_id,
-            preferred_day,
-            preferred_time,
-            student:students(full_name, email)
-        `)
-        .eq('session_id', sessionId)
-        .order('created_at', { ascending: true })
-        .limit(1);
-
-    console.log('[Waitlist] Specific session query result:', waitlist);
-
-    // If no exact match, try generic queue for this tutor
-    if (!waitlist || waitlist.length === 0) {
-        console.log('[Waitlist] No specific match, checking generic queue for tutor:', tutorId);
-
-        const { data: genericQueue } = await supabase
-            .from('waitlists')
-            .select(`
-                id,
-                student_id,
-                session_id,
-                preferred_day,
-                preferred_time,
-                student:students(full_name, email)
-            `)
-            .eq('tutor_id', tutorId)
-            .is('session_id', null)
-            .order('created_at', { ascending: true });
-
-        console.log('[Waitlist] Generic queue result:', genericQueue);
-
-        // Take first in generic queue (prefer matching preferences, but not critical for now)
-        if (genericQueue && genericQueue.length > 0) {
-            waitlist = [genericQueue[0]];
-            console.log('[Waitlist] Using generic queue entry:', waitlist[0]);
-        }
-    }
-
-    if (waitlist && waitlist.length > 0) {
-        const nextInLine = waitlist[0];
-        console.log('[Waitlist] Found student in line:', nextInLine);
-
-        // 5. Create new active session for the waitlisted student
-        const newSessionData: Record<string, unknown> = {
-            tutor_id: tutorId,
-            student_id: nextInLine.student_id,
-            start_time: session.start_time,
-            end_time: session.end_time,
-            topic: session.topic,
-            status: 'active',
-            price: session.price,
-            payment_status: 'pending',
-            paid: false,
+        const json = (await res.json().catch(() => ({}))) as {
+            success?: boolean;
+            error?: string;
+            needsPenaltyChoice?: boolean;
+            penaltyAmount?: number;
+            isLate?: boolean;
         };
-
-        if (isGroupLesson && session.subject_id) {
-            const { data: siblings } = await supabase
-                .from('sessions')
-                .select('id, available_spots')
-                .eq('tutor_id', tutorId)
-                .eq('start_time', session.start_time)
-                .eq('subject_id', session.subject_id)
-                .neq('status', 'cancelled');
-
-            const currentSpots = siblings?.[0]?.available_spots ?? 1;
-            const newSpots = Math.max(0, currentSpots - 1);
-
-            newSessionData.subject_id = session.subject_id;
-            newSessionData.available_spots = newSpots;
-
-            if (siblings && siblings.length > 0) {
-                for (const sib of siblings) {
-                    await supabase
-                        .from('sessions')
-                        .update({ available_spots: newSpots })
-                        .eq('id', sib.id);
-                }
-            }
-            console.log(`[Waitlist] Group lesson: set available_spots=${newSpots} on ${(siblings?.length ?? 0) + 1} sessions`);
+        if (res.ok && json.success) {
+            return {
+                success: true,
+                needsPenaltyChoice: json.needsPenaltyChoice,
+                penaltyAmount: json.penaltyAmount,
+                isLate: json.isLate,
+            };
         }
-
-        const { data: newSession, error: createError } = await supabase
-            .from('sessions')
-            .insert([newSessionData])
-            .select()
-            .single();
-
-        if (createError) {
-            console.error('[Waitlist] Error creating new session:', createError);
-        }
-
-        if (!createError && newSession) {
-            console.log('[Waitlist] Successfully created new session:', newSession.id);
-            // 6. Remove from waitlist
-            await supabase.from('waitlists').delete().eq('id', nextInLine.id);
-
-            const sData = Array.isArray(nextInLine.student) ? nextInLine.student[0] : nextInLine.student;
-
-            // 7. Send waitlist matched emails
-            if (sData?.email) {
-                sendEmail({
-                    type: 'waitlist_matched_student',
-                    to: sData.email as string,
-                    data: {
-                        studentName: (sData as any).full_name || t(locale, 'misc.studentFallback'),
-                        tutorName,
-                        date: emailDate,
-                        time: emailTime,
-                        price: session.price?.toString() || '0',
-                        sessionId: newSession.id,
-                        bankAccountName: null,
-                        bankAccountNumber: null,
-                        paymentPurpose: null,
-                        locale,
-                    }
-                });
-            }
-
-            if (tutorEmail) {
-                sendEmail({
-                    type: 'waitlist_matched_tutor',
-                    to: tutorEmail,
-                    data: {
-                        studentName: (sData as any).full_name || t(locale, 'misc.studentFallback'),
-                        tutorName,
-                        date: emailDate,
-                        time: emailTime,
-                        locale,
-                    }
-                });
-            }
-        }
-    } else {
-        console.log('[Waitlist] No waitlist entries found - session cancelled without auto-fill');
+        const message =
+            typeof json.error === 'string'
+                ? json.error
+                : res.status === 401
+                  ? 'Unauthorized'
+                  : res.status === 403
+                    ? 'Forbidden'
+                    : 'Failed to cancel session';
+        return { success: false, error: message };
+    } catch (e) {
+        console.error('[cancelSessionViaApi]', e);
+        return {
+            success: false,
+            error: e instanceof Error ? e.message : 'Network error',
+        };
     }
+}
 
-    return { success: true };
+/** @deprecated Use cancelSessionViaApi — kept as alias for existing imports */
+export async function cancelSessionAndFillWaitlist(params: CancelSessionParams) {
+    return cancelSessionViaApi(params);
 }

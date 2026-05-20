@@ -190,8 +190,6 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
         }
     };
 
-    const initials = studentName.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
-
     if (embed) {
         return (
             <div className="min-h-screen bg-white flex flex-col relative overflow-x-hidden">
@@ -239,16 +237,11 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                         </div>
                     </div>
                 </div>
-                <div className="flex items-center gap-3">
-                    {location.pathname !== '/student/sessions' && packageCountLabel != null && packageCountLabel !== '' && (
-                    <span className="hidden sm:inline-flex text-xs font-semibold text-[var(--org-brand)] bg-[color-mix(in_srgb,var(--org-brand)_10%,#ffffff)] border border-[color-mix(in_srgb,var(--org-brand)_22%,#e5e7eb)] px-2.5 py-1 rounded-lg">
+                {location.pathname !== '/student/sessions' && packageCountLabel != null && packageCountLabel !== '' && (
+                    <span className="hidden sm:inline-flex text-xs font-semibold text-[var(--org-brand)] bg-[color-mix(in_srgb,var(--org-brand)_10%,#ffffff)] border border-[color-mix(in_srgb,var(--org-brand)_22%,#e5e7eb)] px-2.5 py-1 rounded-lg shrink-0">
                         {packageCountLabel}
                     </span>
-                    )}
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[var(--org-brand)] to-[var(--org-brand-secondary)] flex items-center justify-center text-white font-bold text-sm shadow-sm ring-2 ring-white">
-                        {initials || '?'}
-                    </div>
-                </div>
+                )}
             </header>
 
             <Dialog open={isTutorModalOpen} onOpenChange={setIsTutorModalOpen}>

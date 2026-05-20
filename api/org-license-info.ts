@@ -43,7 +43,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: org, error: orgErr } = await supabase
       .from('organizations')
-      .select('id, tutor_license_count, tutor_limit')
+      .select('id, tutor_license_count')
       .eq('id', orgId)
       .maybeSingle();
 
@@ -53,10 +53,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.status(200).json({
       organizationId: orgId,
-      tutorLicenseCount: Math.max(
-        Number((org as any).tutor_license_count) || 0,
-        Number((org as any).tutor_limit) || 0
-      ),
+      tutorLicenseCount: Number((org as any).tutor_license_count) || 0,
     });
   } catch (err: any) {
     console.error('[org-license-info] Error:', err?.message || err);

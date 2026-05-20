@@ -23,15 +23,23 @@ export async function verifyRequestAuth(
 
   const authHeader = typeof req.headers.authorization === 'string' ? req.headers.authorization : '';
   if (!authHeader.startsWith('Bearer ')) return null;
+  if (!serviceKey) return null;
 
-  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  if (!url || !serviceKey) return null;
+  const token = authHeader.slice(7);
+  const urls = [process.env.SUPABASE_URL, process.env.VITE_SUPABASE_URL].filter(
+    (u, i, arr): u is string => Boolean(u) && arr.indexOf(u) === i,
+  );
+  if (urls.length === 0) return null;
 
-  const sb = createClient(url, serviceKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-  const { data, error } = await sb.auth.getUser(authHeader.slice(7));
-  if (error || !data.user) return null;
+  for (const url of urls) {
+    const sb = createClient(url, serviceKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const { data, error } = await sb.auth.getUser(token);
+    if (!error && data.user) {
+      return { userId: data.user.id, isInternal: false };
+    }
+  }
 
-  return { userId: data.user.id, isInternal: false };
+  return null;
 }

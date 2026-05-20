@@ -53,7 +53,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: org, error: orgErr } = await supabase
       .from('organizations')
-      .select('id, tutor_license_count, tutor_limit')
+      .select('id, tutor_license_count')
       .eq('id', orgId)
       .maybeSingle();
 
@@ -61,11 +61,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(404).json({ error: 'Organization not found' });
     }
 
-    // Backwards-compat: older orgs used tutor_limit to mean license count.
-    const licenseCount = Math.max(
-      Number((org as any).tutor_license_count) || 0,
-      Number((org as any).tutor_limit) || 0
-    );
+    const licenseCount = Number((org as any).tutor_license_count) || 0;
     if (licenseCount <= 0) {
       return res.status(400).json({ error: 'This organization does not use tutor licenses' });
     }
