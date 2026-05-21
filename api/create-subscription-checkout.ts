@@ -245,7 +245,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
       const trialCheck = await assertTrialEligible(req.headers.authorization);
-      if (!trialCheck.ok) {
+      if (trialCheck.ok === false) {
         return res.status(trialCheck.status).json({ error: trialCheck.error });
       }
       // Stripe native trial — no promotion code in Dashboard required

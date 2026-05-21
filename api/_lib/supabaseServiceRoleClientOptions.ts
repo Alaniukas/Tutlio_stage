@@ -26,9 +26,10 @@ export function supabaseServiceRoleClientOptions(): {
   const auth = { autoRefreshToken: false, persistSession: false } as const;
   const agent = getDevInsecureAgent();
   if (!agent) return { auth };
-  const fetchWithDispatcher = (input: RequestInfo | URL, init?: RequestInit) =>
-    undiciFetch(input, { ...(init as Record<string, unknown> | undefined), dispatcher: agent } as Parameters<
-      typeof undiciFetch
-    >[1]);
-  return { auth, global: { fetch: fetchWithDispatcher as typeof globalThis.fetch } };
+  const fetchWithDispatcher: typeof globalThis.fetch = (input, init) =>
+    undiciFetch(input as Parameters<typeof undiciFetch>[0], {
+      ...(init as Record<string, unknown> | undefined),
+      dispatcher: agent,
+    } as Parameters<typeof undiciFetch>[1]) as unknown as Promise<Response>;
+  return { auth, global: { fetch: fetchWithDispatcher } };
 }

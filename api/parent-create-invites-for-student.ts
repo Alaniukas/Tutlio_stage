@@ -116,10 +116,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return json(res, 200, { success: true, sent: 0, message: 'No parent emails on record' });
     }
 
-    const results: { email: string; ok: boolean; error?: string }[] = [];
+    const results: { email: string; ok: boolean; error?: string; code?: string }[] = [];
 
     const appOrigin = publicOriginFromRequest(req);
-    const body = parseJsonBody(req);
     const emailLocale = inviteEmailLocale(
       typeof body.locale === 'string' ? body.locale : undefined,
       appOrigin,

@@ -122,7 +122,7 @@ export async function insertParentInviteAndSendEmail(opts: {
     publicHost: origin,
   });
 
-  if (!emailResult.ok) {
+  if (emailResult.ok === false) {
     return {
       token,
       code,
