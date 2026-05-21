@@ -91,7 +91,8 @@ export default function CompanyDashboard() {
     ready: companyPaymentRowsReady,
   } = useDismissibleDashboardItemIds(companyPaymentRowsKey);
   const [orgName, setOrgName] = useState(cached?.orgName ?? '');
-  const [tutorLimit, setTutorLimit] = useState(cached?.tutorLimit ?? 0);
+  const [tutorLicenseCap, setTutorLicenseCap] = useState<number>(cached?.tutorLicenseCap ?? 0);
+  const [licensedTutors, setLicensedTutors] = useState<number>(cached?.licensedTutors ?? 0);
   const [activeTutors, setActiveTutors] = useState(cached?.activeTutors ?? 0);
   const [pendingInvites, setPendingInvites] = useState(cached?.pendingInvites ?? 0);
   const [sessionsThisMonth, setSessionsThisMonth] = useState(cached?.sessionsThisMonth ?? 0);
@@ -122,7 +123,7 @@ export default function CompanyDashboard() {
 
       const { data: adminRow } = await supabase
         .from('organization_admins')
-        .select('organization_id, organizations(name, tutor_limit)')
+        .select('organization_id, organizations(name, tutor_license_count)')
         .eq('user_id', user.id)
         .maybeSingle();
 
@@ -130,19 +131,22 @@ export default function CompanyDashboard() {
         setLoading(false);
         return;
       }
-      const org = adminRow.organizations as any;
+      const orgRaw = adminRow.organizations as any;
+      const org = Array.isArray(orgRaw) ? orgRaw[0] : orgRaw;
       const organizationId = adminRow.organization_id;
       setOrgIdForDismiss(organizationId);
       setOrgName(org?.name || '');
-      setTutorLimit(org?.tutor_limit || 0);
+      const cap = Number(org?.tutor_license_count) || 0;
+      setTutorLicenseCap(cap);
 
       const visibleTutors = await getOrgVisibleTutors(
         supabase as any,
         organizationId,
-        'id, email',
+        'id, email, has_active_license',
       );
       const tutorIds = visibleTutors.map((tu: any) => tu.id);
       setActiveTutors(tutorIds.length);
+      setLicensedTutors(visibleTutors.filter((tu: any) => tu.has_active_license !== false).length);
 
       const { count: pendingCount } = await supabase
         .from('tutor_invites')
@@ -422,7 +426,8 @@ export default function CompanyDashboard() {
       setCache(DASH_CACHE_KEY, {
         orgIdForDismiss: organizationId,
         orgName: org?.name || '',
-        tutorLimit: org?.tutor_limit || 0,
+        tutorLicenseCap: cap,
+        licensedTutors: visibleTutors.filter((tu: any) => tu.has_active_license !== false).length,
         activeTutors: tutorIds.length,
         pendingInvites: pendingCount || 0,
         sessionsThisMonth: cacheSessionsMonth,
@@ -443,8 +448,15 @@ export default function CompanyDashboard() {
   const stats: StatCard[] = [
     {
       label: t('companyDash.tutors'),
-      value: `${activeTutors} / ${tutorLimit}`,
-      sub: `${tutorLimit - activeTutors} ${t('companyDash.freeInvites')}`,
+      value: t('companyDash.tutorStatValue', { count: String(activeTutors) }),
+      sub:
+        tutorLicenseCap > 0
+          ? t('companyDash.tutorStatSubLicenses', {
+              used: String(licensedTutors),
+              total: String(tutorLicenseCap),
+              pending: String(pendingInvites),
+            })
+          : t('companyDash.tutorStatSubInvites', { pending: String(pendingInvites) }),
       icon: <Users className="w-5 h-5" />,
       iconBg: 'bg-slate-900',
       iconColor: 'text-indigo-200',

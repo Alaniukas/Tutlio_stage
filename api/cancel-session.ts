@@ -13,6 +13,7 @@ import { lt } from 'date-fns/locale';
 import { deleteSessionFromGoogle, syncSessionToGoogle } from './_lib/google-calendar.js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { canStudentSideCancelSession, canTutorSideCancelSession } from './_lib/cancel-session-access.js';
+import { releaseSessionSlotAsAvailability } from './_lib/release-session-availability.js';
 
 async function sendEmail(body: object) {
     const baseUrl = process.env.VERCEL_URL
@@ -57,6 +58,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         cancellationHours,
         cancellationFeePercent,
         penaltyPaidViaStripe,
+        leaveFreeTime,
     } = req.body as {
         sessionId: string;
         tutorId: string;
@@ -70,6 +72,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         cancellationHours?: number;
         cancellationFeePercent?: number;
         penaltyPaidViaStripe?: boolean;
+        /** Tutor/org cancel only: create one-time availability for other students to book */
+        leaveFreeTime?: boolean;
     };
 
     const normEmail = (e: string | null | undefined) =>
@@ -233,6 +237,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         .eq('id', otherSession.id);
                 }
             }
+        }
+    }
+
+    const shouldReleaseFreeSlot =
+        !isGroupLesson &&
+        (cancelledBy === 'student' || (cancelledBy === 'tutor' && leaveFreeTime === true));
+
+    if (shouldReleaseFreeSlot) {
+        try {
+            await releaseSessionSlotAsAvailability(supabase, {
+                tutorId,
+                startTime: session.start_time,
+                endTime: session.end_time,
+                subjectId: session.subject_id ?? null,
+            });
+        } catch (releaseErr) {
+            console.error('[cancel-session] release free slot failed:', releaseErr);
         }
     }
 

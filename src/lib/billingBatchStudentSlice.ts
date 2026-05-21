@@ -146,7 +146,7 @@ export async function loadBatchStudentSlices(
   );
 
   (sessionsWithBatch ?? []).forEach(
-    (s: { id?: string; payment_batch_id?: string; student_id?: string }) => {
+    (s: { id?: string; payment_batch_id?: string; student_id?: string; price?: number | null }) => {
       if (s.payment_batch_id && s.id && s.student_id) {
         studentBySessionId.set(s.id, s.student_id);
         if (!priceBySessionId.has(s.id)) priceBySessionId.set(s.id, Number(s.price) || 0);

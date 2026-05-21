@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from './types';
+import { isSsrMethod, rejectSsrMethod, sendSsrHtml } from './_lib/ssr-http.js';
 import {
   type Locale,
   type DomainKey,
@@ -99,7 +100,7 @@ function renderFeature(featureId: FeatureId, locale: Locale, domain: DomainKey):
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'GET') return res.status(405).send('Method not allowed');
+  if (!isSsrMethod(req.method)) return rejectSsrMethod(res);
 
   const featureId = (typeof req.query.feature === 'string' ? req.query.feature : '') as FeatureId;
   const cfg = FEATURES[featureId];
@@ -129,8 +130,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const body = renderFeature(featureId, locale, domain);
   const html = renderShell({ locale, domain, path, title, description, body, jsonLd, breadcrumbs });
 
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.setHeader('Content-Language', locale);
-  res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400');
-  return res.status(200).send(html);
+  sendSsrHtml(req, res, html, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Content-Language': locale,
+    'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
+  });
 }

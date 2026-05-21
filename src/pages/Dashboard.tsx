@@ -9,12 +9,12 @@ import { getCached, setCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
 import { autoCloseBillingBatchIfAllPaid } from '@/lib/autoCloseBillingBatch';
 import { useUser } from '@/contexts/UserContext';
-import { tutorUsesManualStudentPayments } from '@/lib/subscription';
+import { tutorHasPlatformSubscriptionAccess, tutorUsesManualStudentPayments } from '@/lib/subscription';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { sendEmail } from '@/lib/email';
 import { format, isAfter, isBefore, addDays, subDays, parseISO, startOfDay } from 'date-fns';
 import type { Locale as DateFnsLocale } from 'date-fns';
-import { useTranslation } from '@/lib/i18n';
+import { useTranslation, buildLocalizedPath } from '@/lib/i18n';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import Toast from '@/components/Toast';
 import {
@@ -40,7 +40,8 @@ import { cn, normalizeUrl } from '@/lib/utils';
 import StatusBadge from '@/components/StatusBadge';
 import { DateTimeSpinner } from '@/components/TimeSpinner';
 import { Edit2 } from 'lucide-react';
-import { cancelSessionAndFillWaitlist } from '@/lib/lesson-actions';
+import { cancelSessionAndFillWaitlist, releaseSessionSlotViaApi } from '@/lib/lesson-actions';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
     tutorCalendarFallbackProfileDeduped,
     tutorDashboardSessionsDeduped,
@@ -130,7 +131,7 @@ function nextYmdForDow(dow: number): string {
 }
 
 export default function DashboardPage() {
-    const { t, dateFnsLocale } = useTranslation();
+    const { t, dateFnsLocale, locale } = useTranslation();
     const navigate = useNavigate();
     const location = useLocation();
     const { user: ctxUser, profile: ctxProfile } = useUser();
@@ -174,6 +175,8 @@ export default function DashboardPage() {
     const [cancelConfirmId, setCancelConfirmId] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
     const [cancellationReason, setCancellationReason] = useState('');
+    const [leaveFreeTimeOnCancel, setLeaveFreeTimeOnCancel] = useState(false);
+    const [leaveFreeTimeOnReschedule, setLeaveFreeTimeOnReschedule] = useState(false);
     const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
     const [noShowPickerOpen, setNoShowPickerOpen] = useState(false);
     const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
@@ -629,12 +632,14 @@ export default function DashboardPage() {
             tutorName,
             studentEmail: studentData?.email || null,
             tutorEmail: user?.email || null,
+            leaveFreeTime: leaveFreeTimeOnCancel,
         });
 
         if (success) {
             setIsModalOpen(false);
             setCancelConfirmId(null);
             setCancellationReason('');
+            setLeaveFreeTimeOnCancel(false);
             fetchData();
             if (selectedSession.paid) {
                 setToastMessage({ message: t('dash.cancelledRefund'), type: 'success' });
@@ -697,6 +702,27 @@ export default function DashboardPage() {
             }).eq('id', selectedSession.id);
 
             if (!error) {
+                const timeChanged = oldStart.getTime() !== newStart.getTime();
+                if (timeChanged && leaveFreeTimeOnReschedule && currentUserId) {
+                    const released = await releaseSessionSlotViaApi({
+                        tutorId: currentUserId,
+                        startTime: oldStart.toISOString(),
+                        endTime: oldEnd.toISOString(),
+                        subjectId: selectedSession.subject_id ?? null,
+                    });
+                    if (released.created) {
+                        try {
+                            await fetch('/api/google-calendar-sync', {
+                                method: 'POST',
+                                headers: await authHeaders(),
+                                body: JSON.stringify({ userId: currentUserId }),
+                            });
+                        } catch (err) {
+                            console.error('Google Calendar sync after releasing free slot:', err);
+                        }
+                    }
+                }
+
                 // Notify only student about lesson reschedule
                 const { data: studentData } = await supabase.from('students').select('email').eq('id', selectedSession.student_id).single();
 
@@ -720,6 +746,7 @@ export default function DashboardPage() {
                 syncSessionToGoogleCalendar(selectedSession.id);
 
                 setIsEditingTime(false);
+                setLeaveFreeTimeOnReschedule(false);
                 setToastMessage({ message: t('dash.rescheduleSuccess'), type: 'success' });
                 fetchData();
                 setIsModalOpen(false);
@@ -977,6 +1004,9 @@ export default function DashboardPage() {
         return t('dash.greetEvening');
     };
 
+    const needsPlatformSubscription =
+        isOrgTutor === false && ctxProfile && !tutorHasPlatformSubscriptionAccess(ctxProfile);
+
     return (
         <Layout>
             {toastMessage && (
@@ -1006,6 +1036,29 @@ export default function DashboardPage() {
                         )}
                     </p>
                 </div>
+
+                {needsPlatformSubscription && (
+                    <div className="rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                        <div>
+                            <p className="font-semibold text-indigo-950">{t('dash.subscribeBannerTitle')}</p>
+                            <p className="text-sm text-indigo-800 mt-1">{t('dash.subscribeBannerText')}</p>
+                        </div>
+                        <div className="flex flex-wrap gap-2 shrink-0">
+                            <Link
+                                to="/registration/subscription"
+                                className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+                            >
+                                {t('dash.subscribeBannerCta')}
+                            </Link>
+                            <Link
+                                to={buildLocalizedPath('/pricing', locale)}
+                                className="inline-flex items-center justify-center rounded-xl border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100"
+                            >
+                                {t('dash.subscribeBannerPricing')}
+                            </Link>
+                        </div>
+                    </div>
+                )}
 
                 {/* Top stats – centered when few cards (e.g. org_tutor) */}
                 <div className={cn(
@@ -1848,6 +1901,13 @@ export default function DashboardPage() {
                                 {isEditingTime ? (
                                     <div className="mt-2 space-y-2">
                                         <DateTimeSpinner value={editNewStartTime} onChange={setEditNewStartTime} />
+                                        <label className="flex items-start gap-2 cursor-pointer">
+                                <Checkbox
+                                    checked={leaveFreeTimeOnReschedule}
+                                    onChange={(e) => setLeaveFreeTimeOnReschedule(e.target.checked)}
+                                />
+                                            <span className="text-xs text-gray-600 leading-snug">{t('dash.leaveFreeTime')}</span>
+                                        </label>
                                         <div className="flex gap-2">
                                             <Button size="sm" variant="outline" className="h-7 px-2 text-xs flex-1 rounded-lg" onClick={() => setIsEditingTime(false)}>{t('dash.cancelEdit')}</Button>
                                             <Button size="sm" className="h-7 px-2 text-xs flex-1 rounded-lg" onClick={handleReschedule} disabled={saving}>{saving ? '...' : t('dash.saveEdit')}</Button>
@@ -2021,8 +2081,15 @@ export default function DashboardPage() {
                             {cancellationReason.length > 0 && cancellationReason.trim().length < 5 && (
                                 <p className="text-xs text-red-500">{t('dash.minChars', { min: '5', current: String(cancellationReason.trim().length) })}</p>
                             )}
+                            <label className="flex items-start gap-2 cursor-pointer pt-1">
+                                <Checkbox
+                                    checked={leaveFreeTimeOnCancel}
+                                    onChange={(e) => setLeaveFreeTimeOnCancel(e.target.checked)}
+                                />
+                                <span className="text-sm text-gray-600 leading-snug">{t('dash.leaveFreeTime')}</span>
+                            </label>
                             <div className="flex gap-2 mt-3">
-                                <Button variant="outline" size="sm" onClick={() => { setCancelConfirmId(null); setCancellationReason(''); }} className="rounded-xl flex-1">
+                                <Button variant="outline" size="sm" onClick={() => { setCancelConfirmId(null); setCancellationReason(''); setLeaveFreeTimeOnCancel(false); }} className="rounded-xl flex-1">
                                     {t('dash.cancelBtn')}
                                 </Button>
                                 <Button variant="destructive" size="sm" onClick={handleCancelSession} disabled={saving || cancellationReason.trim().length < 5} className="rounded-xl flex-1 gap-2">

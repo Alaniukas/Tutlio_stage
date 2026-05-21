@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { supabase } from '@/lib/supabase';
+import { fetchParentInvitePreviewByCode, fetchParentInvitePreviewByToken } from '@/lib/parentInvitePreview';
 import { useTranslation } from '@/lib/i18n';
 import { Check, Eye, EyeOff, Users } from 'lucide-react';
 
@@ -34,9 +34,7 @@ export default function ParentRegister() {
     }
 
     (async () => {
-      const { data, error: fetchErr } = await supabase
-        .rpc('get_parent_invite_preview', { p_token: tokenFromUrl })
-        .maybeSingle() as { data: { used: boolean; parent_email: string; parent_name: string | null; student_full_name: string | null; parent_phone?: string | null; token?: string } | null; error: any };
+      const { data, error: fetchErr } = await fetchParentInvitePreviewByToken(tokenFromUrl);
 
       if (fetchErr || !data) {
         setError(t('parent.invalidToken'));
@@ -47,10 +45,10 @@ export default function ParentRegister() {
           parent_email: data.parent_email,
           parent_name: data.parent_name || '',
           student_name: data.student_full_name || '',
-          parent_phone: (data as any).parent_phone ?? null,
+          parent_phone: data.parent_phone ?? null,
         });
         setFullName(data.parent_name || '');
-        setResolvedToken(tokenFromUrl);
+        setResolvedToken(data.token?.trim() || tokenFromUrl);
       }
       setLoading(false);
     })();
@@ -67,9 +65,7 @@ export default function ParentRegister() {
     setLookupSubmitting(true);
     setError(null);
     try {
-      const { data, error: rpcErr } = await supabase
-        .rpc('get_parent_invite_preview_by_code', { p_code: code, p_email: email })
-        .maybeSingle() as { data: { used: boolean; parent_email: string; parent_name: string | null; student_full_name: string | null; parent_phone?: string | null; token: string } | null; error: any };
+      const { data, error: rpcErr } = await fetchParentInvitePreviewByCode(code, email);
 
       if (rpcErr || !data) {
         setError(t('parent.invalidManualInvite'));
@@ -129,8 +125,17 @@ export default function ParentRegister() {
       });
 
       if (!resp.ok) {
-        const err = await resp.json().catch(() => ({ error: 'Failed' }));
-        setError(err.error || 'Registration failed');
+        const err = await resp.json().catch(() => ({})) as { error?: string; code?: string };
+        const code = err.code;
+        if (code === 'invite_not_found') {
+          setError(t('parent.invalidManualInvite'));
+        } else if (code === 'invite_used') {
+          setError(t('parent.tokenUsed'));
+        } else if (code === 'registration_failed') {
+          setError(t('parent.registerFailed'));
+        } else {
+          setError(err.error || t('parent.registerFailed'));
+        }
         setSubmitting(false);
         return;
       }

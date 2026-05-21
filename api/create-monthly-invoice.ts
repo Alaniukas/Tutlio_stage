@@ -7,7 +7,6 @@ import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
-import { generateInvoicePdf, type InvoicePdfData } from './_lib/invoicePdf.js';
 import {
     tutorUsesManualStudentPayments,
     trimManualPaymentBankDetails,
@@ -54,6 +53,71 @@ function resolveApiUrl(req: VercelRequest, path: string): string {
     if (origin) return `${origin.replace(/\/$/, '')}${path}`;
     const base = (getEnv('APP_URL') || getEnv('VITE_APP_URL') || 'http://127.0.0.1:3002').replace(/\/$/, '');
     return `${base}${path}`;
+}
+
+async function loadInvoicePdfAttachment(
+    invoiceId: string
+): Promise<{ invoiceNumber: string; pdfBase64: string } | null> {
+    const { data: inv } = await supabase
+        .from('invoices')
+        .select('invoice_number, pdf_storage_path')
+        .eq('id', invoiceId)
+        .maybeSingle();
+    if (!inv?.pdf_storage_path) return null;
+
+    const { data: blob } = await supabase.storage.from('invoices').download(inv.pdf_storage_path);
+    if (!blob) return null;
+
+    const arrayBuf = await blob.arrayBuffer();
+    return {
+        invoiceNumber: inv.invoice_number,
+        pdfBase64: Buffer.from(arrayBuf).toString('base64'),
+    };
+}
+
+async function generateMonthlySalesInvoicePdf(
+    req: VercelRequest,
+    opts: {
+        tutorId: string;
+        billingBatchId: string;
+        periodStartDate: string;
+        periodEndDate: string;
+        sessionIds: string[];
+    }
+): Promise<{ invoiceNumber: string; pdfBase64: string } | null> {
+    try {
+        const invRes = await postInternalJson(
+            resolveApiUrl(req, '/api/generate-invoice'),
+            {
+                periodStart: opts.periodStartDate,
+                periodEnd: opts.periodEndDate,
+                groupingType: 'single',
+                tutorId: opts.tutorId,
+                sessionIds: opts.sessionIds,
+                issuedByUserId: opts.tutorId,
+                billingBatchId: opts.billingBatchId,
+            },
+            20000
+        );
+
+        if (!invRes.ok) {
+            const errText = await invRes.text().catch(() => '');
+            console.error('[create-monthly-invoice] generate-invoice HTTP', invRes.status, errText);
+            return null;
+        }
+
+        const invData = (await invRes.json().catch(() => null)) as { invoiceIds?: string[] } | null;
+        const invoiceId = invData?.invoiceIds?.[0];
+        if (!invoiceId) {
+            console.error('[create-monthly-invoice] generate-invoice returned no invoice id');
+            return null;
+        }
+
+        return await loadInvoicePdfAttachment(invoiceId);
+    } catch (err) {
+        console.error('[create-monthly-invoice] generate-invoice error:', err);
+        return null;
+    }
 }
 
 async function postInternalJson(url: string, payload: unknown, timeoutMs = 7000) {
@@ -395,31 +459,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     .eq('id', billingBatch.id);
             }
 
-            // Auto-generate S.F. if invoice profile exists (before email so PDF can be attached)
+            // Generate S.F. PDF via shared generate-invoice (same path as lesson packages).
             let sfPdfBase64: string | null = null;
             let sfInvoiceNumber: string | null = null;
             if (shouldIncludeSalesInvoice) {
-                try {
-                    console.log(`[create-monthly-invoice] Generating S.F. for batch ${billingBatch.id}, tutor ${tutorId}`);
-                    const sfResult = await autoGenerateSF(tutorId, billingBatch.id, periodStartDate, periodEndDate, payerSessions, payerName, payerEmail, tutor);
-                    if (sfResult) {
-                        sfPdfBase64 = sfResult.pdfBase64 ?? null;
-                        sfInvoiceNumber = sfResult.invoiceNumber ?? null;
-                        console.log(`[create-monthly-invoice] S.F. generated: ${sfInvoiceNumber}, pdfBase64 length: ${sfPdfBase64?.length ?? 0}`);
-                    } else {
-                        console.log('[create-monthly-invoice] autoGenerateSF returned null (no invoice profile?)');
-                    }
-                } catch (sfErr) {
-                    console.error('[create-monthly-invoice] S.F. auto-generation failed (non-blocking):', sfErr);
+                console.log(`[create-monthly-invoice] Generating S.F. for batch ${billingBatch.id}, tutor ${tutorId}`);
+                const sfResult = await generateMonthlySalesInvoicePdf(req, {
+                    tutorId,
+                    billingBatchId: billingBatch.id,
+                    periodStartDate,
+                    periodEndDate,
+                    sessionIds: sessionIdsForBatch,
+                });
+                if (sfResult) {
+                    sfPdfBase64 = sfResult.pdfBase64;
+                    sfInvoiceNumber = sfResult.invoiceNumber;
+                    console.log(`[create-monthly-invoice] S.F. generated: ${sfInvoiceNumber}, pdfBase64 length: ${sfPdfBase64.length}`);
+                } else {
+                    console.log('[create-monthly-invoice] generate-invoice returned no PDF for batch', billingBatch.id);
                 }
             }
 
             // Safety net: ensure an invoices row exists for this batch so it appears on /invoices.
-            // autoGenerateSF now always creates one (even without invoice_profiles), but keep as fallback.
             {
                 const { data: existingInv } = await supabase
                     .from('invoices')
-                    .select('id')
+                    .select('id, invoice_number, pdf_storage_path')
                     .eq('billing_batch_id', billingBatch.id)
                     .maybeSingle();
                 if (!existingInv) {
@@ -464,6 +529,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         if (fbLineItems.length > 0) {
                             await supabase.from('invoice_line_items').insert(fbLineItems);
                         }
+                    }
+                } else if (shouldIncludeSalesInvoice && existingInv.pdf_storage_path && !sfPdfBase64) {
+                    const attached = await loadInvoicePdfAttachment(existingInv.id);
+                    if (attached) {
+                        sfPdfBase64 = attached.pdfBase64;
+                        sfInvoiceNumber = attached.invoiceNumber;
                     }
                 }
             }
@@ -568,167 +639,4 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.error('create-monthly-invoice error:', err);
         return res.status(500).json({ error: err.message });
     }
-}
-
-async function autoGenerateSF(
-    tutorId: string,
-    billingBatchId: string,
-    periodStart: string,
-    periodEnd: string,
-    sessions: any[],
-    payerName: string,
-    payerEmail: string,
-    tutor: any
-): Promise<{ invoiceNumber: string; pdfBase64: string | null } | null> {
-    let invoiceProfile: any = null;
-    if (tutor.organization_id) {
-        const { data: orgProf } = await supabase
-            .from('invoice_profiles')
-            .select('*')
-            .eq('organization_id', tutor.organization_id)
-            .maybeSingle();
-        invoiceProfile = orgProf;
-    }
-    if (!invoiceProfile) {
-        const { data: userProf } = await supabase.from('invoice_profiles').select('*').eq('user_id', tutorId).maybeSingle();
-        invoiceProfile = userProf;
-    }
-
-    const hasProfile = !!invoiceProfile;
-    if (!hasProfile) {
-        console.log(`[autoGenerateSF] No invoice_profiles for tutor ${tutorId} — using fallback seller info`);
-    }
-
-    // Build seller snapshot from invoice profile or tutor profile as fallback
-    const full = tutor?.full_name && typeof tutor.full_name === 'string' ? tutor.full_name.trim() : '';
-    let sellerSnapshot: Record<string, any>;
-    let invoiceNumber: string;
-
-    if (hasProfile) {
-        const isCompany = ['mb', 'uab', 'ii'].includes(invoiceProfile.entity_type);
-        const biz = typeof invoiceProfile.business_name === 'string' ? invoiceProfile.business_name.trim() : '';
-        const sellerName = isCompany ? biz || full || 'Įmonė' : full || biz || 'Korepetitorius';
-
-        sellerSnapshot = {
-            name: sellerName || 'Korepetitorius',
-            entityType: invoiceProfile.entity_type,
-            companyCode: invoiceProfile.company_code || undefined,
-            vatCode: invoiceProfile.vat_code || undefined,
-            address: invoiceProfile.address || undefined,
-            activityNumber: invoiceProfile.activity_number || undefined,
-            personalCode: invoiceProfile.personal_code || undefined,
-            contactEmail: invoiceProfile.contact_email || undefined,
-            contactPhone: invoiceProfile.contact_phone || undefined,
-        };
-
-        const series = invoiceProfile.invoice_series || 'SF';
-        const num = invoiceProfile.next_invoice_number || 1;
-        invoiceNumber = `${series}-${String(num).padStart(3, '0')}`;
-
-        await supabase
-            .from('invoice_profiles')
-            .update({ next_invoice_number: num + 1, updated_at: new Date().toISOString() })
-            .eq('id', invoiceProfile.id);
-    } else {
-        sellerSnapshot = {
-            name: full || 'Korepetitorius',
-            entityType: 'individual',
-        };
-
-        const dateCode = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-        const shortBatch = billingBatchId.slice(0, 6).toUpperCase();
-        invoiceNumber = `SF-${dateCode}-${shortBatch}`;
-    }
-
-    const buyerSnapshot = {
-        name: payerName || 'Mokinys',
-        email: payerEmail || undefined,
-    };
-
-    const totalAmount = sessions.reduce((sum, s) => sum + (s.price || 0), 0);
-
-    const { data: invoice } = await supabase
-        .from('invoices')
-        .insert({
-            invoice_number: invoiceNumber,
-            issued_by_user_id: tutorId,
-            organization_id: tutor.organization_id ?? null,
-            seller_snapshot: sellerSnapshot,
-            buyer_snapshot: buyerSnapshot,
-            issue_date: new Date().toISOString().slice(0, 10),
-            period_start: periodStart,
-            period_end: periodEnd,
-            grouping_type: 'single',
-            subtotal: totalAmount,
-            total_amount: totalAmount,
-            status: 'issued',
-            billing_batch_id: billingBatchId,
-        })
-        .select('id')
-        .single();
-
-    if (!invoice) return null;
-
-    // Build line items: one row per session with date, time, subject, and price
-    const lineItems = sessions
-        .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
-        .map(s => {
-            const subjectName = (s.subjects as any)?.name || 'Pamoka';
-            const dt = new Date(s.start_time);
-            const datePart = dt.toLocaleDateString('lt-LT', { year: 'numeric', month: '2-digit', day: '2-digit' });
-            const timePart = dt.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' });
-            const studentName = (s.students as any)?.full_name || '';
-            const desc = studentName
-                ? `${subjectName} — ${studentName} (${datePart} ${timePart})`
-                : `${subjectName} (${datePart} ${timePart})`;
-            return {
-                invoice_id: invoice.id,
-                description: desc,
-                quantity: 1,
-                unit_price: Math.round((s.price || 0) * 100) / 100,
-                total_price: Math.round((s.price || 0) * 100) / 100,
-                session_ids: [s.id],
-            };
-        });
-
-    if (lineItems.length > 0) {
-        await supabase.from('invoice_line_items').insert(lineItems);
-    }
-
-    // Generate PDF and upload
-    try {
-        const pdfData: InvoicePdfData = {
-            invoiceNumber,
-            issueDate: new Date().toLocaleDateString('lt-LT'),
-            periodStart: new Date(periodStart).toLocaleDateString('lt-LT'),
-            periodEnd: new Date(periodEnd).toLocaleDateString('lt-LT'),
-            seller: sellerSnapshot as InvoicePdfData['seller'],
-            buyer: buyerSnapshot,
-            lineItems: lineItems.map(li => ({
-                description: li.description,
-                quantity: li.quantity,
-                unitPrice: li.unit_price,
-                totalPrice: li.total_price,
-            })),
-            totalAmount,
-        };
-
-        const pdfBytes = await generateInvoicePdf(pdfData);
-        const storagePath = `${tutorId}/${invoice.id}.pdf`;
-
-        const { error: uploadErr } = await supabase.storage
-            .from('invoices')
-            .upload(storagePath, pdfBytes, { contentType: 'application/pdf', upsert: true });
-
-        if (!uploadErr) {
-            await supabase.from('invoices').update({ pdf_storage_path: storagePath }).eq('id', invoice.id);
-        }
-
-        return { invoiceNumber, pdfBase64: Buffer.from(pdfBytes).toString('base64') };
-    } catch (pdfErr) {
-        console.error(`[autoGenerateSF] PDF generation/upload error for ${invoiceNumber}:`, pdfErr);
-    }
-
-    console.log(`[autoGenerateSF] S.F. ${invoiceNumber} created for batch ${billingBatchId} (PDF: failed/skipped)`);
-    return { invoiceNumber, pdfBase64: null };
 }

@@ -8,15 +8,15 @@ if (typeof process !== 'undefined' && process.env.TUTLIO_DEV_API_LOCAL === '1') 
 }
 
 import type { VercelRequest, VercelResponse } from './types';
-import { t, type Locale } from './_lib/i18n.js';
+import { t, isValidLocale, localizedFromEmail, type Locale } from './_lib/i18n.js';
 import { Resend } from 'resend';
 import { createClient } from '@supabase/supabase-js';
 import { outlookEmailButton, headerInlineStyle } from './_lib/outlookEmail.js';
 import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClientOptions.js';
 import { sendPushForEmail } from './_lib/sendPush.js';
 
-const resend = new Resend(process.env.RESEND_API_KEY_STAGE || process.env.RESEND_API_KEY);
-const FROM_EMAIL = process.env.FROM_EMAIL || 'Tutlio <onboarding@tutlio.lt>';
+const resend = new Resend(process.env.RESEND_API_KEY);
+
 
 function randomToken() {
   return `${crypto.randomUUID().replace(/-/g, '')}${crypto.randomUUID().replace(/-/g, '')}`;
@@ -489,23 +489,19 @@ function tutorInvite(d: any, locale: Locale) {
 function inviteEmail(d: any, locale: Locale) {
   const isSchoolInvite = d?.context === 'school';
   const inviteSubject = isSchoolInvite
-    ? (locale === 'lt' ? 'Jūsų registracijos nuoroda mokykloje' : 'Your school registration link')
+    ? t(locale, 'em.schoolInviteSub')
     : t(locale, 'em.studentInviteSub');
   const inviteHeader = isSchoolInvite
-    ? (locale === 'lt' ? 'Kvietimas Prisijungti' : 'Invitation to join')
+    ? t(locale, 'em.schoolInviteHeader')
     : t(locale, 'em.studentInviteHeader');
   const inviteHeaderSub = isSchoolInvite
-    ? (locale === 'lt' ? 'Jūsų koordinatorius kviečia į platformą' : 'Your coordinator invited you to the platform')
+    ? t(locale, 'em.schoolInviteHeaderSub')
     : t(locale, 'em.studentInviteHeaderSub');
   const inviteBody = isSchoolInvite
-    ? (locale === 'lt'
-      ? `Jūsų vaikas <strong>${esc(d.studentName || '')}</strong> užregistruotas mokykloje <strong>${esc(d.tutorName || 'Mokykla')}</strong>.`
-      : `Your child <strong>${esc(d.studentName || '')}</strong> is registered in <strong>${esc(d.tutorName || 'School')}</strong>.`)
+    ? t(locale, 'em.schoolInviteBody', { student: esc(d.studentName || ''), school: esc(d.tutorName || 'School') })
     : t(locale, 'em.studentInviteBody', { tutor: d.tutorName });
-  /* Inline school copy — bundled API i18n on some deployments can miss fresh keys,
-   * and uppercase CSS turns a missing-key fallback into gibberish (e.g. EM.SCHOOLSTUDENTINVITECODELABEL). */
   const inviteCodeLabel = isSchoolInvite
-    ? (locale === 'lt' ? 'Jūsų vaiko registracijos kodas:' : 'Your child\'s registration code:')
+    ? t(locale, 'em.schoolStudentInviteCodeLabel')
     : t(locale, 'em.studentInviteCodeLabel');
   const inviteCodeCaptionStyle = isSchoolInvite
     ? 'color:#6b7280; font-size:13px; margin: 0 0 8px 0; font-weight: 600;'
@@ -1996,11 +1992,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const { type, to, data: rawData } = req.body;
+    const { type, to, data: rawData, locale: bodyLocale } = req.body;
     if (!type || !to) {
       return res.status(400).json({ error: 'Missing required fields: type, to' });
     }
-    const apiKey = process.env.RESEND_API_KEY_STAGE || process.env.RESEND_API_KEY;
+    const apiKey = process.env.RESEND_API_KEY?.trim();
     if (!apiKey) {
       console.error('[send-email] RESEND_API_KEY not set');
       return res.status(503).json({ error: 'Email service not configured' });
@@ -2058,40 +2054,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     function parentInvite(d: any, locale: Locale) {
+      const studentName = esc(d.studentName || '');
+      const hostLabel = d.publicHost || 'tutlio.lt';
       return {
-        subject: locale === 'lt' ? `Pakvietimas sukurti tėvų paskyrą – Tutlio` : `Invitation to create a parent account – Tutlio`,
+        subject: t(locale, 'em.parentInviteSub'),
         html: wrap(`
           <div class="header" style="${headerInlineStyle('#7c3aed', '#6d28d9')}">
-            <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">${locale === 'lt' ? 'Tėvų paskyra' : 'Parent Account'}</h1>
+            <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">${t(locale, 'em.parentInviteHeader')}</h1>
           </div>
           <div class="body">
-            <p class="greeting">${locale === 'lt' ? 'Sveiki' : 'Hello'}${d.parentName ? `, ${esc(d.parentName)}` : ''},</p>
+            <p class="greeting">${t(locale, 'em.hiNameNoEmoji', { name: d.parentName || studentName })}</p>
             <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-              ${locale === 'lt'
-                ? `Jūsų vaikas <strong>${esc(d.studentName || '')}</strong> sukūrė paskyrą Tutlio platformoje ir pakvietė jus susikurti tėvų paskyrą.`
-                : `Your child <strong>${esc(d.studentName || '')}</strong> has created an account on Tutlio and invited you to create a parent account.`}
+              ${t(locale, 'em.parentInviteBody', { student: studentName })}
             </p>
             <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-              ${locale === 'lt'
-                ? 'Su tėvų paskyra galėsite matyti pamokas, sąskaitas ir bendrauti su korepetitoriais.'
-                : 'With a parent account, you can view lessons, invoices, and communicate with tutors.'}
+              ${t(locale, 'em.parentInviteBenefits')}
             </p>
             <div style="text-align:center; margin:24px 0;">
-              <a href="${esc(d.registerLink || '')}" style="display:inline-block; background:#7c3aed; color:#fff; font-weight:700; font-size:15px; padding:14px 36px; border-radius:12px; text-decoration:none;">
-                ${locale === 'lt' ? 'Sukurti paskyrą' : 'Create Account'}
+              <a href="${String(d.registerLink || '').replace(/"/g, '%22')}" style="display:inline-block; background:#7c3aed; color:#fff; font-weight:700; font-size:15px; padding:14px 36px; border-radius:12px; text-decoration:none;">
+                ${t(locale, 'em.parentInviteBtnCreate')}
               </a>
             </div>
             ${d.code ? `
             <p style="color:#4b5563; font-size:14px; line-height:1.6; text-align:center;">
-              ${locale === 'lt'
-                ? `Arba atverkite <strong>tutlio.lt/parent-register</strong> ir įveskite kodą: <strong style="letter-spacing:2px;">${esc(String(d.code))}</strong>`
-                : `Or open <strong>tutlio.lt/parent-register</strong> and enter code: <strong style="letter-spacing:2px;">${esc(String(d.code))}</strong>`}
+              ${t(locale, 'em.parentInviteCodeFallback', { host: hostLabel, code: esc(String(d.code)) })}
             </p>` : ''}
           </div>${footerFor(locale)}`, locale),
       };
     }
 
-    const locale: Locale = 'lt';
+    const locale: Locale = isValidLocale(bodyLocale) ? bodyLocale : 'lt';
 
     // Resolve org branding for whitelabel emails
     let orgBranding: EmailBranding | null = null;
@@ -2215,7 +2207,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     emailContent = applyBranding(emailContent);
 
     const emailPayload: Parameters<typeof resend.emails.send>[0] = {
-      from: FROM_EMAIL,
+      from: localizedFromEmail(locale),
       to: Array.isArray(to) ? to : [to],
       subject: unescapeHtml(emailContent.subject),
       html: emailContent.html,

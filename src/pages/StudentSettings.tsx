@@ -136,7 +136,7 @@ export default function StudentSettings() {
             const res = await fetch('/api/student-invite-parent', {
                 method: 'POST',
                 headers: await authHeaders(),
-                body: JSON.stringify({}),
+                body: JSON.stringify({ locale }),
             });
             const body = await res.json().catch(() => ({} as Record<string, unknown>));
             if (res.status === 409 && Array.isArray(body.parents)) {

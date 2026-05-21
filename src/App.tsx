@@ -188,11 +188,14 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/:locale/login" element={<Login />} />
         <Route path="/auth/callback" element={<AuthCallback />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/:locale/register" element={<Register />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/registration/subscription" element={<TutorSubscribe />} />
         <Route path="/tutor-subscribe" element={<Navigate to="/registration/subscription" replace />} />
         <Route path="/book/:inviteCode" element={<StudentOnboarding />} />
+        <Route path="/:locale/book/:inviteCode" element={<StudentOnboarding />} />
         <Route path="/parent-register" element={<ParentRegister />} />
+        <Route path="/:locale/parent-register" element={<ParentRegister />} />
         <Route path="/school-contract-complete" element={<SchoolContractComplete />} />
         <Route path="/stripe-success" element={<StripeSuccess />} />
         <Route path="/perlas-success" element={<PerlasSuccess />} />

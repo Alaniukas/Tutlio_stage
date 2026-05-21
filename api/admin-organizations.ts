@@ -227,7 +227,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Keep list endpoint fast: heavy stats are computed in the detail endpoint.
         const out = (orgs || []).map((org) => ({
           ...org,
-          tutor_license_count: Math.max(Number((org as any).tutor_license_count) || 0, Number((org as any).tutor_limit) || 0),
           tutor_count: 0,
           student_count: 0,
           lessons_occurred: null,
@@ -253,11 +252,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (orgErr) return res.status(500).json({ error: orgErr.message });
       if (!org) return res.status(404).json({ error: 'Organization not found' });
-
-      (org as any).tutor_license_count = Math.max(
-        Number((org as any).tutor_license_count) || 0,
-        Number((org as any).tutor_limit) || 0
-      );
 
       // Fetch independent data in parallel to reduce total response time.
       const [

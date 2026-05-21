@@ -89,7 +89,8 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { cancelSessionAndFillWaitlist } from '@/lib/lesson-actions';
+import { cancelSessionAndFillWaitlist, releaseSessionSlotViaApi } from '@/lib/lesson-actions';
+import { Checkbox } from '@/components/ui/checkbox';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
@@ -300,6 +301,8 @@ export default function CalendarPage() {
   const [newTutorComment, setNewTutorComment] = useState('');
   const [newShowCommentToStudent, setNewShowCommentToStudent] = useState(false);
   const [cancellationReason, setCancellationReason] = useState('');
+  const [leaveFreeTimeOnCancel, setLeaveFreeTimeOnCancel] = useState(false);
+  const [leaveFreeTimeOnReschedule, setLeaveFreeTimeOnReschedule] = useState(false);
 
   // Mass cancel states
   const [massCancelStartDate, setMassCancelStartDate] = useState('');
@@ -2435,6 +2438,7 @@ export default function CalendarPage() {
               tutorName: tutorProfile?.full_name || '',
               studentEmail: studentData?.email || null,
               tutorEmail: tutorProfile?.email || null,
+              leaveFreeTime: leaveFreeTimeOnCancel,
             });
 
             if (success) successCount++;
@@ -2462,6 +2466,7 @@ export default function CalendarPage() {
           tutorName: tutorProfile?.full_name || '',
           studentEmail: studentData?.email || null,
           tutorEmail: tutorProfile?.email || null,
+          leaveFreeTime: leaveFreeTimeOnCancel,
         });
 
         if (success) {
@@ -2475,6 +2480,7 @@ export default function CalendarPage() {
         setIsEventModalOpen(false);
         setCancelConfirmId(null);
         setCancellationReason('');
+        setLeaveFreeTimeOnCancel(false);
         setGroupCancelChoice(null);
         fetchData();
         // Update Google Calendar – remove cancelled session and update free time blocks
@@ -2839,6 +2845,18 @@ export default function CalendarPage() {
           }
         }
 
+        let releasedFreeSlot = false;
+        if (timeChanged && leaveFreeTimeOnReschedule && user?.id) {
+          const released = await releaseSessionSlotViaApi({
+            tutorId: user.id,
+            startTime: oldStart.toISOString(),
+            endTime: oldEnd.toISOString(),
+            subjectId: selectedEvent.subject_id ?? null,
+          });
+          releasedFreeSlot = !!released.created;
+          setLeaveFreeTimeOnReschedule(false);
+        }
+
         // Send reschedule email only to student
         if (timeChanged) {
           const { data: studentData } = await supabase
@@ -2866,9 +2884,9 @@ export default function CalendarPage() {
           }
         }
 
-        if (googleCalendarConnected && (timeChanged || durationChanged)) {
+        if (googleCalendarConnected && (timeChanged || durationChanged || releasedFreeSlot)) {
           try {
-            if (applyToAllFuture) {
+            if (applyToAllFuture || releasedFreeSlot) {
               await fetch('/api/google-calendar-sync', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -4244,6 +4262,13 @@ export default function CalendarPage() {
                 <Label>{t('cal.timeLabel')}</Label>
                 <DateTimeSpinner value={editNewStartTime} onChange={setEditNewStartTime} />
               </div>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <Checkbox
+                  checked={leaveFreeTimeOnReschedule}
+                  onChange={(e) => setLeaveFreeTimeOnReschedule(e.target.checked)}
+                />
+                <span className="text-sm text-gray-600 leading-snug">{t('dash.leaveFreeTime')}</span>
+              </label>
               <div className="space-y-2">
                 <Label>{t('cal.durationLabel')}</Label>
                 <Input
@@ -4622,8 +4647,15 @@ export default function CalendarPage() {
               {cancellationReason.length > 0 && cancellationReason.trim().length < 5 && (
                 <p className="text-xs text-red-500">{t('dash.minChars', { min: '5', current: String(cancellationReason.trim().length) })}</p>
               )}
+              <label className="flex items-start gap-2 cursor-pointer pt-1">
+                <Checkbox
+                  checked={leaveFreeTimeOnCancel}
+                  onChange={(e) => setLeaveFreeTimeOnCancel(e.target.checked)}
+                />
+                <span className="text-sm text-gray-600 leading-snug">{t('dash.leaveFreeTime')}</span>
+              </label>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => { setCancelConfirmId(null); setCancellationReason(''); }} className="rounded-xl flex-1">
+                <Button variant="outline" size="sm" onClick={() => { setCancelConfirmId(null); setCancellationReason(''); setLeaveFreeTimeOnCancel(false); }} className="rounded-xl flex-1">
                   {t('cal.cancelBtn')}
                 </Button>
                 <Button variant="destructive" size="sm" onClick={handleCancelSession} disabled={saving || cancellationReason.trim().length < 5} className="rounded-xl flex-1 gap-2">

@@ -12,7 +12,11 @@ import type { LandingVariant } from './HeroSection';
 const TUTOR_ICONS = [CalendarDays, Users, CreditCard, BellRing];
 const SCHOOLS_ICONS = [CalendarDays, Users2, CreditCard, LineChart];
 
-const HL_FEATURES = [
+const HL_FEATURES: Array<{
+  key: string;
+  icon: typeof CalendarDays;
+  comingSoon?: boolean;
+}> = [
   { key: 'calendar', icon: CalendarDays },
   { key: 'reminders', icon: Bell },
   { key: 'messaging', icon: MessageSquare },

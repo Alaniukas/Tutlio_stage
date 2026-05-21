@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase, setRememberMe } from '@/lib/supabase';
 import { getPasswordResetRedirectTo } from '@/lib/auth-redirects';
+import { detectAuthLocaleFromHost } from '@/lib/auth-locale';
 import { hasActiveSubscription, tutorHasPlatformSubscriptionAccess } from '@/lib/subscription';
 import { getOrgAdminDashboardPath } from '@/lib/orgAdminDashboardPath';
 import { orgAdminRowByUserDeduped } from '@/lib/preload';
@@ -582,11 +583,19 @@ export default function Login() {
     }
     setLoading(true);
     setError(null);
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: getPasswordResetRedirectTo(import.meta.env.VITE_APP_URL, window.location.origin),
+    const redirectTo = getPasswordResetRedirectTo(import.meta.env.VITE_APP_URL, window.location.origin);
+    const resetRes = await fetch('/api/request-password-reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: email.trim(),
+        locale: detectAuthLocaleFromHost(),
+        redirectTo,
+      }),
     });
-    if (error) {
-      setError(t('login.resetError') + error.message);
+    const resetBody = await resetRes.json().catch(() => ({}));
+    if (!resetRes.ok) {
+      setError(t('login.resetError') + (resetBody?.error || resetRes.statusText));
     } else {
       setResetSent(true);
     }
@@ -599,14 +608,20 @@ export default function Login() {
     setInviteLoading(true);
     setInviteError(null);
     const code = inviteCode.trim().toUpperCase();
-    const { data, error } = await supabase
-      .rpc('get_student_by_invite_code', { p_invite_code: code });
-    if (error || !data?.[0]?.id) {
-      setInviteError(t('login.codeNotFound'));
+    try {
+      const { data, error } = await supabase
+        .rpc('get_student_by_invite_code', { p_invite_code: code });
+      if (error || !data?.[0]?.id) {
+        setInviteError(t('login.codeNotFound'));
+        return;
+      }
+      navigate(`/book/${code}`);
+    } catch (err) {
+      console.error('[Login] student invite lookup failed:', err);
+      setInviteError(t('login.unexpectedError'));
+    } finally {
       setInviteLoading(false);
-      return;
     }
-    navigate(`/book/${code}`);
   };
 
   const resetStudent = () => {
@@ -923,7 +938,7 @@ export default function Login() {
                       <Input
                         id="email"
                         type="email"
-                        placeholder="vardas@pavyzdys.lt"
+                        placeholder={t('register.emailPlaceholder')}
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         required
@@ -965,7 +980,7 @@ export default function Login() {
                       <Input
                         id="email"
                         type="email"
-                        placeholder="vardas@pavyzdys.lt"
+                        placeholder={t('register.emailPlaceholder')}
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         required
@@ -977,7 +992,7 @@ export default function Login() {
                         <Label htmlFor="password" className="text-sm font-medium text-gray-700">{t('common.password')}</Label>
                         <button
                           type="button"
-                          onClick={() => { setIsForgotPassword(true); setError(null); }}
+                          onClick={() => { setIsForgotPassword(true); setError(null); setLoading(false); }}
                           className="text-sm text-indigo-600 hover:underline font-medium"
                         >
                           {t('login.forgotPassword')}
@@ -1100,7 +1115,7 @@ export default function Login() {
                       <Input
                         id="p-email"
                         type="email"
-                        placeholder="vardas@pavyzdys.lt"
+                        placeholder={t('register.emailPlaceholder')}
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         required
@@ -1139,7 +1154,7 @@ export default function Login() {
                       <Input
                         id="p-email2"
                         type="email"
-                        placeholder="vardas@pavyzdys.lt"
+                        placeholder={t('register.emailPlaceholder')}
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         required
@@ -1151,7 +1166,7 @@ export default function Login() {
                         <Label htmlFor="p-password" className="text-sm font-medium text-gray-700">{t('common.password')}</Label>
                         <button
                           type="button"
-                          onClick={() => { setIsForgotPassword(true); setError(null); }}
+                          onClick={() => { setIsForgotPassword(true); setError(null); setLoading(false); }}
                           className="text-sm text-violet-600 hover:underline font-medium"
                         >
                           {t('login.forgotPassword')}
@@ -1284,7 +1299,7 @@ export default function Login() {
                         <Input
                           id="s-email"
                           type="email"
-                          placeholder="vardas@pavyzdys.lt"
+                          placeholder={t('register.emailPlaceholder')}
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
                           required
@@ -1323,7 +1338,7 @@ export default function Login() {
                         <Input
                           id="s-email"
                           type="email"
-                          placeholder="vardas@pavyzdys.lt"
+                          placeholder={t('register.emailPlaceholder')}
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
                           required
@@ -1335,7 +1350,7 @@ export default function Login() {
                           <Label htmlFor="s-password" className="text-sm font-medium text-gray-700">{t('common.password')}</Label>
                           <button
                             type="button"
-                            onClick={() => { setIsForgotPassword(true); setError(null); }}
+                            onClick={() => { setIsForgotPassword(true); setError(null); setLoading(false); }}
                             className="text-sm text-violet-600 hover:underline font-medium"
                           >
                             {t('login.forgotPassword')}

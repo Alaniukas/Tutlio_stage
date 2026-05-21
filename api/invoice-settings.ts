@@ -61,6 +61,39 @@ async function handleGet(req: VercelRequest, res: VercelResponse) {
   if (!userId) return res.status(400).json({ error: 'User context required' });
 
   const scope = req.query.scope as string;
+  const tutorIdParam = typeof req.query.tutorId === 'string' ? req.query.tutorId.trim() : '';
+
+  /** Org admin issuing on behalf of a tutor: seller profile is the tutor's invoice_profiles row. */
+  if (scope === 'tutor' && tutorIdParam) {
+    const { data: adminRow } = await supabase
+      .from('organization_admins')
+      .select('organization_id')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (!adminRow?.organization_id) {
+      return res.status(403).json({ error: 'Not an organization admin' });
+    }
+
+    const { data: tutorProf } = await supabase
+      .from('profiles')
+      .select('organization_id')
+      .eq('id', tutorIdParam)
+      .maybeSingle();
+
+    if (!tutorProf || tutorProf.organization_id !== adminRow.organization_id) {
+      return res.status(403).json({ error: 'Tutor not in your organization' });
+    }
+
+    const { data, error } = await supabase
+      .from('invoice_profiles')
+      .select('*')
+      .eq('user_id', tutorIdParam)
+      .maybeSingle();
+
+    if (error) return res.status(500).json({ error: error.message });
+    return res.status(200).json({ data });
+  }
 
   if (scope === 'organization') {
     const { data: adminRow } = await supabase

@@ -6,6 +6,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { sendTutorInviteEmail } from './_lib/sendTutorInviteResend.js';
+import { inviteEmailLocale, publicOriginFromRequest } from './_lib/public-origin.js';
 
 type SubjectPreset = {
   name: string;
@@ -76,7 +77,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       break_between_lessons,
       min_booking_hours,
       company_commission_percent,
-    } = req.body as any;
+      locale: bodyLocale,
+    } = req.body as {
+      organizationId: string;
+      inviteeName?: string;
+      inviteeEmail: string;
+      inviteePhone?: string;
+      subjects?: SubjectPreset[];
+      cancellation_hours?: number;
+      cancellation_fee_percent?: number;
+      reminder_student_hours?: number;
+      reminder_tutor_hours?: number;
+      break_between_lessons?: number;
+      min_booking_hours?: number;
+      company_commission_percent?: number;
+      locale?: string;
+    };
 
     const normalizedInviteeEmail = String(inviteeEmail || '').trim().toLowerCase();
 
@@ -154,11 +170,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let emailSent = false;
     let emailError: string | undefined;
     try {
+      const appOrigin = publicOriginFromRequest(req);
       const emailResult = await sendTutorInviteEmail(normalizedInviteeEmail, {
         inviteToken: token,
-        orgName: (org as any).name || null,
+        orgName: (org as { name?: string }).name || null,
         inviteeName: inviteeName || null,
         inviteeEmail: normalizedInviteeEmail,
+        origin: appOrigin,
+        emailLocale: inviteEmailLocale(
+          typeof bodyLocale === 'string' ? bodyLocale : undefined,
+          appOrigin,
+        ),
+        uiLocale: typeof bodyLocale === 'string' ? bodyLocale : undefined,
       });
       emailSent = emailResult.ok;
       const rawError = 'error' in emailResult ? emailResult.error : undefined;

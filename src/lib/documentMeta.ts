@@ -3,11 +3,20 @@ import { t } from '@/lib/i18n/core';
 import type { Platform } from '@/lib/platform';
 import { DEFAULT_PLATFORM } from '@/lib/platform';
 
+function escapeCssIdent(key: string): string {
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+    return CSS.escape(key);
+  }
+  // Very old browsers / embedded WebViews without CSS.escape — keep selectors safe for simple meta keys.
+  return key.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
 function setMeta(attr: 'name' | 'property', key: string, content: string) {
+  const esc = escapeCssIdent(key);
   const sel =
     attr === 'name'
-      ? `meta[name="${CSS.escape(key)}"]`
-      : `meta[property="${CSS.escape(key)}"]`;
+      ? `meta[name="${esc}"]`
+      : `meta[property="${esc}"]`;
   let el = document.head.querySelector(sel) as HTMLMetaElement | null;
   if (!el) {
     el = document.createElement('meta');

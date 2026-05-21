@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Eye, EyeOff, Building2, AlertCircle } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { getStoredUtm } from '@/lib/analytics';
+import { detectAuthLocaleFromHost, getAuthEmailOrigin } from '@/lib/auth-locale';
 
 const COUNTRY_DIAL_CODES = [
   { code: 'LT', label: 'Lithuania', dial: '+370' },
@@ -178,7 +179,8 @@ export default function Register() {
 
     const stripeCheckoutSessionId = sessionStorage.getItem('stripe_checkout_session_id');
 
-    const appOrigin = (import.meta.env.VITE_APP_URL || window.location.origin).replace(/\/$/, '');
+    const appOrigin = getAuthEmailOrigin(import.meta.env.VITE_APP_URL, window.location.origin);
+    const authLocale = detectAuthLocaleFromHost();
     let authData: any = null;
 
     if (normalizedOrgToken) {
@@ -211,7 +213,7 @@ export default function Register() {
     } else {
       // Email confirmation must land on a route that can consume the auth hash.
       // Then we continue to subscription flow via ?next=...
-      const emailRedirectTo = `${appOrigin}/auth/callback?next=${encodeURIComponent('/registration/subscription')}`;
+      const emailRedirectTo = `${appOrigin}/auth/callback?next=${encodeURIComponent('/dashboard')}`;
       const signUpResult = await supabase.auth.signUp({
         email,
         password,
@@ -222,6 +224,7 @@ export default function Register() {
             phone: normalizedPhone,
             accepted_privacy_policy_at: acceptedAt,
             accepted_terms_at: acceptedAt,
+            locale: authLocale,
             ...(stripeCheckoutSessionId ? { stripe_checkout_session_id: stripeCheckoutSessionId } : {}),
           },
         },
@@ -296,11 +299,12 @@ export default function Register() {
         console.error('[Register] Profile upsert error:', upsertError);
       }
 
-      const hasAccess = orgToken || profileData.subscription_status;
-      const subPath = requestedPlan
-        ? `/registration/subscription?plan=${encodeURIComponent(requestedPlan)}`
-        : '/registration/subscription';
-      navigate(hasAccess ? '/dashboard' : subPath);
+      // Account first — subscription is offered on dashboard / pricing, not a hard gate at sign-up.
+      if (requestedPlan && !orgToken) {
+        navigate(`/registration/subscription?plan=${encodeURIComponent(requestedPlan)}`);
+        return;
+      }
+      navigate('/dashboard');
       return;
     }
 

@@ -4,12 +4,9 @@
  * Matches send-email.ts `tutor_invite` (LT only, Outlook-safe layout).
  */
 import { Resend } from 'resend';
-import { t, type Locale } from './i18n.js';
+import { t, isValidLocale, localizedFromEmail, type Locale } from './i18n.js';
+import { buildTutorRegisterInviteUrl } from './public-origin.js';
 import { outlookEmailButton, headerInlineStyle } from './outlookEmail.js';
-
-const FROM_EMAIL = process.env.FROM_EMAIL || 'Tutlio <onboarding@tutlio.lt>';
-
-const getAppUrl = () => process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
 const baseStyles = `
   <style>
@@ -51,20 +48,27 @@ export type TutorInviteEmailData = {
   orgName: string | null;
   inviteeName: string | null;
   inviteeEmail: string;
+  /** Request origin (tutlio.lt / tutlio.com / localhost). */
+  origin: string;
+  /** Email copy language (any supported locale). */
+  emailLocale?: string;
+  /** UI locale for URL path prefix (lt, en, pl, …). */
+  uiLocale?: string;
 };
 
 export async function sendTutorInviteEmail(
   to: string,
   data: TutorInviteEmailData
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const apiKey = process.env.RESEND_API_KEY_STAGE || process.env.RESEND_API_KEY;
+  const apiKey = process.env.RESEND_API_KEY?.trim();
   if (!apiKey) {
     return { ok: false, error: 'Email service not configured' };
   }
 
-  const locale: Locale = 'lt';
-  const appUrl = getAppUrl();
-  const inviteLink = `${appUrl}/register?org_token=${data.inviteToken || ''}`;
+  const locale: Locale = isValidLocale(data.emailLocale) ? data.emailLocale : 'lt';
+  const inviteLink = buildTutorRegisterInviteUrl(data.origin, data.inviteToken || '', {
+    uiLocale: data.uiLocale,
+  });
   const greetingName = data.inviteeName || data.inviteeEmail || t(locale, 'em.tutorInviteDefault');
   const orgLabel = data.orgName || 'Tutlio';
 
@@ -85,7 +89,7 @@ export async function sendTutorInviteEmail(
 
   const resend = new Resend(apiKey);
   const { error } = await resend.emails.send({
-    from: FROM_EMAIL,
+    from: localizedFromEmail(locale),
     to: [to],
     subject,
     html,

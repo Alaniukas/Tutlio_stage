@@ -38,7 +38,7 @@ import { sendEmail } from '@/lib/email';
 import { assertTutorSlotsFree, runOrgAdminCreateSession } from '@/pages/company/orgAdminSessionCreate';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
 import { authHeaders } from '@/lib/apiHelpers';
-import { cancelSessionAndFillWaitlist } from '@/lib/lesson-actions';
+import { cancelSessionAndFillWaitlist, releaseSessionSlotViaApi } from '@/lib/lesson-actions';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { Button } from '@/components/ui/button';
 import {
@@ -298,13 +298,10 @@ export default function CompanyTvarkarastis() {
     if (!(orgId && explicitlyUnlicensed)) return;
     const { data: org } = await supabase
       .from('organizations')
-      .select('tutor_license_count, tutor_limit')
+      .select('tutor_license_count')
       .eq('id', orgId)
       .maybeSingle();
-    const cap = Math.max(
-      Number((org as any)?.tutor_license_count) || 0,
-      Number((org as any)?.tutor_limit) || 0,
-    );
+    const cap = Number((org as any)?.tutor_license_count) || 0;
     if (cap > 0) {
       throw new Error(t('compSch.tutorNotLicensed'));
     }
@@ -364,6 +361,8 @@ export default function CompanyTvarkarastis() {
   const [editStatus, setEditStatus] = useState<'active' | 'completed' | 'cancelled' | 'no_show'>('active');
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const [cancellationReason, setCancellationReason] = useState('');
+  const [leaveFreeTimeOnCancel, setLeaveFreeTimeOnCancel] = useState(false);
+  const [leaveFreeTimeOnReschedule, setLeaveFreeTimeOnReschedule] = useState(false);
   const [isDeleteRecurringDialogOpen, setIsDeleteRecurringDialogOpen] = useState(false);
 
   // Availability edit state
@@ -537,13 +536,10 @@ export default function CompanyTvarkarastis() {
       if (organizationId) {
         const { data: orgRow } = await supabase
           .from('organizations')
-          .select('org_subject_templates, tutor_license_count, tutor_limit')
+          .select('org_subject_templates, tutor_license_count')
           .eq('id', organizationId)
           .maybeSingle();
-        const cap = Math.max(
-          Number((orgRow as any)?.tutor_license_count) || 0,
-          Number((orgRow as any)?.tutor_limit) || 0,
-        );
+        const cap = Number((orgRow as any)?.tutor_license_count) || 0;
         nextOrgUsesLicenses = cap > 0;
         setOrgUsesLicenses(nextOrgUsesLicenses);
         const tpl = (orgRow as any)?.org_subject_templates;
@@ -1274,6 +1270,16 @@ export default function CompanyTvarkarastis() {
       const timeChanged =
         oldStart.getTime() !== newStart.getTime() || oldEnd.getTime() !== newEnd.getTime();
 
+      if (timeChanged && leaveFreeTimeOnReschedule) {
+        await releaseSessionSlotViaApi({
+          tutorId: (payload.tutor_id as string) || selectedEvent.tutor_id,
+          startTime: oldStart.toISOString(),
+          endTime: oldEnd.toISOString(),
+          subjectId: selectedEvent.subject_id ?? null,
+        });
+        setLeaveFreeTimeOnReschedule(false);
+      }
+
       if (timeChanged) {
         const tutorId = payload.tutor_id as string;
         const studentId = payload.student_id as string;
@@ -1358,12 +1364,14 @@ export default function CompanyTvarkarastis() {
         tutorName: selectedEvent.tutor?.full_name || '',
         studentEmail: null,
         tutorEmail: null,
+        leaveFreeTime: leaveFreeTimeOnCancel,
       });
 
       if (success) {
         setCancelConfirmOpen(false);
         setIsEventDetailOpen(false);
         setCancellationReason('');
+        setLeaveFreeTimeOnCancel(false);
         fetchData();
         try {
           await fetch('/api/google-calendar-sync', {
@@ -2846,8 +2854,15 @@ export default function CompanyTvarkarastis() {
                     placeholder={t('compSch.specifyReasonPlaceholder')}
                     className="rounded-lg border-red-200"
                   />
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <Checkbox
+                      checked={leaveFreeTimeOnCancel}
+                      onChange={(e) => setLeaveFreeTimeOnCancel(e.target.checked)}
+                    />
+                    <span className="text-sm text-gray-700 leading-snug">{t('dash.leaveFreeTime')}</span>
+                  </label>
                   <div className="flex gap-2">
-                    <Button size="sm" variant="outline" className="flex-1 rounded-xl" onClick={() => { setCancelConfirmOpen(false); setCancellationReason(''); }}>
+                    <Button size="sm" variant="outline" className="flex-1 rounded-xl" onClick={() => { setCancelConfirmOpen(false); setCancellationReason(''); setLeaveFreeTimeOnCancel(false); }}>
                       {t('compSch.back')}
                     </Button>
                     <Button size="sm" variant="destructive" className="flex-1 rounded-xl" onClick={handleCancelSession}
@@ -2977,6 +2992,13 @@ export default function CompanyTvarkarastis() {
                     <DateTimeSpinner value={editStartTime} onChange={setEditStartTime} />
                   </div>
                 </div>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <Checkbox
+                    checked={leaveFreeTimeOnReschedule}
+                    onChange={(e) => setLeaveFreeTimeOnReschedule(e.target.checked)}
+                  />
+                  <span className="text-sm text-gray-600 leading-snug">{t('dash.leaveFreeTime')}</span>
+                </label>
                 <div className="space-y-2 max-w-[200px]">
                   <Label>{t('compSch.durationMin')}</Label>
                   <Input

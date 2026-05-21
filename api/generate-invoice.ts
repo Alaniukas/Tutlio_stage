@@ -3,6 +3,14 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { generateInvoicePdf, type InvoicePdfData } from './_lib/invoicePdf.js';
 
+/** EUR per lesson for org-tutor → company invoices (see profiles.company_commission_percent). */
+function orgTutorLessonPayEur(tutorPayRate: number | null | undefined, sessionPrice: number | null | undefined): number {
+  const rate = Number(tutorPayRate);
+  if (Number.isFinite(rate) && rate > 0) return rate;
+  const price = Number(sessionPrice);
+  return Number.isFinite(price) && price > 0 ? price : 0;
+}
+
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -30,6 +38,8 @@ interface GenerateInvoiceBody {
   allowPendingStripePackages?: boolean;
   /** Who issues the invoice on internal calls (org admin or tutor JWT subject). Required with internal auth unless tutorId alone is enough for your flow. */
   issuedByUserId?: string;
+  /** Link invoice to a monthly billing batch (payer invoice email). */
+  billingBatchId?: string;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -361,6 +371,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           subtotal: totalAmount,
           total_amount: totalAmount,
           status: 'issued',
+          ...(body.billingBatchId ? { billing_batch_id: body.billingBatchId } : {}),
         })
         .select('id')
         .single();
@@ -471,23 +482,14 @@ async function getSellerProfile(userId: string, orgId: string | null, isOrgTutor
     return data;
   }
 
-  // Org admin (or same org) issuing to students/payers: seller is the organization.
+  // Org admin or org tutor issuing to students/payers: seller is the organization when configured.
   if (orgId) {
-    const { data: adminRow } = await supabase
-      .from('organization_admins')
-      .select('id')
-      .eq('user_id', userId)
+    const { data: orgInvoiceProfile } = await supabase
+      .from('invoice_profiles')
+      .select('*')
       .eq('organization_id', orgId)
       .maybeSingle();
-
-    if (adminRow) {
-      const { data } = await supabase
-        .from('invoice_profiles')
-        .select('*')
-        .eq('organization_id', orgId)
-        .maybeSingle();
-      if (data) return data;
-    }
+    if (orgInvoiceProfile) return orgInvoiceProfile;
   }
 
   // Fallback: user's personal profile
@@ -578,19 +580,20 @@ function buildLineItems(
   groupingType: GroupingType,
   opts?: { orgTutorRateEur: number | null }
 ): LineItemData[] {
-  const orgTutorRateEur = opts?.orgTutorRateEur ?? null;
-  if (orgTutorRateEur != null) {
-    // Org tutor → invoice to organization: quantity = occurred lessons, unit price = org rate.
-    // GroupingType only affects aggregation, not the rate.
+  const orgTutorPayRate = opts?.orgTutorRateEur ?? null;
+  if (orgTutorPayRate != null) {
+    const linePay = (s: any) => orgTutorLessonPayEur(orgTutorPayRate, s.price);
+
     if (groupingType === 'per_payment') {
       return sessions.map(s => {
         const subject = (s.subjects as any)?.name || 'Pamoka';
         const date = new Date(s.start_time).toLocaleDateString('lt-LT');
+        const amount = linePay(s);
         return {
           description: `${subject} (${date})`,
           quantity: 1,
-          unitPrice: orgTutorRateEur,
-          totalPrice: orgTutorRateEur,
+          unitPrice: amount,
+          totalPrice: amount,
           sessionIds: [s.id],
         };
       });
@@ -604,11 +607,12 @@ function buildLineItems(
     }
     return Array.from(subjectMap.values()).map(group => {
       const qty = group.sessions.length;
-      const totalPrice = qty * orgTutorRateEur;
+      const totalPrice = group.sessions.reduce((sum, s) => sum + linePay(s), 0);
+      const unitPrice = qty > 0 ? Math.round((totalPrice / qty) * 100) / 100 : 0;
       return {
         description: `${group.name} - korepetavimo paslaugos`,
         quantity: qty,
-        unitPrice: Math.round(orgTutorRateEur * 100) / 100,
+        unitPrice,
         totalPrice: Math.round(totalPrice * 100) / 100,
         sessionIds: group.sessions.map((s: any) => s.id),
       };

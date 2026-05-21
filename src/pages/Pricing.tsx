@@ -84,6 +84,16 @@ export default function Pricing() {
       <LandingNavbar />
 
       <main className="flex-1 pt-[60px] md:pt-[72px]">
+        <section className="bg-[#ecfdf5] border-b border-emerald-200">
+          <div className="max-w-[1200px] mx-auto px-6 py-3 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center text-sm text-emerald-950">
+            <span>{t('pricing.trialBannerPrefix')}</span>
+            <code className="font-mono text-base font-bold tracking-widest bg-white px-3 py-0.5 rounded-md border border-emerald-300 text-emerald-900">
+              TRIAL7D
+            </code>
+            <span className="text-emerald-800">{t('pricing.trialBannerSuffix')}</span>
+          </div>
+        </section>
+
         {/* Hero */}
         <section className="relative overflow-hidden bg-gradient-to-b from-[#f5f5f3] via-[#f0efed] to-white">
           <div className="absolute top-[10%] left-1/2 -translate-x-1/2 w-[700px] h-[400px] bg-white/40 rounded-full blur-[100px] pointer-events-none" />

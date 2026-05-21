@@ -66,11 +66,10 @@ export default function FindTutorModal({ isOpen, onClose, orgId, onPickSlot }: F
       );
       const { data: orgRow } = await supabase
         .from('organizations')
-        .select('tutor_license_count, tutor_limit')
+        .select('tutor_license_count')
         .eq('id', orgId)
         .single();
-      const orgUsesLicenses =
-        Math.max(Number(orgRow?.tutor_license_count) || 0, Number(orgRow?.tutor_limit) || 0) > 0;
+      const orgUsesLicenses = (Number(orgRow?.tutor_license_count) || 0) > 0;
       const tutorList = (profiles || []).filter(
         (p: any) =>
           !adminIds.has(p.id) &&

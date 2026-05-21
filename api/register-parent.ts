@@ -12,79 +12,107 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Keep it untyped to avoid build-time typecheck failures.
   const supabase = createClient(url, key) as any;
 
-  const body = req.body as {
-    token?: string;
-    code?: string;
-    email?: string;
-    fullName: string;
-    password: string;
-  };
+  try {
+    const body = req.body as {
+      token?: string;
+      code?: string;
+      email?: string;
+      fullName: string;
+      password: string;
+    };
 
-  const { token, code, email, fullName, password } = body;
+    const { token, code, email, fullName, password } = body;
 
-  if (!fullName?.trim() || !password || password.length < 6) {
-    return res.status(400).json({ error: 'Missing or invalid fields' });
-  }
-
-  let invite:
-    | { id: string; parent_email: string; student_id: string; used: boolean }
-    | null = null;
-
-  if (token?.trim()) {
-    const { data, error } = await supabase
-      .from('parent_invites')
-      .select('id, parent_email, student_id, used')
-      .eq('token', token.trim())
-      .maybeSingle();
-    if (error) return res.status(500).json({ error: error.message });
-    invite = data;
-  } else if (code?.trim() && email?.trim()) {
-    const { data, error } = await supabase
-      .from('parent_invites')
-      .select('id, parent_email, student_id, used')
-      .eq('code', code.trim().toUpperCase())
-      .ilike('parent_email', email.trim())
-      .maybeSingle();
-    if (error) return res.status(500).json({ error: error.message });
-    invite = data;
-  } else {
-    return res.status(400).json({ error: 'Provide token or code and email' });
-  }
-
-  if (!invite) return res.status(404).json({ error: 'Invite not found' });
-  if (invite.used) return res.status(400).json({ error: 'Invite already used' });
-
-  const normalizedEmail = invite.parent_email.trim().toLowerCase();
-
-  const { data: authData, error: authErr } = await supabase.auth.admin.createUser({
-    email: normalizedEmail,
-    password,
-    email_confirm: true,
-  });
-
-  if (authErr) {
-    const msg = authErr.message || '';
-    if (msg.includes('already registered') || msg.includes('already been registered')) {
-      let existing: { id: string; email?: string } | undefined;
-      for (let page = 1; page <= 20 && !existing; page++) {
-        const { data: { users }, error: listErr } = await supabase.auth.admin.listUsers({ page, perPage: 100 });
-        if (listErr || !users?.length) break;
-        existing = users.find((u: any) => (u.email || '').trim().toLowerCase() === normalizedEmail);
-        if (users.length < 100) break;
-      }
-      if (existing?.id) {
-        await linkParent(supabase, existing.id, fullName.trim(), invite.student_id, invite.id, normalizedEmail);
-        return res.status(200).json({ success: true });
-      }
+    if (!fullName?.trim() || !password || password.length < 6) {
+      return res.status(400).json({ error: 'Missing or invalid fields', code: 'invalid_fields' });
     }
-    return res.status(400).json({ error: 'Registration failed' });
+
+    let invite:
+      | { id: string; parent_email: string; student_id: string; used: boolean }
+      | null = null;
+
+    if (token?.trim()) {
+      const trimmedToken = token.trim();
+      const { data, error } = await supabase
+        .from('parent_invites')
+        .select('id, parent_email, student_id, used')
+        .eq('token', trimmedToken)
+        .maybeSingle();
+      if (error) return res.status(500).json({ error: error.message });
+      invite = data;
+      if (!invite) {
+        const { data: byCode, error: codeErr } = await supabase
+          .from('parent_invites')
+          .select('id, parent_email, student_id, used')
+          .eq('code', trimmedToken.toUpperCase())
+          .eq('used', false)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (codeErr) return res.status(500).json({ error: codeErr.message });
+        invite = byCode;
+      }
+    } else if (code?.trim() && email?.trim()) {
+      const normalizedCode = code.trim().toUpperCase();
+      const normalizedEmail = email.trim().toLowerCase();
+      const { data, error } = await supabase
+        .from('parent_invites')
+        .select('id, parent_email, student_id, used')
+        .eq('code', normalizedCode)
+        .ilike('parent_email', normalizedEmail)
+        .maybeSingle();
+      if (error) return res.status(500).json({ error: error.message });
+      invite = data;
+    } else {
+      return res.status(400).json({ error: 'Provide token or code and email', code: 'missing_invite' });
+    }
+
+    if (!invite) {
+      return res.status(404).json({ error: 'Invite not found', code: 'invite_not_found' });
+    }
+    if (invite.used) {
+      return res.status(400).json({ error: 'Invite already used', code: 'invite_used' });
+    }
+
+    const normalizedEmail = invite.parent_email.trim().toLowerCase();
+
+    const { data: authData, error: authErr } = await supabase.auth.admin.createUser({
+      email: normalizedEmail,
+      password,
+      email_confirm: true,
+    });
+
+    if (authErr) {
+      const msg = authErr.message || '';
+      if (msg.includes('already registered') || msg.includes('already been registered')) {
+        let existing: { id: string; email?: string } | undefined;
+        for (let page = 1; page <= 20 && !existing; page++) {
+          const { data: { users }, error: listErr } = await supabase.auth.admin.listUsers({ page, perPage: 100 });
+          if (listErr || !users?.length) break;
+          existing = users.find((u: any) => (u.email || '').trim().toLowerCase() === normalizedEmail);
+          if (users.length < 100) break;
+        }
+        if (existing?.id) {
+          const { error: pwErr } = await supabase.auth.admin.updateUserById(existing.id, { password });
+          if (pwErr) {
+            console.warn('[register-parent] could not update password for existing user:', pwErr.message);
+          }
+          await linkParent(supabase, existing.id, fullName.trim(), invite.student_id, invite.id, normalizedEmail);
+          return res.status(200).json({ success: true });
+        }
+      }
+      return res.status(400).json({ error: 'Registration failed', code: 'registration_failed' });
+    }
+
+    if (!authData.user) return res.status(500).json({ error: 'User creation failed' });
+
+    await linkParent(supabase, authData.user.id, fullName.trim(), invite.student_id, invite.id, normalizedEmail);
+
+    return res.status(200).json({ success: true });
+  } catch (err: any) {
+    console.error('[register-parent] Error:', err?.message || err);
+    return res.status(500).json({ error: 'Internal server error', code: 'internal_error' });
   }
-
-  if (!authData.user) return res.status(500).json({ error: 'User creation failed' });
-
-  await linkParent(supabase, authData.user.id, fullName.trim(), invite.student_id, invite.id, normalizedEmail);
-
-  return res.status(200).json({ success: true });
 }
 
 async function linkParent(

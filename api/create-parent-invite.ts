@@ -2,8 +2,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { insertParentInviteAndSendEmail, type ParentInviteSource } from './_lib/parentInvite.js';
-
-const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
+import { inviteEmailLocale, publicOriginFromRequest } from './_lib/public-origin.js';
 
 /**
  * Legacy/server-only: use `x-internal-key` (service role) or POST from register-student /
@@ -60,20 +59,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (stErr || !student) return res.status(404).json({ error: 'Student not found' });
 
+  const appOrigin = publicOriginFromRequest(req);
   const result = await insertParentInviteAndSendEmail({
     supabase,
-    appUrl: APP_URL,
+    appUrl: appOrigin,
     parentEmail,
     studentId,
     studentFullName: student.full_name || '',
     parentName: parentName ?? null,
     source: source ?? null,
     invitedByUserId: invitedByUserId ?? null,
+    locale: inviteEmailLocale(
+      typeof (req.body as { locale?: string })?.locale === 'string'
+        ? (req.body as { locale?: string }).locale
+        : undefined,
+      appOrigin,
+    ),
+    uiLocale:
+      typeof (req.body as { locale?: string })?.locale === 'string'
+        ? (req.body as { locale?: string }).locale
+        : undefined,
   });
 
   if ('error' in result) {
     return res.status(500).json({ error: result.error });
   }
 
-  return res.status(200).json({ success: true, token: result.token, code: result.code });
+  return res.status(200).json({
+    success: true,
+    token: result.token,
+    code: result.code,
+    emailSent: result.emailSent,
+    emailError: result.emailSent ? undefined : result.emailError,
+  });
 }

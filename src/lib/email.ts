@@ -32,9 +32,10 @@ interface SendEmailParams {
     type: EmailType;
     to: string | string[];
     data: Record<string, any>;
+    locale?: string;
 }
 
-export async function sendEmail({ type, to, data }: SendEmailParams): Promise<boolean> {
+export async function sendEmail({ type, to, data, locale }: SendEmailParams): Promise<boolean> {
     try {
         const { data: { session } } = await supabase.auth.getSession();
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -44,7 +45,7 @@ export async function sendEmail({ type, to, data }: SendEmailParams): Promise<bo
         const response = await fetch('/api/send-email', {
             method: 'POST',
             headers,
-            body: JSON.stringify({ type, to, data }),
+            body: JSON.stringify({ type, to, data, locale }),
         });
 
         if (!response.ok) {

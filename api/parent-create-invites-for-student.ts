@@ -2,8 +2,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { insertParentInviteAndSendEmail } from './_lib/parentInvite.js';
-
-const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
+import { inviteEmailLocale, publicOriginFromRequest } from './_lib/public-origin.js';
 
 /** Raw Node response — avoids Express-style helpers missing under `vercel dev`. */
 function json(res: VercelResponse, status: number, body: unknown) {
@@ -119,19 +118,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const results: { email: string; ok: boolean; error?: string }[] = [];
 
+    const appOrigin = publicOriginFromRequest(req);
+    const body = parseJsonBody(req);
+    const emailLocale = inviteEmailLocale(
+      typeof body.locale === 'string' ? body.locale : undefined,
+      appOrigin,
+    );
+
     for (const t of targets) {
       const r = await insertParentInviteAndSendEmail({
         supabase,
-        appUrl: APP_URL,
+        appUrl: appOrigin,
         parentEmail: t.email,
         studentId,
         studentFullName: (student.full_name as string) || '',
         parentName: t.name,
         source: 'school_admin',
         invitedByUserId: auth.userId,
+        locale: emailLocale,
+        uiLocale: typeof body.locale === 'string' ? body.locale : undefined,
       });
       if ('error' in r) {
         results.push({ email: t.email, ok: false, error: r.error });
+      } else if (!r.emailSent) {
+        results.push({
+          email: t.email,
+          ok: false,
+          error: r.emailError || 'Email send failed',
+          code: r.code,
+        });
       } else {
         results.push({ email: t.email, ok: true });
       }

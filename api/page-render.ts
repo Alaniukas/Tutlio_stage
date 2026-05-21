@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from './types';
+import { isSsrMethod, rejectSsrMethod, sendSsrHtml } from './_lib/ssr-http.js';
 import {
   type Locale,
   type DomainKey,
@@ -31,10 +32,13 @@ function renderLanding(locale: Locale, domain: DomainKey): string {
 
   const featuresHtml = features
     .map(
-      (f) => `<div class="card">
+      (f) => {
+        const featurePath = buildPath(`/features/${f.key}`, locale, domain);
+        return `<a href="${featurePath}" class="card" style="text-decoration:none;color:inherit">
     <h3>${esc(t(locale, `landing.feature.${f.key}`))}</h3>
     <p>${esc(t(locale, `landing.feature.${f.key}Desc`))}</p>
-  </div>`,
+  </a>`;
+      },
     )
     .join('\n');
 
@@ -236,7 +240,7 @@ const PAGE_DESC_KEYS: Record<PageId, string> = {
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'GET') return res.status(405).send('Method not allowed');
+  if (!isSsrMethod(req.method)) return rejectSsrMethod(res);
 
   const page = (typeof req.query.page === 'string' ? req.query.page : 'landing') as PageId;
   if (!PAGE_RENDERERS[page]) return res.status(404).send('Not found');
@@ -283,8 +287,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const body = renderer(locale, domain);
   const html = renderShell({ locale, domain, path, title, description, body, jsonLd, extraHead, breadcrumbs });
 
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.setHeader('Content-Language', locale);
-  res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400');
-  return res.status(200).send(html);
+  sendSsrHtml(req, res, html, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Content-Language': locale,
+    'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
+  });
 }

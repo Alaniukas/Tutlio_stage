@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { Resend } from 'resend';
 import { createClient } from '@supabase/supabase-js';
 
-const resend = new Resend(process.env.RESEND_API_KEY_STAGE || process.env.RESEND_API_KEY);
+const resend = new Resend(process.env.RESEND_API_KEY);
 const FROM_EMAIL = process.env.FROM_EMAIL || 'Tutlio <onboarding@tutlio.lt>';
 const NOTIFY_EMAILS = ['simas0423@gmail.com', 'alaniukasa@gmail.com'];
 

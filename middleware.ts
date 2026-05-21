@@ -77,6 +77,16 @@ function ssrDestination(request: Request): string | null {
     return `/api/feature-render?feature=${encodeURIComponent(feature[1])}&locale=${locale}`;
   }
 
+  if (rest === '/dpa') {
+    return `/api/legal-render?page=dpa&locale=${locale}`;
+  }
+  if (rest === '/privacy-policy') {
+    return `/api/legal-render?page=privacy-policy&locale=${locale}`;
+  }
+  if (rest === '/terms') {
+    return `/api/legal-render?page=terms&locale=${locale}`;
+  }
+
   return null;
 }
 
@@ -104,6 +114,9 @@ export const config = {
     '/blog',
     '/blog/:slug*',
     '/features/:feature*',
+    '/dpa',
+    '/privacy-policy',
+    '/terms',
     '/:locale',
     '/:locale/pricing',
     '/:locale/apie-mus',
@@ -113,5 +126,8 @@ export const config = {
     '/:locale/blog',
     '/:locale/blog/:slug*',
     '/:locale/features/:feature*',
+    '/:locale/dpa',
+    '/:locale/privacy-policy',
+    '/:locale/terms',
   ],
 };

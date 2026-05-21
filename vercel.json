@@ -13,6 +13,9 @@
         "api/blog-render.ts": {
             "maxDuration": 30
         },
+        "api/legal-render.ts": {
+            "maxDuration": 30
+        },
         "api/sitemap.ts": {
             "maxDuration": 30
         }

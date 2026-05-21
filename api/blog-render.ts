@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from './types';
+import { isSsrMethod, rejectSsrMethod, sendSsrHtml } from './_lib/ssr-http.js';
 import { createClient } from '@supabase/supabase-js';
 import {
   type Locale,
@@ -148,6 +149,7 @@ function shell(opts: BlogShellOpts): string {
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>${esc(title)}</title>
 <meta name="description" content="${esc(description)}" />
+<meta name="robots" content="index, follow, max-image-preview:large" />
 <link rel="canonical" href="${esc(url)}" />
 ${hreflangTags(blogPath)}
 <meta property="og:type" content="article" />
@@ -218,7 +220,7 @@ ${body}
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'GET') return res.status(405).send('Method not allowed');
+  if (!isSsrMethod(req.method)) return rejectSsrMethod(res);
 
   const supabase = getSupabase();
   if (!supabase) return res.status(503).send('Database not configured');
@@ -271,15 +273,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   <p style="margin-top:2em"><a href="${blogListPath}">&larr; ${l.back}</a></p>
 </article>`;
 
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('Content-Language', locale);
-    res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400');
-    return res.status(200).send(shell({
+    sendSsrHtml(req, res, shell({
       locale, domain, blogPath, title: `${title} | Tutlio`, description: excerpt, url, image, body, jsonLd,
       publishedTime: post.published_at as string,
       modifiedTime: (post.updated_at as string) || undefined,
       tag: (post.tag as string) || undefined,
-    }));
+    }), {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Language': locale,
+      'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
+    });
+    return;
   }
 
   // Blog listing
@@ -342,10 +346,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     publisher: { '@type': 'Organization', name: 'Tutlio', url: 'https://www.tutlio.com' },
   });
 
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.setHeader('Content-Language', locale);
-  res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400');
-  return res.status(200).send(shell({
+  sendSsrHtml(req, res, shell({
     locale, domain, blogPath, title: `${l.blog} | Tutlio`, description: blogDesc, url, image: '', body, jsonLd: blogListJsonLd,
-  }));
+  }), {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Content-Language': locale,
+    'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
+  });
 }

@@ -17,7 +17,7 @@ import {
   ArrowLeft,
   Tag,
   ShieldCheck,
-  CircleHelp
+  CircleHelp,
 } from 'lucide-react';
 import {
   Dialog,
@@ -29,15 +29,14 @@ import {
 } from '@/components/ui/dialog';
 import { useTranslation, buildLocalizedPath } from '@/lib/i18n';
 
-const APP_URL = import.meta.env.VITE_APP_URL || window.location.origin;
-const DEPLOY_MARKER = 'egg-2026-04-02-a';
+const TRIAL_DISPLAY_CODE = 'TRIAL7D';
+const TRIAL_CODES = ['TRIAL7D', 'TRIAL', 'BANDYMAS'] as const;
 
 export default function TutorSubscribe() {
   const { t, locale } = useTranslation();
   const location = useLocation();
   const isRegistrationSubscription = location.pathname === '/registration/subscription';
   const [searchParams] = useSearchParams();
-  const fromRegister = searchParams.get('from') === 'register';
   const canceled = searchParams.get('canceled') === '1';
   const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'yearly' | 'subscription_only'>('monthly');
   const [couponCode, setCouponCode] = useState('');
@@ -49,6 +48,10 @@ export default function TutorSubscribe() {
   const [manualLoading, setManualLoading] = useState(false);
   const [manualErr, setManualErr] = useState<string | null>(null);
   const navigate = useNavigate();
+
+  const trialAvailable = trialUsed !== true;
+  const effectiveCoupon = couponCode.trim().toUpperCase();
+  const isTrialCoupon = TRIAL_CODES.includes(effectiveCoupon as (typeof TRIAL_CODES)[number]);
 
   useEffect(() => {
     const requestedPlan = searchParams.get('plan');
@@ -109,7 +112,7 @@ export default function TutorSubscribe() {
     const loadProfile = async (userId: string) => {
       const { data: profile } = await supabase
         .from('profiles')
-        .select('subscription_status, organization_id, manual_subscription_exempt')
+        .select('subscription_status, organization_id, manual_subscription_exempt, trial_used')
         .eq('id', userId)
         .maybeSingle();
       return profile;
@@ -117,7 +120,7 @@ export default function TutorSubscribe() {
 
     const check = async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user || !isRegistrationSubscription) {
+      if (!user) {
         setTrialUsed(false);
         return;
       }
@@ -126,7 +129,7 @@ export default function TutorSubscribe() {
         await new Promise((r) => setTimeout(r, 400));
         profile = await loadProfile(user.id);
       }
-      setTrialUsed(false);
+      setTrialUsed(!!profile?.trial_used);
       let hasAccess = tutorHasPlatformSubscriptionAccess(profile);
       if (!hasAccess && profile) {
         const { data: { session } } = await supabase.auth.getSession();
@@ -134,7 +137,7 @@ export default function TutorSubscribe() {
           try {
             const res = await fetch('/api/refresh-my-subscription', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
             });
             const data = res.ok ? await res.json().catch(() => null) : null;
             hasAccess =
@@ -142,13 +145,12 @@ export default function TutorSubscribe() {
               ['canceled', 'past_due', 'unpaid'].includes(data?.subscription_status || '');
           } catch (_) {}
         }
-        // Keep manual bypass as a source of truth even if Stripe refresh says no active subscription.
         if (!hasAccess) {
           const freshProfile = await loadProfile(user.id);
           hasAccess = tutorHasPlatformSubscriptionAccess(freshProfile);
         }
       }
-      if (hasAccess) navigate('/dashboard', { replace: true });
+      if (hasAccess && isRegistrationSubscription) navigate('/dashboard', { replace: true });
     };
     check();
   }, [isRegistrationSubscription, navigate]);
@@ -163,7 +165,7 @@ export default function TutorSubscribe() {
       try {
         await fetch('/api/refresh-my-subscription', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
         });
       } finally {
         navigate('/dashboard', { replace: true });
@@ -188,19 +190,26 @@ export default function TutorSubscribe() {
 
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (isRegistrationSubscription) {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
+
+      if (useTrial && !session?.access_token) {
+        throw new Error(t('subscribe.loginFirst'));
       }
+
       const plan = useTrial ? 'monthly' : selectedPlan;
-      const effectiveCoupon = useTrial ? 'TRIAL' : (couponCode.trim() || undefined);
+      const applyTrial =
+        useTrial ||
+        (trialAvailable && plan === 'monthly' && isTrialCoupon);
+
       const response = await fetch('/api/create-subscription-checkout', {
         method: 'POST',
         headers,
         body: JSON.stringify({
           plan,
-          couponCode: effectiveCoupon,
-          successRedirect: isRegistrationSubscription ? 'dashboard' : undefined,
+          startTrial: applyTrial,
+          couponCode: applyTrial ? undefined : (couponCode.trim() || undefined),
+          successRedirect: isRegistrationSubscription ? 'registration' : undefined,
           locale,
           audience: 'tutor',
         }),
@@ -215,11 +224,18 @@ export default function TutorSubscribe() {
       if (data.url) {
         window.location.href = data.url;
       }
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : t('common.error'));
       setLoading(false);
     }
   };
+
+  const primaryButtonLabel = (() => {
+    if (loading) return t('subscribe.preparing');
+    if (selectedPlan === 'monthly' && isTrialCoupon) return t('subscribe.tryFreeBtn');
+    if (selectedPlan === 'yearly') return t('subscribe.payBtn');
+    return effectiveCoupon ? t('subscribe.continueWithCode') : t('subscribe.continueBtn');
+  })();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-950 via-indigo-900 to-violet-900 relative overflow-hidden">
@@ -266,6 +282,7 @@ export default function TutorSubscribe() {
       <div className="relative z-10 container mx-auto px-4 py-12 max-w-6xl">
         <div className="mb-8">
           <button
+            type="button"
             onClick={() => navigate(-1)}
             className="inline-flex items-center gap-2 text-white/70 hover:text-white transition-colors mb-6"
           >
@@ -273,26 +290,36 @@ export default function TutorSubscribe() {
             {t('subscribe.goBack')}
           </button>
 
-          {canceled && (
-            <p className="mb-4 text-amber-200 text-sm bg-amber-500/20 border border-amber-500/40 rounded-xl px-4 py-2 inline-block">
-              {t('subscribe.paymentCancelledMsg')}
-            </p>
-          )}
-
-          <div className="text-center mb-12">
-            <h1 className="text-5xl font-bold text-white mb-4 tracking-tight">
+          <div className="text-center mb-10">
+            <h1 className="text-4xl sm:text-5xl font-bold text-white mb-4 tracking-tight">
               {t('subscribe.forTutors')}
             </h1>
-            <p className="text-xl text-indigo-200 max-w-2xl mx-auto">
+            <p className="text-lg sm:text-xl text-indigo-200 max-w-2xl mx-auto">
               {t('subscribe.allYouNeed')}
             </p>
+            {isRegistrationSubscription && (
+              <button
+                type="button"
+                onClick={() => navigate('/dashboard', { replace: true })}
+                className="mt-4 text-sm text-indigo-200/90 underline hover:text-white transition-colors"
+              >
+                {t('subscribe.skipToDashboard')}
+              </button>
+            )}
           </div>
         </div>
 
+        {trialUsed === true && (
+          <div className="max-w-3xl mx-auto mb-6 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-center text-amber-100 text-sm">
+            {t('subscribe.trialUsed')}
+          </div>
+        )}
+
         <div className="grid md:grid-cols-3 gap-6 mb-12 max-w-5xl mx-auto">
           <button
+            type="button"
             onClick={() => setSelectedPlan('monthly')}
-            className={`relative bg-white rounded-3xl p-8 text-left transition-all transform hover:scale-105 ${
+            className={`relative bg-white rounded-3xl p-8 text-left transition-all transform hover:scale-[1.02] ${
               selectedPlan === 'monthly'
                 ? 'ring-4 ring-indigo-500 shadow-2xl'
                 : 'shadow-xl hover:shadow-2xl'
@@ -303,7 +330,7 @@ export default function TutorSubscribe() {
                 {t('subscribe.selected')}
               </div>
             )}
-            <div className="mb-6">
+            <div className="mb-6 mt-2">
               <h3 className="text-2xl font-bold text-gray-900 mb-2">{t('subscribe.monthlyTitle')}</h3>
               <div className="flex items-baseline gap-2">
                 <span className="text-5xl font-bold text-indigo-600">€19.99</span>
@@ -335,8 +362,9 @@ export default function TutorSubscribe() {
           </button>
 
           <button
+            type="button"
             onClick={() => setSelectedPlan('yearly')}
-            className={`relative bg-white rounded-3xl p-8 text-left transition-all transform hover:scale-105 ${
+            className={`relative bg-white rounded-3xl p-8 text-left transition-all transform hover:scale-[1.02] ${
               selectedPlan === 'yearly'
                 ? 'ring-4 ring-indigo-500 shadow-2xl'
                 : 'shadow-xl hover:shadow-2xl'
@@ -348,9 +376,9 @@ export default function TutorSubscribe() {
               </div>
             )}
             <div className="absolute -top-3 left-6 bg-gradient-to-r from-green-500 to-emerald-500 text-white text-xs font-bold px-4 py-1.5 rounded-full shadow-lg">
-              SUTAUPYK 25%
+              {t('subscribe.save25Badge')}
             </div>
-            <div className="mb-6">
+            <div className="mb-6 mt-2">
               <h3 className="text-2xl font-bold text-gray-900 mb-2">{t('subscribe.yearlyTitle')}</h3>
               <div className="flex items-baseline gap-2">
                 <span className="text-5xl font-bold text-indigo-600">€14.99</span>
@@ -383,8 +411,9 @@ export default function TutorSubscribe() {
           </button>
 
           <button
+            type="button"
             onClick={() => setSelectedPlan('subscription_only')}
-            className={`relative bg-white rounded-3xl p-8 text-left transition-all transform hover:scale-105 ${
+            className={`relative bg-white rounded-3xl p-8 text-left transition-all transform hover:scale-[1.02] ${
               selectedPlan === 'subscription_only'
                 ? 'ring-4 ring-amber-500 shadow-2xl'
                 : 'shadow-xl hover:shadow-2xl'
@@ -430,13 +459,13 @@ export default function TutorSubscribe() {
               <Input
                 id="coupon"
                 type="text"
-                placeholder="pvz. TRIAL7D"
+                placeholder={TRIAL_DISPLAY_CODE}
                 value={couponCode}
                 onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
                 className="bg-white/90 border-white/40 text-gray-900 placeholder:text-gray-500 font-mono tracking-wider"
               />
             </div>
-            {couponCode && (
+            {effectiveCoupon && (
               <p className="text-xs text-indigo-200 mt-2">
                 {t('subscribe.couponApplied')}
               </p>
@@ -451,28 +480,21 @@ export default function TutorSubscribe() {
             </div>
           )}
           <Button
+            type="button"
             onClick={() => handleSubscribe(false)}
             disabled={loading}
             className="w-full py-6 text-lg font-semibold bg-white text-indigo-600 hover:bg-indigo-50 rounded-2xl shadow-xl"
           >
-            {loading ? t('subscribe.preparing') : (() => {
-              const code = couponCode.trim().toUpperCase();
-              const isTrialCode = ['TRIAL', 'TRIAL7D', 'BANDYMAS'].includes(code);
-              if (selectedPlan === 'monthly' && isTrialCode) return t('subscribe.tryFreeBtn');
-              if (selectedPlan === 'yearly') return t('subscribe.payBtn');
-              return code ? t('subscribe.continueWithCode') : t('subscribe.continueBtn');
-            })()}
+            {primaryButtonLabel}
           </Button>
 
-          <Button
-            onClick={() => handleSubscribe(true)}
-            disabled={loading || trialUsed === true}
-            className="w-full mt-3 py-5 text-base font-medium rounded-2xl border-2 border-white/60 bg-indigo-900/50 text-white hover:bg-indigo-800/60 disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {trialUsed === true
-              ? t('subscribe.trialUsed')
-              : t('subscribe.tryFree7Days')}
-          </Button>
+          {trialAvailable && selectedPlan === 'monthly' && (
+            <p className="text-center text-xs text-indigo-200/80 mt-3">
+              <a href={buildLocalizedPath('/pricing', locale)} className="underline hover:text-white">
+                {t('subscribe.trialSeePricing')}
+              </a>
+            </p>
+          )}
 
           <div className="mt-6 p-5 bg-white/10 backdrop-blur border border-white/20 rounded-2xl text-left">
             <div className="flex items-start gap-3">
@@ -482,10 +504,9 @@ export default function TutorSubscribe() {
               <div>
                 <p className="text-white font-semibold mb-1">{t('subscribe.cancelInfo')}</p>
                 <p className="text-indigo-200 text-sm">
-                  {['TRIAL7D', 'TRIAL', 'BANDYMAS'].includes(couponCode.toUpperCase())
+                  {isTrialCoupon
                     ? t('subscribe.trialPaymentInfo', { price: selectedPlan === 'yearly' ? '€179.88/year' : '€19.99/mo' })
-                    : t('subscribe.safePaymentInfo')
-                  }
+                    : t('subscribe.safePaymentInfo')}
                 </p>
               </div>
             </div>
@@ -512,9 +533,6 @@ export default function TutorSubscribe() {
         </div>
 
         <div className="max-w-2xl mx-auto mt-16 text-center">
-          <p className="text-indigo-300/80 text-xs mb-3">
-            Deploy marker: {DEPLOY_MARKER}
-          </p>
           <p className="text-indigo-200 text-sm">
             {t('subscribe.questionsContact')}{' '}
             <a href="mailto:info@tutlio.lt" className="text-white underline hover:text-indigo-200">

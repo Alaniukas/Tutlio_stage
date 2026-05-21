@@ -338,6 +338,9 @@ export default function AdminPanel() {
         if (featureId === 'manual_payments' && v === undefined) {
           v = orgFeatures.enable_manual_student_payments as boolean | undefined;
         }
+        if (featureId === 'perlas_finance' && v === undefined) {
+          v = !!org.perlas_finance_enabled;
+        }
         mergedFeatures[featureId] = v ?? definition.defaultValue;
       });
       setEditFeatures(mergedFeatures);
@@ -346,7 +349,6 @@ export default function AdminPanel() {
       setEditManualPaymentUrl(typeof mpUrl === 'string' ? mpUrl : '');
       setEditSlug(org.slug || '');
       setEditLogoUrl(org.logo_url || '');
-      setEditPerlasFinanceEnabled(!!org.perlas_finance_enabled);
       setEditBrandColor(org.brand_color || '#6366f1');
       setEditBrandColorSecondary(org.brand_color_secondary || '#8b5cf6');
       setDetailTutors(data.tutors || []);
@@ -378,6 +380,8 @@ export default function AdminPanel() {
       const manualOn = !!editFeatures.manual_payments;
       merged.manual_payments = manualOn;
       merged.enable_manual_student_payments = manualOn;
+      const perlasOn = !!editFeatures.perlas_finance;
+      merged.perlas_finance = perlasOn;
 
       const res = await fetch(`/api/admin-organizations?id=${encodeURIComponent(detailId)}`, {
         method: 'PATCH',
@@ -389,7 +393,7 @@ export default function AdminPanel() {
           tutor_license_count: editTutorLicenseCount,
           status: editStatus,
           features: merged,
-          perlas_finance_enabled: editPerlasFinanceEnabled,
+          perlas_finance_enabled: perlasOn,
           slug: editSlug.trim() || null,
           logo_url: editLogoUrl.trim() || null,
           brand_color: editBrandColor.trim() || '#6366f1',
@@ -1086,27 +1090,6 @@ export default function AdminPanel() {
                           </div>
                         </div>
                       ))}
-                    </div>
-
-                    {/* PerlasFinance toggle */}
-                    <div className="flex items-center justify-between rounded-xl border border-teal-500/25 bg-teal-500/5 p-4">
-                      <div>
-                        <span className="text-sm font-medium text-white">PerlasFinance</span>
-                        <p className="text-xs text-slate-400 mt-0.5">Banko pavedimų mokėjimai ir išmokėjimai</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setEditPerlasFinanceEnabled(!editPerlasFinanceEnabled)}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0 ${
-                          editPerlasFinanceEnabled ? 'bg-teal-600' : 'bg-white/20'
-                        }`}
-                      >
-                        <span
-                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                            editPerlasFinanceEnabled ? 'translate-x-6' : 'translate-x-1'
-                          }`}
-                        />
-                      </button>
                     </div>
 
                     {editFeatures.custom_branding && (

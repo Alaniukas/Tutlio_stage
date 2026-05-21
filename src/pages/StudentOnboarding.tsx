@@ -67,19 +67,35 @@ function StepIndicator({ current }: { current: Step }) {
     const STEP_LABELS = [t('onboard.stepVerify'), t('onboard.stepProfile'), t('onboard.stepAccount'), t('onboard.stepDone')];
     const currentIdx = STEPS.indexOf(current);
     return (
-        <div className="flex items-center justify-center gap-2 mb-8 overflow-x-auto px-1" style={{ scrollbarWidth: 'none' }}>
+        <div className="flex items-center justify-center gap-2 mb-8 overflow-x-auto px-1 py-1" style={{ scrollbarWidth: 'none' }}>
             {STEPS.slice(0, 3).map((s, i) => (
                 <div key={s} className="flex items-center gap-2">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${i < currentIdx ? 'bg-violet-600 text-white' :
-                        i === currentIdx ? 'bg-violet-600 text-white ring-4 ring-violet-200' :
-                            'bg-gray-100 text-gray-400'
-                        }`}>
-                        {i < currentIdx ? <Check className="w-4 h-4" /> : i + 1}
+                    <div className="flex shrink-0 items-center justify-center w-10 h-10">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${i < currentIdx ? 'bg-violet-600 text-white' :
+                            i === currentIdx ? 'bg-violet-600 text-white ring-4 ring-violet-200' :
+                                'bg-gray-100 text-gray-400'
+                            }`}>
+                            {i < currentIdx ? <Check className="w-4 h-4" /> : i + 1}
+                        </div>
                     </div>
-                    <span className={`text-xs font-medium hidden sm:block ${i === currentIdx ? 'text-gray-900' : 'text-gray-400'}`}>
+                    <span
+                        className={`text-xs font-medium hidden sm:block ${
+                            i === currentIdx
+                                ? 'text-white'
+                                : i < currentIdx
+                                    ? 'text-violet-200'
+                                    : 'text-violet-300/80'
+                        }`}
+                    >
                         {STEP_LABELS[i]}
                     </span>
-                    {i < 2 && <div className={`w-8 h-0.5 ${i < currentIdx ? 'bg-violet-600' : 'bg-gray-200'}`} />}
+                    {i < 2 && (
+                        <div
+                            className={`w-8 h-0.5 ${
+                                i < currentIdx ? 'bg-violet-400' : 'bg-white/25'
+                            }`}
+                        />
+                    )}
                 </div>
             ))}
         </div>
@@ -114,6 +130,7 @@ export default function StudentOnboarding() {
     const [wantsParentAccount, setWantsParentAccount] = useState(false);
     /** After registration: parent invite email outcome */
     const [parentInviteOutcome, setParentInviteOutcome] = useState<'idle' | 'sending' | 'sent' | 'failed' | 'skipped'>('idle');
+    const [parentInviteCode, setParentInviteCode] = useState<string | null>(null);
 
     const [password, setPassword] = useState('');
     const [passwordConfirm, setPasswordConfirm] = useState('');
@@ -233,6 +250,16 @@ export default function StudentOnboarding() {
         setStep('account');
     };
 
+    const mapRegisterStudentError = (body: { error?: string; code?: string }) => {
+        if (body?.code === 'email_already_registered') {
+            return t('onboard.emailAlreadyRegistered');
+        }
+        if (body?.code === 'create_user_failed' && body?.error) {
+            return body.error;
+        }
+        return body?.error || t('onboard.createError');
+    };
+
     const handleCreateAccount = async () => {
         if (!studentData) return;
         if (password !== passwordConfirm) { setError(t('onboard.passwordMismatch')); return; }
@@ -246,54 +273,65 @@ export default function StudentOnboarding() {
 
         const acceptedAt = new Date().toISOString();
         const effectivePayerType = isSchoolInvite || wantsParentAccount ? 'parent' : 'self';
+        const accountEmail = (studentData.email || email).trim().toLowerCase();
 
-        const apiRes = await fetch('/api/register-student', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                email: studentData.email,
-                password,
-                studentId: studentData.id,
-                fullName: studentData.full_name,
-                phone: studentData.phone,
-                age,
-                grade,
-                subjectId,
-                payerType: effectivePayerType,
-                payerName: effectivePayerType === 'parent' ? payerName.trim() : null,
-                payerEmail: effectivePayerType === 'parent' ? payerEmail.trim() : null,
-                payerPhone: effectivePayerType === 'parent' ? payerPhone.trim() : null,
-                acceptedAt,
-                suppressParentInvite: isSchoolInvite,
-            }),
-        });
+        try {
+            const apiRes = await fetch('/api/register-student', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: accountEmail,
+                    password,
+                    studentId: studentData.id,
+                    fullName: studentData.full_name,
+                    phone: studentData.phone,
+                    age,
+                    grade,
+                    subjectId,
+                    payerType: effectivePayerType,
+                    payerName: effectivePayerType === 'parent' ? payerName.trim() : null,
+                    payerEmail: effectivePayerType === 'parent' ? payerEmail.trim() : null,
+                    payerPhone: effectivePayerType === 'parent' ? payerPhone.trim() : null,
+                    acceptedAt,
+                    suppressParentInvite: isSchoolInvite,
+                    locale,
+                }),
+            });
 
-        if (!apiRes.ok) {
-            const body = await apiRes.json().catch(() => ({}));
-            setError(body?.error || t('onboard.createError'));
+            const body = await apiRes.json().catch(() => ({})) as {
+                error?: string;
+                code?: string;
+                parentInviteSent?: boolean;
+                parentInviteCode?: string | null;
+            };
+
+            if (!apiRes.ok) {
+                setError(mapRegisterStudentError(body));
+                return;
+            }
+
+            setStep('done');
+
+            if (isSchoolInvite || effectivePayerType !== 'parent') {
+                setParentInviteOutcome('skipped');
+                setParentInviteCode(null);
+                return;
+            }
+
+            if (!payerEmail.trim()) {
+                setParentInviteOutcome('failed');
+                setParentInviteCode(null);
+                return;
+            }
+
+            setParentInviteCode(body.parentInviteCode?.trim() || null);
+            setParentInviteOutcome(body.parentInviteSent ? 'sent' : 'failed');
+        } catch (e) {
+            console.error('[StudentOnboarding] register-student failed:', e);
+            setError(t('onboard.networkError'));
+        } finally {
             setSubmitting(false);
-            return;
         }
-
-        const regJson = (await apiRes.json().catch(() => ({}))) as {
-            parentInviteSent?: boolean;
-            parentInviteSkipped?: boolean;
-        };
-
-        setStep('done');
-        setSubmitting(false);
-
-        if (isSchoolInvite || effectivePayerType !== 'parent') {
-            setParentInviteOutcome('skipped');
-            return;
-        }
-
-        if (!payerEmail.trim()) {
-            setParentInviteOutcome('failed');
-            return;
-        }
-
-        setParentInviteOutcome(regJson.parentInviteSent ? 'sent' : 'failed');
     };
 
     if (loading) {
@@ -660,9 +698,25 @@ export default function StudentOnboarding() {
                                 ) : (
                                     <>
                                         <AlertCircle className="w-4 h-4 inline mr-1" />
-                                        {locale === 'en'
-                                            ? 'Could not send parent invite email. You can ask your tutor to resend it from the school panel.'
-                                            : 'Nepavyko automatiškai išsiųsti kvietimo tėvams. Kreipkitės į korepetitorių arba mokyklą – jie gali išsiųsti pakartotinai.'}
+                                        {parentInviteCode ? (
+                                            locale === 'en' ? (
+                                                <>
+                                                    Could not send the email automatically. Share this code with your parent at{' '}
+                                                    <strong>tutlio.lt/parent-register</strong> (same email as above):{' '}
+                                                    <strong className="font-mono tracking-widest">{parentInviteCode}</strong>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    Nepavyko automatiškai išsiųsti el. laiško. Perduokite tėvams kodą svetainėje{' '}
+                                                    <strong>tutlio.lt/parent-register</strong> (tas pats el. paštas):{' '}
+                                                    <strong className="font-mono tracking-widest">{parentInviteCode}</strong>
+                                                </>
+                                            )
+                                        ) : locale === 'en' ? (
+                                            'Could not create parent invite. Ask your tutor to resend it from the school panel.'
+                                        ) : (
+                                            'Nepavyko sukurti tėvų kvietimo. Kreipkitės į korepetitorių arba mokyklą – jie gali išsiųsti pakartotinai.'
+                                        )}
                                     </>
                                 )}
                             </div>

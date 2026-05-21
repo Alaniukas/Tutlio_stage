@@ -36,10 +36,59 @@ export function publicOriginFromRequest(req: VercelRequest): string {
 
 export function defaultLocaleForOrigin(origin: string): string {
   try {
-    const host = new URL(origin).hostname;
+    const host = new URL(origin).hostname.toLowerCase().replace(/^www\./, '');
     if (host === 'tutlio.com' || host.endsWith('.tutlio.com')) return 'en';
+    if (host === 'tutlio.pl' || host.endsWith('.tutlio.pl')) return 'pl';
   } catch {
     /* ignore */
   }
   return 'lt';
+}
+
+const VALID_LOCALES = new Set(['lt','en','pl','lv','ee','fr','es','de','se','dk','fi','no']);
+
+/** Resolve the email copy locale from the UI locale + request origin. */
+export function inviteEmailLocale(uiLocale: string | undefined, origin: string): string {
+  if (uiLocale && VALID_LOCALES.has(uiLocale)) return uiLocale;
+  return defaultLocaleForOrigin(origin);
+}
+
+/** Full public URL with optional locale prefix (e.g. tutlio.com/parent-register vs /en/...). */
+export function buildPublicAppUrl(
+  origin: string,
+  pathname: string,
+  opts?: { locale?: string; searchParams?: Record<string, string> },
+): string {
+  const base = origin.replace(/\/$/, '');
+  const path = pathname.startsWith('/') ? pathname : `/${pathname}`;
+  const defaultLocale = defaultLocaleForOrigin(origin);
+  const loc = (opts?.locale || defaultLocale).trim();
+  const prefix = loc && loc !== defaultLocale ? `/${loc}` : '';
+  const url = new URL(`${base}${prefix}${path}`);
+  if (opts?.searchParams) {
+    for (const [k, v] of Object.entries(opts.searchParams)) {
+      if (v !== undefined && v !== '') url.searchParams.set(k, v);
+    }
+  }
+  return url.toString();
+}
+
+export function publicHostLabel(origin: string): string {
+  try {
+    return new URL(origin).host;
+  } catch {
+    return 'tutlio.lt';
+  }
+}
+
+/** Tutor org invite: /register?org_token=… with optional /{locale} prefix. */
+export function buildTutorRegisterInviteUrl(
+  origin: string,
+  orgToken: string,
+  opts?: { uiLocale?: string },
+): string {
+  return buildPublicAppUrl(origin, '/register', {
+    locale: opts?.uiLocale,
+    searchParams: { org_token: orgToken.trim() },
+  });
 }

@@ -42,3 +42,8 @@ export function t(locale: Locale, key: string, params?: Record<string, string | 
   }
   return text;
 }
+
+export function translationKeys(locale: Locale, prefix: string): string[] {
+  const dict = translations[locale] ?? translations.en;
+  return Object.keys(dict).filter((k) => k.startsWith(`${prefix}.`)).sort();
+}

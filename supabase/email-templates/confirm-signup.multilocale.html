@@ -1,0 +1,55 @@
+{{ if eq .Data.locale "pl" }}
+<!DOCTYPE html>
+<html lang="pl">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:'Segoe UI',Tahoma,sans-serif;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="560" style="max-width:560px;background:#fff;border-radius:16px;overflow:hidden;">
+<tr><td style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:32px 24px;text-align:center;">
+<h1 style="color:#fff;font-size:22px;margin:0;">Potwierdź swój adres e-mail</h1></td></tr>
+<tr><td style="padding:32px 24px;">
+<p style="color:#1f2937;font-size:16px;">Witaj!</p>
+<p style="color:#4b5563;font-size:14px;line-height:1.6;">Dziękujemy za rejestrację w <strong>Tutlio</strong>. Kliknij przycisk, aby potwierdzić adres e-mail.</p>
+<p style="text-align:center;margin:24px 0;"><a href="{{ .ConfirmationURL }}" style="display:inline-block;background:#4f46e5;color:#fff;font-weight:700;padding:14px 36px;border-radius:12px;text-decoration:none;">Potwierdź e-mail</a></p>
+<p style="color:#9ca3af;font-size:12px;">Jeśli nie zakładałeś konta, zignoruj tę wiadomość.</p>
+</td></tr>
+<tr><td style="background:#f9fafb;padding:16px;text-align:center;font-size:12px;color:#9ca3af;">Zespół Tutlio · info@tutlio.pl</td></tr>
+</table></td></tr></table>
+</body></html>
+{{ else if eq .Data.locale "en" }}
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:'Segoe UI',Tahoma,sans-serif;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="560" style="max-width:560px;background:#fff;border-radius:16px;overflow:hidden;">
+<tr><td style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:32px 24px;text-align:center;">
+<h1 style="color:#fff;font-size:22px;margin:0;">Confirm your email</h1></td></tr>
+<tr><td style="padding:32px 24px;">
+<p style="color:#1f2937;font-size:16px;">Hello!</p>
+<p style="color:#4b5563;font-size:14px;line-height:1.6;">Thanks for signing up for <strong>Tutlio</strong>. Click the button below to confirm your email address.</p>
+<p style="text-align:center;margin:24px 0;"><a href="{{ .ConfirmationURL }}" style="display:inline-block;background:#4f46e5;color:#fff;font-weight:700;padding:14px 36px;border-radius:12px;text-decoration:none;">Confirm email</a></p>
+<p style="color:#9ca3af;font-size:12px;">If you did not create an account, you can ignore this message.</p>
+</td></tr>
+<tr><td style="background:#f9fafb;padding:16px;text-align:center;font-size:12px;color:#9ca3af;">Tutlio team · info@tutlio.pl</td></tr>
+</table></td></tr></table>
+</body></html>
+{{ else }}
+<!DOCTYPE html>
+<html lang="lt">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:'Segoe UI',Tahoma,sans-serif;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="560" style="max-width:560px;background:#fff;border-radius:16px;overflow:hidden;">
+<tr><td style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:32px 24px;text-align:center;">
+<h1 style="color:#fff;font-size:22px;margin:0;">Patvirtinkite registraciją</h1></td></tr>
+<tr><td style="padding:32px 24px;">
+<p style="color:#1f2937;font-size:16px;">Sveiki!</p>
+<p style="color:#4b5563;font-size:14px;line-height:1.6;">Ačiū, kad registravotės <strong>Tutlio</strong>. Paspauskite mygtuką, kad patvirtintumėte el. pašto adresą.</p>
+<p style="text-align:center;margin:24px 0;"><a href="{{ .ConfirmationURL }}" style="display:inline-block;background:#4f46e5;color:#fff;font-weight:700;padding:14px 36px;border-radius:12px;text-decoration:none;">Patvirtinti el. paštą</a></p>
+<p style="color:#9ca3af;font-size:12px;">Jei neregistravotės, ignoruokite šį laišką.</p>
+</td></tr>
+<tr><td style="background:#f9fafb;padding:16px;text-align:center;font-size:12px;color:#9ca3af;">Tutlio komanda · info@tutlio.lt</td></tr>
+</table></td></tr></table>
+</body></html>
+{{ end }}

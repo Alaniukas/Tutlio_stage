@@ -39,7 +39,7 @@ export function dedupeAuthGetUser(): Promise<User | null> {
 /** Parallel `OrgSuspendedBanner` / StrictMode bursts → one round-trip per org id. */
 export function orgSuspensionRowDeduped(organizationId: string) {
   return dedupeAsync(`org_sf:${organizationId}`, () =>
-    supabase.from('organizations').select('status, features').eq('id', organizationId).maybeSingle(),
+    supabase.from('organizations').select('status, features, perlas_finance_enabled').eq('id', organizationId).maybeSingle(),
   );
 }
 
@@ -176,7 +176,7 @@ export function orgTutorPolicyRowDeduped(organizationId: string) {
     supabase
       .from('organizations')
       .select(
-        'org_tutor_lesson_edit, org_tutors_can_edit_lesson_settings, invoice_issuer_mode, tutor_license_count, tutor_limit',
+        'org_tutor_lesson_edit, org_tutors_can_edit_lesson_settings, invoice_issuer_mode, tutor_license_count',
       )
       .eq('id', organizationId)
       .maybeSingle(),
@@ -265,7 +265,7 @@ export function orgAdminRowByUserDeduped(userId: string) {
     try {
       const { data, error } = await supabase
         .from('organization_admins')
-        .select('organization_id, organizations(name, tutor_limit, entity_type)')
+        .select('organization_id, organizations(name, tutor_license_count, entity_type)')
         .eq('user_id', userId)
         .abortSignal(controller.signal)
         .maybeSingle();
@@ -316,7 +316,7 @@ export async function preloadOrgAdminData() {
         .eq('organization_id', orgId),
       supabase
         .from('profiles')
-        .select('id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent')
+        .select('id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, has_active_license')
         .eq('organization_id', orgId),
       supabase
         .from('tutor_invites')
@@ -355,7 +355,8 @@ export async function preloadOrgAdminData() {
         tutor: (tutorData || []).find((t: any) => t.id === inv.used_by_profile_id) || null,
       }));
       setCache(COMPANY_TUTORS_CACHE_KEY, {
-        orgId, tutorLimit: org?.tutor_limit || 0,
+        orgId,
+        tutorLicenseCount: Number(org?.tutor_license_count) || 0,
         tutors: visibleTutors, invites: enrichedInvites,
       });
     }
@@ -475,8 +476,11 @@ async function preloadDashboard(
       (s: any) => s.status === 'active' && isAfter(new Date(s.end_time), now) && isBefore(new Date(s.start_time), next7days)
     );
 
+    const licensedApprox = (tutorProfiles || []).filter((p: any) => p.has_active_license !== false).length;
     setCache('company_dashboard', {
-      orgName: org?.name || '', entityType: org?.entity_type || 'company', tutorLimit: org?.tutor_limit || 0,
+      orgName: org?.name || '', entityType: org?.entity_type || 'company',
+      tutorLicenseCap: Number(org?.tutor_license_count) || 0,
+      licensedTutors: licensedApprox,
       activeTutors: tutorIds.length, pendingInvites: pendingCount || 0,
       sessionsThisMonth: completed.length, upcomingSessions: upcoming.length,
       earningsThisMonth: completed.reduce((sum: number, s: any) => sum + (s.price || 0), 0),

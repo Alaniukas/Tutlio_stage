@@ -2,8 +2,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { insertParentInviteAndSendEmail } from './_lib/parentInvite.js';
-
-const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
+import { inviteEmailLocale, publicOriginFromRequest } from './_lib/public-origin.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -68,20 +67,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   }
 
+  const appOrigin = publicOriginFromRequest(req);
+  const body = (req.body || {}) as { locale?: string };
   const result = await insertParentInviteAndSendEmail({
     supabase,
-    appUrl: APP_URL,
+    appUrl: appOrigin,
     parentEmail: emailRaw,
     studentId: studentRow.id as string,
     studentFullName: String(studentRow.full_name || ''),
     parentName: (studentRow.payer_name as string | null) ?? null,
     source: 'student_self',
     invitedByUserId: auth.userId,
+    locale: inviteEmailLocale(body.locale, appOrigin),
+    uiLocale: body.locale,
   });
 
   if ('error' in result) {
     return res.status(500).json({ error: result.error });
   }
 
-  return res.status(200).json({ success: true });
+  return res.status(200).json({
+    success: true,
+    emailSent: result.emailSent,
+    code: result.emailSent ? undefined : result.code,
+  });
 }

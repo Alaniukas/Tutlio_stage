@@ -44,7 +44,8 @@ import {
 } from '@/lib/studentPaymentModel';
 import StudentPaymentModelSection from '@/components/StudentPaymentModelSection';
 import { sendEmail } from '@/lib/email';
-import { cancelSessionAndFillWaitlist } from '@/lib/lesson-actions';
+import { cancelSessionAndFillWaitlist, releaseSessionSlotViaApi } from '@/lib/lesson-actions';
+import { Checkbox } from '@/components/ui/checkbox';
 import { copyTextToClipboard } from '@/lib/copyToClipboard';
 import StatusBadge from '@/components/StatusBadge';
 import Toast from '@/components/Toast';
@@ -120,7 +121,7 @@ async function buildLatestInvoiceByStudentIdForTutor(tutorId: string): Promise<M
 }
 
 export default function StudentsPage() {
-  const { t, dateFnsLocale } = useTranslation();
+  const { t, locale, dateFnsLocale } = useTranslation();
   const location = useLocation();
   const { user, profile } = useUser();
   const orgPolicy = useOrgTutorPolicy();
@@ -179,6 +180,8 @@ export default function StudentsPage() {
   const [savingSession, setSavingSession] = useState(false);
   const [noShowPickerOpen, setNoShowPickerOpen] = useState(false);
   const [cancellationReason, setCancellationReason] = useState('');
+  const [leaveFreeTimeOnCancel, setLeaveFreeTimeOnCancel] = useState(false);
+  const [leaveFreeTimeOnReschedule, setLeaveFreeTimeOnReschedule] = useState(false);
   const [viewCommentText, setViewCommentText] = useState('');
   const [viewShowToStudent, setViewShowToStudent] = useState(false);
   const [viewCommentSaving, setViewCommentSaving] = useState(false);
@@ -850,6 +853,7 @@ export default function StudentsPage() {
           sendEmail({
             type: 'invite_email',
             to: newStudent.email,
+            locale,
             data: {
               studentName: newStudent.full_name,
               tutorName: profile?.full_name || 'Korepetitorius',
@@ -976,12 +980,14 @@ export default function StudentsPage() {
       tutorName: profile?.full_name || '',
       studentEmail: studentData?.email || null,
       tutorEmail: profile?.email || null,
+      leaveFreeTime: leaveFreeTimeOnCancel,
     });
 
     if (success) {
       setIsSessionModalOpen(false);
       setCancelConfirmId(null);
       setCancellationReason('');
+      setLeaveFreeTimeOnCancel(false);
       fetchAllSessions();
       try {
         const tutorId = authUser?.id || user?.id;
@@ -1025,6 +1031,9 @@ export default function StudentsPage() {
       return;
     }
     const newEnd = new Date(newStart.getTime() + Math.max(5, editDurationMinutes) * 60 * 1000);
+    const oldStart = new Date(selectedSessionForModal.start_time);
+    const oldEnd = new Date(selectedSessionForModal.end_time);
+    const timeChanged = oldStart.getTime() !== newStart.getTime();
 
     setSavingSession(true);
     const payload: Record<string, any> = {
@@ -1042,6 +1051,17 @@ export default function StudentsPage() {
       .eq('id', selectedSessionForModal.id);
 
     if (!error) {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const tutorId = selectedSessionForModal.tutor_id || authUser?.id || user?.id;
+      if (timeChanged && leaveFreeTimeOnReschedule && tutorId) {
+        await releaseSessionSlotViaApi({
+          tutorId,
+          startTime: oldStart.toISOString(),
+          endTime: oldEnd.toISOString(),
+          subjectId: selectedSessionForModal.subject_id ?? null,
+        });
+        setLeaveFreeTimeOnReschedule(false);
+      }
       const updated = { ...selectedSessionForModal, ...payload };
       setSelectedSessionForModal(updated);
       setAllSessions((prev) => prev.map((s: any) => (s.id === updated.id ? { ...s, ...updated } : s)));
@@ -2653,6 +2673,13 @@ export default function StudentsPage() {
                 <Label>{t('cal.timeLabel')}</Label>
                 <DateTimeSpinner value={editNewStartTime} onChange={setEditNewStartTime} />
               </div>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <Checkbox
+                  checked={leaveFreeTimeOnReschedule}
+                  onChange={(e) => setLeaveFreeTimeOnReschedule(e.target.checked)}
+                />
+                <span className="text-sm text-gray-600 leading-snug">{t('dash.leaveFreeTime')}</span>
+              </label>
               <div className="space-y-2">
                 <Label>{t('cal.durationLabel')}</Label>
                 <Input
@@ -2877,8 +2904,15 @@ export default function StudentsPage() {
                   {t('dash.minChars', { min: '5', current: String(cancellationReason.trim().length) })}
                 </p>
               )}
+              <label className="flex items-start gap-2 cursor-pointer pt-1">
+                <Checkbox
+                  checked={leaveFreeTimeOnCancel}
+                  onChange={(e) => setLeaveFreeTimeOnCancel(e.target.checked)}
+                />
+                <span className="text-sm text-gray-600 leading-snug">{t('dash.leaveFreeTime')}</span>
+              </label>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => { setCancelConfirmId(null); setCancellationReason(''); }} className="rounded-xl flex-1">
+                <Button variant="outline" size="sm" onClick={() => { setCancelConfirmId(null); setCancellationReason(''); setLeaveFreeTimeOnCancel(false); }} className="rounded-xl flex-1">
                   {t('dash.cancelBtn')}
                 </Button>
                 <Button variant="destructive" size="sm" onClick={handleCancelSession} disabled={savingSession || cancellationReason.trim().length < 5} className="rounded-xl flex-1 gap-2">

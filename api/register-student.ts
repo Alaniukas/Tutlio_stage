@@ -6,6 +6,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { insertParentInviteAndSendEmail } from './_lib/parentInvite.js';
+import { inviteEmailLocale, publicOriginFromRequest } from './_lib/public-origin.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -15,7 +16,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const appUrl = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
+    const appOrigin = publicOriginFromRequest(req);
 
     if (!supabaseUrl || !serviceKey) {
       return res.status(500).json({ error: 'Missing Supabase env vars' });
@@ -37,6 +38,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       acceptedAt,
       /** When true (e.g. school org), skip parent invite email — admin may send separately; student can resend from portal. */
       suppressParentInvite,
+      locale,
     } = req.body || {};
 
     if (!email || !password || !studentId) {
@@ -62,22 +64,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const submittedEmail = String(email).trim().toLowerCase();
-    const studentEmail = String(student.email || '').trim().toLowerCase();
-    const hasStudentEmail = studentEmail.length > 0;
-
-    if (hasStudentEmail && studentEmail !== submittedEmail) {
-      return res.status(400).json({ error: 'Email does not match student record' });
+    if (!submittedEmail.includes('@')) {
+      return res.status(400).json({ error: 'Invalid email address' });
     }
 
-    const normalizedDbEmail = (student.email || '').trim().toLowerCase();
-    const normalizedInputEmail = String(email).trim().toLowerCase();
-    const emailChanged = normalizedDbEmail.length > 0 && normalizedDbEmail !== normalizedInputEmail;
-
-    if (emailChanged) {
-      console.warn('[register-student] Student email changed during onboarding', {
+    const studentEmail = String(student.email || '').trim().toLowerCase();
+    if (studentEmail.length > 0 && studentEmail !== submittedEmail) {
+      console.warn('[register-student] Student email updated during onboarding', {
         studentId,
         previousEmail: student.email,
-        nextEmail: email,
+        nextEmail: submittedEmail,
       });
     }
 
@@ -85,7 +81,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       full_name: fullName,
       role: 'student',
       student_id: studentId,
-      email,
+      email: submittedEmail,
       phone: phone || null,
       age: age || null,
       grade: grade || null,
@@ -98,30 +94,77 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       accepted_terms_at: acceptedAt || null,
     };
 
+    let authUserId: string | null = null;
+
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-      email,
+      email: submittedEmail,
       password,
       email_confirm: true,
       user_metadata: signupPayload,
     });
 
     if (authError || !authData.user) {
-      return res.status(400).json({ error: authError?.message || 'Failed to create user' });
+      const msg = authError?.message || '';
+      const alreadyRegistered =
+        /already registered|already been registered|duplicate/i.test(msg);
+      if (alreadyRegistered) {
+        let existing: { id: string } | undefined;
+        for (let page = 1; page <= 20 && !existing; page++) {
+          const { data: { users }, error: listErr } = await supabase.auth.admin.listUsers({
+            page,
+            perPage: 100,
+          });
+          if (listErr || !users?.length) break;
+          existing = users.find(
+            (u: { email?: string }) =>
+              (u.email || '').trim().toLowerCase() === submittedEmail,
+          );
+          if (users.length < 100) break;
+        }
+        if (existing?.id) {
+          authUserId = existing.id;
+          const { error: pwErr } = await supabase.auth.admin.updateUserById(existing.id, {
+            password,
+            user_metadata: signupPayload,
+          });
+          if (pwErr) {
+            console.warn('[register-student] could not update password for existing user:', pwErr.message);
+          }
+        }
+      }
+      if (!authUserId) {
+        return res.status(400).json({
+          error: alreadyRegistered
+            ? 'This email is already registered. Sign in or use password reset.'
+            : authError?.message || 'Failed to create user',
+          code: alreadyRegistered ? 'email_already_registered' : 'create_user_failed',
+        });
+      }
+    } else {
+      authUserId = authData.user.id;
     }
 
     await supabase.from('students').update({
-      email: hasStudentEmail ? student.email : submittedEmail,
-      linked_user_id: authData.user.id,
+      email: submittedEmail,
+      linked_user_id: authUserId,
+      phone: phone || null,
+      age: (() => {
+        const n = Number(age);
+        return Number.isFinite(n) ? n : null;
+      })(),
+      grade: grade || null,
+      subject_id: subjectId || null,
       payment_payer: payerType || null,
       payer_name: payerType === 'parent' ? payerName : null,
       payer_email: payerType === 'parent' ? payerEmail : null,
       payer_phone: payerType === 'parent' ? payerPhone : null,
-      phone: phone || null,
       accepted_privacy_policy_at: acceptedAt || null,
       accepted_terms_at: acceptedAt || null,
     }).eq('id', studentId);
 
     let parentInviteSent = false;
+    let parentInviteCode: string | null = null;
+    let parentInviteError: string | null = null;
     const skipInvite = !!suppressParentInvite;
     if (
       payerType === 'parent' &&
@@ -131,24 +174,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ) {
       const inviteRes = await insertParentInviteAndSendEmail({
         supabase,
-        appUrl,
+        appUrl: appOrigin,
         parentEmail: String(payerEmail).trim(),
         studentId,
         studentFullName: String(fullName || ''),
         parentName: payerName ? String(payerName).trim() : null,
         source: 'student_self',
-        invitedByUserId: authData.user.id,
+        invitedByUserId: authUserId,
+        locale: inviteEmailLocale(typeof locale === 'string' ? locale : undefined, appOrigin),
+        uiLocale: typeof locale === 'string' ? locale : undefined,
       });
-      parentInviteSent = !('error' in inviteRes);
       if ('error' in inviteRes) {
-        console.warn('[register-student] parent invite:', inviteRes.error);
+        console.warn('[register-student] parent invite create:', inviteRes.error);
+        parentInviteError = inviteRes.error;
+      } else {
+        parentInviteCode = inviteRes.code;
+        parentInviteSent = inviteRes.emailSent;
+        if (!inviteRes.emailSent) {
+          parentInviteError = inviteRes.emailError || 'Email send failed';
+          console.warn('[register-student] parent invite email:', parentInviteError);
+        }
       }
     }
 
     return res.status(200).json({
       success: true,
-      userId: authData.user.id,
+      userId: authUserId,
       parentInviteSent,
+      parentInviteCode,
+      parentInviteError,
       parentInviteSkipped: skipInvite || payerType !== 'parent',
     });
   } catch (err: any) {

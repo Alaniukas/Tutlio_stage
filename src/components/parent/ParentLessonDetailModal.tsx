@@ -70,6 +70,7 @@ export function ParentLessonDetailModal({
   t,
   dateFnsLocale,
   stripePayerEmail,
+  perlasEnabled,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;

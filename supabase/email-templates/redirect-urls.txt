@@ -1,0 +1,23 @@
+# Supabase → Authentication → URL Configuration → Redirect URLs
+# Pridėkite po vieną eilutę (Add URL). Wildcard ** leidžia visus kelius.
+
+# Lenkija (pagrindinis)
+https://www.tutlio.pl/**
+https://tutlio.pl/**
+https://www.tutlio.pl/login
+https://tutlio.pl/login
+
+# tutlio.com — TIK jei tas pats Vercel projektas aptarnauja .com (ne tik redirect į .pl)
+https://www.tutlio.com/**
+https://tutlio.com/**
+https://www.tutlio.com/login
+https://tutlio.com/login
+
+# Lietuva (palikite, jei dar naudojate tutlio.lt)
+https://www.tutlio.lt/**
+https://tutlio.lt/**
+https://www.tutlio.lt/login
+https://tutlio.lt/login
+
+# Lokalus dev
+http://localhost:3000/**

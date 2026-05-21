@@ -15,19 +15,23 @@ function getSupabase() {
   return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } }) as any;
 }
 
-const STATIC_PAGES: { path: string; changefreq: string; priority: string; lastmod: string }[] = [
-  { path: '/', changefreq: 'weekly', priority: '1.0', lastmod: '2026-05-17' },
-  { path: '/pricing', changefreq: 'monthly', priority: '0.8', lastmod: '2026-05-17' },
-  { path: '/apie-mus', changefreq: 'monthly', priority: '0.7', lastmod: '2026-05-17' },
-  { path: '/kontaktai', changefreq: 'monthly', priority: '0.6', lastmod: '2026-01-15' },
-  { path: '/blog', changefreq: 'weekly', priority: '0.8', lastmod: '2026-05-17' },
-  { path: '/features/calendar', changefreq: 'monthly', priority: '0.7', lastmod: '2026-05-17' },
-  { path: '/features/waitlist', changefreq: 'monthly', priority: '0.7', lastmod: '2026-05-17' },
-  { path: '/features/payments', changefreq: 'monthly', priority: '0.7', lastmod: '2026-05-17' },
-  { path: '/features/reminders', changefreq: 'monthly', priority: '0.7', lastmod: '2026-05-17' },
-  { path: '/privacy-policy', changefreq: 'yearly', priority: '0.3', lastmod: '2025-06-01' },
-  { path: '/terms', changefreq: 'yearly', priority: '0.3', lastmod: '2025-06-01' },
-  { path: '/dpa', changefreq: 'yearly', priority: '0.2', lastmod: '2025-06-01' },
+function staticLastmod(): string {
+  return new Date().toISOString().split('T')[0];
+}
+
+const STATIC_PAGES: { path: string; changefreq: string; priority: string }[] = [
+  { path: '/', changefreq: 'weekly', priority: '1.0' },
+  { path: '/pricing', changefreq: 'monthly', priority: '0.8' },
+  { path: '/apie-mus', changefreq: 'monthly', priority: '0.7' },
+  { path: '/kontaktai', changefreq: 'monthly', priority: '0.6' },
+  { path: '/blog', changefreq: 'weekly', priority: '0.8' },
+  { path: '/features/calendar', changefreq: 'monthly', priority: '0.7' },
+  { path: '/features/waitlist', changefreq: 'monthly', priority: '0.7' },
+  { path: '/features/payments', changefreq: 'monthly', priority: '0.7' },
+  { path: '/features/reminders', changefreq: 'monthly', priority: '0.7' },
+  { path: '/privacy-policy', changefreq: 'yearly', priority: '0.3' },
+  { path: '/terms', changefreq: 'yearly', priority: '0.3' },
+  { path: '/dpa', changefreq: 'yearly', priority: '0.2' },
 ];
 
 function alternatesXml(path: string): string {
@@ -68,11 +72,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const entries: string[] = [];
   const myLocales = LOCALES.filter((l) => canonicalDomain(l) === domain);
+  const staticMod = staticLastmod();
 
   for (const page of STATIC_PAGES) {
     for (const locale of myLocales) {
       const loc = buildCanonicalUrl(page.path, locale);
-      entries.push(urlEntry(loc, page.changefreq, page.priority, page.path, page.lastmod));
+      entries.push(urlEntry(loc, page.changefreq, page.priority, page.path, staticMod));
     }
   }
 

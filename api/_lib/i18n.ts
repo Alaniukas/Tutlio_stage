@@ -1,9 +1,27 @@
+import type { Locale as FullLocale } from './seo-routing.js';
+import { LOCALES } from './seo-routing.js';
 import { lt } from '../../src/lib/i18n/lt.js';
 import { en } from '../../src/lib/i18n/en.js';
+import { pl } from '../../src/lib/i18n/pl.js';
+import { lv } from '../../src/lib/i18n/lv.js';
+import { ee } from '../../src/lib/i18n/ee.js';
+import { fr } from '../../src/lib/i18n/fr.js';
+import { es } from '../../src/lib/i18n/es.js';
+import { de } from '../../src/lib/i18n/de.js';
+import { se } from '../../src/lib/i18n/se.js';
+import { dk } from '../../src/lib/i18n/dk.js';
+import { fi } from '../../src/lib/i18n/fi.js';
+import { no } from '../../src/lib/i18n/no.js';
 
-export type Locale = 'lt' | 'en';
+export type Locale = FullLocale;
 
-const translations: Record<Locale, Record<string, string>> = { lt, en };
+export function isValidLocale(v: unknown): v is Locale {
+  return typeof v === 'string' && (LOCALES as readonly string[]).includes(v);
+}
+
+const translations: Record<Locale, Record<string, string>> = {
+  lt, en, pl, lv, ee, fr, es, de, se, dk, fi, no,
+};
 
 /** Server funkcijose kai kur bundle neįtraukia naujausių raktų – būtiniausi el. pašto fragmentai čia visada. */
 const EMAIL_SERVER_FALLBACKS: Partial<Record<Locale, Record<string, string>>> = {
@@ -25,12 +43,27 @@ const EMAIL_SERVER_FALLBACKS: Partial<Record<Locale, Record<string, string>>> = 
   },
 };
 
+const DEFAULT_FROM_EMAIL = process.env.FROM_EMAIL || 'Tutlio <onboarding@tutlio.lt>';
+
+/** Extract the bare email address from a `Display Name <addr>` string. */
+function extractEmailAddress(from: string): string {
+  const match = from.match(/<([^>]+)>/);
+  return match ? match[1] : from;
+}
+
+/** Localized "from" for Resend: uses `em.emailSenderName` + the address from FROM_EMAIL env. */
+export function localizedFromEmail(locale: Locale | string | undefined): string {
+  const senderName = t(locale, 'em.emailSenderName');
+  const addr = extractEmailAddress(DEFAULT_FROM_EMAIL);
+  return `${senderName} <${addr}>`;
+}
+
 export function t(
   locale: Locale | string | undefined,
   key: string,
   params?: Record<string, string | number>,
 ): string {
-  const lc: Locale = locale === 'en' ? 'en' : 'lt';
+  const lc: Locale = isValidLocale(locale) ? locale : 'lt';
   let text =
     translations[lc]?.[key] ??
     EMAIL_SERVER_FALLBACKS[lc]?.[key] ??

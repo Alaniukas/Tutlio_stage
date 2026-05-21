@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { getCached, setCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
 import { cancelSessionAndFillWaitlist } from '@/lib/lesson-actions';
+import { Checkbox } from '@/components/ui/checkbox';
 import { format } from 'date-fns';
 import { useTranslation } from '@/lib/i18n';
 import { CalendarDays, Search, ChevronDown, ListOrdered, UserX, XCircle, CheckCircle, Pencil, Ban, Loader2, MessageSquare, Trash2 } from 'lucide-react';
@@ -128,6 +129,7 @@ export default function CompanySessions() {
   const [markingNoShow, setMarkingNoShow] = useState(false);
   const [cancelMode, setCancelMode] = useState(false);
   const [cancellationReason, setCancellationReason] = useState('');
+  const [leaveFreeTimeOnCancel, setLeaveFreeTimeOnCancel] = useState(false);
   const [cancellingSession, setCancellingSession] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editTopic, setEditTopic] = useState('');
@@ -243,11 +245,13 @@ export default function CompanySessions() {
         tutorName: selectedSession.tutor_name,
         studentEmail: null,
         tutorEmail: null,
+        leaveFreeTime: leaveFreeTimeOnCancel,
       });
       if (success) {
         setSelectedSession(null);
         setCancelMode(false);
         setCancellationReason('');
+        setLeaveFreeTimeOnCancel(false);
         loadData();
       } else {
         alert(error || t('compSch.errorCancelling', { msg: '' }));
@@ -1020,6 +1024,13 @@ export default function CompanySessions() {
                         onChange={e => setCancellationReason(e.target.value)}
                         className="rounded-lg"
                       />
+                      <label className="flex items-start gap-2 cursor-pointer">
+                        <Checkbox
+                          checked={leaveFreeTimeOnCancel}
+                          onChange={(e) => setLeaveFreeTimeOnCancel(e.target.checked)}
+                        />
+                        <span className="text-sm text-gray-700 leading-snug">{t('dash.leaveFreeTime')}</span>
+                      </label>
                       <div className="flex gap-2">
                         <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setCancelMode(false)}>
                           {t('compSess.close')}

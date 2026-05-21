@@ -7,7 +7,7 @@ import {
   ChevronRight, ChevronDown, X, Pencil, Mail, Send, AlertCircle
 } from 'lucide-react';
 import { format } from 'date-fns';
-import { useTranslation } from '@/lib/i18n';
+import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { dedupeSubjectPresets, subjectPresetKey, tutorSubjectsContainLessonDuplicate } from '@/lib/subjectPresetDedupe';
 import { removeOrgSubjectTemplatesMatchingPreset } from '@/lib/orgSubjectTemplateCleanup';
@@ -332,11 +332,10 @@ function TutorSubjectPriceRow({ template, existing, onSave, onDelete }: {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function CompanyTutors() {
-  const { t, dateFnsLocale } = useTranslation();
+  const { t, locale, dateFnsLocale } = useTranslation();
   const tc = getCached<any>(COMPANY_TUTORS_CACHE_KEY);
   const [loading, setLoading] = useState(!tc);
   const [orgId, setOrgId] = useState<string | null>(tc?.orgId ?? null);
-  const [tutorLimit, setTutorLimit] = useState(tc?.tutorLimit ?? 0);
   const [tutorLicenseCount, setTutorLicenseCount] = useState<number>(tc?.tutorLicenseCount ?? 0);
   const [tutors, setTutors] = useState<Tutor[]>(tc?.tutors ?? []);
   const [invites, setInvites] = useState<Invite[]>(tc?.invites ?? []);
@@ -428,7 +427,7 @@ export default function CompanyTutors() {
 
     const { data: adminRow } = await supabase
       .from('organization_admins')
-      .select('organization_id, organizations(tutor_limit, tutor_license_count)')
+      .select('organization_id, organizations(tutor_license_count)')
       .eq('user_id', user.id)
       .maybeSingle();
     if (!adminRow) {
@@ -439,11 +438,8 @@ export default function CompanyTutors() {
     setOrgId(adminRow.organization_id);
     const orgJoinedRaw = (adminRow as any).organizations as any;
     const orgJoined = Array.isArray(orgJoinedRaw) ? orgJoinedRaw[0] : orgJoinedRaw;
-    const joinedTutorLimit = Number(orgJoined?.tutor_limit) || 0;
     const joinedLicenseCount = Number(orgJoined?.tutor_license_count) || 0;
-    setTutorLimit(joinedTutorLimit);
-    // Backwards-compat: older orgs used tutor_limit to mean license count.
-    let effectiveLicenseCount = Math.max(joinedLicenseCount, joinedTutorLimit);
+    let effectiveLicenseCount = joinedLicenseCount;
     setLicenseInfoError(null);
 
     // Try to load organization default settings (columns may not exist yet)
@@ -455,7 +451,7 @@ export default function CompanyTutors() {
 
     if (orgData) {
       const directLicenseCount = Number((orgData as any).tutor_license_count) || 0;
-      if (directLicenseCount > 0) effectiveLicenseCount = directLicenseCount;
+      effectiveLicenseCount = directLicenseCount;
       setOrgDefaults({
         cancellation_hours: (orgData as any).default_cancellation_hours || 24,
         cancellation_fee_percent: (orgData as any).default_cancellation_fee_percent || 0,
@@ -469,12 +465,9 @@ export default function CompanyTutors() {
 
     // If RLS prevents reading tutor_license_count via client queries, fall back to server endpoint.
     // IMPORTANT: Do this in background so the page never "hangs" on a pending request.
+    setTutorLicenseCount(effectiveLicenseCount);
     const startLicenseInfoFetch = () => {
-      // If we already have a reliable count (joined or direct orgData), don't fetch.
-      if (effectiveLicenseCount > 0) {
-        setTutorLicenseCount(effectiveLicenseCount);
-        return;
-      }
+      if (effectiveLicenseCount > 0) return;
       void (async () => {
         try {
           const { data: { session } } = await supabase.auth.getSession();
@@ -619,7 +612,6 @@ export default function CompanyTutors() {
 
     setCache(COMPANY_TUTORS_CACHE_KEY, {
       orgId: adminRow.organization_id,
-      tutorLimit: joinedTutorLimit,
       tutorLicenseCount: effectiveLicenseCount,
       tutors: visibleTutors, invites: enriched,
     });
@@ -633,6 +625,8 @@ export default function CompanyTutors() {
 
   const orgUsesLicenses = tutorLicenseCount > 0;
   const showLicenseUi = tutorLicenseCount > 0;
+
+  const unusedInvites = useMemo(() => invites.filter((i) => !i.used), [invites]);
 
   const setTutorLicense = async (tutorId: string, next: boolean) => {
     if (!orgId) return;
@@ -658,7 +652,6 @@ export default function CompanyTutors() {
         const updated = prev.map((tu) => (tu.id === tutorId ? { ...tu, has_active_license: next } : tu));
         setCache(COMPANY_TUTORS_CACHE_KEY, {
           orgId,
-          tutorLimit,
           tutorLicenseCount,
           tutors: updated,
           invites,
@@ -722,6 +715,7 @@ export default function CompanyTutors() {
           break_between_lessons: inviteBreakBetween,
           min_booking_hours: inviteMinBooking,
           company_commission_percent: inviteCommissionPercent,
+          locale,
         }),
       });
       const raw = await res.text();
@@ -769,7 +763,8 @@ export default function CompanyTutors() {
   };
 
   const copyLink = (token: string) => {
-    const url = `${window.location.origin}/register?org_token=${token}`;
+    const path = buildLocalizedPath('/register', locale);
+    const url = `${window.location.origin}${path}?org_token=${encodeURIComponent(token)}`;
     navigator.clipboard.writeText(url);
     setCopiedToken(token);
     setTimeout(() => setCopiedToken(null), 2000);
@@ -958,11 +953,6 @@ export default function CompanyTutors() {
     if (selectedTutor) setSelectedTutor({ ...selectedTutor, subjects: selectedTutor.subjects.filter(s => s.id !== subjectId) });
   };
 
-  const activeSlots = tutors.length;
-  const freeSlots = tutorLimit - activeSlots;
-  const canCreateInvite = activeSlots < tutorLimit;
-  const unusedInvites = invites.filter(i => !i.used);
-
   if (loading) {
     return <><div className="flex items-center justify-center h-64"><div className="w-8 h-8 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" /></div></>;
   }
@@ -974,39 +964,13 @@ export default function CompanyTutors() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between min-w-0">
           <div className="min-w-0 flex-1">
             <h1 className="text-xl sm:text-2xl font-bold text-gray-900">{t('compTut.title')}</h1>
-            <p className="text-sm text-gray-500 mt-0.5">
-              {t('compTut.activeSlots', { active: String(activeSlots), free: String(freeSlots), limit: String(tutorLimit) })}
-            </p>
           </div>
           <button
             onClick={openInviteModal}
-            disabled={!canCreateInvite}
-            className={cn(
-              'flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors touch-manipulation w-full sm:w-auto shrink-0',
-              canCreateInvite ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-            )}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors touch-manipulation w-full sm:w-auto shrink-0 bg-indigo-600 text-white hover:bg-indigo-700"
           >
             <Plus className="w-4 h-4 shrink-0" /> <span className="truncate">{t('compTut.createInvite')}</span>
           </button>
-        </div>
-
-        {/* Capacity bar */}
-          <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900 rounded-2xl border border-slate-900/40 shadow-md p-4 text-white">
-          <div className="flex items-center justify-between text-sm mb-2">
-            <span className="font-medium text-slate-100">{t('compTut.capacityUsage')}</span>
-            <span className="text-indigo-100">{activeSlots} / {tutorLimit}</span>
-          </div>
-          <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-gradient-to-r from-emerald-400 via-sky-400 to-indigo-400 rounded-full transition-all"
-              style={{ width: tutorLimit > 0 ? `${(activeSlots / tutorLimit) * 100}%` : '0%' }}
-            />
-          </div>
-          {freeSlots === 0 && (
-            <p className="text-xs text-amber-200 mt-2 font-medium">
-              {t('compTut.limitReached')}
-            </p>
-          )}
         </div>
 
         {/* License usage */}

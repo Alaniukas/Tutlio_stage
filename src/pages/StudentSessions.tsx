@@ -1520,28 +1520,28 @@ export default function StudentSessions() {
                                             </span>
                                             {s.meeting_link && !isPast && (
                                                 <a href={normalizeUrl(s.meeting_link) || undefined} target="_blank" rel="noreferrer" className="ml-2 bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors">
-                                                    Prisijungti
+                                                    {t('stuSess.joinLesson')}
                                                 </a>
                                             )}
                                         </div>
                                     </div>
 
-                                    <div className="text-right flex-shrink-0 flex flex-col items-end gap-2">
-                                        <span className={cn("text-xs font-bold px-3 py-1 rounded-full border", statusCfg.color)}>
+                                    <div className="text-right flex-shrink-0 flex flex-col items-end justify-center gap-1.5 min-w-[6.5rem]">
+                                        <span className={cn("text-xs font-bold px-3 py-1 rounded-full border whitespace-nowrap", statusCfg.color)}>
                                             {t(statusCfg.labelKey)}
                                         </span>
-                                        {paymentPayer !== 'parent' && (
+                                        {paymentPayer !== 'parent' && s.status !== 'cancelled' && (
                                             <div>
                                                 {s.paid ? (
                                                     <div className="flex items-center gap-1">
                                                         <CheckCircle className="w-4 h-4 text-green-500" />
-                                                        <span className="text-sm text-green-600 font-bold">{t('stuSess.paid')}</span>
+                                                        <span className="text-sm text-green-600 font-bold whitespace-nowrap">{t('stuSess.paid')}</span>
                                                     </div>
                                                 ) : s.price ? (
                                                     isMonthlyBilling && !showPerLessonStripeButton ? (
                                                         <span className="text-sm font-black text-blue-600">€{s.price} <span className="text-xs text-blue-500/80 font-semibold">{t('stuSess.invoiceShort')}</span></span>
                                                     ) : (
-                                                        <span className="text-sm font-black text-amber-600">€{s.price} <span className="text-xs text-amber-500/80 font-semibold">(Laukia)</span></span>
+                                                        <span className="text-sm font-black text-amber-600 whitespace-nowrap">€{s.price} <span className="text-xs text-amber-500/80 font-semibold">({t('stuSess.paymentPendingShort')})</span></span>
                                                     )
                                                 ) : null}
                                             </div>
@@ -1570,7 +1570,7 @@ export default function StudentSessions() {
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
                             <CalendarDays className="w-5 h-5 text-indigo-600" />
-                            Pamokos informacija
+                            {t('stuSess.sessionDetails')}
                         </DialogTitle>
                     </DialogHeader>
                     <div className="space-y-4 py-3">
@@ -1599,7 +1599,7 @@ export default function StudentSessions() {
                         {paymentPayer !== 'parent' && (
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                                 <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
-                                    <p className="text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">Kaina</p>
+                                    <p className="text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">{t('stuSess.price')}</p>
                                     <p className="font-bold text-gray-900">€{selectedSession?.price ?? '–'}</p>
                                     {selectedSession?.status === 'active' && !selectedSession.paid && selectedSession.price != null && showPerLessonStripeButton && (
                                         <p className="text-[11px] text-gray-500 mt-1 leading-snug">
@@ -1608,7 +1608,7 @@ export default function StudentSessions() {
                                     )}
                                 </div>
                                 <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100 flex flex-col items-center justify-center">
-                                    <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wider">Statusas</p>
+                                    <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wider">{t('stuSess.status')}</p>
                                     <StatusBadge status={selectedSession?.status || ''} paymentStatus={selectedSession?.payment_status} paid={selectedSession?.paid} endTime={selectedSession?.end_time} />
                                 </div>
                             </div>
@@ -1617,7 +1617,7 @@ export default function StudentSessions() {
                         {/* Tutor comment (visible only if marked "show to student") */}
                         {selectedSession?.show_comment_to_student && selectedSession?.tutor_comment && (
                             <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-100">
-                                <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wider mb-1">Korepetitoriaus komentaras</p>
+                                <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wider mb-1">{t('stuSess.tutorComment')}</p>
                                 <div className="text-sm text-indigo-900 whitespace-pre-wrap">{selectedSession.tutor_comment}</div>
                             </div>
                         )}
@@ -1629,7 +1629,7 @@ export default function StudentSessions() {
                                     {tutorName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || '?'}
                                 </div>
                                 <div className="min-w-0">
-                                    <p className="text-xs text-violet-500 font-semibold uppercase tracking-wider">Korepetitorius</p>
+                                    <p className="text-xs text-violet-500 font-semibold uppercase tracking-wider">{t('stuSess.tutor')}</p>
                                     <p className="font-semibold text-gray-900 text-sm">{tutorName}</p>
                                     {tutorEmail && (
                                         <a href={`mailto:${tutorEmail}`} className="text-xs text-indigo-600 hover:underline flex items-center gap-1 mt-0.5">
@@ -1649,7 +1649,7 @@ export default function StudentSessions() {
                                     rel="noreferrer"
                                     className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-indigo-50 text-indigo-600 font-bold hover:bg-indigo-100 transition-colors border border-indigo-100"
                                 >
-                                    <Video className="w-4 h-4" /> Prisijungti prie susitikimo
+                                    <Video className="w-4 h-4" /> {t('studentDash.joinMeeting')}
                                 </a>
                             ) : (
                                 <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-100 text-gray-400 text-sm">

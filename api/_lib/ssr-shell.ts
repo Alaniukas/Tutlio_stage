@@ -87,6 +87,7 @@ export function renderShell(opts: ShellOptions): string {
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>${esc(title)}</title>
 <meta name="description" content="${esc(description)}" />
+<meta name="robots" content="index, follow, max-image-preview:large" />
 <link rel="canonical" href="${esc(canonicalUrl)}" />
 ${hreflangTags(path)}
 <meta property="og:type" content="website" />
@@ -138,6 +139,13 @@ a:hover{text-decoration:underline}
 .faq summary{font-weight:600;cursor:pointer;font-size:1rem}
 .faq p{margin-top:8px;color:#555;font-size:.95rem}
 .footer{border-top:1px solid #e5e7eb;text-align:center;padding:24px;color:#888;font-size:.85rem;margin-top:auto}
+.footer-links{display:flex;flex-wrap:wrap;justify-content:center;gap:16px;margin-bottom:12px}
+.footer-links a{color:#4f46e5}
+.legal-sub{color:#555;margin-bottom:24px}
+.legal h2{font-size:1.25rem;font-weight:600;margin:28px 0 10px}
+.legal h3{font-size:1.05rem;font-weight:600;margin:20px 0 8px}
+.legal p,.legal li{color:#555;font-size:.92rem;margin-bottom:10px}
+.legal ul{margin:8px 0 16px;padding-left:22px}
 </style>
 </head>
 <body>
@@ -150,7 +158,15 @@ a:hover{text-decoration:underline}
   </div>
 </nav>
 ${body}
-<footer class="footer">${t(locale, 'common.allRightsReserved', { year: new Date().getFullYear() })}</footer>
+<footer class="footer">
+  <div class="footer-links">
+    <a href="${buildPath('/privacy-policy', locale, domain)}">${t(locale, 'footer.privacyPolicy')}</a>
+    <a href="${buildPath('/terms', locale, domain)}">${t(locale, 'footer.terms')}</a>
+    <a href="${buildPath('/dpa', locale, domain)}">${t(locale, 'footer.dpa')}</a>
+    <a href="${buildPath('/kontaktai', locale, domain)}">${t(locale, 'contact.title')}</a>
+  </div>
+  ${t(locale, 'common.allRightsReserved', { year: new Date().getFullYear() })}
+</footer>
 </body>
 </html>`;
 }
