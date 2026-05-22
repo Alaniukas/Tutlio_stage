@@ -450,22 +450,44 @@ export default function Login() {
       }
 
       if (role === 'student') {
-        // Use RPC function to bypass RLS
         const { data: studentRows } = await supabase
           .rpc('get_student_by_user_id', { p_user_id: data.user.id });
 
-        const studentData = studentRows?.[0] ?? null;
+        let studentData = studentRows?.[0] ?? null;
+
+        if (!studentData && data.user.email) {
+          try {
+            const { data: linkRows, error: rpcError } = await supabase.rpc('get_student_by_email_for_linking', {
+              p_email: data.user.email,
+            });
+            if (!rpcError) {
+              const linkRow = linkRows?.[0];
+              if (linkRow) {
+                if (!linkRow.linked_user_id) {
+                  await supabase.from('students').update({ linked_user_id: data.user.id }).eq('id', linkRow.id);
+                }
+                setLoading(false);
+                navigate('/student');
+                return;
+              }
+            } else {
+              console.warn('[Login] get_student_by_email_for_linking during student login:', rpcError);
+            }
+          } catch (err) {
+            console.error('[Login] student email linking during login:', err);
+          }
+        }
 
         if (studentData) {
           setLoading(false);
           navigate('/student');
           return;
-        } else {
-          await supabase.auth.signOut();
-          setError(t('login.noStudentFound'));
-          setLoading(false);
-          return;
         }
+
+        await supabase.auth.signOut();
+        setError(t('login.noStudentFound'));
+        setLoading(false);
+        return;
       }
 
       if (role === 'tutor') {

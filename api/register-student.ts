@@ -144,7 +144,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       authUserId = authData.user.id;
     }
 
-    await supabase.from('students').update({
+    const { error: linkErr } = await supabase.from('students').update({
       email: submittedEmail,
       linked_user_id: authUserId,
       phone: phone || null,
@@ -161,6 +161,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       accepted_privacy_policy_at: acceptedAt || null,
       accepted_terms_at: acceptedAt || null,
     }).eq('id', studentId);
+
+    if (linkErr) {
+      console.error('[register-student] failed to link student row:', linkErr);
+      return res.status(500).json({ error: 'Failed to link student account', code: 'link_student_failed' });
+    }
 
     let parentInviteSent = false;
     let parentInviteCode: string | null = null;

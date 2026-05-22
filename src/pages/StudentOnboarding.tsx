@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { Check, ArrowRight, AlertCircle, Eye, EyeOff, ChevronLeft, User, Users, Mail, Phone } from 'lucide-react';
@@ -111,7 +111,15 @@ export default function StudentOnboarding() {
     const [studentData, setStudentData] = useState<StudentData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const errorBannerRef = useRef<HTMLParagraphElement | null>(null);
     const [submitting, setSubmitting] = useState(false);
+
+    const showError = useCallback((message: string) => {
+        setError(message);
+        requestAnimationFrame(() => {
+            errorBannerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+    }, []);
 
     const [email, setEmail] = useState('');
     const [phone, setPhone] = useState('');
@@ -228,23 +236,23 @@ export default function StudentOnboarding() {
     };
 
     const handleVerify = () => {
-        if (!email.trim()) { setError(t('onboard.emailMandatory')); return; }
-        if (!phone.trim()) { setError(t('onboard.phoneMandatory')); return; }
-        if (!validateLithuanianPhone(phone)) { setError(t('onboard.phoneFormatError')); return; }
+        if (!email.trim()) { showError(t('onboard.emailMandatory')); return; }
+        if (!phone.trim()) { showError(t('onboard.phoneMandatory')); return; }
+        if (!validateLithuanianPhone(phone)) { showError(t('onboard.phoneFormatError')); return; }
         setError(null);
         setStudentData((prev) => prev ? { ...prev, email: email.trim(), phone: phone.trim() } : prev);
         setStep('profile');
     };
 
     const handleProfile = () => {
-        if (!grade) { setError(t('onboard.selectGrade')); return; }
+        if (!grade) { showError(t('onboard.selectGrade')); return; }
         const effectivePayerType = isSchoolInvite || wantsParentAccount ? 'parent' : 'self';
         if (effectivePayerType === 'parent' && !schoolInviteParentLocked) {
-            if (!payerName.trim()) { setError(t('onboard.parentNameReq')); return; }
-            if (!payerEmail.trim()) { setError(t('onboard.parentEmailReq')); return; }
-            if (!payerPhone.trim()) { setError(t('onboard.parentPhoneReq')); return; }
+            if (!payerName.trim()) { showError(t('onboard.parentNameReq')); return; }
+            if (!payerEmail.trim()) { showError(t('onboard.parentEmailReq')); return; }
+            if (!payerPhone.trim()) { showError(t('onboard.parentPhoneReq')); return; }
             const pNorm = formatLithuanianPhone(payerPhone);
-            if (!validateLithuanianPhone(pNorm)) { setError(t('onboard.parentPhoneFormat')); return; }
+            if (!validateLithuanianPhone(pNorm)) { showError(t('onboard.parentPhoneFormat')); return; }
         }
         setError(null);
         setStep('account');
@@ -262,10 +270,10 @@ export default function StudentOnboarding() {
 
     const handleCreateAccount = async () => {
         if (!studentData) return;
-        if (password !== passwordConfirm) { setError(t('onboard.passwordMismatch')); return; }
-        if (password.length < 6) { setError(t('onboard.passwordTooShort')); return; }
+        if (password !== passwordConfirm) { showError(t('onboard.passwordMismatch')); return; }
+        if (password.length < 6) { showError(t('onboard.passwordTooShort')); return; }
         if (!agreePrivacy || !agreeTerms) {
-            setError(t('onboard.mustAgree'));
+            showError(t('onboard.mustAgree'));
             return;
         }
         setSubmitting(true);
@@ -306,9 +314,19 @@ export default function StudentOnboarding() {
             };
 
             if (!apiRes.ok) {
-                setError(mapRegisterStudentError(body));
+                showError(mapRegisterStudentError(body));
                 return;
             }
+
+            const { error: signInError } = await supabase.auth.signInWithPassword({
+                email: accountEmail,
+                password,
+            });
+            if (!signInError) {
+                navigate('/student');
+                return;
+            }
+            console.warn('[StudentOnboarding] auto sign-in after register failed:', signInError);
 
             setStep('done');
 
@@ -328,7 +346,7 @@ export default function StudentOnboarding() {
             setParentInviteOutcome(body.parentInviteSent ? 'sent' : 'failed');
         } catch (e) {
             console.error('[StudentOnboarding] register-student failed:', e);
-            setError(t('onboard.networkError'));
+            showError(t('onboard.networkError'));
         } finally {
             setSubmitting(false);
         }
@@ -415,7 +433,9 @@ export default function StudentOnboarding() {
                             </div>
                         </div>
 
-                        {error && <p className="text-sm text-red-500 mt-3 bg-red-50 rounded-xl px-3 py-2">{error}</p>}
+                        {error && (
+                            <p ref={errorBannerRef} className="text-sm text-red-500 mt-3 bg-red-50 rounded-xl px-3 py-2">{error}</p>
+                        )}
 
                         <button
                             onClick={handleVerify}
@@ -570,7 +590,9 @@ export default function StudentOnboarding() {
                             </div>
                         </div>
 
-                        {error && <p className="text-sm text-red-500 mt-3 bg-red-50 rounded-xl px-3 py-2">{error}</p>}
+                        {error && (
+                            <p ref={errorBannerRef} className="text-sm text-red-500 mt-3 bg-red-50 rounded-xl px-3 py-2">{error}</p>
+                        )}
 
                         <button
                             onClick={handleProfile}
@@ -645,7 +667,9 @@ export default function StudentOnboarding() {
                             </div>
                         </div>
 
-                        {error && <p className="text-sm text-red-500 mt-3 bg-red-50 rounded-xl px-3 py-2">{error}</p>}
+                        {error && (
+                            <p ref={errorBannerRef} className="text-sm text-red-500 mt-3 bg-red-50 rounded-xl px-3 py-2">{error}</p>
+                        )}
 
                         <button
                             onClick={handleCreateAccount}
