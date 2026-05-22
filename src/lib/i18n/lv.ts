@@ -179,6 +179,7 @@ export const lv: Record<string, string> = {
   'login.loginLabel': 'Pieteikšanās',
   'login.noStudentFound': 'Nav atrasts skolēna konts ar šo e-pastu. Varbūt esat privātskolotājs?',
   'login.noTutorFound': 'Nav atrasts privātskolotāja konts ar šo e-pastu. Varbūt esat skolēns?',
+  'login.useOrgAdminLogin': 'Organizācijas administratoriem jāpiesakās, izmantojot uzņēmuma vai skolas pieteikšanās lapu, nevis privātskolotāja portālu.',
   'login.registerWithCode': 'Reģistrēties ar kodu',
   'login.registrationLabel': 'Reģistrācija',
   'login.rememberMe': 'Atcerēties mani',

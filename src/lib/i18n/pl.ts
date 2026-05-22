@@ -1210,6 +1210,7 @@ export const pl: Record<string, string> = {
   'login.noParentFound': 'Nie znaleziono konta rodzica z tym e-mailem. Może jesteś uczniem lub korepetytorem?',
   'login.noStudentFound': 'Nie znaleziono konta ucznia z tym e-mailem. Może jesteś korepetytorem?',
   'login.noTutorFound': 'Nie znaleziono konta korepetytora z tym e-mailem. Może jesteś uczniem?',
+  'login.useOrgAdminLogin': 'Administratorzy organizacji muszą logować się za pośrednictwem strony logowania firmy lub szkoły, a nie portalu korepetytora.',
   'login.registerWithCode': 'Zarejestruj się z kodem',
   'login.registrationLabel': 'Rejestracja',
   'login.rememberMe': 'Zapamiętaj mnie',

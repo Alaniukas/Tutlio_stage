@@ -1785,6 +1785,7 @@ export const es: Record<string, string> = {
   'login.noParentFound': 'No se encontró cuenta de padre con este correo. ¿Quizás es alumno o tutor?',
   'login.noStudentFound': 'No se encontró cuenta de alumno con este correo. ¿Quizás es tutor?',
   'login.noTutorFound': 'No se encontró cuenta de tutor con este correo. ¿Quizás es alumno?',
+  'login.useOrgAdminLogin': 'Los administradores de la organización deben iniciar sesión a través de la página de inicio de sesión de la empresa o escuela, no del portal de tutores.',
   'login.parentNoAccount': '¿Aún no tiene cuenta?',
   'login.parentRegisterLink': 'Regístrese con el código recibido por correo',
   'login.resetError': 'Error al enviar el enlace: ',

@@ -741,6 +741,7 @@ export const fr: Record<string, string> = {
   'login.noParentFound': 'Aucun compte parent trouvé avec cet e-mail. Peut-être êtes-vous un élève ou un tuteur ?',
   'login.noStudentFound': 'Aucun compte élève trouvé avec cet e-mail. Peut-être êtes-vous un tuteur ?',
   'login.noTutorFound': 'Aucun compte tuteur trouvé avec cet e-mail. Peut-être êtes-vous un élève ?',
+  'login.useOrgAdminLogin': 'Les administrateurs de l\'organisation doivent se connecter via la page de connexion de l\'entreprise ou de l\'école, et non via le portail des tuteurs.',
   'login.registerWithCode': 'S\'inscrire avec un code',
   'login.registrationLabel': 'Inscription',
   'login.rememberMe': 'Se souvenir de moi',

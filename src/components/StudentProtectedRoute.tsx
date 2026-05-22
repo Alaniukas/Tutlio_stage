@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
+import { resolveAccountPortals, type AccountPortals } from '@/lib/account-portal';
 import { rpcGetStudentByUserIdDeduped } from '@/lib/preload';
 import { useUser } from '@/contexts/UserContext';
 
 export default function StudentProtectedRoute() {
     const { user: ctxUser, profile: ctxProfile, loading: ctxLoading } = useUser();
-    const [status, setStatus] = useState<'loading' | 'student' | 'none'>('loading');
+    const [status, setStatus] = useState<'loading' | 'student' | 'tutor' | 'parent' | 'none'>('loading');
     const [isFrozen, setIsFrozen] = useState(false);
     const location = useLocation();
     const params = new URLSearchParams(location.search);
@@ -42,6 +43,19 @@ export default function StudentProtectedRoute() {
                     }
                 };
 
+                const portals = await withTimeout<AccountPortals>(
+                    resolveAccountPortals(ctxUser.id),
+                    2500,
+                );
+                if (portals.tutor && !portals.student) {
+                    if (!cancelled) setStatus('tutor');
+                    return;
+                }
+                if (portals.parent && !portals.student) {
+                    if (!cancelled) setStatus('parent');
+                    return;
+                }
+
                 const result = await withTimeout<any>(rpcGetStudentByUserIdDeduped(ctxUser.id), 2500);
 
                 const studentRows = result?.data;
@@ -74,6 +88,9 @@ export default function StudentProtectedRoute() {
             </div>
         );
     }
+
+    if (status === 'tutor') return <Navigate to="/dashboard" replace />;
+    if (status === 'parent') return <Navigate to="/parent" replace />;
 
     if (status === 'student') return (
         <>

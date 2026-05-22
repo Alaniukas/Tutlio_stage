@@ -5,7 +5,13 @@ import { getPasswordResetRedirectTo } from '@/lib/auth-redirects';
 import { detectAuthLocaleFromHost } from '@/lib/auth-locale';
 import { hasActiveSubscription, tutorHasPlatformSubscriptionAccess } from '@/lib/subscription';
 import { getOrgAdminDashboardPath } from '@/lib/orgAdminDashboardPath';
-import { orgAdminRowByUserDeduped } from '@/lib/preload';
+import {
+  canAccessLoginPortal,
+  getHomePathForPortals,
+  loginErrorKeyForPortalMismatch,
+  resolveAccountPortals,
+  type LoginPortal,
+} from '@/lib/account-portal';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AlertCircle, ArrowLeft, ArrowRight, BookOpen, ChevronRight, Sparkles, Building2, Users } from 'lucide-react';
@@ -223,53 +229,25 @@ export default function Login() {
     if (!session?.user) return false;
     const user = session.user;
 
-    const orgAdmin = await withTimeout(
-      orgAdminRowByUserDeduped(user.id),
-      3000,
-      'Org admin check timeout',
+    const portals = await withTimeout(
+      resolveAccountPortals(user.id, { email: user.email, linkStudentByEmail: true }),
+      5000,
+      'Account portal check timeout',
     ).catch((err) => {
-      console.warn('[Login] redirectByRole org admin check timeout/failure:', err);
+      console.warn('[Login] redirectByRole account portal check failed:', err);
       return null;
     });
-    if (orgAdmin) {
-      const path = await getOrgAdminDashboardPath(supabase, user.id);
-      navigate(path);
+    if (!portals) return false;
+
+    const homePath = await getHomePathForPortals(user.id, portals);
+    if (homePath && homePath !== '/dashboard') {
+      navigate(homePath);
       return true;
     }
-
-    // Parent: use SECURITY DEFINER RPC to avoid RLS recursion on parent_profiles.
-    const { data: parentProfileId, error: parentErr } = await supabase
-      .rpc('get_parent_profile_id_by_user_id', { p_user_id: user.id });
-    if (parentErr) {
-      console.warn('[Login] redirectByRole parent profile lookup failed:', parentErr);
+    if (portals.student && !portals.tutor) {
+      navigate('/student');
+      return true;
     }
-    if (parentProfileId) { navigate('/parent'); return true; }
-
-    const { data: studentRows } = await supabase
-      .rpc('get_student_by_user_id', { p_user_id: user.id });
-    let student = studentRows?.[0] ?? null;
-    if (!student && user.email) {
-      try {
-        const { data: linkRows, error: rpcError } = await supabase.rpc('get_student_by_email_for_linking', { p_email: user.email });
-        if (rpcError) {
-          console.warn('[Login] RPC get_student_by_email_for_linking failed:', rpcError);
-          // Continue without linking - don't block login
-        } else {
-          const linkRow = linkRows?.[0];
-          if (linkRow) {
-            if (!linkRow.linked_user_id) {
-              await supabase.from('students').update({ linked_user_id: user.id }).eq('id', linkRow.id);
-            }
-            navigate('/student');
-            return true;
-          }
-        }
-      } catch (err) {
-        console.error('[Login] Error in student linking:', err);
-        // Continue without linking - don't block login
-      }
-    }
-    if (student) { navigate('/student'); return true; }
 
     let { data: profile, error: profileError } = await supabase
       .from('profiles').select('id, organization_id, subscription_status, manual_subscription_exempt').eq('id', user.id).maybeSingle();
@@ -286,24 +264,9 @@ export default function Login() {
         profile = updated;
       }
     } else if (!profile && meta.full_name) {
-      try {
-        const { data: studentByEmailRows, error: rpcError } = await supabase.rpc('get_student_by_email_for_linking', { p_email: user.email || '' });
-        if (rpcError) {
-          console.warn('[Login] RPC get_student_by_email_for_linking failed:', rpcError);
-          // Continue without linking - don't block login
-        } else {
-          const studentByEmail = studentByEmailRows?.[0];
-          if (studentByEmail) {
-            if (!studentByEmail.linked_user_id) {
-              await supabase.from('students').update({ linked_user_id: user.id }).eq('id', studentByEmail.id);
-            }
-            navigate('/student');
-            return true;
-          }
-        }
-      } catch (err) {
-        console.error('[Login] Error in student linking (profile check):', err);
-        // Continue without linking - don't block login
+      if (portals.student && !portals.tutor) {
+        navigate('/student');
+        return true;
       }
       await supabase.from('profiles').upsert({
         id: user.id,
@@ -418,93 +381,50 @@ export default function Login() {
       if (error) {
         setError(t('auth.invalidCredentials'));
       } else if (data.user) {
-        const orgAdminRow = await withTimeout(
-          orgAdminRowByUserDeduped(data.user.id),
-          3000,
-          'Org admin check timeout',
-        ).catch((err) => {
-          console.warn('[Login] org admin check during login timeout/failure:', err);
-          return null;
+        const loginPortal: LoginPortal | null =
+          role === 'tutor' ? 'tutor' : role === 'student' ? 'student' : role === 'parent' ? 'parent' : null;
+
+        const portals = await resolveAccountPortals(data.user.id, {
+          email: data.user.email,
+          linkStudentByEmail: role === 'student',
         });
-        if (orgAdminRow) {
+
+        if (loginPortal && !canAccessLoginPortal(portals, loginPortal)) {
+          const hasOrgToken = Boolean(String(data.user.user_metadata?.org_token || '').trim());
+          const allowNewOrgTutor = loginPortal === 'tutor' && hasOrgToken && !portals.student && !portals.parent;
+          if (!allowNewOrgTutor) {
+            await supabase.auth.signOut();
+            setError(t(loginErrorKeyForPortalMismatch(loginPortal, portals)));
+            setLoading(false);
+            return;
+          }
+        }
+
+        if (portals.orgAdmin && loginPortal !== 'tutor') {
           const path = await getOrgAdminDashboardPath(supabase, data.user.id);
           navigate(path);
           return;
         }
-
-      if (role === 'parent') {
-        const { data: parentProfileId, error: parentErr } = await supabase
-          .rpc('get_parent_profile_id_by_user_id', { p_user_id: data.user.id });
-        if (parentErr) {
-          console.warn('[Login] parent_profiles lookup failed during login:', parentErr);
+        if (portals.orgAdmin && loginPortal === 'tutor' && !portals.tutor && !String(data.user.user_metadata?.org_token || '').trim()) {
+          await supabase.auth.signOut();
+          setError(t('login.useOrgAdminLogin'));
+          setLoading(false);
+          return;
         }
-        if (parentProfileId) {
+
+        if (role === 'parent') {
           setLoading(false);
           navigate('/parent');
           return;
         }
-        await supabase.auth.signOut();
-        setError(t('login.noParentFound'));
-        setLoading(false);
-        return;
-      }
 
-      if (role === 'student') {
-        const { data: studentRows } = await supabase
-          .rpc('get_student_by_user_id', { p_user_id: data.user.id });
-
-        let studentData = studentRows?.[0] ?? null;
-
-        if (!studentData && data.user.email) {
-          try {
-            const { data: linkRows, error: rpcError } = await supabase.rpc('get_student_by_email_for_linking', {
-              p_email: data.user.email,
-            });
-            if (!rpcError) {
-              const linkRow = linkRows?.[0];
-              if (linkRow) {
-                if (!linkRow.linked_user_id) {
-                  await supabase.from('students').update({ linked_user_id: data.user.id }).eq('id', linkRow.id);
-                }
-                setLoading(false);
-                navigate('/student');
-                return;
-              }
-            } else {
-              console.warn('[Login] get_student_by_email_for_linking during student login:', rpcError);
-            }
-          } catch (err) {
-            console.error('[Login] student email linking during login:', err);
-          }
-        }
-
-        if (studentData) {
+        if (role === 'student') {
           setLoading(false);
           navigate('/student');
           return;
         }
 
-        await supabase.auth.signOut();
-        setError(t('login.noStudentFound'));
-        setLoading(false);
-        return;
-      }
-
       if (role === 'tutor') {
-        if (isStudentAuthUser(data.user)) {
-          const { data: studentRows } = await supabase
-            .rpc('get_student_by_user_id', { p_user_id: data.user.id });
-          if (studentRows?.[0]) {
-            setLoading(false);
-            navigate('/student');
-            return;
-          }
-          await supabase.auth.signOut();
-          setError(t('login.noStudentFound'));
-          setLoading(false);
-          return;
-        }
-
         let { data: tutorData, error: tutorError } = await supabase
           .from('profiles')
           .select('id')
@@ -530,25 +450,11 @@ export default function Login() {
             tutorData = updated;
           }
         } else if (!tutorData && meta.full_name) {
-          try {
-            const { data: studentByEmailRows, error: rpcError } = await supabase.rpc('get_student_by_email_for_linking', { p_email: data.user.email || '' });
-            if (rpcError) {
-              console.warn('[Login] RPC get_student_by_email_for_linking failed:', rpcError);
-              // Continue without linking - don't block login
-            } else {
-              const studentByEmail = studentByEmailRows?.[0];
-              if (studentByEmail) {
-                if (!studentByEmail.linked_user_id) {
-                  await supabase.from('students').update({ linked_user_id: data.user.id }).eq('id', studentByEmail.id);
-                }
-                setLoading(false);
-                navigate('/student');
-                return;
-              }
-            }
-          } catch (err) {
-            console.error('[Login] Error in student linking (Google OAuth):', err);
-            // Continue without linking - don't block login
+          if (portals.student && !portals.tutor) {
+            await supabase.auth.signOut();
+            setError(t('login.noTutorFound'));
+            setLoading(false);
+            return;
           }
           await supabase.from('profiles').upsert({
             id: data.user.id,

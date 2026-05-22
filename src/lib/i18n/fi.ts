@@ -3593,6 +3593,7 @@ export const fi: Record<string, string> = {
   'login.noParentFound': 'Tällä sähköpostilla ei löytynyt huoltajatiliä. Oletko kenties oppilas tai opettaja?',
   'login.noStudentFound': 'Tällä sähköpostilla ei löytynyt oppilastiliä. Oletko kenties opettaja?',
   'login.noTutorFound': 'Tällä sähköpostilla ei löytynyt opettajatiliä. Oletko kenties oppilas?',
+  'login.useOrgAdminLogin': 'Organisaation ylläpitäjien on kirjauduttava sisään yrityksen tai koulun kirjautumissivun kautta, ei opettajaportaalista.',
   'login.resetError': 'Virhe palautuslinkin lähettämisessä: ',
   'login.parentNoAccount': '',
   'login.parentRegisterLink': 'Rekisteröidy sähköpostissasi olevalla koodilla',

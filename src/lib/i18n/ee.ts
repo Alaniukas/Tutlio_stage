@@ -179,6 +179,7 @@ export const ee: Record<string, string> = {
   'login.loginLabel': 'Sisselogimine',
   'login.noStudentFound': 'Selle e-postiga õpilase kontot ei leitud. Võib-olla olete eraõpetaja?',
   'login.noTutorFound': 'Selle e-postiga eraõpetaja kontot ei leitud. Võib-olla olete õpilane?',
+  'login.useOrgAdminLogin': 'Organisatsiooni administraatorid peavad sisse logima ettevõtte või kooli sisselogimislehe kaudu, mitte eraõpetaja portaali kaudu.',
   'login.registerWithCode': 'Registreeru koodiga',
   'login.registrationLabel': 'Registreerimine',
   'login.rememberMe': 'Jäta mind meelde',

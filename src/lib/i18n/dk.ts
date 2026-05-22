@@ -2883,6 +2883,7 @@ export const dk: Record<string, string> = {
   'login.noParentFound': 'Ingen forældrekonto blev fundet med denne e-mail. Måske er du en elev eller en tutor?',
   'login.noStudentFound': 'Ingen elevkonto blev fundet med denne e-mail. Måske er du en tutor?',
   'login.noTutorFound': 'Ingen tutorkonto blev fundet med denne e-mail. Måske er du en elev?',
+  'login.useOrgAdminLogin': 'Organisationsadministratorer skal logge ind via virksomhedens eller skolens loginside, ikke tutorportalen.',
   'login.resetError': 'Fejl ved afsendelse af nulstillingslink: ',
   'login.parentRegisterLink': 'Registrér dig med koden fra din e-mail',
   'min_booking_hours': 'Min. bookingtid (timer)',

@@ -2877,6 +2877,7 @@ export const se: Record<string, string> = {
   'login.noParentFound': 'Inget föräldrakonto hittades med denna e-post. Kanske är du en elev eller lärare?',
   'login.noStudentFound': 'Inget elevkonto hittades med denna e-post. Kanske är du en lärare?',
   'login.noTutorFound': 'Inget lärarkonto hittades med denna e-post. Kanske är du en elev?',
+  'login.useOrgAdminLogin': 'Organisationsadministratörer måste logga in via företagets eller skolans inloggningssida, inte genom lärarportalen.',
   'login.resetError': 'Fel vid skickande av återställningslänk: ',
   'login.parentRegisterLink': 'Registrera dig med koden från ditt e-postmeddelande',
   'min_booking_hours': 'Min. bokningstid (tim)',

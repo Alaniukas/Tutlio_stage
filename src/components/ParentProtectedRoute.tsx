@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
+import { resolveAccountPortals } from '@/lib/account-portal';
 import { supabase } from '@/lib/supabase';
 import { useUser } from '@/contexts/UserContext';
 
@@ -28,13 +29,13 @@ function writeParentCache(userId: string, profileId: string | null) {
 
 export default function ParentProtectedRoute() {
     const { user: ctxUser, loading: ctxLoading } = useUser();
-    const [status, setStatus] = useState<'loading' | 'parent' | 'none'>('loading');
+    const [status, setStatus] = useState<'loading' | 'parent' | 'tutor' | 'student' | 'none'>('loading');
     const cancelledRef = useRef(false);
 
     useEffect(() => {
         cancelledRef.current = false;
 
-        const setIfNotCancelled = (next: 'loading' | 'parent' | 'none') => {
+        const setIfNotCancelled = (next: 'loading' | 'parent' | 'tutor' | 'student' | 'none') => {
             if (!cancelledRef.current) setStatus(next);
         };
 
@@ -55,6 +56,21 @@ export default function ParentProtectedRoute() {
                 setIfNotCancelled('parent');
             } else {
                 setIfNotCancelled('loading');
+            }
+
+            try {
+                const portals = await resolveAccountPortals(ctxUser.id);
+                if (cancelledRef.current) return;
+                if (portals.tutor && !portals.parent) {
+                    setIfNotCancelled('tutor');
+                    return;
+                }
+                if (portals.student && !portals.parent) {
+                    setIfNotCancelled('student');
+                    return;
+                }
+            } catch (err) {
+                console.warn('[ParentProtectedRoute] account portal check failed:', err);
             }
 
             // Retry the RPC a few times with backoff to absorb transient network/RLS errors.
@@ -122,5 +138,7 @@ export default function ParentProtectedRoute() {
     }
 
     if (status === 'parent') return <Outlet />;
+    if (status === 'tutor') return <Navigate to="/dashboard" replace />;
+    if (status === 'student') return <Navigate to="/student" replace />;
     return <Navigate to="/login" replace />;
 }

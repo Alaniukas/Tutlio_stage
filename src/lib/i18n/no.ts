@@ -2885,6 +2885,7 @@ export const no: Record<string, string> = {
   'login.noParentFound': 'Ingen foreldrekonto ble funnet med denne e-posten. Kanskje du er en elev eller tutor?',
   'login.noStudentFound': 'Ingen elevkonto ble funnet med denne e-posten. Kanskje du er en tutor?',
   'login.noTutorFound': 'Ingen tutorkonto ble funnet med denne e-posten. Kanskje du er en elev?',
+  'login.useOrgAdminLogin': 'Organisasjonsadministratorer må logge inn via påloggingssiden for selskapet eller skolen, ikke tutorportalen.',
   'login.resetError': 'Feil ved sending av tilbakestillingslenke: ',
   'login.parentRegisterLink': 'Registrer med koden fra e-posten din',
   'min_booking_hours': 'Min. bookingtid (t)',

@@ -2671,6 +2671,7 @@ export const lt: Record<string, string> = {
   'login.noParentFound': 'Su šiuo el. paštu nebuvo rasta tėvų paskyra. Galbūt esate mokinys arba korepetitorius?',
   'login.noStudentFound': 'Su šiuo el. paštu nebuvo rasta mokinio paskyra. Galbūt esate korepetitorius?',
   'login.noTutorFound': 'Su šiuo el. paštu nebuvo rasta korepetitoriaus paskyra. Galbūt esate mokinys?',
+  'login.useOrgAdminLogin': 'Organizacijos administratoriai turi prisijungti per įmonės ar mokyklos prisijungimo puslapį, ne per korepetitoriaus portalą.',
   'login.registerWithCode': 'Registruotis su kodu',
   'login.registrationLabel': 'Registracija',
   'login.rememberMe': 'Prisiminti mane',

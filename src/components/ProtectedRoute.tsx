@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
+import { resolveAccountPortals } from '@/lib/account-portal';
 import { supabase } from '@/lib/supabase';
 import { hasActiveSubscription, tutorHasPlatformSubscriptionAccess } from '@/lib/subscription';
 import { useUser } from '@/contexts/UserContext';
@@ -7,7 +8,7 @@ import { useUser } from '@/contexts/UserContext';
 export default function ProtectedRoute() {
   const location = useLocation();
   const { user: ctxUser, profile: ctxProfile, loading: ctxLoading } = useUser();
-  const [status, setStatus] = useState<'loading' | 'tutor' | 'org_admin' | 'student' | 'none' | 'needs_subscription'>('loading');
+  const [status, setStatus] = useState<'loading' | 'tutor' | 'org_admin' | 'student' | 'parent' | 'none' | 'needs_subscription'>('loading');
   const [redirectToSubscription, setRedirectToSubscription] = useState(false);
   const resolvedForUserRef = useRef<string | null>(null);
 
@@ -94,6 +95,20 @@ export default function ProtectedRoute() {
 
       setStatus('loading');
 
+      const portals = await resolveAccountPortals(ctxUser.id);
+      if (portals.orgAdmin && !portals.tutor) {
+        if (!cancelled) { resolvedForUserRef.current = ctxUser.id; setStatus('org_admin'); }
+        return;
+      }
+      if (portals.parent && !portals.tutor) {
+        if (!cancelled) { resolvedForUserRef.current = ctxUser.id; setStatus('parent'); }
+        return;
+      }
+      if (portals.student && !portals.tutor) {
+        if (!cancelled) { resolvedForUserRef.current = ctxUser.id; setStatus('student'); }
+        return;
+      }
+
       let profile: {
         organization_id: string | null;
         subscription_status?: string | null;
@@ -112,31 +127,6 @@ export default function ProtectedRoute() {
           .eq('id', ctxUser.id)
           .maybeSingle();
         profile = fetched;
-      }
-
-      try {
-        if (!ctxProfile) {
-          const { data: studentRows } = await supabase.rpc('get_student_by_user_id', { p_user_id: ctxUser.id });
-          if (studentRows && studentRows.length > 0) {
-            if (!cancelled) { resolvedForUserRef.current = ctxUser.id; setStatus('student'); }
-            return;
-          }
-        }
-      } catch (err) {
-        console.error('[ProtectedRoute] Error checking student status:', err);
-        if (!cancelled) setStatus('loading');
-        return;
-      }
-
-      const { data: orgAdmin } = await supabase
-        .from('organization_admins')
-        .select('id')
-        .eq('user_id', ctxUser.id)
-        .maybeSingle();
-
-      if (orgAdmin) {
-        if (!cancelled) { resolvedForUserRef.current = ctxUser.id; setStatus('org_admin'); }
-        return;
       }
 
       const orgTokenRaw = ctxUser.user_metadata?.org_token;
@@ -201,6 +191,10 @@ export default function ProtectedRoute() {
 
   if (status === 'org_admin') {
     return <Navigate to="/company" replace />;
+  }
+
+  if (status === 'parent') {
+    return <Navigate to="/parent" replace />;
   }
 
   if (status === 'student') {

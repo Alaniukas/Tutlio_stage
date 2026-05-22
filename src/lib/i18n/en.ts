@@ -2672,6 +2672,7 @@ export const en: Record<string, string> = {
   'login.noParentFound': 'No parent account was found with this email. Perhaps you are a student or a tutor?',
   'login.noStudentFound': 'No student account was found with this email. Perhaps you are a tutor?',
   'login.noTutorFound': 'No tutor account was found with this email. Perhaps you are a student?',
+  'login.useOrgAdminLogin': 'Organization administrators must sign in via the company or school login page, not the tutor portal.',
   'login.registerWithCode': 'Register with code',
   'login.registrationLabel': 'Registration',
   'login.rememberMe': 'Remember me',

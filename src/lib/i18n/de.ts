@@ -1781,6 +1781,7 @@ export const de: Record<string, string> = {
   'login.noParentFound': 'Kein Elternkonto mit dieser E-Mail gefunden. Vielleicht sind Sie Schüler oder Lehrer?',
   'login.noStudentFound': 'Kein Schülerkonto mit dieser E-Mail gefunden. Vielleicht sind Sie Lehrer?',
   'login.noTutorFound': 'Kein Lehrerkonto mit dieser E-Mail gefunden. Vielleicht sind Sie Schüler?',
+  'login.useOrgAdminLogin': 'Organisationsadministratoren müssen sich über die Anmeldeseite des Unternehmens oder der Schule anmelden, nicht über das Tutorenportal.',
   'login.parentNoAccount': 'Noch kein Konto?',
   'login.parentRegisterLink': 'Registrieren Sie sich mit dem per E-Mail erhaltenen Code',
   'login.resetError': 'Fehler beim Senden des Links: ',
