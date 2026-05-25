@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { authHeaders } from '@/lib/apiHelpers';
+import { orgAdminRowByUserDeduped } from '@/lib/preload';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
 const CONV_CACHE_TTL = 300_000;
@@ -216,6 +217,7 @@ export function useChatMessages(conversationId: string | null) {
   conversationIdRef.current = conversationId;
 
   const appendMessage = useCallback((msg: ChatMessage) => {
+    if (msg.conversation_id !== conversationIdRef.current) return;
     setMessages((prev) => {
       if (prev.some((m) => m.id === msg.id)) return prev;
       return mergeChatMessages(prev, [msg]);
@@ -231,13 +233,14 @@ export function useChatMessages(conversationId: string | null) {
       .select('*')
       .eq('conversation_id', cid)
       .order('created_at', { ascending: true });
+    if (conversationIdRef.current !== cid) return;
     if (error) {
       console.error('[useChat] fetchMessages:', error.message);
     } else {
       const rows = (data ?? []) as ChatMessage[];
-      setMessages((prev) => mergeChatMessages(prev, rows));
+      setMessages(rows);
     }
-    if (!opts?.silent) setLoading(false);
+    if (!opts?.silent && conversationIdRef.current === cid) setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -246,6 +249,7 @@ export function useChatMessages(conversationId: string | null) {
       return;
     }
 
+    setMessages([]);
     void fetchMessages();
 
     const channel = supabase
@@ -262,6 +266,7 @@ export function useChatMessages(conversationId: string | null) {
         },
         (payload) => {
           const newMsg = payload.new as ChatMessage;
+          if (newMsg.conversation_id !== conversationIdRef.current) return;
           appendMessage(newMsg);
         },
       )
@@ -305,26 +310,30 @@ export async function sendMessage(
   if (!user) return null;
 
   // Org tutor license gating: allow read-only inbox for unlicensed org tutors.
+  // Org admins share organization_id on profile but are not tutors — skip (see useOrgTutorPolicy).
   try {
-    const { data: prof } = await supabase
-      .from('profiles')
-      .select('organization_id, has_active_license')
-      .eq('id', user.id)
-      .maybeSingle();
-
-    const orgId = (prof as any)?.organization_id as string | null | undefined;
-    const hasActiveLicense = (prof as any)?.has_active_license !== false;
-
-    if (orgId && !hasActiveLicense) {
-      const { data: org } = await supabase
-        .from('organizations')
-        .select('tutor_license_count')
-        .eq('id', orgId)
+    const adminRow = await orgAdminRowByUserDeduped(user.id);
+    if (!adminRow?.organization_id) {
+      const { data: prof } = await supabase
+        .from('profiles')
+        .select('organization_id, has_active_license')
+        .eq('id', user.id)
         .maybeSingle();
-      const orgUsesLicenses = (Number((org as any)?.tutor_license_count) || 0) > 0;
-      if (orgUsesLicenses) {
-        console.warn('[useChat] sendMessage blocked: org tutor not licensed');
-        return null;
+
+      const orgId = (prof as any)?.organization_id as string | null | undefined;
+      const hasActiveLicense = (prof as any)?.has_active_license !== false;
+
+      if (orgId && !hasActiveLicense) {
+        const { data: org } = await supabase
+          .from('organizations')
+          .select('tutor_license_count')
+          .eq('id', orgId)
+          .maybeSingle();
+        const orgUsesLicenses = (Number((org as any)?.tutor_license_count) || 0) > 0;
+        if (orgUsesLicenses) {
+          console.warn('[useChat] sendMessage blocked: org tutor not licensed');
+          return null;
+        }
       }
     }
   } catch (e) {

@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import {
+  type Locale,
   LOCALES,
   detectDomain,
   buildCanonicalUrl,
@@ -15,29 +16,32 @@ function getSupabase() {
   return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } }) as any;
 }
 
-function staticLastmod(): string {
-  return new Date().toISOString().split('T')[0];
-}
-
 const STATIC_PAGES: { path: string; changefreq: string; priority: string }[] = [
   { path: '/', changefreq: 'weekly', priority: '1.0' },
   { path: '/pricing', changefreq: 'monthly', priority: '0.8' },
   { path: '/apie-mus', changefreq: 'monthly', priority: '0.7' },
   { path: '/kontaktai', changefreq: 'monthly', priority: '0.6' },
-  { path: '/blog', changefreq: 'weekly', priority: '0.8' },
   { path: '/features/calendar', changefreq: 'monthly', priority: '0.7' },
   { path: '/features/waitlist', changefreq: 'monthly', priority: '0.7' },
   { path: '/features/payments', changefreq: 'monthly', priority: '0.7' },
   { path: '/features/reminders', changefreq: 'monthly', priority: '0.7' },
+  { path: '/features/cancellation', changefreq: 'monthly', priority: '0.7' },
+  { path: '/features/comments', changefreq: 'monthly', priority: '0.7' },
   { path: '/privacy-policy', changefreq: 'yearly', priority: '0.3' },
   { path: '/terms', changefreq: 'yearly', priority: '0.3' },
   { path: '/dpa', changefreq: 'yearly', priority: '0.2' },
 ];
 
-function alternatesXml(path: string): string {
+const TITLE_COLUMNS = LOCALES.map((l) => `title_${l}`).join(', ');
+
+function postHasTranslation(post: Record<string, unknown>, locale: Locale): boolean {
+  return !!post[`title_${locale}`];
+}
+
+function alternatesXml(path: string, locales: Locale[] = LOCALES): string {
   const links: string[] = [];
 
-  for (const locale of LOCALES) {
+  for (const locale of locales) {
     const href = buildCanonicalUrl(path, locale);
     links.push(`    <xhtml:link rel="alternate" hreflang="${locale}" href="${href}" />`);
   }
@@ -47,12 +51,12 @@ function alternatesXml(path: string): string {
   return links.join('\n');
 }
 
-function urlEntry(loc: string, changefreq: string, priority: string, path: string, lastmod?: string): string {
+function urlEntry(loc: string, changefreq: string, priority: string, path: string, altLocales: Locale[], lastmod?: string): string {
   return `  <url>
     <loc>${loc}</loc>${lastmod ? `\n    <lastmod>${lastmod}</lastmod>` : ''}
     <changefreq>${changefreq}</changefreq>
     <priority>${priority}</priority>
-${alternatesXml(path)}
+${alternatesXml(path, altLocales)}
   </url>`;
 }
 
@@ -60,11 +64,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const domain = detectDomain(req);
   const supabase = getSupabase();
 
-  let blogPosts: { slug: string; published_at: string }[] = [];
+  let blogPosts: Record<string, unknown>[] = [];
   if (supabase) {
     const { data } = await supabase
       .from('blog_posts')
-      .select('slug, published_at')
+      .select(`slug, published_at, ${TITLE_COLUMNS}`)
       .eq('status', 'published')
       .order('published_at', { ascending: false });
     blogPosts = data || [];
@@ -72,22 +76,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const entries: string[] = [];
   const myLocales = LOCALES.filter((l) => canonicalDomain(l) === domain);
-  const staticMod = staticLastmod();
 
   for (const page of STATIC_PAGES) {
     for (const locale of myLocales) {
       const loc = buildCanonicalUrl(page.path, locale);
-      entries.push(urlEntry(loc, page.changefreq, page.priority, page.path, staticMod));
+      entries.push(urlEntry(loc, page.changefreq, page.priority, page.path, LOCALES));
+    }
+  }
+
+  // Only include blog URLs for locales that have at least one translated post
+  const blogTranslatedLocales = myLocales.filter(
+    (l) => blogPosts.some((p) => postHasTranslation(p, l)),
+  );
+
+  if (blogTranslatedLocales.length > 0) {
+    for (const locale of blogTranslatedLocales) {
+      const loc = buildCanonicalUrl('/blog', locale);
+      entries.push(urlEntry(loc, 'weekly', '0.8', '/blog', blogTranslatedLocales));
     }
   }
 
   const today = new Date().toISOString().split('T')[0];
   for (const post of blogPosts) {
-    const blogPath = `/blog/${post.slug}`;
-    const lastmod = post.published_at ? post.published_at.split('T')[0] : today;
-    for (const locale of myLocales) {
+    const blogPath = `/blog/${post.slug as string}`;
+    const lastmod = post.published_at ? (post.published_at as string).split('T')[0] : today;
+
+    const postLocales = myLocales.filter((l) => postHasTranslation(post, l));
+    for (const locale of postLocales) {
       const loc = buildCanonicalUrl(blogPath, locale);
-      entries.push(urlEntry(loc, 'monthly', '0.7', blogPath, lastmod));
+      entries.push(urlEntry(loc, 'monthly', '0.7', blogPath, postLocales, lastmod));
     }
   }
 

@@ -9,6 +9,7 @@ import { Eye, EyeOff, Building2, AlertCircle } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { getStoredUtm } from '@/lib/analytics';
 import { detectAuthLocaleFromHost, getAuthEmailOrigin } from '@/lib/auth-locale';
+import OrgTutorPolicyModal from '@/components/OrgTutorPolicyModal';
 
 const COUNTRY_DIAL_CODES = [
   { code: 'LT', label: 'Lithuania', dial: '+370' },
@@ -110,6 +111,7 @@ export default function Register() {
 
   const [agreePrivacy, setAgreePrivacy] = useState(false);
   const [agreeTerms, setAgreeTerms] = useState(false);
+  const [policyOpen, setPolicyOpen] = useState(false);
 
   const navigate = useNavigate();
   const phoneExampleLocal = PHONE_EXAMPLES_BY_DIAL[phoneDialCode] || '61234567';
@@ -438,7 +440,22 @@ export default function Register() {
             <Button type="submit" className="w-full" disabled={loading || (normalizedOrgToken !== null && orgTokenValid === false)}>
               {loading ? t('common.registering') : t('common.register')}
             </Button>
+
+            {normalizedOrgToken && orgTokenValid && (
+              <p className="text-xs text-center text-gray-500 mt-1">
+                {t('register.orgPolicyConsent')}{' '}
+                <button
+                  type="button"
+                  onClick={() => setPolicyOpen(true)}
+                  className="text-indigo-600 hover:underline font-medium"
+                >
+                  {t('register.orgPolicyLink')}
+                </button>
+              </p>
+            )}
           </form>
+
+          <OrgTutorPolicyModal open={policyOpen} onOpenChange={setPolicyOpen} />
         </CardContent>
 
         <CardFooter className="flex justify-center">

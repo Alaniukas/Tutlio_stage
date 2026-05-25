@@ -122,12 +122,13 @@ interface BlogShellOpts {
   publishedTime?: string;
   modifiedTime?: string;
   tag?: string;
+  noindex?: boolean;
 }
 
 const DEFAULT_OG = 'https://www.tutlio.com/og-image.png';
 
 function shell(opts: BlogShellOpts): string {
-  const { locale, domain, blogPath, title, description, url, body, jsonLd, publishedTime, modifiedTime, tag } = opts;
+  const { locale, domain, blogPath, title, description, url, body, jsonLd, publishedTime, modifiedTime, tag, noindex } = opts;
   const image = opts.image || DEFAULT_OG;
   const l = LABELS[locale];
   const homePath = buildPath('/', locale, domain);
@@ -149,7 +150,7 @@ function shell(opts: BlogShellOpts): string {
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>${esc(title)}</title>
 <meta name="description" content="${esc(description)}" />
-<meta name="robots" content="index, follow, max-image-preview:large" />
+<meta name="robots" content="${noindex ? 'noindex, follow' : 'index, follow, max-image-preview:large'}" />
 <link rel="canonical" href="${esc(url)}" />
 ${hreflangTags(blogPath)}
 <meta property="og:type" content="article" />
@@ -236,6 +237,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from('blog_posts').select('*').eq('slug', slug).eq('status', 'published').single();
     if (!post) return res.status(404).send('Not found');
 
+    const hasNativeTitle = !!post[`title_${locale}`];
     const title = resolve(post, 'title', locale);
     const excerpt = resolve(post, 'excerpt', locale);
     const content = resolve(post, 'content', locale);
@@ -278,6 +280,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       publishedTime: post.published_at as string,
       modifiedTime: (post.updated_at as string) || undefined,
       tag: (post.tag as string) || undefined,
+      noindex: !hasNativeTitle,
     }), {
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Language': locale,
@@ -296,6 +299,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const items = posts || [];
   const blogPath = '/blog';
   const url = buildCanonicalUrl(blogPath, locale);
+  const hasAnyTranslation = items.some((p: Record<string, unknown>) => !!p[`title_${locale}`]);
 
   const cards = items.map((p: Record<string, unknown>) => {
     const t = resolve(p, 'title', locale);
@@ -348,6 +352,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   sendSsrHtml(req, res, shell({
     locale, domain, blogPath, title: `${l.blog} | Tutlio`, description: blogDesc, url, image: '', body, jsonLd: blogListJsonLd,
+    noindex: !hasAnyTranslation,
   }), {
     'Content-Type': 'text/html; charset=utf-8',
     'Content-Language': locale,

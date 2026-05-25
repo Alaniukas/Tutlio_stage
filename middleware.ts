@@ -1,7 +1,7 @@
 import { next, rewrite } from '@vercel/functions';
 
 const LOCALES = new Set(['en', 'lt', 'pl', 'lv', 'ee', 'fr', 'es', 'de', 'se', 'dk', 'fi', 'no']);
-const FEATURES = new Set(['calendar', 'waitlist', 'payments', 'reminders']);
+const FEATURES = new Set(['calendar', 'waitlist', 'payments', 'reminders', 'cancellation', 'comments']);
 
 /** Crawlers and AI fetchers — humans always get the Vite SPA. */
 const BOT_UA =

@@ -15,7 +15,7 @@ import {
   faqJsonLd,
 } from './_lib/ssr-shell.js';
 
-type FeatureId = 'calendar' | 'waitlist' | 'payments' | 'reminders';
+type FeatureId = 'calendar' | 'waitlist' | 'payments' | 'reminders' | 'cancellation' | 'comments';
 
 interface FeatureConfig {
   path: string;
@@ -53,6 +53,20 @@ const FEATURES: Record<FeatureId, FeatureConfig> = {
     descKey: 'feature.reminders.pageDesc',
     detailKeys: ['beforeLesson', 'afterLesson', 'paymentDue', 'customTiming'],
     faqKeys: ['channels', 'customize', 'disable'],
+  },
+  cancellation: {
+    path: '/features/cancellation',
+    titleKey: 'feature.cancellation.pageTitle',
+    descKey: 'feature.cancellation.pageDesc',
+    detailKeys: ['deadlines', 'fees', 'waitlistLink', 'transparency'],
+    faqKeys: ['howSet', 'studentSee', 'refund'],
+  },
+  comments: {
+    path: '/features/comments',
+    titleKey: 'feature.comments.pageTitle',
+    descKey: 'feature.comments.pageDesc',
+    detailKeys: ['lessonNotes', 'fileSharing', 'history', 'parentAccess'],
+    faqKeys: ['whoSees', 'fileTypes', 'storage'],
   },
 };
 

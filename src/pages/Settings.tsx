@@ -6,11 +6,12 @@ import { useUser } from '@/contexts/UserContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { User, Mail, Phone, Save, Lock, Building2, Eye, EyeOff, CreditCard, Calendar, CheckCircle2, XCircle, Sparkles } from 'lucide-react';
+import { User, Mail, Phone, Save, Lock, Building2, Eye, EyeOff, CreditCard, Calendar, CheckCircle2, XCircle, Sparkles, Shield } from 'lucide-react';
 import { formatLithuanianPhone, validateLithuanianPhone } from '@/lib/utils';
 import { hasActiveSubscription } from '@/lib/subscription';
 import { useTranslation } from '@/lib/i18n';
 import PwaInstallGuide from '@/components/PwaInstallGuide';
+import OrgTutorPolicyModal from '@/components/OrgTutorPolicyModal';
 
 interface TutorProfile {
   full_name: string;
@@ -61,6 +62,7 @@ export default function SettingsPage() {
   const [passwordError, setPasswordError] = useState('');
   const [passwordSuccess, setPasswordSuccess] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
+  const [policyOpen, setPolicyOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
@@ -706,6 +708,31 @@ export default function SettingsPage() {
             </div>
           )}
         </div>
+
+        {profile?.organization_id && (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center">
+                  <Shield className="w-5 h-5 text-indigo-600" />
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold text-gray-900">{t('orgTutorPolicy.title')}</h2>
+                  <p className="text-xs text-gray-500">{t('orgTutorPolicy.intro')}</p>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPolicyOpen(true)}
+                className="rounded-xl"
+              >
+                {t('orgTutorPolicy.viewBtn')}
+              </Button>
+            </div>
+            <OrgTutorPolicyModal open={policyOpen} onOpenChange={setPolicyOpen} />
+          </div>
+        )}
 
         <PwaInstallGuide />
       </div>

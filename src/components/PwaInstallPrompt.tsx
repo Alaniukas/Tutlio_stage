@@ -60,31 +60,35 @@ export default function PwaInstallPrompt({ settingsPath }: PwaInstallPromptProps
 
   return (
     <div className="fixed left-1/2 -translate-x-1/2 z-[9999] w-[calc(100%-2rem)] max-w-md animate-fade-in top-[max(1rem,env(safe-area-inset-top))]">
-      <div className="bg-white rounded-2xl shadow-lg border border-gray-200/80 flex items-center gap-3 pl-4 pr-2 py-2.5">
-        <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0">
-          <Smartphone className="w-4 h-4 text-indigo-600" />
+      <div className="bg-white rounded-2xl shadow-lg border border-gray-200/80 px-4 py-3 space-y-2.5">
+        <div className="flex items-start gap-3">
+          <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+            <Smartphone className="w-4 h-4 text-indigo-600" />
+          </div>
+          <p className="text-sm text-gray-700 font-medium flex-1 min-w-0 leading-snug">
+            {t('pwa.bannerText')}
+          </p>
+          <button
+            onClick={handleDismiss}
+            className="p-1 text-gray-300 hover:text-gray-500 transition-colors flex-shrink-0 -mr-1 -mt-0.5"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
-        <p className="text-sm text-gray-700 font-medium flex-1 min-w-0 leading-snug">
-          {t('pwa.bannerText')}
-        </p>
-        <button
-          onClick={handleHowTo}
-          className="px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 transition-colors flex-shrink-0"
-        >
-          {t('pwa.howToInstall')}
-        </button>
-        <button
-          onClick={handleDontShowAgain}
-          className="text-[11px] text-gray-400 hover:text-gray-600 font-medium flex-shrink-0 whitespace-nowrap transition-colors"
-        >
-          {t('pwa.dontShowAgain')}
-        </button>
-        <button
-          onClick={handleDismiss}
-          className="p-1 text-gray-300 hover:text-gray-500 transition-colors flex-shrink-0"
-        >
-          <X className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-2 pl-11">
+          <button
+            onClick={handleHowTo}
+            className="px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 transition-colors"
+          >
+            {t('pwa.howToInstall')}
+          </button>
+          <button
+            onClick={handleDontShowAgain}
+            className="text-[11px] text-gray-400 hover:text-gray-600 font-medium whitespace-nowrap transition-colors"
+          >
+            {t('pwa.dontShowAgain')}
+          </button>
+        </div>
       </div>
     </div>
   );
