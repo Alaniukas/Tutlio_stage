@@ -77,6 +77,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       break_between_lessons,
       min_booking_hours,
       company_commission_percent,
+      personal_meeting_link,
       locale: bodyLocale,
     } = req.body as {
       organizationId: string;
@@ -149,6 +150,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       break_between_lessons,
       min_booking_hours,
       company_commission_percent,
+      personal_meeting_link: String(personal_meeting_link || '').trim() || null,
     });
 
     if (inviteError) {
@@ -188,7 +190,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (rawError) {
         emailError =
           rawError.includes('not configured') || rawError.includes('RESEND')
-            ? 'Email service not configured (RESEND).'
+            ? 'Email service not configured (set RESEND_API_KEY or RESEND_API_KEY_STAGE).'
             : rawError;
       }
     } catch (emailErr: any) {

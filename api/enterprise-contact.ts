@@ -1,8 +1,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { Resend } from 'resend';
 import { createClient } from '@supabase/supabase-js';
-
-const resend = new Resend(process.env.RESEND_API_KEY);
+import { getResendApiKey } from './_lib/resendConfig.js';
 const FROM_EMAIL = process.env.FROM_EMAIL || 'Tutlio <onboarding@tutlio.lt>';
 const NOTIFY_EMAILS = ['simas0423@gmail.com', 'alaniukasa@gmail.com'];
 
@@ -74,12 +73,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       </div>
     `;
 
-    await resend.emails.send({
-      from: FROM_EMAIL,
-      to: NOTIFY_EMAILS,
-      subject: `[Tutlio] Enterprise request from ${companyName}`,
-      html: emailHtml,
-    });
+    const apiKey = getResendApiKey();
+    if (apiKey) {
+      const resend = new Resend(apiKey);
+      await resend.emails.send({
+        from: FROM_EMAIL,
+        to: NOTIFY_EMAILS,
+        subject: `[Tutlio] Enterprise request from ${companyName}`,
+        html: emailHtml,
+      });
+    } else {
+      console.warn('[enterprise-contact] Resend not configured — saved to DB only');
+    }
 
     return res.status(200).json({ success: true });
   } catch (err) {

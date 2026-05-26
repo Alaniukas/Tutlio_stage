@@ -92,6 +92,11 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { cancelSessionAndFillWaitlist, releaseSessionSlotViaApi } from '@/lib/lesson-actions';
 import { Checkbox } from '@/components/ui/checkbox';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
+import {
+  advanceRecurringOccurrence,
+  recurringMaterializeEndDate,
+} from '@/lib/recurringSessions';
+import { resolveLessonMeetingLink } from '@/lib/meetingLink';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { formatContactForTutorView } from '@/lib/orgContactVisibility';
@@ -935,10 +940,11 @@ export default function CalendarPage() {
 
   const resolveMeetingLink = useCallback((subjectLink: string | undefined, studentId?: string) => {
     const student = studentId ? students.find(s => s.id === studentId) : undefined;
-    const studentLink = (student as any)?.personal_meeting_link;
-    if (studentLink) return studentLink;
-    if (tutorMeetingLink) return tutorMeetingLink;
-    return subjectLink || '';
+    return resolveLessonMeetingLink({
+      subjectLink,
+      tutorPersonalLink: tutorMeetingLink,
+      studentPersonalLink: (student as any)?.personal_meeting_link,
+    });
   }, [students, tutorMeetingLink]);
 
   const handleSelectSlot = useCallback(({ start, end }: { start: Date; end: Date }, opts?: { forceCreate?: boolean }) => {
@@ -1296,7 +1302,7 @@ export default function CalendarPage() {
     const endDate = new Date(endTime);
     const durationMs = endDate.getTime() - startDate.getTime();
 
-    if (isRecurring && recurringEndDate) {
+    if (isRecurring) {
       // Get subject data for group lesson logic
       const subject = subjects.find((s) => s.id === selectedSubjectId);
       const studentIdsToCreate = isGroupLesson ? selectedStudentIds : [selectedStudentId];
@@ -1335,7 +1341,7 @@ export default function CalendarPage() {
               start_time: timeStr,
               end_time: endTimeStr,
               start_date: format(firstOccurrence, 'yyyy-MM-dd'),
-              end_date: recurringEndDate,
+              end_date: recurringEndDate.trim() || null,
               meeting_link: meetingLink || null,
               topic: topic || null,
               price: studentPrice,
@@ -1374,15 +1380,7 @@ export default function CalendarPage() {
 
       const sessions: any[] = [];
       const packagesUsage = new Map();
-      const endLimit = parseISO(recurringEndDate);
-
-      const advanceCurrent = (d: Date): Date => {
-        switch (recurringFrequency) {
-          case 'biweekly': return addWeeks(d, 2);
-          case 'monthly': return addMonths(d, 1);
-          default: return addWeeks(d, 1);
-        }
-      };
+      const endLimit = recurringMaterializeEndDate(recurringEndDate, startDate);
 
       for (const template of recurringTemplates) {
         let current = new Date(template.firstOccurrence);
@@ -1432,7 +1430,7 @@ export default function CalendarPage() {
             available_spots: subject?.is_group ? subject.max_students : null,
           });
 
-          current = advanceCurrent(current);
+          current = advanceRecurringOccurrence(current, recurringFrequency);
         }
       }
 
@@ -1522,6 +1520,9 @@ export default function CalendarPage() {
             const normalizedPayer = String(studentData.payment_payer || '').trim().toLowerCase();
             const payerEmail = String(studentData.payer_email || '').trim();
             const hasPayer = normalizedPayer === 'parent' && payerEmail.length > 0;
+            const weekdayNames = ['sekmadienį', 'pirmadienį', 'antradienį', 'trečiadienį', 'ketvirtadienį', 'penktadienį', 'šeštadienį'];
+            const recurringWeekday = weekdayNames[getDay(firstStart)];
+            const recurringTime = format(firstStart, 'HH:mm');
 
             const studentNotifyTo = await resolveStudentNotificationEmail(studentData);
             if (studentNotifyTo) {
@@ -1535,6 +1536,8 @@ export default function CalendarPage() {
                   duration: Math.round(durationMs / 60000),
                   totalLessons: studentSessionList.length,
                   sessions: sessionDates,
+                  recurringWeekday,
+                  recurringTime,
                   ...(orgIdBranding ? { organizationId: orgIdBranding } : {}),
                 },
               }).catch(err => console.error('Error sending recurring booking email:', err));
@@ -1554,6 +1557,8 @@ export default function CalendarPage() {
                   duration: Math.round(durationMs / 60000),
                   totalLessons: studentSessionList.length,
                   sessions: sessionDates,
+                  recurringWeekday,
+                  recurringTime,
                   paymentReminderNote: true,
                   ...(orgIdBranding ? { organizationId: orgIdBranding } : {}),
                 },
@@ -2088,6 +2093,7 @@ export default function CalendarPage() {
     );
 
     let createdCount = 0;
+    const createdSessionsByStudent = new Map<string, any[]>();
 
     for (const dateStr of occurrenceDates) {
       const startDateTime = new Date(`${dateStr}T${assignSelectedSlot}`).toISOString();
@@ -2175,7 +2181,7 @@ export default function CalendarPage() {
             lesson_package_id: lessonPackageId,
             price: price,
             topic: assignTopic || subject?.name || '',
-            meeting_link: assignMeetingLink || subject?.meeting_link || null,
+            meeting_link: resolveMeetingLink(subject?.meeting_link, studentId) || assignMeetingLink || null,
             available_spots: null, // Will be updated after all students are added
           }])
           .select()
@@ -2186,128 +2192,9 @@ export default function CalendarPage() {
           continue; // Skip this student and continue with others
         }
         createdCount++;
-
-      // Notify student & parent/payer
-      if (student) {
-        const { data: tutorProfile } = await supabase
-          .from('profiles')
-          .select('full_name, cancellation_hours, cancellation_fee_percent, stripe_account_id, organization_id, payment_timing, enable_per_lesson, enable_monthly_billing')
-          .eq('id', user.id)
-          .single();
-
-        const normalizedPayer = String(student.payment_payer || '').trim().toLowerCase();
-        const payerEmail = String(student.payer_email || '').trim();
-        const hasPayer = normalizedPayer === 'parent' && payerEmail.length > 0;
-        const assignSlotMeetingLink = assignMeetingLink || subject?.meeting_link || null;
-        const orgIdAssign = (tutorProfile as any)?.organization_id as string | undefined;
-
-        const studentAssignTo = await resolveStudentNotificationEmail(student);
-        if (studentAssignTo) {
-          sendEmail({
-            type: 'booking_confirmation',
-            to: studentAssignTo,
-            data: {
-              studentName: student.full_name,
-              tutorName: tutorProfile?.full_name || '',
-              date: dateStr,
-              time: assignSelectedSlot,
-              subject: subject?.name || '',
-              price: hasPayer ? null : price,
-              duration: duration,
-              cancellationHours: hasPayer ? null : (tutorProfile?.cancellation_hours || 24),
-              cancellationFeePercent: hasPayer ? null : (tutorProfile?.cancellation_fee_percent || 0),
-              paymentStatus: hasPayer ? null : (sessionPaid ? 'paid' : 'pending'),
-              meetingLink: assignSlotMeetingLink,
-              hidePaymentInfo: hasPayer,
-              ...(orgIdAssign ? { organizationId: orgIdAssign } : {}),
-            },
-          }).catch(err => console.error('Error sending booking email:', err));
-        }
-
-        if (hasPayer) {
-          sendEmail({
-            type: 'booking_confirmation',
-            to: payerEmail,
-            data: {
-              forPayer: true,
-              bookedBy: 'tutor',
-              studentName: student.full_name,
-              tutorName: tutorProfile?.full_name || '',
-              date: dateStr,
-              time: assignSelectedSlot,
-              subject: subject?.name || '',
-              price,
-              duration: duration,
-              cancellationHours: tutorProfile?.cancellation_hours ?? 24,
-              cancellationFeePercent: tutorProfile?.cancellation_fee_percent ?? 0,
-              paymentStatus: sessionPaid ? 'paid' : 'pending',
-              meetingLink: assignSlotMeetingLink,
-              ...(orgIdAssign ? { organizationId: orgIdAssign } : {}),
-            },
-          }).catch(err => console.error('Error sending payer booking confirmation email:', err));
-
-          let effectivePaymentTiming = ((tutorProfile as any)?.payment_timing as string | null) ?? 'before_lesson';
-          let effectiveEnablePerLesson = !!(tutorProfile as any)?.enable_per_lesson;
-          let effectiveEnableMonthlyBilling = !!(tutorProfile as any)?.enable_monthly_billing;
-          if ((tutorProfile as any)?.organization_id) {
-            const { data: orgPayFlags } = await supabase
-              .from('organizations')
-              .select('enable_per_lesson, enable_monthly_billing, payment_timing')
-              .eq('id', (tutorProfile as any).organization_id)
-              .maybeSingle();
-            if (orgPayFlags) {
-              effectiveEnablePerLesson = !!(orgPayFlags as any).enable_per_lesson;
-              effectiveEnableMonthlyBilling = !!(orgPayFlags as any).enable_monthly_billing;
-              effectivePaymentTiming = ((orgPayFlags as any).payment_timing as string | null) || effectivePaymentTiming;
-            }
-          }
-
-          const studentModel = student.payment_model as string | null | undefined;
-          const allowsPerLessonNow =
-            studentModel === 'per_lesson'
-              ? true
-              : studentModel === 'monthly_billing' || studentModel === 'prepaid_packages'
-                ? false
-                : effectiveEnablePerLesson && !effectiveEnableMonthlyBilling;
-
-          const shouldSendParentPaymentNow =
-            !sessionPaid &&
-            !lessonPackageId &&
-            allowsPerLessonNow &&
-            effectivePaymentTiming === 'before_lesson';
-
-          if (shouldSendParentPaymentNow) {
-            try {
-              const checkoutRes = await fetch('/api/stripe-checkout', {
-                method: 'POST',
-                headers: await authHeaders(),
-                body: JSON.stringify({ sessionId: sessionData.id, payerEmail }),
-              });
-              const checkoutJson = await checkoutRes.json().catch(() => ({} as any));
-              if (checkoutJson?.creditFullyCovered) {
-                console.info('[Calendar] Credit fully covered lesson (assign)');
-              } else if (checkoutRes.ok && checkoutJson?.url) {
-                const stableLink = `${window.location.origin}/api/pay-session?session=${sessionData.id}`;
-                sendEmail({
-                  type: 'stripe_payment_forwarding',
-                  to: payerEmail,
-                  data: {
-                    studentName: student.full_name,
-                    tutorName: tutorProfile?.full_name || '',
-                    date: dateStr,
-                    time: assignSelectedSlot,
-                    amount: sessionData.price ?? price,
-                    paymentLink: stableLink,
-                    ...(orgIdAssign ? { organizationId: orgIdAssign } : {}),
-                  },
-                }).catch(err => console.error('Error sending parent payment email:', err));
-              }
-            } catch (err) {
-              console.error('Error creating checkout for parent:', err);
-            }
-          }
-        }
-      }
+        const bucket = createdSessionsByStudent.get(studentId) || [];
+        bucket.push(sessionData);
+        createdSessionsByStudent.set(studentId, bucket);
 
         // Sync to Google Calendar
         if (googleCalendarConnected) {
@@ -2337,6 +2224,125 @@ export default function CalendarPage() {
             .from('sessions')
             .update({ available_spots: Math.max(0, remaining) })
             .in('id', allSessionsAtTime.map(s => s.id));
+        }
+      }
+    }
+
+    if (createdSessionsByStudent.size > 0) {
+      const { data: tutorProfile } = await supabase
+        .from('profiles')
+        .select('full_name, cancellation_hours, cancellation_fee_percent, stripe_account_id, organization_id, payment_timing, enable_per_lesson, enable_monthly_billing')
+        .eq('id', user.id)
+        .single();
+      const orgIdAssign = (tutorProfile as any)?.organization_id as string | undefined;
+
+      for (const [studentId, studentSessionList] of createdSessionsByStudent) {
+        const student = students.find((s) => s.id === studentId);
+        if (!student) continue;
+        const sorted = [...studentSessionList].sort(
+          (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
+        );
+        const first = sorted[0];
+        const normalizedPayer = String(student.payment_payer || '').trim().toLowerCase();
+        const payerEmail = String(student.payer_email || '').trim();
+        const hasPayer = normalizedPayer === 'parent' && payerEmail.length > 0;
+        const slotMeetingLink =
+          first.meeting_link || resolveMeetingLink(subject?.meeting_link, studentId) || assignMeetingLink || null;
+
+        if (sorted.length > 1) {
+          const sessionDates = sorted.map((s) => ({
+            date: format(new Date(s.start_time), 'yyyy-MM-dd'),
+            time: format(new Date(s.start_time), 'HH:mm'),
+          }));
+          const firstDow = getDay(new Date(first.start_time));
+          const weekdayNames = ['sekmadienį', 'pirmadienį', 'antradienį', 'trečiadienį', 'ketvirtadienį', 'penktadienį', 'šeštadienį'];
+          const studentAssignTo = await resolveStudentNotificationEmail(student);
+          if (studentAssignTo) {
+            void sendEmail({
+              type: 'recurring_booking_confirmation',
+              to: studentAssignTo,
+              data: {
+                bookedBy: 'tutor',
+                studentName: student.full_name,
+                tutorName: tutorProfile?.full_name || '',
+                subject: assignTopic || subject?.name || '',
+                duration,
+                totalLessons: sorted.length,
+                sessions: sessionDates,
+                recurringWeekday: weekdayNames[firstDow],
+                recurringTime: assignSelectedSlot,
+                ...(orgIdAssign ? { organizationId: orgIdAssign } : {}),
+              },
+            }).catch((err) => console.error('Error sending assign recurring email:', err));
+          }
+          if (hasPayer) {
+            void sendEmail({
+              type: 'recurring_booking_confirmation',
+              to: payerEmail,
+              data: {
+                forPayer: true,
+                bookedBy: 'tutor',
+                studentName: student.full_name,
+                payerName: (student as any).payer_name || student.full_name,
+                tutorName: tutorProfile?.full_name || '',
+                subject: assignTopic || subject?.name || '',
+                duration,
+                totalLessons: sorted.length,
+                sessions: sessionDates,
+                recurringWeekday: weekdayNames[firstDow],
+                recurringTime: assignSelectedSlot,
+                paymentReminderNote: true,
+                ...(orgIdAssign ? { organizationId: orgIdAssign } : {}),
+              },
+            }).catch((err) => console.error('Error sending assign recurring payer email:', err));
+          }
+        } else {
+          const s = first;
+          const dateStr = format(new Date(s.start_time), 'yyyy-MM-dd');
+          const studentAssignTo = await resolveStudentNotificationEmail(student);
+          if (studentAssignTo) {
+            void sendEmail({
+              type: 'booking_confirmation',
+              to: studentAssignTo,
+              data: {
+                studentName: student.full_name,
+                tutorName: tutorProfile?.full_name || '',
+                date: dateStr,
+                time: format(new Date(s.start_time), 'HH:mm'),
+                subject: assignTopic || subject?.name || '',
+                price: hasPayer ? null : s.price,
+                duration,
+                cancellationHours: hasPayer ? null : (tutorProfile?.cancellation_hours || 24),
+                cancellationFeePercent: hasPayer ? null : (tutorProfile?.cancellation_fee_percent || 0),
+                paymentStatus: hasPayer ? null : (s.paid ? 'paid' : 'pending'),
+                meetingLink: slotMeetingLink,
+                hidePaymentInfo: hasPayer,
+                ...(orgIdAssign ? { organizationId: orgIdAssign } : {}),
+              },
+            }).catch((err) => console.error('Error sending booking email:', err));
+          }
+          if (hasPayer) {
+            void sendEmail({
+              type: 'booking_confirmation',
+              to: payerEmail,
+              data: {
+                forPayer: true,
+                bookedBy: 'tutor',
+                studentName: student.full_name,
+                tutorName: tutorProfile?.full_name || '',
+                date: dateStr,
+                time: format(new Date(s.start_time), 'HH:mm'),
+                subject: assignTopic || subject?.name || '',
+                price: s.price,
+                duration,
+                cancellationHours: tutorProfile?.cancellation_hours ?? 24,
+                cancellationFeePercent: tutorProfile?.cancellation_fee_percent ?? 0,
+                paymentStatus: s.paid ? 'paid' : 'pending',
+                meetingLink: slotMeetingLink,
+                ...(orgIdAssign ? { organizationId: orgIdAssign } : {}),
+              },
+            }).catch((err) => console.error('Error sending payer booking confirmation email:', err));
+          }
         }
       }
     }
@@ -4145,13 +4151,18 @@ export default function CalendarPage() {
                     </div>
                   )}
                   <div className="space-y-1.5">
-                    <Label className="text-xs">Kartotis iki *</Label>
+                    <Label className="text-xs">Kartotis iki (neprivaloma)</Label>
                     <DateInput
                       value={recurringEndDate}
                       onChange={(e) => setRecurringEndDate(e.target.value)}
                       min={startTime ? format(addWeeks(new Date(startTime), 1), 'yyyy-MM-dd') : undefined}
                       className="rounded-xl text-sm"
                     />
+                    {!recurringEndDate && (
+                      <p className="text-xs text-gray-500">
+                        Jei paliksite tuščią, pamokos kartosis nuolat (sistemoje sugeneruojamos į priekį ~2 metus).
+                      </p>
+                    )}
                     {recurringEndDate && startTime && (() => {
                       const startMs = new Date(startTime).getTime();
                       const endMs = parseISO(recurringEndDate).getTime();
@@ -4199,7 +4210,7 @@ export default function CalendarPage() {
                   const isGroupLesson = selectedSubject?.is_group;
                   const hasStudents = isGroupLesson ? selectedStudentIds.length > 0 : !!selectedStudentId;
                   const weekdayMissing = isRecurring && recurringFrequency !== 'monthly' && selectedWeekdays.length === 0;
-                  return licenseFrozen || saving || !hasStudents || !startTime || !endTime || (isRecurring && !recurringEndDate) || weekdayMissing;
+                  return licenseFrozen || saving || !hasStudents || !startTime || !endTime || weekdayMissing;
                 })()}
                 title={licenseFrozen ? t('cal.licenseFrozenTitle') : undefined}
                 className="rounded-xl"

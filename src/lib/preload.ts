@@ -309,11 +309,7 @@ export async function preloadOrgAdminData() {
     const org = adminRow.organizations as any;
     const orgId = adminRow.organization_id;
 
-    const [{ data: adminUsers }, { data: tutorData }, { data: inviteData }, { data: linkedStudentsRows }] = await Promise.all([
-      supabase
-        .from('organization_admins')
-        .select('user_id')
-        .eq('organization_id', orgId),
+    const [{ data: tutorData }, { data: inviteData }] = await Promise.all([
       supabase
         .from('profiles')
         .select('id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, has_active_license')
@@ -323,29 +319,13 @@ export async function preloadOrgAdminData() {
         .select('*')
         .eq('organization_id', orgId)
         .order('created_at', { ascending: false }),
-      supabase
-        .from('students')
-        .select('linked_user_id, email')
-        .eq('organization_id', orgId),
     ]);
 
-    const adminIds = new Set((adminUsers || []).map((a: any) => a.user_id));
-    const linkedStudentUserIds = new Set(
-      (linkedStudentsRows || [])
-        .map((s: { linked_user_id?: string | null }) => s.linked_user_id)
-        .filter((id: string | null | undefined): id is string => !!id)
-    );
-    const linkedStudentEmails = new Set(
-      (linkedStudentsRows || [])
-        .map((s: { email?: string | null }) => String(s.email || '').trim().toLowerCase())
-        .filter((email: string) => email.length > 0)
-    );
-    // Match CompanyTutors: exclude org admins and org student accounts (linked profiles)
-    const visibleTutors = (tutorData || []).filter(
-      (t: { id: string; email?: string | null }) =>
-        !adminIds.has(t.id) &&
-        !linkedStudentUserIds.has(t.id) &&
-        !linkedStudentEmails.has(String(t.email || '').trim().toLowerCase())
+    const { getOrgVisibleTutors } = await import('@/lib/orgVisibleTutors');
+    const visibleTutors = await getOrgVisibleTutors(
+      supabase,
+      orgId,
+      'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, has_active_license',
     );
     const tutorIds = visibleTutors.map((t: any) => t.id);
 
@@ -426,6 +406,11 @@ export async function preloadOrgAdminData() {
     }
 
     if (!getCached('company_dashboard')) {
+      const { data: adminUsers } = await supabase
+        .from('organization_admins')
+        .select('user_id')
+        .eq('organization_id', orgId);
+      const adminIds = new Set((adminUsers || []).map((a: { user_id: string }) => a.user_id));
       preloadDashboard(org, orgId, adminIds, tutorIds, visibleTutors, sessionsRes.data || []);
     }
 

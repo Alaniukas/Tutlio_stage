@@ -43,6 +43,7 @@ import StudentPaymentModelSection from '@/components/StudentPaymentModelSection'
 import SendInvoiceModal from '@/components/SendInvoiceModal';
 import { pickStudentContactsForTutorEmail, shouldShowPayerContactSection } from '@/lib/orgContactVisibility';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
+import { findOrgTutorEmailConflict } from '@/lib/orgStudentTutorGuards';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 
 interface Student {
@@ -892,6 +893,18 @@ export default function CompanyStudents() {
         effectiveOrgId = orgId;
       } else {
         effectiveOrgId = ids[0];
+      }
+    }
+
+    if (effectiveOrgId && newStudent.email?.trim()) {
+      const orgTutors = await getOrgVisibleTutors(supabase, effectiveOrgId, 'id, email, full_name');
+      const conflict = findOrgTutorEmailConflict(newStudent.email, orgTutors);
+      if (conflict) {
+        setToastMessage({
+          message: t('compStu.emailMatchesOrgTutor', { name: conflict.tutorName }),
+          type: 'error',
+        });
+        return;
       }
     }
 

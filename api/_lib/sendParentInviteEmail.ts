@@ -3,6 +3,7 @@
  * Avoids HTTP to /api/send-email — unreliable on localhost and can be cut off on Vercel.
  */
 import { Resend } from 'resend';
+import { getResendApiKey, resendNotConfiguredMessage } from './resendConfig.js';
 import { t, localizedFromEmail, type Locale } from './i18n.js';
 import { headerInlineStyle } from './outlookEmail.js';
 
@@ -54,9 +55,9 @@ export async function sendParentInviteEmail(
   to: string,
   data: ParentInviteEmailData,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const apiKey = process.env.RESEND_API_KEY?.trim();
+  const apiKey = getResendApiKey();
   if (!apiKey) {
-    return { ok: false, error: 'Email service not configured (RESEND_API_KEY)' };
+    return { ok: false, error: resendNotConfiguredMessage() };
   }
 
   const locale: Locale = (data.locale as Locale) || 'lt';

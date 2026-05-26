@@ -47,35 +47,15 @@ export default function FindTutorModal({ isOpen, onClose, orgId, onPickSlot }: F
   useEffect(() => {
     if (!isOpen || !orgId) return;
     (async () => {
-      const { data: adminUsers } = await supabase.from('organization_admins').select('user_id').eq('organization_id', orgId);
-      const adminIds = new Set((adminUsers || []).map((a: any) => a.user_id));
-      const { data: profiles } = await supabase.from('profiles').select('id, full_name, email, has_active_license').eq('organization_id', orgId);
-      const { data: linkedStudents } = await supabase
-        .from('students')
-        .select('linked_user_id, email')
-        .eq('organization_id', orgId);
-      const linkedStudentUserIds = new Set(
-        (linkedStudents || [])
-          .map((s: any) => s.linked_user_id)
-          .filter((id: string | null | undefined): id is string => Boolean(id)),
-      );
-      const linkedStudentEmails = new Set(
-        (linkedStudents || [])
-          .map((s: any) => String(s.email || '').trim().toLowerCase())
-          .filter((email: string) => email.length > 0),
-      );
+      const { getOrgVisibleTutors } = await import('@/lib/orgVisibleTutors');
       const { data: orgRow } = await supabase
         .from('organizations')
         .select('tutor_license_count')
         .eq('id', orgId)
         .single();
       const orgUsesLicenses = (Number(orgRow?.tutor_license_count) || 0) > 0;
-      const tutorList = (profiles || []).filter(
-        (p: any) =>
-          !adminIds.has(p.id) &&
-          !linkedStudentUserIds.has(p.id) &&
-          !linkedStudentEmails.has(String(p.email || '').trim().toLowerCase()) &&
-          (!orgUsesLicenses || p.has_active_license !== false),
+      const tutorList = (await getOrgVisibleTutors(supabase, orgId, 'id, full_name, email, has_active_license')).filter(
+        (p) => !orgUsesLicenses || p.has_active_license !== false,
       );
       const map: Record<string, string> = {};
       tutorList.forEach((t: any) => { map[t.id] = t.full_name; });

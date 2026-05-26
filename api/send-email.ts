@@ -14,8 +14,7 @@ import { createClient } from '@supabase/supabase-js';
 import { outlookEmailButton, headerInlineStyle } from './_lib/outlookEmail.js';
 import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClientOptions.js';
 import { sendPushForEmail } from './_lib/sendPush.js';
-
-const resend = new Resend(process.env.RESEND_API_KEY);
+import { getResendApiKey, resendNotConfiguredMessage } from './_lib/resendConfig.js';
 
 
 function randomToken() {
@@ -554,6 +553,18 @@ function recurringBookingConfirmation(d: any, locale: Locale) {
     : t(locale, 'em.recurringSub', { count: String(count), tutor: d.tutorName });
 
   const accountLink = d.forPayer ? appUrl : `${appUrl}/student/sessions`;
+  const weekday = String(d.recurringWeekday || '').trim();
+  const recurTime = String(d.recurringTime || '').trim();
+  const showCompactSummary = weekday && recurTime && count > 0;
+  const showFullTable = !showCompactSummary || count <= 20;
+
+  const summaryBlock = showCompactSummary
+    ? `<div style="background:#eef2ff; border:1px solid #c7d2fe; border-radius:12px; padding:16px; margin:16px 0;">
+        <p style="margin:0; color:#312e81; font-size:15px; font-weight:600; line-height:1.5;">
+          Suplanuota <strong>${count}</strong> pamokų — kiekvieną <strong>${weekday}</strong>, <strong>${recurTime}</strong>.
+        </p>
+      </div>`
+    : '';
 
   return {
     subject: subjectLine,
@@ -562,12 +573,13 @@ function recurringBookingConfirmation(d: any, locale: Locale) {
       <div class="body">
         <p class="greeting">${t(locale, 'em.hiName', { name: d.forPayer ? (d.payerName || '') : d.studentName })}</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">${intro}</p>
+        ${summaryBlock}
         ${table(
           (d.subject ? td(t(locale, 'em.recurringSubjectLabel'), d.subject) : '') +
           (d.duration ? td(t(locale, 'em.recurringDurationLabel'), `${d.duration} ${t(locale, 'em.min')}`) : '') +
           td(t(locale, 'em.recurringTotalLabel'), String(count), false)
         )}
-        <div style="background:#f8f7ff; border:1px solid #e5e3ff; border-radius:12px; padding:16px; margin:20px 0;">
+        ${showFullTable ? `<div style="background:#f8f7ff; border:1px solid #e5e3ff; border-radius:12px; padding:16px; margin:20px 0;">
           <h3 style="color:#4f46e5; font-size:15px; margin:0 0 12px 0; font-weight:700;">${t(locale, 'em.recurringScheduleTitle')}</h3>
           <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
             <thead>
@@ -578,7 +590,7 @@ function recurringBookingConfirmation(d: any, locale: Locale) {
             </thead>
             <tbody>${sessionsHtml}</tbody>
           </table>
-        </div>
+        </div>` : ''}
         ${d.forPayer && d.paymentReminderNote ? `
         <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:12px; padding:14px 16px; margin:16px 0;">
           <p style="color:#92400e; font-size:13px; line-height:1.5; margin:0;">
@@ -1996,11 +2008,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!type || !to) {
       return res.status(400).json({ error: 'Missing required fields: type, to' });
     }
-    const apiKey = process.env.RESEND_API_KEY?.trim();
+    const apiKey = getResendApiKey();
     if (!apiKey) {
-      console.error('[send-email] RESEND_API_KEY not set');
-      return res.status(503).json({ error: 'Email service not configured' });
+      console.error('[send-email]', resendNotConfiguredMessage());
+      return res.status(503).json({ error: resendNotConfiguredMessage() });
     }
+    const resend = new Resend(apiKey);
 
     if (type === 'school_contract') {
       const missingFields = Array.isArray(rawData?.missingFields)

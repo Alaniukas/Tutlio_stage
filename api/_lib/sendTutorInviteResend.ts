@@ -4,6 +4,7 @@
  * Matches send-email.ts `tutor_invite` (LT only, Outlook-safe layout).
  */
 import { Resend } from 'resend';
+import { getResendApiKey, resendNotConfiguredMessage } from './resendConfig.js';
 import { t, isValidLocale, localizedFromEmail, type Locale } from './i18n.js';
 import { buildTutorRegisterInviteUrl } from './public-origin.js';
 import { outlookEmailButton, headerInlineStyle } from './outlookEmail.js';
@@ -60,9 +61,9 @@ export async function sendTutorInviteEmail(
   to: string,
   data: TutorInviteEmailData
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const apiKey = process.env.RESEND_API_KEY?.trim();
+  const apiKey = getResendApiKey();
   if (!apiKey) {
-    return { ok: false, error: 'Email service not configured' };
+    return { ok: false, error: resendNotConfiguredMessage() };
   }
 
   const locale: Locale = isValidLocale(data.emailLocale) ? data.emailLocale : 'lt';

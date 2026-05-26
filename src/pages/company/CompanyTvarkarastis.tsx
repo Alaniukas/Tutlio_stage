@@ -135,6 +135,7 @@ interface OrgTutor {
   id: string;
   full_name: string;
   email: string | null;
+  personal_meeting_link?: string | null;
   /** false = explicit „nelicencijuotas“ ribotam org planui; kitaip laisvas naudoti be licencijos režimu */
   has_active_license?: boolean | null;
 }
@@ -463,7 +464,7 @@ export default function CompanyTvarkarastis() {
       const filteredTutors = await getOrgVisibleTutors(
         supabase as any,
         organizationId,
-        'id, full_name, email, has_active_license',
+        'id, full_name, email, has_active_license, personal_meeting_link',
       );
       const tutorIds = filteredTutors.map((t: any) => t.id);
       setOrgTutors(filteredTutors as OrgTutor[]);
@@ -1029,7 +1030,10 @@ export default function CompanyTvarkarastis() {
     }
 
     setCreatePrice(price);
-    setCreateMeetingLink(subj.meeting_link || '');
+    const tutorRow = createTutorId ? orgTutors.find((t) => t.id === createTutorId) : undefined;
+    setCreateMeetingLink(
+      resolveOrgMeetingLink(subj.meeting_link, createStudentId, tutorRow?.personal_meeting_link, students),
+    );
     setCreateTopic(subj.name || '');
 
     const durationMinutes = tsp?.duration_minutes ?? subj.duration_minutes ?? 60;
@@ -2557,7 +2561,7 @@ export default function CompanyTvarkarastis() {
                     </div>
                   )}
                   <div className="space-y-1.5">
-                    <Label className="text-xs">{t('compSch.recurUntilRequired')}</Label>
+                    <Label className="text-xs">Kartotis iki (neprivaloma)</Label>
                     <DateInput
                       value={createRecurringEndDate}
                       onChange={(e) => setCreateRecurringEndDate(e.target.value)}
@@ -2568,6 +2572,11 @@ export default function CompanyTvarkarastis() {
                       }
                       className="rounded-xl text-sm"
                     />
+                    {!createRecurringEndDate && (
+                      <p className="text-xs text-gray-500">
+                        Tuščia = pamokos kartojasi nuolat (sugeneruojamos į priekį ~2 metus).
+                      </p>
+                    )}
                   </div>
                 </div>
               )}
@@ -2664,7 +2673,6 @@ export default function CompanyTvarkarastis() {
                   !hasStudents ||
                   !createStartTime ||
                   !createEndTime ||
-                  (createIsRecurring && !createRecurringEndDate) ||
                   weekdayMissing
                 );
               })()}

@@ -25,10 +25,36 @@ export type OrgTutorRow = {
  * - assigned to at least one student in the org (`students.tutor_id`), OR
  * - has accepted a tutor invite in the org (`tutor_invites.used_by_profile_id`).
  *
- * We also exclude:
- * - organization admins
- * - users that match org student accounts (by `students.linked_user_id` and `students.email`)
+ * We also exclude organization admins.
+ *
+ * Confirmed org tutors (assigned or accepted invite) are never hidden just because they
+ * also have a linked student row — that case broke real tutors who were added as test students.
  */
+export function buildOrgTutorIdSet(
+  linkedStudents: Array<{ tutor_id?: string | null }> | null | undefined,
+  inviteData: Array<{ used_by_profile_id?: string | null }> | null | undefined,
+): Set<string> {
+  const assignedTutorIds = new Set(
+    (linkedStudents || [])
+      .map((s) => s.tutor_id)
+      .filter((id: string | null | undefined): id is string => !!id),
+  );
+  const acceptedTutorIds = new Set(
+    (inviteData || [])
+      .map((inv) => inv.used_by_profile_id)
+      .filter((id: string | null | undefined): id is string => !!id),
+  );
+  return new Set<string>([...assignedTutorIds, ...acceptedTutorIds]);
+}
+
+export function filterConfirmedOrgTutors<T extends { id: string }>(
+  profileRows: T[],
+  adminIds: Set<string>,
+  tutorIdSet: Set<string>,
+): T[] {
+  return profileRows.filter((p) => tutorIdSet.has(p.id) && !adminIds.has(p.id));
+}
+
 export async function getOrgVisibleTutors(
   supabase: SupabaseClient,
   orgId: string,
@@ -43,38 +69,7 @@ export async function getOrgVisibleTutors(
 
   const adminIds = new Set((adminUsers || []).map((a: any) => a.user_id));
 
-  const linkedStudentUserIds = new Set(
-    (linkedStudents || [])
-      .map((s: any) => s.linked_user_id)
-      .filter((id: string | null | undefined): id is string => !!id),
-  );
-  const linkedStudentEmails = new Set(
-    (linkedStudents || [])
-      .map((s: any) => String(s.email || '').trim().toLowerCase())
-      .filter((email: string) => email.length > 0),
-  );
-
-  const assignedTutorIds = new Set(
-    (linkedStudents || [])
-      .map((s: any) => s.tutor_id)
-      .filter((id: string | null | undefined): id is string => !!id),
-  );
-  const acceptedTutorIds = new Set(
-    (inviteData || [])
-      .map((inv: any) => inv.used_by_profile_id)
-      .filter((id: string | null | undefined): id is string => !!id),
-  );
-  const tutorIdSet = new Set<string>([...assignedTutorIds, ...acceptedTutorIds]);
-
-  const rows = (profileRows || []) as any[];
-  return rows.filter((p) => {
-    const email = String(p.email || '').trim().toLowerCase();
-    return (
-      tutorIdSet.has(p.id) &&
-      !adminIds.has(p.id) &&
-      !linkedStudentUserIds.has(p.id) &&
-      !linkedStudentEmails.has(email)
-    );
-  });
+  const tutorIdSet = buildOrgTutorIdSet(linkedStudents, inviteData);
+  return filterConfirmedOrgTutors((profileRows || []) as unknown as OrgTutorRow[], adminIds, tutorIdSet);
 }
 

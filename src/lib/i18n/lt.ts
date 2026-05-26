@@ -1104,6 +1104,8 @@ export const lt: Record<string, string> = {
   'compStu.emailSendFailed': 'Mokinys išsaugotas, bet pakvietimo el. laiško išsiųsti nepavyko. Patikrinkite nustatymus arba nusiųskite nuorodą rankiniu būdu.',
   'compStu.errorGeneric': 'Klaida',
   'compStu.errorManualPackage': 'Klaida kuriant rankinį paketą',
+  'compStu.emailMatchesOrgTutor':
+    'Šis el. paštas priklauso korepetitoriui {name}. Mokiniui naudokite kitą el. paštą arba pirmiausia pašalinkite korepetitoriaus mokinio įrašą.',
   'compStu.errorPrefix': 'Klaida:',
   'compStu.errorSendingPackage': 'Klaida siunčiant paketą',
   'compStu.feePercent': 'Bauda (%)',

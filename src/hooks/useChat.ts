@@ -589,37 +589,11 @@ export function useMessageableStudents() {
       .maybeSingle();
 
     if (adminRow) {
-      const [{ data: admins }, { data: tutors }, { data: linkedStudents }] = await Promise.all([
-        supabase
-          .from('organization_admins')
-          .select('user_id')
-          .eq('organization_id', adminRow.organization_id),
-        supabase
-          .from('profiles')
-          .select('id, full_name, email')
-          .eq('organization_id', adminRow.organization_id),
-        supabase
-          .from('students')
-          .select('linked_user_id, email')
-          .eq('organization_id', adminRow.organization_id),
-      ]);
-
-      const adminIds = new Set((admins ?? []).map((a: any) => a.user_id));
-      const linkedStudentUserIds = new Set(
-        (linkedStudents ?? [])
-          .map((s: any) => s.linked_user_id)
-          .filter((id: string | null | undefined): id is string => Boolean(id)),
-      );
-      const linkedStudentEmails = new Set(
-        (linkedStudents ?? [])
-          .map((s: any) => String(s.email || '').trim().toLowerCase())
-          .filter((email: string) => email.length > 0),
-      );
-      const orgTutors = (tutors ?? []).filter(
-        (t: any) =>
-          !adminIds.has(t.id) &&
-          !linkedStudentUserIds.has(t.id) &&
-          !linkedStudentEmails.has(String(t.email || '').trim().toLowerCase()),
+      const { getOrgVisibleTutors } = await import('@/lib/orgVisibleTutors');
+      const orgTutors = await getOrgVisibleTutors(
+        supabase,
+        adminRow.organization_id,
+        'id, full_name, email',
       );
       const { data: studentData } = await supabase
         .from('students')

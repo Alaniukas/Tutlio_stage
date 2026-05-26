@@ -1106,6 +1106,8 @@ export const en: Record<string, string> = {
   'compStu.emailSendFailed': 'Email send failed',
   'compStu.errorGeneric': 'Error',
   'compStu.errorManualPackage': 'Error creating manual package',
+  'compStu.emailMatchesOrgTutor':
+    'This email belongs to tutor {name}. Use a different email for the student, or remove the tutor’s student record first.',
   'compStu.errorPrefix': 'Error:',
   'compStu.errorSendingPackage': 'Error sending package',
   'compStu.feePercent': 'Fee (%)',

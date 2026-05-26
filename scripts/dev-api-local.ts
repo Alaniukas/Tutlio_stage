@@ -74,6 +74,14 @@ if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
   console.warn('[dev-api-local] SUPABASE_SERVICE_ROLE_KEY missing — /api/cancel-session will fail');
 }
 
+const { getResendApiKey } = await import('../api/_lib/resendConfig.ts');
+const resendKey = getResendApiKey();
+if (!resendKey) {
+  console.warn('[dev-api-local] RESEND_API_KEY / RESEND_API_KEY_STAGE missing — tutor/parent invite emails will fail');
+} else if (!process.env.RESEND_API_KEY?.trim() && process.env.RESEND_API_KEY_STAGE?.trim()) {
+  console.log('[dev-api-local] Using RESEND_API_KEY_STAGE for outbound email');
+}
+
 function buildQuery(url: URL): Record<string, string | string[]> {
   const out: Record<string, string | string[]> = {};
   for (const key of url.searchParams.keys()) {

@@ -144,6 +144,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       authUserId = authData.user.id;
     }
 
+    if (student.tutor_id && student.tutor_id === authUserId) {
+      return res.status(400).json({
+        error: 'You cannot register as a student assigned to your own tutor account',
+        code: 'self_student_tutor',
+      });
+    }
+
     const { error: linkErr } = await supabase.from('students').update({
       email: submittedEmail,
       linked_user_id: authUserId,

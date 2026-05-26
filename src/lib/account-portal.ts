@@ -76,6 +76,17 @@ export async function getHomePathForPortals(
     return getOrgAdminDashboardPath(supabase, userId);
   }
   if (portals.parent) return '/parent';
+
+  // Org tutors who also have a student row (e.g. bad test data) should land on tutor dashboard.
+  if (portals.tutor && portals.student) {
+    const { data: prof } = await supabase
+      .from('profiles')
+      .select('organization_id')
+      .eq('id', userId)
+      .maybeSingle();
+    if (prof?.organization_id) return '/dashboard';
+  }
+
   if (portals.student) return '/student';
   if (portals.tutor) return '/dashboard';
   return null;

@@ -1,4 +1,8 @@
-import { format, parseISO, getDay, addWeeks, addDays, addMonths, isBefore } from 'date-fns';
+import { format, parseISO, getDay, addDays, isBefore } from 'date-fns';
+import {
+  advanceRecurringOccurrence,
+  recurringMaterializeEndDate,
+} from '@/lib/recurringSessions';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sendEmail } from '@/lib/email';
 import { authHeaders } from '@/lib/apiHelpers';
@@ -141,6 +145,10 @@ async function notifyAfterOrgAdminSessionsCreated(
         date: format(new Date(s.start_time), 'yyyy-MM-dd'),
         time: format(new Date(s.start_time), 'HH:mm'),
       }));
+      const firstStart = new Date(firstSess.start_time);
+      const weekdayNames = ['sekmadienį', 'pirmadienį', 'antradienį', 'trečiadienį', 'ketvirtadienį', 'penktadienį', 'šeštadienį'];
+      const recurringWeekday = weekdayNames[getDay(firstStart)];
+      const recurringTime = format(firstStart, 'HH:mm');
 
       if (st.email) {
         void sendEmail({
@@ -154,6 +162,8 @@ async function notifyAfterOrgAdminSessionsCreated(
             duration: dur,
             totalLessons: studentSessions.length,
             sessions: sessionDates,
+            recurringWeekday,
+            recurringTime,
             ...orgIdPayload,
           },
         }).catch(err => console.error('[OrgSchedule] recurring student email', err));
@@ -173,6 +183,8 @@ async function notifyAfterOrgAdminSessionsCreated(
             duration: dur,
             totalLessons: studentSessions.length,
             sessions: sessionDates,
+            recurringWeekday,
+            recurringTime,
             paymentReminderNote: true,
             ...orgIdPayload,
           },
@@ -368,10 +380,8 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
   }
 
   if (createIsRecurring) {
-    if (!createRecurringEndDate) {
-      throw new Error('Specify the last date for the recurring lesson.');
-    }
-    if (isBefore(parseISO(createRecurringEndDate), startDate)) {
+    const endTrim = (createRecurringEndDate || '').trim();
+    if (endTrim && isBefore(parseISO(endTrim), startDate)) {
       throw new Error('"Repeat until" date must not be earlier than the first lesson.');
     }
     if (createRecurringFrequency !== 'monthly' && createRecurringWeekdays.length === 0) {
@@ -391,7 +401,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     })().catch(() => {});
   };
 
-  if (createIsRecurring && createRecurringEndDate) {
+  if (createIsRecurring) {
     const freq = createRecurringFrequency;
     const daysToCreate =
       freq !== 'monthly' && createRecurringWeekdays.length > 0
@@ -426,7 +436,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
             start_time: timeStr,
             end_time: endTimeStr,
             start_date: format(firstOccurrence, 'yyyy-MM-dd'),
-            end_date: createRecurringEndDate,
+            end_date: (createRecurringEndDate || '').trim() || null,
             meeting_link: createMeetingLink || null,
             topic: createTopic || null,
             price: studentPrice,
@@ -465,18 +475,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
 
     const sessionsRows: Record<string, unknown>[] = [];
     const packagesUsage = new Map<string, number>();
-    const endLimit = parseISO(createRecurringEndDate);
-
-    const advanceCurrent = (d: Date): Date => {
-      switch (freq) {
-        case 'biweekly':
-          return addWeeks(d, 2);
-        case 'monthly':
-          return addMonths(d, 1);
-        default:
-          return addWeeks(d, 1);
-      }
-    };
+    const endLimit = recurringMaterializeEndDate(createRecurringEndDate, startDate);
 
     for (const template of recurringTemplates) {
       let current = new Date(template.firstOccurrence);
@@ -520,7 +519,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
           created_by_role: 'org_admin',
           available_spots: subj.is_group ? subj.max_students : null,
         });
-        current = advanceCurrent(current);
+        current = advanceRecurringOccurrence(current, freq);
       }
     }
 

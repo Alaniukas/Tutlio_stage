@@ -11,6 +11,7 @@ import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { dedupeSubjectPresets, subjectPresetKey, tutorSubjectsContainLessonDuplicate } from '@/lib/subjectPresetDedupe';
 import { removeOrgSubjectTemplatesMatchingPreset } from '@/lib/orgSubjectTemplateCleanup';
+import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -360,6 +361,7 @@ export default function CompanyTutors() {
   const [inviteBreakBetween, setInviteBreakBetween] = useState(0);
   const [inviteMinBooking, setInviteMinBooking] = useState(1);
   const [inviteCommissionPercent, setInviteCommissionPercent] = useState(0);
+  const [inviteMeetingLink, setInviteMeetingLink] = useState('');
 
   // Organization default settings
   const [orgDefaults, setOrgDefaults] = useState({
@@ -498,40 +500,10 @@ export default function CompanyTutors() {
     };
     startLicenseInfoFetch();
 
-    // Find all organization admins so they are not shown as tutors
-    const { data: adminUsers } = await supabase
-      .from('organization_admins')
-      .select('user_id')
-      .eq('organization_id', adminRow.organization_id);
-    const adminIds = new Set((adminUsers || []).map((a: any) => a.user_id));
-
     const { data: tutorData } = await supabase
       .from('profiles')
       .select('id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, personal_meeting_link, has_active_license')
       .eq('organization_id', adminRow.organization_id);
-
-    const { data: linkedStudents } = await supabase
-      .from('students')
-      .select('linked_user_id, email, tutor_id')
-      .eq('organization_id', adminRow.organization_id);
-    const linkedStudentUserIds = new Set(
-      (linkedStudents || [])
-        .map((s: any) => s.linked_user_id)
-        .filter((id: string | null | undefined): id is string => !!id)
-    );
-    const linkedStudentEmails = new Set(
-      (linkedStudents || [])
-        .map((s: any) => String(s.email || '').trim().toLowerCase())
-        .filter((email: string) => email.length > 0)
-    );
-
-    // Only show real tutors (not students accidentally in `profiles`).
-    // A tutor is either assigned to any student in this org OR has accepted an invite.
-    const assignedTutorIds = new Set(
-      (linkedStudents || [])
-        .map((s: any) => s.tutor_id)
-        .filter((id: string | null | undefined): id is string => !!id)
-    );
 
     const { data: inviteData } = await supabase
       .from('tutor_invites')
@@ -539,24 +511,12 @@ export default function CompanyTutors() {
       .eq('organization_id', adminRow.organization_id)
       .order('created_at', { ascending: false });
 
-    const acceptedTutorIds = new Set(
-      (inviteData || [])
-        .map((inv: any) => inv.used_by_profile_id)
-        .filter((id: string | null | undefined): id is string => !!id)
+    const visibleTutors = await getOrgVisibleTutors(
+      supabase as any,
+      adminRow.organization_id,
+      'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, personal_meeting_link, has_active_license',
     );
-
-    const tutorIdSet = new Set<string>([...assignedTutorIds, ...acceptedTutorIds]);
-
-    const visibleTutors = (tutorData || []).filter((t: any) => {
-      const email = String(t.email || '').trim().toLowerCase();
-      return (
-        tutorIdSet.has(t.id) &&
-        !adminIds.has(t.id) &&
-        !linkedStudentUserIds.has(t.id) &&
-        !linkedStudentEmails.has(email)
-      );
-    });
-    setTutors(visibleTutors);
+    setTutors(visibleTutors as Tutor[]);
 
     const enriched = (inviteData || []).map((inv: any) => ({
       ...inv,
@@ -684,6 +644,7 @@ export default function CompanyTutors() {
     setInviteCommissionPercent(orgDefaults.company_commission_percent);
 
     setInviteeName(''); setInviteeEmail(''); setInviteePhone('');
+    setInviteMeetingLink('');
     setInviteError(null); setInviteSuccess(null);
     setSettingsExpanded(false);
     setInviteModalOpen(true);
@@ -715,6 +676,7 @@ export default function CompanyTutors() {
           break_between_lessons: inviteBreakBetween,
           min_booking_hours: inviteMinBooking,
           company_commission_percent: inviteCommissionPercent,
+          personal_meeting_link: inviteMeetingLink.trim() || undefined,
           locale,
         }),
       });
@@ -1167,6 +1129,18 @@ export default function CompanyTutors() {
               <div className="space-y-1.5">
                 <Label className="text-sm font-medium text-gray-700">{t('compTut.nameLabel')}</Label>
                 <Input placeholder={t('compTut.namePlaceholder')} value={inviteeName} onChange={e => setInviteeName(e.target.value)} className="rounded-xl" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium text-gray-700">Prisijungimo nuoroda (pasirinktinai)</Label>
+                <Input
+                  value={inviteMeetingLink}
+                  onChange={(e) => setInviteMeetingLink(e.target.value)}
+                  className="rounded-xl"
+                  placeholder="https://zoom.us/j/..."
+                />
+                <p className="text-xs text-gray-500">
+                  Numatytoji šio korepetitoriaus pamokų nuoroda (Zoom ir pan.). Jei nurodyta, rodoma mokiniams vietoj dalyko nuorodos.
+                </p>
               </div>
             </div>
 
