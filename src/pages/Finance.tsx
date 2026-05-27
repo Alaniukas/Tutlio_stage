@@ -219,12 +219,11 @@ export default function FinancePage() {
 
   const showSessionFinanceReport =
     !!userId && (profile.stripe_onboarding_complete || soloManualStudentPayments);
-  const stripeCardSpanClass =
-    profile.stripe_onboarding_complete && userId && !soloManualStudentPayments ? 'xl:col-span-4' : 'xl:col-span-12';
+  const stripeInSidebar =
+    !!profile.stripe_onboarding_complete && !!userId && !soloManualStudentPayments;
+  const stripeCardSpanClass = stripeInSidebar ? 'xl:col-span-4' : 'xl:col-span-12';
   const reportSpanClass =
-    showSessionFinanceReport && profile.stripe_onboarding_complete && !soloManualStudentPayments
-      ? 'xl:col-span-8'
-      : 'xl:col-span-12';
+    showSessionFinanceReport && stripeInSidebar ? 'xl:col-span-8' : 'xl:col-span-12';
 
   if (isOrgTutorEffective) {
     return (
@@ -333,7 +332,7 @@ export default function FinancePage() {
 
         <div
           className={cn(
-            'bg-white rounded-2xl shadow-sm border border-gray-100 p-6 md:p-7 space-y-6',
+            'bg-white rounded-2xl shadow-sm border border-gray-100 p-6 md:p-7 space-y-6 min-w-0',
             soloManualStudentPayments && 'border-dashed border-amber-200/90 bg-amber-50/20',
             stripeCardSpanClass,
           )}
@@ -354,15 +353,25 @@ export default function FinancePage() {
                   {t('finance.manualStudentPaymentsStripeOptional')}
                 </p>
               )}
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                <div className="flex items-center gap-2 px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
+              <div
+                className={cn(
+                  'flex gap-3',
+                  stripeInSidebar
+                    ? 'flex-col items-stretch'
+                    : 'flex-col sm:flex-row items-start sm:items-center',
+                )}
+              >
+                <div className="flex items-center gap-2 px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl w-fit max-w-full">
                   <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
                   <span className="text-sm font-semibold text-emerald-700">{t('finance.stripeConnected')}</span>
                 </div>
                 <Button
                   variant="outline"
                   size="sm"
-                  className="rounded-xl gap-2 text-sm"
+                  className={cn(
+                    'rounded-xl gap-2 text-sm shrink-0',
+                    stripeInSidebar && 'w-full justify-center',
+                  )}
                   onClick={() => handleStripeAction('manage')}
                   disabled={stripeLoading}
                 >
@@ -740,7 +749,7 @@ export default function FinancePage() {
         </div>
 
         {perlasFinanceEnabled && userId && (
-          <div className="xl:col-span-12">
+          <div className="min-w-0 xl:col-span-12">
             <PerlasFinanceSection entityType="tutor" entityId={userId} />
           </div>
         )}
