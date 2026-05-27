@@ -83,7 +83,7 @@ create table if not exists public.profiles (
   trial_used boolean not null default false,
   trial_ends_at timestamptz,
   company_commission_percent int default 0,
-  preferred_locale text check (preferred_locale is null or preferred_locale in ('lt', 'en', 'pl', 'lv', 'ee')),
+  preferred_locale text check (preferred_locale is null or preferred_locale in ('lt', 'en', 'pl', 'lv', 'ee', 'fr', 'es', 'de', 'se', 'dk', 'fi', 'no')),
   accepted_privacy_policy_at timestamptz,
   accepted_terms_at timestamptz,
   created_at timestamp with time zone default timezone('utc', now()) not null

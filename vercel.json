@@ -5,13 +5,13 @@
     "devCommand": null,
     "redirects": [
         {
-            "source": "/:path(.*)",
+            "source": "/:path((?!api/).*)",
             "has": [{ "type": "host", "value": "tutlio.com" }],
             "destination": "https://www.tutlio.com/:path",
             "permanent": true
         },
         {
-            "source": "/:path(.*)",
+            "source": "/:path((?!api/).*)",
             "has": [{ "type": "host", "value": "tutlio.lt" }],
             "destination": "https://www.tutlio.lt/:path",
             "permanent": true

@@ -92,6 +92,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       break_between_lessons?: number;
       min_booking_hours?: number;
       company_commission_percent?: number;
+      personal_meeting_link?: string;
       locale?: string;
     };
 

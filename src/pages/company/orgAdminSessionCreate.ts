@@ -326,15 +326,10 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     createShowCommentToStudent,
     subjects,
     individualPricing,
-    tutorSubjectPrices,
-    orgSubjectTemplateId,
   } = p;
 
   const subj = subjects.find(s => s.id === createSubjectId);
   if (!subj) throw new Error('Dalykas nerastas.');
-  const tutorSubjPrice = (tutorSubjectPrices || []).find(
-    t => t.tutor_id === createTutorId && t.org_subject_template_id === (orgSubjectTemplateId || ''),
-  );
   let effectiveShowCommentToStudent = createShowCommentToStudent;
   if ((createTutorComment || '').trim()) {
     try {
@@ -422,10 +417,6 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       }
 
       for (const studentId of studentIdsToCreate) {
-        const pricing = individualPricing.find(
-          row => row.student_id === studentId && row.subject_id === createSubjectId,
-        );
-        const studentPrice = pricing?.price ?? tutorSubjPrice?.price ?? subj.price ?? createPrice;
         const { data: template, error: tErr } = await supabase
           .from('recurring_individual_sessions')
           .insert({
@@ -439,7 +430,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
             end_date: (createRecurringEndDate || '').trim() || null,
             meeting_link: createMeetingLink || null,
             topic: createTopic || null,
-            price: studentPrice,
+            price: createPrice,
             active: true,
           })
           .select('id, student_id')
@@ -481,10 +472,6 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       let current = new Date(template.firstOccurrence);
       while (!isBefore(endLimit, current)) {
         const sessionEnd = new Date(current.getTime() + durationMs);
-        const pricing = individualPricing.find(
-          row => row.student_id === template.student_id && row.subject_id === createSubjectId,
-        );
-        const studentPrice = pricing?.price ?? tutorSubjPrice?.price ?? subj.price ?? createPrice;
         let sessionPaid = createIsPaid;
         let sessionPaymentStatus = createIsPaid ? 'paid' : 'pending';
         let lessonPackageId: string | null = null;
@@ -509,7 +496,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
           status: 'active',
           meeting_link: createMeetingLink || null,
           topic: createTopic || null,
-          price: studentPrice,
+          price: createPrice,
           paid: sessionPaid,
           payment_status: sessionPaymentStatus,
           lesson_package_id: lessonPackageId,
@@ -582,10 +569,6 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
   const packagesToUpdate: { id: string; available_lessons: number; reserved_lessons: number }[] = [];
 
   for (const studentId of studentIdsToCreate) {
-    const pricing = individualPricing.find(
-      row => row.student_id === studentId && row.subject_id === createSubjectId
-    );
-    const studentPrice = pricing?.price ?? tutorSubjPrice?.price ?? subj.price ?? createPrice;
     let sessionPaid = createIsPaid;
     let sessionPaymentStatus = createIsPaid ? 'paid' : 'pending';
     let lessonPackageId: string | null = null;
@@ -623,7 +606,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       status: 'active',
       meeting_link: createMeetingLink || null,
       topic: createTopic || null,
-      price: studentPrice,
+      price: createPrice,
       paid: sessionPaid,
       payment_status: sessionPaymentStatus,
       lesson_package_id: lessonPackageId,

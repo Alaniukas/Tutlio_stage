@@ -1,5 +1,6 @@
 import webpush from 'web-push';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { t } from './i18n.js';
 
 const VAPID_PUBLIC = process.env.VAPID_PUBLIC_KEY || '';
 const VAPID_PRIVATE = process.env.VAPID_PRIVATE_KEY || '';
@@ -16,82 +17,130 @@ interface PushPayload {
   tag?: string;
 }
 
-const PUSH_ELIGIBLE: Record<string, (data: any) => PushPayload | null> = {
-  session_reminder: (d) => ({
-    title: d.isTutor ? 'Upcoming lesson' : 'Lesson reminder',
-    body: `${d.date} ${d.time} — ${d.otherName || d.topic || ''}`.trim(),
+const PUSH_ELIGIBLE: Record<string, (data: any, locale: string) => PushPayload | null> = {
+  session_reminder: (d, locale) => ({
+    title: d.isTutor
+      ? t(locale, 'push.session_reminder.title_tutor')
+      : t(locale, 'push.session_reminder.title_student'),
+    body: t(locale, 'push.session_reminder.body', {
+      date: d.date,
+      time: d.time,
+      otherName: d.otherName || d.topic || '',
+    }),
     url: d.isTutor ? '/dashboard' : '/student/sessions',
     tag: `reminder-${d.date}-${d.time}`,
   }),
-  session_reminder_payer: (d) => ({
-    title: 'Lesson reminder',
-    body: `${d.studentName}'s lesson: ${d.date} ${d.time}`,
+  session_reminder_payer: (d, locale) => ({
+    title: t(locale, 'push.session_reminder_payer.title'),
+    body: t(locale, 'push.session_reminder_payer.body', {
+      studentName: d.studentName,
+      date: d.date,
+      time: d.time,
+    }),
     url: '/student/sessions',
     tag: `reminder-payer-${d.date}-${d.time}`,
   }),
-  booking_confirmation: (d) => ({
-    title: 'Session booked',
-    body: `${d.date} ${d.time} with ${d.tutorName}`,
+  booking_confirmation: (d, locale) => ({
+    title: t(locale, 'push.booking_confirmation.title'),
+    body: t(locale, 'push.booking_confirmation.body', {
+      date: d.date,
+      time: d.time,
+      tutorName: d.tutorName,
+    }),
     url: '/student/sessions',
     tag: `booking-${d.date}-${d.time}`,
   }),
-  booking_notification: (d) => ({
-    title: 'New booking',
-    body: `${d.studentName} booked ${d.date} ${d.time}`,
+  booking_notification: (d, locale) => ({
+    title: t(locale, 'push.booking_notification.title'),
+    body: t(locale, 'push.booking_notification.body', {
+      studentName: d.studentName,
+      date: d.date,
+      time: d.time,
+    }),
     url: '/dashboard',
     tag: `booking-notif-${d.date}-${d.time}`,
   }),
-  session_cancelled: (d) => ({
-    title: 'Session cancelled',
-    body: `${d.date} ${d.time} — ${d.studentName} / ${d.tutorName}`,
+  session_cancelled: (d, locale) => ({
+    title: t(locale, 'push.session_cancelled.title'),
+    body: t(locale, 'push.session_cancelled.body', {
+      date: d.date,
+      time: d.time,
+      studentName: d.studentName,
+      tutorName: d.tutorName,
+    }),
     url: '/dashboard',
     tag: `cancel-${d.date}-${d.time}`,
   }),
-  session_cancelled_parent: (d) => ({
-    title: 'Session cancelled',
-    body: `${d.studentName}'s lesson on ${d.date} cancelled`,
+  session_cancelled_parent: (d, locale) => ({
+    title: t(locale, 'push.session_cancelled_parent.title'),
+    body: t(locale, 'push.session_cancelled_parent.body', {
+      studentName: d.studentName,
+      date: d.date,
+    }),
     url: '/student/sessions',
     tag: `cancel-parent-${d.date}-${d.time}`,
   }),
-  lesson_rescheduled: (d) => ({
-    title: 'Lesson rescheduled',
-    body: `New time: ${d.newDate} ${d.newTime}`,
+  lesson_rescheduled: (d, locale) => ({
+    title: t(locale, 'push.lesson_rescheduled.title'),
+    body: t(locale, 'push.lesson_rescheduled.body', {
+      newDate: d.newDate,
+      newTime: d.newTime,
+    }),
     url: '/dashboard',
     tag: `reschedule-${d.newDate}-${d.newTime}`,
   }),
-  chat_new_message: (d) => ({
-    title: `Message from ${d.senderName || 'Tutlio'}`,
-    body: d.preview || 'New message',
+  chat_new_message: (d, locale) => ({
+    title: t(locale, 'push.chat_new_message.title', {
+      senderName: d.senderName || 'Tutlio',
+    }),
+    body: d.preview || t(locale, 'push.chat_new_message.fallback_body'),
     url: d.messagesUrl || '/messages',
     tag: `chat-${d.senderName}`,
   }),
-  waitlist_matched_student: (d) => ({
-    title: 'Slot available!',
-    body: `${d.date} ${d.time} with ${d.tutorName}`,
+  waitlist_matched_student: (d, locale) => ({
+    title: t(locale, 'push.waitlist_matched_student.title'),
+    body: t(locale, 'push.waitlist_matched_student.body', {
+      date: d.date,
+      time: d.time,
+      tutorName: d.tutorName,
+    }),
     url: '/student/sessions',
     tag: `waitlist-${d.date}-${d.time}`,
   }),
-  waitlist_matched_tutor: (d) => ({
-    title: 'Waitlist match',
-    body: `${d.studentName} matched for ${d.date}`,
+  waitlist_matched_tutor: (d, locale) => ({
+    title: t(locale, 'push.waitlist_matched_tutor.title'),
+    body: t(locale, 'push.waitlist_matched_tutor.body', {
+      studentName: d.studentName,
+      date: d.date,
+    }),
     url: '/dashboard',
     tag: `waitlist-tutor-${d.date}`,
   }),
-  payment_review_needed: (d) => ({
-    title: 'Payment needs review',
-    body: `${d.studentName} — ${d.date}`,
+  payment_review_needed: (d, locale) => ({
+    title: t(locale, 'push.payment_review_needed.title'),
+    body: t(locale, 'push.payment_review_needed.body', {
+      studentName: d.studentName,
+      date: d.date,
+    }),
     url: '/dashboard',
     tag: `pay-review-${d.date}`,
   }),
-  payment_reminder: (d) => ({
-    title: 'Payment reminder',
-    body: `€${d.price} for lesson ${d.date} ${d.time}`,
+  payment_reminder: (d, locale) => ({
+    title: t(locale, 'push.payment_reminder.title'),
+    body: t(locale, 'push.payment_reminder.body', {
+      price: d.price,
+      date: d.date,
+      time: d.time,
+    }),
     url: '/student/sessions',
     tag: `pay-remind-${d.date}`,
   }),
-  payment_after_lesson_reminder: (d) => ({
-    title: 'Payment due',
-    body: `€${d.amount} for lesson with ${d.tutorName}`,
+  payment_after_lesson_reminder: (d, locale) => ({
+    title: t(locale, 'push.payment_after_lesson_reminder.title'),
+    body: t(locale, 'push.payment_after_lesson_reminder.body', {
+      amount: d.amount,
+      tutorName: d.tutorName,
+    }),
     url: '/student/sessions',
     tag: `pay-after-${d.date}`,
   }),
@@ -160,10 +209,22 @@ export async function sendPushForUserId(userId: string, type: string, data: any)
   if (!VAPID_PUBLIC || !VAPID_PRIVATE) return 0;
   const builder = PUSH_ELIGIBLE[type];
   if (!builder) return 0;
-  const payload = builder(data);
-  if (!payload) return 0;
+
   const sb = serviceSupabase();
   if (!sb) return 0;
+
+  const { data: profile } = await sb
+    .from('profiles')
+    .select('preferred_locale')
+    .eq('id', userId)
+    .limit(1)
+    .maybeSingle();
+
+  const locale = (profile as any)?.preferred_locale || 'lt';
+
+  const payload = builder(data, locale);
+  if (!payload) return 0;
+
   return deliverPayloadToUserSubscriptions(sb, userId, payload);
 }
 
@@ -182,9 +243,6 @@ export async function sendPushForEmail(
   const builder = PUSH_ELIGIBLE[type];
   if (!builder) return 0;
 
-  const payload = builder(data);
-  if (!payload) return 0;
-
   const sb = serviceSupabase();
   if (!sb) return 0;
 
@@ -194,11 +252,12 @@ export async function sendPushForEmail(
   for (const email of emails) {
     const { data: profiles } = await sb
       .from('profiles')
-      .select('id')
+      .select('id, preferred_locale')
       .eq('email', email)
       .limit(1);
 
     let userId = (profiles as any)?.[0]?.id;
+    let locale = (profiles as any)?.[0]?.preferred_locale || 'lt';
 
     if (!userId) {
       const { data: students } = await sb
@@ -208,9 +267,22 @@ export async function sendPushForEmail(
         .not('linked_user_id', 'is', null)
         .limit(1);
       userId = (students as any)?.[0]?.linked_user_id;
+
+      if (userId) {
+        const { data: linkedProfile } = await sb
+          .from('profiles')
+          .select('preferred_locale')
+          .eq('id', userId)
+          .limit(1)
+          .maybeSingle();
+        locale = (linkedProfile as any)?.preferred_locale || 'lt';
+      }
     }
 
     if (!userId) continue;
+
+    const payload = builder(data, locale);
+    if (!payload) continue;
 
     sent += await deliverPayloadToUserSubscriptions(sb, userId, payload);
   }

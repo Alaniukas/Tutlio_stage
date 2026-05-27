@@ -2015,6 +2015,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const resend = new Resend(apiKey);
 
+    const resend = new Resend(apiKey);
+
     if (type === 'school_contract') {
       const missingFields = Array.isArray(rawData?.missingFields)
         ? rawData.missingFields.map((x: any) => String(x || '').trim()).filter(Boolean)

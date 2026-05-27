@@ -1307,7 +1307,6 @@ export default function CalendarPage() {
       const subject = subjects.find((s) => s.id === selectedSubjectId);
       const studentIdsToCreate = isGroupLesson ? selectedStudentIds : [selectedStudentId];
 
-      const tspRecur = getTutorSubjectPrice(subject?.name);
       // Determine which days to create templates for
       const daysToCreate = (recurringFrequency !== 'monthly' && selectedWeekdays.length > 0)
         ? selectedWeekdays
@@ -1326,11 +1325,6 @@ export default function CalendarPage() {
         }
 
         for (const studentId of studentIdsToCreate) {
-          const pricing = individualPricing.find(
-            (p) => p.student_id === studentId && p.subject_id === selectedSubjectId
-          );
-          const studentPrice = pricing?.price ?? tspRecur?.price ?? subject?.price ?? price;
-
           const { data: template } = await supabase
             .from('recurring_individual_sessions')
             .insert({
@@ -1344,7 +1338,7 @@ export default function CalendarPage() {
               end_date: recurringEndDate.trim() || null,
               meeting_link: meetingLink || null,
               topic: topic || null,
-              price: studentPrice,
+              price,
               active: true,
             })
             .select('id, student_id')
@@ -1384,10 +1378,6 @@ export default function CalendarPage() {
 
       for (const template of recurringTemplates) {
         let current = new Date(template.firstOccurrence);
-        const pricing = individualPricing.find(
-          (p: any) => p.student_id === template.student_id && p.subject_id === selectedSubjectId
-        );
-        const studentPrice = pricing?.price ?? tspRecur?.price ?? subject?.price ?? price;
 
         while (!isBefore(endLimit, current)) {
           const sessionEnd = new Date(current.getTime() + durationMs);
@@ -1420,7 +1410,7 @@ export default function CalendarPage() {
             status: 'active',
             meeting_link: meetingLink || null,
             topic: topic || null,
-            price: studentPrice,
+            price,
             paid: sessionPaid,
             payment_status: sessionPaymentStatus,
             lesson_package_id: lessonPackageId,
@@ -1684,15 +1674,7 @@ export default function CalendarPage() {
       // Check for lesson packages for each student and prepare sessions
       const sessionsToInsert = [];
       const packagesToUpdate = [];
-      const tspSingle = getTutorSubjectPrice(subject?.name);
-
       for (const studentId of studentIdsToCreate) {
-        // Check for individual pricing for THIS student
-        const pricing = individualPricing.find(
-          (p) => p.student_id === studentId && p.subject_id === selectedSubjectId
-        );
-        const studentPrice = pricing?.price ?? tspSingle?.price ?? subject?.price ?? price;
-
         // Check if student has available lesson package for this subject
         let sessionPaid = isPaid;
         let sessionPaymentStatus = isPaid ? 'paid' : 'pending';
@@ -1735,7 +1717,7 @@ export default function CalendarPage() {
           status: 'active',
           meeting_link: meetingLink || null,
           topic: topic || null,
-          price: studentPrice,
+          price,
           paid: sessionPaid,
           payment_status: sessionPaymentStatus,
           lesson_package_id: lessonPackageId,
@@ -2909,6 +2891,49 @@ export default function CalendarPage() {
             console.error('Google Calendar sync error:', e);
           }
         }
+
+        const savedFields: Partial<Session> = {
+          start_time: newStart,
+          end_time: newEnd,
+          topic: editTopic,
+          meeting_link: editMeetingLink,
+          tutor_comment: editTutorComment || null,
+          show_comment_to_student: editShowCommentToStudent,
+          ...(!orgPolicy.hideMoney
+            ? { price: Number.isFinite(Number(editPrice)) ? Number(editPrice) : 0 }
+            : {}),
+        };
+
+        const matchesFutureEditScope = (s: Session) => {
+          if (!applyToAllFuture) return s.id === selectedEvent.id;
+          if (s.status !== 'active') return false;
+          if (s.start_time.getTime() < selectedEvent.start_time.getTime()) return false;
+          if (selectedEvent.recurring_session_id) {
+            return s.recurring_session_id === selectedEvent.recurring_session_id;
+          }
+          return s.subject_id === selectedEvent.subject_id;
+        };
+
+        const applySavedFieldsToSession = (s: Session): Session => {
+          if (!matchesFutureEditScope(s)) return s;
+          if (applyToAllFuture && (timeChanged || durationChanged)) {
+            const shiftMs = newStart.getTime() - oldStart.getTime();
+            const rowNewStart = new Date(s.start_time.getTime() + shiftMs);
+            return {
+              ...s,
+              ...savedFields,
+              start_time: rowNewStart,
+              end_time: new Date(rowNewStart.getTime() + durMs),
+            };
+          }
+          return { ...s, ...savedFields };
+        };
+
+        setSessions((prev) => prev.map(applySavedFieldsToSession));
+        setSelectedEvent((prev) => (prev ? applySavedFieldsToSession(prev) : prev));
+        setSelectedGroupSessions((prev) => prev.map(applySavedFieldsToSession));
+        setViewCommentText(editTutorComment || '');
+        setViewShowToStudent(editShowCommentToStudent);
 
         setIsEditingSession(false);
         setGroupEditChoice(null);
