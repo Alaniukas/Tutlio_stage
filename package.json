@@ -27,7 +27,7 @@
     "supabase:db": "npx supabase login && npx supabase db push",
     "vercel:link": "vercel link",
     "vercel:link-tutlio": "vercel link --yes --project tutlio --scope alaniukas-projects",
-    "vercel:deploy-prod": "vercel deploy --prod --yes",
+    "vercel:deploy-prod": "vercel link --yes --project tutlio --scope alaniukas-projects && vercel deploy --prod --yes",
     "release-letters": "tsx scripts/send-release-letters.ts",
     "email:product-update": "tsx scripts/email-product-update.ts",
     "security:pencheck": "npx --yes tsx scripts/security-pencheck.ts"
