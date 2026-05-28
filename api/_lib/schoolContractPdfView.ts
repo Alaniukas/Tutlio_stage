@@ -47,21 +47,55 @@ export async function ensureSchoolContractAccessToken(
   contractId: string,
   opts?: { existingToken?: string | null },
 ): Promise<string | null> {
+  const cid = contractId.trim();
+  if (!cid) return null;
+
   const reuse = opts?.existingToken?.trim();
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 90).toISOString();
+
   if (reuse) {
-    const { data: row } = await adminSb
+    const { data: row, error: lookupErr } = await adminSb
       .from('school_contract_completion_tokens')
-      .select('token')
+      .select('token, contract_id')
       .eq('token', reuse)
-      .eq('contract_id', contractId)
       .maybeSingle();
-    if (row?.token) return row.token;
+    if (lookupErr) {
+      console.error('[schoolContractPdfView] token lookup:', lookupErr);
+    }
+    if (row?.token) {
+      if (String(row.contract_id) !== cid) {
+        console.error('[schoolContractPdfView] token contract mismatch', {
+          token: reuse.slice(0, 8),
+          expected: cid,
+          actual: row.contract_id,
+        });
+        return null;
+      }
+      return row.token;
+    }
+
+    // Email / completion link already contains this token — persist it instead of minting a new one.
+    const { error: insertReuseErr } = await adminSb.from('school_contract_completion_tokens').insert({
+      contract_id: cid,
+      token: reuse,
+      expires_at: expiresAt,
+    });
+    if (!insertReuseErr) return reuse;
+    if (insertReuseErr.code === '23505') {
+      const { data: again } = await adminSb
+        .from('school_contract_completion_tokens')
+        .select('token, contract_id')
+        .eq('token', reuse)
+        .maybeSingle();
+      if (again?.token && String(again.contract_id) === cid) return again.token;
+    }
+    console.error('[schoolContractPdfView] token insert (reuse):', insertReuseErr);
+    return null;
   }
 
   const token = randomToken();
-  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 90).toISOString();
   const { error } = await adminSb.from('school_contract_completion_tokens').insert({
-    contract_id: contractId,
+    contract_id: cid,
     token,
     expires_at: expiresAt,
   });

@@ -2046,8 +2046,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           typeof rawData?.completionUrl === 'string' ? rawData.completionUrl : '',
         );
         const accessToken = await ensureSchoolContractAccessToken(adminSb, contractId, { existingToken });
+        const appBase = publicAppOriginFromRequest(req);
         if (accessToken) {
-          const appBase = publicAppOriginFromRequest(req);
           if (missingFields.length > 0) {
             rawData.completionUrl = schoolContractCompletionPageUrl(appBase, accessToken);
           }
@@ -2055,6 +2055,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             existingToken: accessToken,
           });
           if (pdfViewUrl) rawData.pdfUrl = pdfViewUrl;
+        } else if (existingToken && missingFields.length > 0) {
+          console.error('[send-email] school_contract: could not persist completion token from URL');
+          rawData.completionUrl = schoolContractCompletionPageUrl(appBase, existingToken);
         } else if (!existingToken && missingFields.length > 0) {
           const generated = await createSchoolCompletionUrl(contractId, req);
           if (generated) rawData.completionUrl = generated;

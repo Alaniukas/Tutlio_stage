@@ -172,12 +172,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).send(pageHtml('<h2>Nenurodytas token.</h2>'));
   }
 
-  const { data: contract, error: contractErr } = await supabase
+  const { data: contractRow, error: contractErr } = await supabase
     .from('school_contracts')
-    .select('id, student_id, organization_id, template_id, contract_number, annual_fee, filled_body, media_publicity_consent, template:school_contract_templates(pdf_url)')
+    .select('id, student_id, organization_id, template_id, contract_number, annual_fee, filled_body, media_publicity_consent')
     .eq('id', resolvedContractId)
     .maybeSingle();
-  if (contractErr || !contract) return res.status(404).send(pageHtml('<h2>Sutartis nerasta.</h2>'));
+  if (contractErr || !contractRow) return res.status(404).send(pageHtml('<h2>Sutartis nerasta.</h2>'));
+
+  let templatePdfUrl: string | null = null;
+  if (contractRow.template_id) {
+    const { data: tpl } = await supabase
+      .from('school_contract_templates')
+      .select('pdf_url')
+      .eq('id', contractRow.template_id)
+      .maybeSingle();
+    templatePdfUrl = tpl?.pdf_url ? String(tpl.pdf_url) : null;
+  }
+  const contract = { ...contractRow, template: templatePdfUrl ? { pdf_url: templatePdfUrl } : null };
 
   const { data: orgRow } = await supabase
     .from('organizations')
