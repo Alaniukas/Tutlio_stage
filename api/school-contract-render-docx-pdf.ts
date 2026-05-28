@@ -1,7 +1,11 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
-import { renderDocxTemplateUrlToPdfBuffer } from './_lib/renderSchoolContractDocxToPdf.js';
+import { renderDocxBufferToPdfBuffer } from './_lib/renderSchoolContractDocxToPdf.js';
 import { schoolContractPdfStoragePath } from './_lib/schoolContractPdfPath.js';
+import {
+  extractSchoolContractStoragePath,
+  SCHOOL_CONTRACTS_BUCKET,
+} from './_lib/schoolContractStorage.js';
 
 function json(res: VercelResponse, status: number, body: Record<string, unknown>) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -77,7 +81,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!adminRow?.organization_id) return json(res, 403, { error: 'Not authorized for this organization' });
 
   try {
-    const pdfBuffer = await renderDocxTemplateUrlToPdfBuffer({ templateUrl, payload: templatePayload });
+    const templatePath = extractSchoolContractStoragePath(templateUrl);
+    const { data: docxBlob, error: dlErr } = await adminSb.storage
+      .from(SCHOOL_CONTRACTS_BUCKET)
+      .download(templatePath);
+    if (dlErr || !docxBlob) {
+      console.error('[school-contract-render-docx-pdf] download:', dlErr);
+      return json(res, 502, { error: dlErr?.message || 'Nepavyko atsisiųsti DOCX šablono' });
+    }
+    const docxBuffer = Buffer.from(await docxBlob.arrayBuffer());
+    const pdfBuffer = await renderDocxBufferToPdfBuffer({ docxBuffer, payload: templatePayload });
     const path = schoolContractPdfStoragePath({
       organizationId,
       contractId,
