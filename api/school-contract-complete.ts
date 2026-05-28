@@ -174,12 +174,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: contract, error: contractErr } = await supabase
     .from('school_contracts')
-    .select('id, student_id, organization_id, template_id, contract_number, annual_fee, filled_body, media_publicity_consent, template:school_contract_templates(pdf_url), organizations(name, email, entity_type), student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent)')
+    .select('id, student_id, organization_id, template_id, contract_number, annual_fee, filled_body, media_publicity_consent, template:school_contract_templates(pdf_url), organizations(name, email, entity_type)')
     .eq('id', resolvedContractId)
     .maybeSingle();
   if (contractErr || !contract) return res.status(404).send(pageHtml('<h2>Sutartis nerasta.</h2>'));
 
-  const st = (contract as any).student || {};
+  const { data: studentRow } = await supabase
+    .from('students')
+    .select('full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent')
+    .eq('id', (contract as any).student_id)
+    .maybeSingle();
+  const st = studentRow || {};
   const orgEntityType = String((contract as any)?.organizations?.entity_type || '').trim().toLowerCase();
   const isSchoolOrg = orgEntityType === 'school';
   const existingConsent = String((contract as any)?.media_publicity_consent || '').trim();

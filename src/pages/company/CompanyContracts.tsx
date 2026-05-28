@@ -30,6 +30,11 @@ import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
 import { useLocation } from 'react-router-dom';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { schoolContractPdfStoragePath } from '@/lib/schoolContractPdfPath';
+import {
+  attachStudentsToContracts,
+  SCHOOL_CONTRACT_STUDENT_SELECT,
+  type SchoolContractStudentEmbed,
+} from '@/lib/schoolContractStudentEmbed';
 
 interface Student {
   id: string;
@@ -190,13 +195,13 @@ export default function CompanyContracts() {
 
     const [tRes, cRes, sRes] = await Promise.all([
       supabase.from('school_contract_templates').select('*').eq('organization_id', admin.organization_id).order('created_at', { ascending: false }),
-      supabase.from('school_contracts').select('*, media_publicity_consent, student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent)').eq('organization_id', admin.organization_id).is('archived_at', null).order('created_at', { ascending: false }),
-      supabase.from('students').select('id, full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent').eq('organization_id', admin.organization_id).order('full_name'),
+      supabase.from('school_contracts').select('*, media_publicity_consent').eq('organization_id', admin.organization_id).is('archived_at', null).order('created_at', { ascending: false }),
+      supabase.from('students').select(SCHOOL_CONTRACT_STUDENT_SELECT).eq('organization_id', admin.organization_id).order('full_name'),
     ]);
 
     const tData = tRes.data || [];
-    const cData = cRes.data || [];
     const sData = sRes.data || [];
+    const cData = attachStudentsToContracts(cRes.data || [], sData);
     setTemplates(tData);
     setContracts(cData);
     setStudents(sData);
@@ -967,9 +972,29 @@ export default function CompanyContracts() {
         additional_fee_purpose: hasAdditionalFee ? additionalFeePurpose.trim() : null,
         signing_status: sendImmediately ? 'sent' : 'draft',
         sent_at: sendImmediately ? new Date().toISOString() : null,
-      }).select('*, student:students(full_name, email, payer_name, payer_email, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date)').single();
+      }).select('*').single();
 
       if (error) { setToast({ message: error.message, type: 'error' }); return; }
+
+      const contractStudent: SchoolContractStudentEmbed | undefined = selectedStudent
+        ? {
+            full_name: selectedStudent.full_name,
+            email: selectedStudent.email,
+            phone: selectedStudent.phone,
+            payer_name: selectedStudent.payer_name,
+            payer_email: selectedStudent.payer_email,
+            payer_phone: selectedStudent.payer_phone,
+            payer_personal_code: selectedStudent.payer_personal_code,
+            parent_secondary_name: selectedStudent.parent_secondary_name,
+            parent_secondary_email: selectedStudent.parent_secondary_email,
+            parent_secondary_phone: selectedStudent.parent_secondary_phone,
+            parent_secondary_personal_code: selectedStudent.parent_secondary_personal_code,
+            parent_secondary_address: selectedStudent.parent_secondary_address,
+            student_address: selectedStudent.student_address,
+            student_city: selectedStudent.student_city,
+            child_birth_date: selectedStudent.child_birth_date,
+          }
+        : undefined;
 
       let firstInstallment:
         | { id: string; installment_number: number; amount: number; due_date: string }
@@ -1023,7 +1048,7 @@ export default function CompanyContracts() {
       let installmentCheckoutWarning: string | undefined;
 
       if (sendImmediately && created) {
-        const recipient = contractParentEmail.trim() || created.student?.payer_email || created.student?.email;
+        const recipient = contractParentEmail.trim() || contractStudent?.payer_email || contractStudent?.email;
         if (!recipient) {
           await supabase.from('school_contracts').update({ signing_status: 'draft', sent_at: null }).eq('id', created.id);
           setToast({ message: tr('school.toastNoEmail'), type: 'error' });
@@ -1040,9 +1065,9 @@ export default function CompanyContracts() {
             data: {
               schoolName: orgName,
               schoolEmail: orgEmail,
-              studentName: created.student?.full_name || '',
-              parentName: contractParentName.trim() || created.student?.payer_name || created.student?.full_name || '',
-              recipientName: contractParentName.trim() || created.student?.payer_name || created.student?.full_name || '',
+              studentName: contractStudent?.full_name || '',
+              parentName: contractParentName.trim() || contractStudent?.payer_name || contractStudent?.full_name || '',
+              recipientName: contractParentName.trim() || contractStudent?.payer_name || contractStudent?.full_name || '',
               parentPhone: contractParentPhone.trim(),
               parentPersonalCode: contractParentPersonalCode.trim() || undefined,
               childBirthDate: contractChildBirthDate.trim() || undefined,
@@ -1073,8 +1098,8 @@ export default function CompanyContracts() {
                 totalInstallments,
                 amount: Number(firstInstallment.amount),
                 dueDate: firstInstallment.due_date,
-                studentName: created.student?.full_name || '',
-                parentName: contractParentName.trim() || created.student?.payer_name || created.student?.full_name || '',
+                studentName: contractStudent?.full_name || '',
+                parentName: contractParentName.trim() || contractStudent?.payer_name || contractStudent?.full_name || '',
                 recipientEmail: recipient,
                 additionalFeeAmount: Number(created.additional_fee_amount || 0),
                 additionalFeePurpose: created.additional_fee_purpose || undefined,
