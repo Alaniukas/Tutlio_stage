@@ -3,6 +3,11 @@ import { createClient } from '@supabase/supabase-js';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { renderDocxTemplateUrlToPdfBuffer } from './_lib/renderSchoolContractDocxToPdf.js';
 import { schoolContractPdfStoragePath } from './_lib/schoolContractPdfPath.js';
+import {
+  fetchSchoolContractCompletionToken,
+  isSchoolContractCompletionTokenUsed,
+  markSchoolContractCompletionTokenUsed,
+} from './_lib/schoolContractCompletionToken.js';
 
 function pageHtml(content: string) {
   return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Sutarties duomenų papildymas</title></head><body style="margin:0;font-family:'Segoe UI',Arial,sans-serif;background:linear-gradient(135deg,#f5f3ff 0%,#ecfeff 50%,#f0fdf4 100%);padding:24px;"><div style="max-width:720px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:24px;box-shadow:0 10px 35px rgba(2,6,23,.08);">${content}</div></body></html>`;
@@ -156,15 +161,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let tokenRow: { id: string; contract_id: string; used_at: string | null; expires_at: string } | null = null;
   let resolvedContractId = '';
   if (token) {
-    const { data, error: tokenErr } = await supabase
-      .from('school_contract_completion_tokens')
-      .select('id, contract_id, used_at, expires_at')
-      .eq('token', token)
-      .maybeSingle();
+    const { data, error: tokenErr } = await fetchSchoolContractCompletionToken(supabase, token);
     if (tokenErr || !data) return res.status(404).send(pageHtml('<h2>Nuoroda nerasta.</h2>'));
-    if (data.used_at) return res.status(410).send(pageHtml('<h2>Nuoroda jau panaudota.</h2>'));
-    if (new Date(data.expires_at).getTime() < Date.now()) return res.status(410).send(pageHtml('<h2>Nuoroda nebegalioja.</h2>'));
-    tokenRow = data as any;
+    if (isSchoolContractCompletionTokenUsed(data)) {
+      return res.status(410).send(pageHtml('<h2>Nuoroda jau panaudota.</h2>'));
+    }
+    if (new Date(data.expires_at).getTime() < Date.now()) {
+      return res.status(410).send(pageHtml('<h2>Nuoroda nebegalioja.</h2>'));
+    }
+    tokenRow = {
+      id: data.id,
+      contract_id: data.contract_id,
+      used_at: data.used_at ?? null,
+      expires_at: data.expires_at,
+    };
     resolvedContractId = data.contract_id;
   } else if (contractIdDirect) {
     resolvedContractId = contractIdDirect;
@@ -571,10 +581,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (tokenRow?.id) {
-    await supabase
-      .from('school_contract_completion_tokens')
-      .update({ used_at: new Date().toISOString() })
-      .eq('id', tokenRow.id);
+    await markSchoolContractCompletionTokenUsed(supabase, tokenRow.id);
   }
 
   return res.status(200).send(pageHtml('<h2>Ačiū! Duomenys išsaugoti.</h2><p><strong>Atnaujinta PDF sutartis išsiųsta jūsų el. paštu.</strong></p><p>Sutartį pasirašykite gavę atnaujintą versiją.</p>'));

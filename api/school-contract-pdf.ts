@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { loadSchoolContractPdfBuffer } from './_lib/schoolContractPdfView.js';
+import { fetchSchoolContractCompletionToken } from './_lib/schoolContractCompletionToken.js';
 
 /**
  * GET /api/school-contract-pdf?token=...
@@ -30,11 +31,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const adminSb = createClient(supabaseUrl, serviceRoleKey);
 
-  const { data: tokenRow, error: tokenErr } = await adminSb
-    .from('school_contract_completion_tokens')
-    .select('contract_id, expires_at')
-    .eq('token', token)
-    .maybeSingle();
+  const { data: tokenRow, error: tokenErr } = await fetchSchoolContractCompletionToken(adminSb, token);
 
   if (tokenErr || !tokenRow?.contract_id) {
     res.statusCode = 404;
