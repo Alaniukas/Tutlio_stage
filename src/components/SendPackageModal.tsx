@@ -1,15 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/lib/supabase';
 import { authHeaders } from '@/lib/apiHelpers';
 import { Checkbox } from '@/components/ui/checkbox';
 import { CircleHelp, Loader2, Package } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { tutorUsesManualStudentPayments } from '@/lib/subscription';
+import PackageItemsEditor, { type PackageEditorItem, type PackageEditorSubject } from '@/components/PackageItemsEditor';
 
 interface SendPackageModalProps {
   isOpen: boolean;
@@ -21,6 +21,23 @@ interface SendPackageModalProps {
   tutorId?: string;
 }
 
+const STRIPE_FEE_PERCENT = 0.015;
+const STRIPE_FEE_FIXED_EUR = 0.25;
+const PLATFORM_FEE_PERCENT = 0.02;
+
+function calcTotalWithFees(basePriceEur: number): number {
+  const platformFee = basePriceEur * PLATFORM_FEE_PERCENT;
+  return (basePriceEur + platformFee + STRIPE_FEE_FIXED_EUR) / (1 - STRIPE_FEE_PERCENT);
+}
+
+const formatEur = (value: number) =>
+  new Intl.NumberFormat('lt-LT', {
+    style: 'currency',
+    currency: 'EUR',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+
 export default function SendPackageModal({
   isOpen,
   onClose,
@@ -31,31 +48,10 @@ export default function SendPackageModal({
   tutorId: propTutorId,
 }: SendPackageModalProps) {
   const { t } = useTranslation();
-  const STRIPE_FEE_PERCENT = 0.015;
-  const STRIPE_FEE_FIXED_EUR = 0.25;
-  const PLATFORM_FEE_PERCENT = 0.02;
 
-  const formatEur = (value: number) =>
-    new Intl.NumberFormat('lt-LT', {
-      style: 'currency',
-      currency: 'EUR',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value);
-
-  const calcTotalWithFees = (baseLessonPrice: number, lessonCount: number) => {
-    const baseTotal = baseLessonPrice * lessonCount;
-    const platformFee = baseTotal * PLATFORM_FEE_PERCENT;
-    return (baseTotal + platformFee + STRIPE_FEE_FIXED_EUR) / (1 - STRIPE_FEE_PERCENT);
-  };
-
-  const [subjects, setSubjects] = useState<any[]>([]);
+  const [subjects, setSubjects] = useState<PackageEditorSubject[]>([]);
   const [individualPricing, setIndividualPricing] = useState<Record<string, number>>({});
-  const [selectedSubjectId, setSelectedSubjectId] = useState('');
-  const [totalLessons, setTotalLessons] = useState<number>(5);
-  const [pricePerLesson, setPricePerLesson] = useState<number>(0);
-  const [baseTotalPrice, setBaseTotalPrice] = useState<number>(0);
-  const [totalPriceWithFees, setTotalPriceWithFees] = useState<number>(0);
+  const [items, setItems] = useState<PackageEditorItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingSubjects, setLoadingSubjects] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +59,6 @@ export default function SendPackageModal({
   const [canUseManual, setCanUseManual] = useState(false);
   const [isForceManualOnly, setIsForceManualOnly] = useState(false);
   const [expiresAt, setExpiresAt] = useState('');
-  /** Stripe: attach S.F. PDF to payment email (default on) */
   const [attachSalesInvoice, setAttachSalesInvoice] = useState(true);
 
   useEffect(() => {
@@ -73,32 +68,31 @@ export default function SendPackageModal({
     }
   }, [isOpen]);
 
+  // Seed one row when subjects load (so the form is usable immediately)
   useEffect(() => {
-    if (subjects.length > 0 && !selectedSubjectId) {
-      const firstSubject = subjects[0];
-      setSelectedSubjectId(firstSubject.id);
-      setPricePerLesson(firstSubject.price);
+    if (subjects.length > 0 && items.length === 0) {
+      const first = subjects[0]!;
+      const price = individualPricing[first.id] ?? Number(first.price ?? 0);
+      setItems([{ subjectId: first.id, totalLessons: 5, pricePerLesson: price }]);
     }
-  }, [subjects]);
+  }, [subjects, individualPricing]);
 
-  useEffect(() => {
-    if (selectedSubjectId) {
-      const subject = subjects.find(s => s.id === selectedSubjectId);
-      if (subject) {
-        const customPrice = individualPricing[selectedSubjectId];
-        setPricePerLesson(customPrice !== undefined ? customPrice : subject.price);
-      }
-    }
-  }, [selectedSubjectId, subjects, individualPricing]);
-
-  useEffect(() => {
-    const baseTotal = pricePerLesson * totalLessons;
-    setBaseTotalPrice(baseTotal);
-    setTotalPriceWithFees(calcTotalWithFees(pricePerLesson, totalLessons));
-  }, [pricePerLesson, totalLessons]);
+  const totals = useMemo(() => {
+    const totalLessons = items.reduce((acc, it) => acc + (Number(it.totalLessons) || 0), 0);
+    const basePriceEur = items.reduce(
+      (acc, it) => acc + (Number(it.totalLessons) || 0) * (Number(it.pricePerLesson) || 0),
+      0,
+    );
+    return {
+      totalLessons,
+      basePriceEur,
+      totalWithFees: calcTotalWithFees(basePriceEur),
+    };
+  }, [items]);
 
   const fetchSubjects = async () => {
     setLoadingSubjects(true);
+    setItems([]);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
@@ -123,7 +117,7 @@ export default function SendPackageModal({
 
     const [subjectsResult, pricingResult] = await Promise.all([
       supabase.from('subjects').select('id, name, price, color').eq('tutor_id', effectiveTutorId).order('name'),
-      supabase.from('student_individual_pricing').select('subject_id, price').eq('student_id', studentId).eq('tutor_id', effectiveTutorId)
+      supabase.from('student_individual_pricing').select('subject_id, price').eq('student_id', studentId).eq('tutor_id', effectiveTutorId),
     ]);
 
     if (subjectsResult.error) {
@@ -138,19 +132,25 @@ export default function SendPackageModal({
     setLoadingSubjects(false);
   };
 
-  /** Lithuanian/English plural unit only (no leading number) — avoids "5 5 pamokos". */
-  const getLessonUnitWord = (count: number) => {
-    if (count === 1) return t('package.lessonUnit1');
-    if (count < 10) return t('package.lessonUnit2to9');
-    return t('package.lessonUnit10plus');
+  const validate = (): string | null => {
+    if (items.length === 0) return t('package.atLeastOneSubject');
+    const ids = new Set<string>();
+    for (const it of items) {
+      if (!it.subjectId) return t('package.atLeastOneSubject');
+      if (ids.has(it.subjectId)) return t('package.duplicateSubject');
+      ids.add(it.subjectId);
+      if (!it.totalLessons || it.totalLessons <= 0) return t('package.fillAllFields');
+    }
+    if (totals.totalLessons > 100) return t('package.maxLessonsExceeded');
+    return null;
   };
 
   const handleSendPackage = async () => {
-    if (!selectedSubjectId || totalLessons <= 0) {
-      setError(t('package.fillAllFields'));
+    const validationError = validate();
+    if (validationError) {
+      setError(validationError);
       return;
     }
-
     setLoading(true);
     setError(null);
 
@@ -170,9 +170,11 @@ export default function SendPackageModal({
         body: JSON.stringify({
           tutorId: propTutorId || user.id,
           studentId,
-          subjectId: selectedSubjectId,
-          totalLessons,
-          pricePerLesson,
+          items: items.map((it) => ({
+            subjectId: it.subjectId,
+            totalLessons: it.totalLessons,
+            pricePerLesson: it.pricePerLesson,
+          })),
           ...(expiresAt ? { expiresAt } : {}),
           attachSalesInvoice,
         }),
@@ -216,12 +218,11 @@ export default function SendPackageModal({
     }
   };
 
-  const selectedSubject = subjects.find((s) => s.id === selectedSubjectId);
-  const summarySubject = selectedSubject?.name?.trim() || '';
+  const disableSend = loading || items.length === 0 || items.some((it) => !it.subjectId || it.totalLessons <= 0);
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="w-[95vw] max-w-md max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[95vw] max-w-xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Package className="w-5 h-5 text-violet-600" />
@@ -239,38 +240,13 @@ export default function SendPackageModal({
             <div className="text-center py-4"><Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" /></div>
           ) : (
             <>
-              <div>
-                <Label className="text-sm font-semibold text-gray-700">{t('package.subject')}</Label>
-                <Select value={selectedSubjectId} onValueChange={setSelectedSubjectId}>
-                  <SelectTrigger className="mt-1 rounded-lg"><SelectValue placeholder={t('package.selectSubject')} /></SelectTrigger>
-                  <SelectContent>
-                    {subjects.map(subject => (
-                      <SelectItem key={subject.id} value={subject.id}>
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: subject.color }} />
-                          <span>{subject.name}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label className="text-sm font-semibold text-gray-700">{t('package.lessonCount')}</Label>
-                <Input type="number" value={totalLessons} onChange={(e) => setTotalLessons(Math.max(1, parseInt(e.target.value) || 1))} min={1} max={100} className="mt-1 rounded-lg" />
-                <p className="text-xs text-gray-500 mt-1">{t('package.lessonCountHint')}</p>
-              </div>
-
-              <div>
-                <Label className="text-sm font-semibold text-gray-700">{t('package.pricePerLesson')}</Label>
-                <Input type="number" value={pricePerLesson} onChange={(e) => setPricePerLesson(Math.max(0, parseFloat(e.target.value) || 0))} min={0} step={0.01} className="mt-1 rounded-lg" />
-                <p className="text-xs text-gray-500 mt-1">
-                  {selectedSubjectId && subjects.find(s => s.id === selectedSubjectId) && (
-                    <>{t('package.defaultPrice', { price: subjects.find(s => s.id === selectedSubjectId)?.price })}</>
-                  )}
-                </p>
-              </div>
+              <PackageItemsEditor
+                subjects={subjects}
+                individualPricing={individualPricing}
+                items={items}
+                onChange={setItems}
+                disabled={loading}
+              />
 
               {canUseManual && (
                 <div>
@@ -293,9 +269,7 @@ export default function SendPackageModal({
                     </button>
                   </div>
                   {isForceManualOnly && (
-                    <p className="text-xs text-amber-700 mt-2">
-                      {t('pricing.subscriptionOnlyDesc')}
-                    </p>
+                    <p className="text-xs text-amber-700 mt-2">{t('pricing.subscriptionOnlyDesc')}</p>
                   )}
                 </div>
               )}
@@ -316,13 +290,10 @@ export default function SendPackageModal({
                 <div className="bg-violet-50 border border-violet-200 rounded-xl p-4">
                   <div className="flex justify-between items-center mb-2">
                     <span className="text-sm font-semibold text-violet-900">{t('package.totalToPay')}</span>
-                    <span className="text-2xl font-bold text-violet-700 tracking-tight">{formatEur(baseTotalPrice)}</span>
+                    <span className="text-2xl font-bold text-violet-700 tracking-tight">{formatEur(totals.basePriceEur)}</span>
                   </div>
                   <p className="text-xs text-violet-600">
-                    {summarySubject ? (
-                      <span className="font-medium text-violet-800">{summarySubject}: </span>
-                    ) : null}
-                    {totalLessons} {getLessonUnitWord(totalLessons)} × {formatEur(pricePerLesson)}
+                    {t('package.totalAcrossSubjects')}: {totals.totalLessons}
                   </p>
                 </div>
               ) : (
@@ -333,19 +304,16 @@ export default function SendPackageModal({
                       <span className="relative inline-flex items-center group">
                         <CircleHelp className="w-3.5 h-3.5 text-violet-500 cursor-help" />
                         <span className="hidden group-hover:block pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-64 -translate-x-1/2 rounded-lg border border-violet-200 bg-white p-2.5 text-xs font-medium text-gray-700 opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
-                          {t('package.tooltipTutor', { amount: formatEur(baseTotalPrice) })}<br />
-                          {t('package.tooltipPlatform', { amount: formatEur(baseTotalPrice * PLATFORM_FEE_PERCENT) })}<br />
-                          {t('package.tooltipStripe', { amount: formatEur(totalPriceWithFees - baseTotalPrice - (baseTotalPrice * PLATFORM_FEE_PERCENT)) })}
+                          {t('package.tooltipTutor', { amount: formatEur(totals.basePriceEur) })}<br />
+                          {t('package.tooltipPlatform', { amount: formatEur(totals.basePriceEur * PLATFORM_FEE_PERCENT) })}<br />
+                          {t('package.tooltipStripe', { amount: formatEur(totals.totalWithFees - totals.basePriceEur - (totals.basePriceEur * PLATFORM_FEE_PERCENT)) })}
                         </span>
                       </span>
                     </span>
-                    <span className="text-2xl font-bold text-violet-700 tracking-tight">{formatEur(totalPriceWithFees)}</span>
+                    <span className="text-2xl font-bold text-violet-700 tracking-tight">{formatEur(totals.totalWithFees)}</span>
                   </div>
                   <p className="text-xs text-violet-600">
-                    {summarySubject ? (
-                      <span className="font-medium text-violet-800">{summarySubject}: </span>
-                    ) : null}
-                    {totalLessons} {getLessonUnitWord(totalLessons)} × {formatEur(pricePerLesson)}{' '}
+                    {t('package.totalAcrossSubjects')}: {totals.totalLessons}{' '}
                     <span className="text-violet-500">{t('package.includingFeesNote')}</span>
                   </p>
                 </div>
@@ -371,7 +339,7 @@ export default function SendPackageModal({
 
               <div className="flex gap-2">
                 <Button variant="outline" onClick={onClose} disabled={loading} className="flex-1 rounded-lg">{t('common.cancel')}</Button>
-                <Button onClick={handleSendPackage} disabled={loading || !selectedSubjectId || totalLessons <= 0} className="flex-1 rounded-lg bg-violet-600 hover:bg-violet-700">
+                <Button onClick={handleSendPackage} disabled={disableSend} className="flex-1 rounded-lg bg-violet-600 hover:bg-violet-700">
                   {loading ? (<><Loader2 className="w-4 h-4 animate-spin mr-2" />{t('common.sending')}</>) : t('package.sendOffer')}
                 </Button>
               </div>

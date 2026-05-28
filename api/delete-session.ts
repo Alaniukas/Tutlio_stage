@@ -149,11 +149,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // If paid via package -> return credits first (avoid leaving credit stuck).
+    // Track credits per (package, subject) so multi-subject packages return to
+    // the right item.
     const creditsByPackage = new Map<string, number>();
+    const creditsByItem = new Map<string, number>(); // key: `${packageId}::${subjectId}`
     for (const s of sessionsToDelete) {
       if (s.lesson_package_id) {
         creditsByPackage.set(s.lesson_package_id, (creditsByPackage.get(s.lesson_package_id) || 0) + 1);
+        if (s.subject_id) {
+          const k = `${s.lesson_package_id}::${s.subject_id}`;
+          creditsByItem.set(k, (creditsByItem.get(k) || 0) + 1);
+        }
       }
+    }
+    for (const [key, countToReturn] of creditsByItem.entries()) {
+      const [packageId, subjectId] = key.split('::');
+      if (!packageId || !subjectId) continue;
+      const { data: item } = await supabase
+        .from('lesson_package_items')
+        .select('id, available_lessons, reserved_lessons')
+        .eq('package_id', packageId)
+        .eq('subject_id', subjectId)
+        .maybeSingle();
+      if (!item) continue;
+      const available = Number((item as any).available_lessons || 0);
+      const reserved = Number((item as any).reserved_lessons || 0);
+      const { error: itemUpdErr } = await supabase
+        .from('lesson_package_items')
+        .update({
+          available_lessons: available + countToReturn,
+          reserved_lessons: Math.max(0, reserved - countToReturn),
+        })
+        .eq('id', (item as any).id);
+      if (itemUpdErr) return json(res, 500, { error: 'Failed to return package item credit' });
     }
     for (const [packageId, countToReturn] of creditsByPackage.entries()) {
       const { data: pkg, error: pkgErr } = await supabase

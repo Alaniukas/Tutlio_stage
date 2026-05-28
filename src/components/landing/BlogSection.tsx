@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
-import { resolveField, formatBlogDate } from '@/lib/blogLocale';
+import { resolveField, formatBlogDate, blogPostPath } from '@/lib/blogLocale';
 import Reveal from './Reveal';
 
 export default function BlogSection() {
@@ -45,7 +45,7 @@ export default function BlogSection() {
 
         <div className="grid md:grid-cols-[1.1fr_1fr] gap-4 sm:gap-5">
           <Reveal delay={100}>
-            <Link to={`/blog/${String(featured.slug)}`} className="group relative rounded-2xl overflow-hidden bg-gray-100 min-h-[280px] sm:min-h-[420px] block">
+            <Link to={blogPostPath(featured, locale)} className="group relative rounded-2xl overflow-hidden bg-gray-100 min-h-[280px] sm:min-h-[420px] block">
               {featured.cover_image ? (
                 <img
                   src={String(featured.cover_image)}
@@ -73,7 +73,7 @@ export default function BlogSection() {
           <Reveal delay={250}>
             <div className="flex flex-col gap-5 h-full">
               {second ? (
-                <Link to={`/blog/${String(second.slug)}`} className="rounded-2xl bg-gray-900 p-7 flex flex-col justify-between flex-1 min-h-[195px] group">
+                <Link to={blogPostPath(second, locale)} className="rounded-2xl bg-gray-900 p-7 flex flex-col justify-between flex-1 min-h-[195px] group">
                   <span className="text-[11px] font-semibold text-gray-500">
                     {second.published_at ? formatBlogDate(String(second.published_at), locale) : ''}
                   </span>
@@ -98,7 +98,7 @@ export default function BlogSection() {
               )}
 
               {third ? (
-                <Link to={`/blog/${String(third.slug)}`} className="group relative rounded-2xl overflow-hidden bg-gray-100 flex-1 min-h-[195px] block">
+                <Link to={blogPostPath(third, locale)} className="group relative rounded-2xl overflow-hidden bg-gray-100 flex-1 min-h-[195px] block">
                   {third.cover_image ? (
                     <img
                       src={String(third.cover_image)}

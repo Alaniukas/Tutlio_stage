@@ -21,7 +21,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return json(res, 500, { error: 'Missing Supabase env vars' });
   }
 
-  const { packageId } = req.body as { packageId?: string };
+  const { packageId, subjectId } = req.body as { packageId?: string; subjectId?: string };
   if (!packageId) return json(res, 400, { error: 'packageId is required' });
 
   const supabase = createClient(supabaseUrl, serviceRoleKey);
@@ -56,6 +56,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return json(res, 409, { error: 'No available lessons in package' });
   }
 
+  // Pick the matching package item to decrement.
+  // - subjectId provided: find the item for that subject
+  // - subjectId omitted (legacy callers): fall back to the package's denormalized subject_id
+  const lookupSubjectId = (subjectId && subjectId.trim()) || (pkg as any).subject_id;
+  let itemRow: { id: string; available_lessons: number; reserved_lessons: number } | null = null;
+  if (lookupSubjectId) {
+    const { data: itemData } = await supabase
+      .from('lesson_package_items')
+      .select('id, available_lessons, reserved_lessons')
+      .eq('package_id', packageId)
+      .eq('subject_id', lookupSubjectId)
+      .maybeSingle();
+    itemRow = (itemData as any) || null;
+  }
+  if (!itemRow) {
+    return json(res, 409, { error: 'No matching package item for this subject' });
+  }
+  const itemAvailable = Number(itemRow.available_lessons || 0);
+  if (itemAvailable <= 0) {
+    return json(res, 409, { error: 'No available lessons for this subject in package' });
+  }
+
+  // Atomically decrement the item first (with optimistic CAS on available_lessons),
+  // then decrement the parent aggregate.
+  const itemUpdated = {
+    available_lessons: itemAvailable - 1,
+    reserved_lessons: Number(itemRow.reserved_lessons || 0) + 1,
+  };
+  const { error: itemUpdErr } = await supabase
+    .from('lesson_package_items')
+    .update(itemUpdated)
+    .eq('id', itemRow.id)
+    .eq('available_lessons', itemAvailable);
+  if (itemUpdErr) {
+    return json(res, 500, { error: 'Failed to reserve package item lesson', details: itemUpdErr.message });
+  }
+
   const updated = {
     available_lessons: available - 1,
     reserved_lessons: Number(pkg.reserved_lessons || 0) + 1,
@@ -68,16 +105,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .eq('available_lessons', available);
 
   if (updErr) {
+    // Roll back the item-level change so counters stay consistent.
+    await supabase
+      .from('lesson_package_items')
+      .update({ available_lessons: itemAvailable, reserved_lessons: Number(itemRow.reserved_lessons || 0) })
+      .eq('id', itemRow.id);
     return json(res, 500, { error: 'Failed to reserve package lesson', details: updErr.message });
   }
 
   if (updated.available_lessons === 0) {
     try {
-      const [{ data: tutorRow }, { data: studentRow }, { data: subjectRow }] = await Promise.all([
+      const [{ data: tutorRow }, { data: studentRow }, { data: subjectRow }, { data: itemsRows }] = await Promise.all([
         supabase.from('profiles').select('id, full_name, email, organization_id').eq('id', (pkg as any).tutor_id).maybeSingle(),
         supabase.from('students').select('id, full_name').eq('id', (pkg as any).student_id).maybeSingle(),
         supabase.from('subjects').select('id, name').eq('id', (pkg as any).subject_id).maybeSingle(),
+        supabase
+          .from('lesson_package_items')
+          .select('total_lessons, price_per_lesson, subjects!inner(name)')
+          .eq('package_id', packageId)
+          .order('position', { ascending: true }),
       ]);
+
+      type DepletedItem = { subjectName: string; totalLessons: number; pricePerLesson: string };
+      const itemsForEmail: DepletedItem[] = (itemsRows || []).map((row: any) => ({
+        subjectName: (row.subjects?.name as string) || 'Pamoka',
+        totalLessons: Number(row.total_lessons) || 0,
+        pricePerLesson: Number(row.price_per_lesson || 0).toFixed(2),
+      }));
 
       let recipients: string[] = [];
       let recipientName = 'Administratore';
@@ -103,6 +157,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (recipients.length > 0) {
+        const firstItem = itemsForEmail[0];
         await fetch(`${APP_URL}/api/send-email`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
@@ -112,7 +167,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             data: {
               tutorName: recipientName,
               studentName: (studentRow as any)?.full_name || 'Mokinys',
-              subjectName: (subjectRow as any)?.name || 'Dalykas',
+              // Back-compat: first subject (or legacy denormalized value)
+              subjectName: firstItem?.subjectName || (subjectRow as any)?.name || 'Dalykas',
+              // Multi-subject payload:
+              items: itemsForEmail,
               totalLessons: Number(pkg.total_lessons || 0),
               ...((tutorRow as any)?.organization_id ? { organizationId: (tutorRow as any).organization_id } : {}),
             },

@@ -318,10 +318,10 @@ export default function StudentSettings() {
                                     <SelectContent>
                                         {Array.from({ length: 12 }, (_, i) => (
                                             <SelectItem key={i} value={`${i + 1} klasė`}>
-                                                {locale === 'en' ? `Grade ${i + 1}` : `${i + 1} klasė`}
+                                                {t('onboard.gradeN', { n: i + 1 })}
                                             </SelectItem>
                                         ))}
-                                        <SelectItem value="Studentas">{locale === 'en' ? 'University' : 'Studentas'}</SelectItem>
+                                        <SelectItem value="Studentas">{t('lessonSet.gradeUniversity')}</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>

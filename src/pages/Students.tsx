@@ -714,7 +714,7 @@ export default function StudentsPage() {
     // Fetch lesson packages: include unpaid pending (offers) and paid active — useMemo splits them
     let pkgQuery = supabase
       .from('lesson_packages')
-      .select('*, subject:subjects(name)')
+      .select('*, subject:subjects(name), lesson_package_items(subject_id, total_lessons, available_lessons, total_price, position, subjects!inner(name))')
       .eq('student_id', student.id)
       .order('created_at', { ascending: true });
     if (user?.id) pkgQuery = pkgQuery.eq('tutor_id', user.id);
@@ -1067,9 +1067,9 @@ export default function StudentsPage() {
       setAllSessions((prev) => prev.map((s: any) => (s.id === updated.id ? { ...s, ...updated } : s)));
       setIsEditingSession(false);
       syncSessionToGoogleCalendar(selectedSessionForModal.id);
-      setToastMessage({ message: 'Pamokos duomenys atnaujinti', type: 'success' });
+      setToastMessage({ message: t('students.lessonUpdated'), type: 'success' });
     } else {
-      setToastMessage({ message: 'Nepavyko pakeisti pamokos duomenų', type: 'error' });
+      setToastMessage({ message: t('students.editLessonFailed'), type: 'error' });
     }
     setSavingSession(false);
   };
@@ -1311,7 +1311,7 @@ export default function StudentsPage() {
       if (selectedStudent) {
         const { data } = await supabase
           .from('lesson_packages')
-          .select('*, subject:subjects(name, color)')
+          .select('*, subject:subjects(name, color), lesson_package_items(subject_id, total_lessons, available_lessons, total_price, position, subjects!inner(name, color))')
           .eq('student_id', selectedStudent.id)
           .or('active.eq.true,payment_status.eq.pending')
           .order('created_at', { ascending: false });
@@ -1867,7 +1867,7 @@ export default function StudentsPage() {
                           <Input
                             value={studentNameDraft}
                             onChange={(e) => setStudentNameDraft(e.target.value)}
-                            placeholder="Vardas Pavardė"
+                            placeholder={t('common.name')}
                             className="rounded-xl"
                           />
                           <div className="flex gap-2">
@@ -1881,7 +1881,7 @@ export default function StudentsPage() {
                               }}
                               disabled={savingStudentName}
                             >
-                              Atšaukti
+                              {t('common.cancel')}
                             </Button>
                             <Button
                               type="button"
@@ -1889,7 +1889,7 @@ export default function StudentsPage() {
                               onClick={async () => {
                                 const nextName = studentNameDraft.trim();
                                 if (!nextName) {
-                                  setToastMessage({ message: 'Įveskite vardą ir pavardę', type: 'error' });
+                                  setToastMessage({ message: t('students.enterFullName'), type: 'error' });
                                   return;
                                 }
                                 setSavingStudentName(true);
@@ -1898,20 +1898,20 @@ export default function StudentsPage() {
                                   .update({ full_name: nextName })
                                   .eq('id', selectedStudent.id);
                                 if (error) {
-                                  setToastMessage({ message: error.message || 'Nepavyko išsaugoti', type: 'error' });
+                                  setToastMessage({ message: error.message || t('common.saveFailed'), type: 'error' });
                                   setSavingStudentName(false);
                                   return;
                                 }
                                 setSelectedStudent((s) => (s ? { ...s, full_name: nextName } : s));
                                 setStudents((prev) => prev.map((st) => (st.id === selectedStudent.id ? { ...st, full_name: nextName } : st)));
-                                setToastMessage({ message: 'Mokinio vardas atnaujintas', type: 'success' });
+                                setToastMessage({ message: t('students.nameUpdated'), type: 'success' });
                                 setIsEditingStudentName(false);
                                 setSavingStudentName(false);
                               }}
                               disabled={savingStudentName || !studentNameDraft.trim()}
                               className="bg-emerald-600 hover:bg-emerald-700"
                             >
-                              {savingStudentName ? 'Saugoma…' : 'Išsaugoti'}
+                              {savingStudentName ? t('common.saving') : t('common.save')}
                             </Button>
                           </div>
                         </div>
@@ -2014,31 +2014,51 @@ export default function StudentsPage() {
                           const n = Number(pkg.total_lessons) || 0;
                           const unit =
                             n === 1 ? t('package.lessonUnit1') : n < 10 ? t('package.lessonUnit2to9') : t('package.lessonUnit10plus');
+                          const items = Array.isArray(pkg.lesson_package_items) ? pkg.lesson_package_items : [];
+                          const isMulti = items.length > 1;
+                          const subjectLabel = isMulti
+                            ? items.map((it: any) => it.subjects?.name).filter(Boolean).join(', ')
+                            : pkg.subject?.name || pkg.subjects?.name || '—';
                           return (
-                          <div key={pkg.id} className="flex items-center justify-between text-xs gap-2 flex-wrap">
-                            <span className="font-medium text-amber-900">
-                              {pkg.subject?.name || pkg.subjects?.name || '—'} · {n} {unit}
-                            </span>
-                            <div className="flex items-center gap-2">
-                              <span className="text-amber-700">
-                                {format(new Date(pkg.created_at), 'd MMM yyyy HH:mm', { locale: dateFnsLocale })}
+                          <div key={pkg.id} className="text-xs">
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <span className="font-medium text-amber-900">
+                                {subjectLabel} · {n} {unit}
                               </span>
-                              {pkg.payment_method === 'manual' && (
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-6 text-[11px] rounded-lg border-violet-300 text-violet-800 px-2"
-                                  disabled={confirmingPackageId === pkg.id}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    void handleConfirmManualPayment(pkg.id);
-                                  }}
-                                >
-                                  {confirmingPackageId === pkg.id ? <Loader2 className="w-3 h-3 animate-spin" /> : t('stu.confirmPayment')}
-                                </Button>
-                              )}
+                              <div className="flex items-center gap-2">
+                                <span className="text-amber-700">
+                                  {format(new Date(pkg.created_at), 'd MMM yyyy HH:mm', { locale: dateFnsLocale })}
+                                </span>
+                                {pkg.payment_method === 'manual' && (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-6 text-[11px] rounded-lg border-violet-300 text-violet-800 px-2"
+                                    disabled={confirmingPackageId === pkg.id}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      void handleConfirmManualPayment(pkg.id);
+                                    }}
+                                  >
+                                    {confirmingPackageId === pkg.id ? <Loader2 className="w-3 h-3 animate-spin" /> : t('stu.confirmPayment')}
+                                  </Button>
+                                )}
+                              </div>
                             </div>
+                            {isMulti && (
+                              <ul className="pl-3 mt-1 space-y-0.5 text-[11px] text-amber-800">
+                                {items
+                                  .slice()
+                                  .sort((a: any, b: any) => Number(a.position || 0) - Number(b.position || 0))
+                                  .map((it: any) => (
+                                    <li key={it.subject_id} className="flex justify-between gap-3">
+                                      <span className="truncate">{it.subjects?.name || '—'}</span>
+                                      <span className="tabular-nums shrink-0">{Number(it.total_lessons || 0)}</span>
+                                    </li>
+                                  ))}
+                              </ul>
+                            )}
                           </div>
                           );
                         })}
@@ -2073,29 +2093,55 @@ export default function StudentsPage() {
                         )}
                       >
                         {activeStudentPackages.map((pkg: any, idx: number) => {
+                          const items = Array.isArray(pkg.lesson_package_items) ? pkg.lesson_package_items : [];
+                          const isMulti = items.length > 1;
                           const subjectName =
                             pkg.subject?.name || pkg.subjects?.name || t('stu.subjectUnknown');
                           const avail = Number(pkg.available_lessons) || 0;
                           const tot = Number(pkg.total_lessons) || 0;
                           return (
-                            <div
-                              key={pkg.id}
-                              className="flex items-center justify-between gap-3 text-sm"
-                            >
-                              <div className="min-w-0 flex items-baseline gap-2">
-                                {activeStudentPackages.length > 1 && (
-                                  <span className="text-violet-500 text-xs font-semibold tabular-nums shrink-0">
-                                    #{idx + 1}
+                            <div key={pkg.id} className="flex flex-col gap-1.5 text-sm">
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0 flex items-baseline gap-2">
+                                  {activeStudentPackages.length > 1 && (
+                                    <span className="text-violet-500 text-xs font-semibold tabular-nums shrink-0">
+                                      #{idx + 1}
+                                    </span>
+                                  )}
+                                  <span className="font-semibold text-violet-900 truncate">
+                                    {isMulti
+                                      ? items
+                                          .map((it: any) => it.subjects?.name)
+                                          .filter(Boolean)
+                                          .join(', ')
+                                      : subjectName}
                                   </span>
-                                )}
-                                <span className="font-semibold text-violet-900 truncate">{subjectName}</span>
+                                </div>
+                                <span className="text-violet-800 font-semibold tabular-nums text-xs sm:text-sm shrink-0">
+                                  {t('stu.activePackageLessonsShort', {
+                                    available: String(avail),
+                                    total: String(tot),
+                                  })}
+                                </span>
                               </div>
-                              <span className="text-violet-800 font-semibold tabular-nums text-xs sm:text-sm shrink-0">
-                                {t('stu.activePackageLessonsShort', {
-                                  available: String(avail),
-                                  total: String(tot),
-                                })}
-                              </span>
+                              {isMulti && (
+                                <ul className="pl-3 space-y-0.5">
+                                  {items
+                                    .slice()
+                                    .sort((a: any, b: any) => Number(a.position || 0) - Number(b.position || 0))
+                                    .map((it: any) => (
+                                      <li
+                                        key={it.subject_id}
+                                        className="flex items-center justify-between gap-3 text-xs text-violet-700"
+                                      >
+                                        <span className="truncate">{it.subjects?.name || '—'}</span>
+                                        <span className="tabular-nums shrink-0">
+                                          {Number(it.available_lessons || 0)}/{Number(it.total_lessons || 0)}
+                                        </span>
+                                      </li>
+                                    ))}
+                                </ul>
+                              )}
                             </div>
                           );
                         })}
@@ -2636,7 +2682,7 @@ export default function StudentsPage() {
                     const start = toDate(rawStart);
                     const end = toDate(rawEnd);
                     if (!start) {
-                      setToastMessage({ message: 'Nepavyko atidaryti redagavimo (neteisinga pamokos pradžios data).', type: 'error' });
+                      setToastMessage({ message: t('students.openEditFailed'), type: 'error' });
                       return;
                     }
 

@@ -761,12 +761,10 @@ export default function Login() {
                 </div>
                 <div className="flex-1">
                   <p className="text-white font-semibold text-base">
-                    {locale === 'lt' ? 'Mokiniai / Tėvai' : 'Students / Parents'}
+                    {t('login.studentsParents')}
                   </p>
                   <p className="text-indigo-300 text-sm mt-0.5">
-                    {locale === 'lt'
-                      ? 'Prisijunkite kaip mokinys arba kaip tėvai'
-                      : 'Login as a student or as a parent'}
+                    {t('login.studentsParentsDesc')}
                   </p>
                 </div>
                 <ChevronRight className="w-5 h-5 text-white/40 group-hover:text-white/80 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
@@ -1141,7 +1139,7 @@ export default function Login() {
                   onClick={backToStudentGroup}
                   className="w-full text-sm text-violet-600 font-medium hover:underline"
                 >
-                  {locale === 'lt' ? 'Atgal į Mokiniai / Tėvai' : 'Back to Students / Parents'}
+                  {t('login.backToStudentsParents')}
                 </button>
               </div>
             </div>
@@ -1205,10 +1203,10 @@ export default function Login() {
                       </div>
                       <div>
                         <p className="font-semibold text-gray-900 text-sm">
-                          {locale === 'lt' ? 'Tėvų prisijungimas' : 'Parent login'}
+                          {t('login.parentLoginTitle')}
                         </p>
                         <p className="text-xs text-gray-400">
-                          {locale === 'lt' ? 'Prisijunkite kaip tėvai / globėjai' : 'Login as a parent / guardian'}
+                          {t('login.parentLoginDesc2')}
                         </p>
                       </div>
                     </button>

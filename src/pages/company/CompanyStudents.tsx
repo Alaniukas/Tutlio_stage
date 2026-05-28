@@ -41,6 +41,7 @@ import {
 } from '@/lib/studentPaymentModel';
 import StudentPaymentModelSection from '@/components/StudentPaymentModelSection';
 import SendInvoiceModal from '@/components/SendInvoiceModal';
+import PackageItemsEditor, { type PackageEditorItem, type PackageEditorSubject } from '@/components/PackageItemsEditor';
 import { pickStudentContactsForTutorEmail, shouldShowPayerContactSection } from '@/lib/orgContactVisibility';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { findOrgTutorEmailConflict } from '@/lib/orgStudentTutorGuards';
@@ -83,6 +84,13 @@ interface Student {
 interface Tutor {
   id: string;
   full_name: string;
+  subject_names?: string[];
+}
+
+function formatTutorSubjectsLine(names: string[] | undefined, noSubjectsLabel: string): string {
+  if (!names?.length) return noSubjectsLabel;
+  if (names.length <= 4) return names.join(', ');
+  return `${names.slice(0, 4).join(', ')} +${names.length - 4}`;
 }
 
 interface SubjectOption {
@@ -234,9 +242,8 @@ export default function CompanyStudents() {
   const [packageSubjects, setPackageSubjects] = useState<any[]>([]);
   const [loadingPackages, setLoadingPackages] = useState(false);
   const [sendPackageOpen, setSendPackageOpen] = useState(false);
-  const [pkgSubjectId, setPkgSubjectId] = useState('');
-  const [pkgLessons, setPkgLessons] = useState(5);
-  const [pkgPrice, setPkgPrice] = useState(0);
+  const [pkgItems, setPkgItems] = useState<PackageEditorItem[]>([]);
+  const [pkgIndividualPricing, setPkgIndividualPricing] = useState<Record<string, number>>({});
   const [pkgExpiresAt, setPkgExpiresAt] = useState('');
   const [pkgSending, setPkgSending] = useState(false);
   const [pkgAttachSalesInvoice, setPkgAttachSalesInvoice] = useState(true);
@@ -440,10 +447,10 @@ export default function CompanyStudents() {
     let cancelled = false;
     (async () => {
       setLoadingPackages(true);
-      const [pkgRes, subjRes] = await Promise.all([
+      const [pkgRes, subjRes, pricingRes] = await Promise.all([
         supabase
           .from('lesson_packages')
-          .select('*, subject:subjects(name, color)')
+          .select('*, subject:subjects(name, color), lesson_package_items(subject_id, total_lessons, available_lessons, total_price, position, subjects!inner(name, color))')
           .eq('student_id', selectedStudent.id)
           // Show both "active" and "pending" packages (org admin wants to see what is sent vs paid)
           .or('active.eq.true,payment_status.eq.pending')
@@ -453,12 +460,25 @@ export default function CompanyStudents() {
           .select('id, name, color, price, duration_minutes')
           .eq('tutor_id', selectedStudent.tutor_id)
           .order('name'),
+        supabase
+          .from('student_individual_pricing')
+          .select('subject_id, price')
+          .eq('student_id', selectedStudent.id)
+          .eq('tutor_id', selectedStudent.tutor_id),
       ]);
       if (!cancelled) {
         setStudentPackages(pkgRes.data || []);
         setPackageSubjects(subjRes.data || []);
+        const pricingMap: Record<string, number> = {};
+        (pricingRes.data || []).forEach((p: any) => { pricingMap[p.subject_id] = Number(p.price); });
+        setPkgIndividualPricing(pricingMap);
         const first = subjRes.data?.[0];
-        if (first) { setPkgSubjectId(first.id); setPkgPrice(first.price); }
+        if (first) {
+          const initialPrice = pricingMap[first.id] ?? Number(first.price ?? 0);
+          setPkgItems([{ subjectId: first.id, totalLessons: 5, pricePerLesson: initialPrice }]);
+        } else {
+          setPkgItems([]);
+        }
         setLoadingPackages(false);
       }
     })();
@@ -582,9 +602,30 @@ export default function CompanyStudents() {
       'id, full_name, email',
     );
 
-    setTutors(tutorsList);
-
     const tutorIds = tutorsList.map((t) => t.id);
+    let tutorsWithSubjects: Tutor[] = tutorsList;
+    if (tutorIds.length > 0) {
+      const { data: subjectRows } = await supabase
+        .from('subjects')
+        .select('tutor_id, name')
+        .in('tutor_id', tutorIds)
+        .order('name');
+      const subjectsByTutor = new Map<string, string[]>();
+      for (const row of subjectRows || []) {
+        const tid = row.tutor_id as string;
+        const name = String(row.name || '').trim();
+        if (!tid || !name) continue;
+        const list = subjectsByTutor.get(tid) || [];
+        if (!list.includes(name)) list.push(name);
+        subjectsByTutor.set(tid, list);
+      }
+      tutorsWithSubjects = tutorsList.map((tu) => ({
+        ...tu,
+        subject_names: subjectsByTutor.get(tu.id) || [],
+      }));
+    }
+
+    setTutors(tutorsWithSubjects);
     let fetchedStudents: Student[] = [];
     let studentsErr: { message: string } | null = null;
 
@@ -633,7 +674,7 @@ export default function CompanyStudents() {
       setStudents(fetchedStudents);
     }
 
-    setCache('company_students', { students: fetchedStudents, tutors: tutorsList });
+    setCache('company_students', { students: fetchedStudents, tutors: tutorsWithSubjects });
     setLoading(false);
   };
 
@@ -666,7 +707,26 @@ export default function CompanyStudents() {
   }, [newStudent.tutor_ids]);
 
   const handleSendPackage = async () => {
-    if (!selectedStudent || !pkgSubjectId || pkgLessons <= 0) return;
+    if (!selectedStudent || pkgItems.length === 0) return;
+    // Local validation (same rules as SendPackageModal)
+    const seen = new Set<string>();
+    let totalLessonsSum = 0;
+    for (const it of pkgItems) {
+      if (!it.subjectId || it.totalLessons <= 0) {
+        setToastMessage({ message: t('package.fillAllFields'), type: 'error' });
+        return;
+      }
+      if (seen.has(it.subjectId)) {
+        setToastMessage({ message: t('package.duplicateSubject'), type: 'error' });
+        return;
+      }
+      seen.add(it.subjectId);
+      totalLessonsSum += it.totalLessons;
+    }
+    if (totalLessonsSum > 100) {
+      setToastMessage({ message: t('package.maxLessonsExceeded'), type: 'error' });
+      return;
+    }
     setPkgSending(true);
     try {
       const endpoint = orgUsesManualPackages ? '/api/create-manual-package' : '/api/create-package-checkout';
@@ -676,9 +736,11 @@ export default function CompanyStudents() {
         body: JSON.stringify({
           tutorId: selectedStudent.tutor_id,
           studentId: selectedStudent.id,
-          subjectId: pkgSubjectId,
-          totalLessons: pkgLessons,
-          pricePerLesson: pkgPrice,
+          items: pkgItems.map((it) => ({
+            subjectId: it.subjectId,
+            totalLessons: it.totalLessons,
+            pricePerLesson: it.pricePerLesson,
+          })),
           ...(pkgExpiresAt ? { expiresAt: pkgExpiresAt } : {}),
           ...(!orgUsesManualPackages ? { attachSalesInvoice: pkgAttachSalesInvoice } : {}),
         }),
@@ -696,7 +758,7 @@ export default function CompanyStudents() {
       setPkgExpiresAt('');
       const { data } = await supabase
         .from('lesson_packages')
-        .select('*, subject:subjects(name, color)')
+        .select('*, subject:subjects(name, color), lesson_package_items(subject_id, total_lessons, available_lessons, total_price, position, subjects!inner(name, color))')
         .eq('student_id', selectedStudent.id)
         .or('active.eq.true,payment_status.eq.pending')
         .order('created_at', { ascending: false });
@@ -718,7 +780,7 @@ export default function CompanyStudents() {
       if (error) throw error;
       const { data } = await supabase
         .from('lesson_packages')
-        .select('*, subject:subjects(name, color)')
+        .select('*, subject:subjects(name, color), lesson_package_items(subject_id, total_lessons, available_lessons, total_price, position, subjects!inner(name, color))')
         .eq('student_id', selectedStudent.id)
         .or('active.eq.true,payment_status.eq.pending')
         .order('created_at', { ascending: false });
@@ -1402,14 +1464,14 @@ export default function CompanyStudents() {
                           />
                           <div className="mt-2 max-h-52 overflow-y-auto space-y-1">
                             {tutors
-                              .filter((t) =>
-                                t.full_name.toLowerCase().includes(multiTutorSearch.trim().toLowerCase())
+                              .filter((tu) =>
+                                tu.full_name.toLowerCase().includes(multiTutorSearch.trim().toLowerCase())
                               )
-                              .map((t) => {
-                                const active = newStudent.tutor_ids.includes(t.id);
+                              .map((tu) => {
+                                const active = newStudent.tutor_ids.includes(tu.id);
                                 return (
                                   <label
-                                    key={t.id}
+                                    key={tu.id}
                                     className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-gray-50 cursor-pointer text-xs"
                                   >
                                     <input
@@ -1417,13 +1479,18 @@ export default function CompanyStudents() {
                                       checked={active}
                                       onChange={(e) => {
                                         const next = e.target.checked
-                                          ? [...newStudent.tutor_ids, t.id]
-                                          : newStudent.tutor_ids.filter((id) => id !== t.id);
+                                          ? [...newStudent.tutor_ids, tu.id]
+                                          : newStudent.tutor_ids.filter((id) => id !== tu.id);
                                         setNewStudent({ ...newStudent, tutor_ids: next });
                                       }}
                                       className="w-3.5 h-3.5"
                                     />
-                                    <span className="truncate">{t.full_name}</span>
+                                    <span className="min-w-0 flex-1">
+                                      <span className="block truncate text-gray-900">{tu.full_name}</span>
+                                      <span className="block truncate text-[11px] text-gray-500">
+                                        {formatTutorSubjectsLine(tu.subject_names, t('compSch.tutorNoSubjects'))}
+                                      </span>
+                                    </span>
                                   </label>
                                 );
                               })}
@@ -2305,29 +2372,36 @@ export default function CompanyStudents() {
                       </div>
                     )}
                     <div className="pt-1 flex items-center gap-2 flex-wrap">
-                      {isSchoolView && (
-                        <>
+                      {(() => {
+                        const inviteRecipient =
+                          (selectedStudent.email || '').trim() ||
+                          (isSchoolView ? (selectedStudent.payer_email || '').trim() : '');
+                        return (
                           <Button
                             type="button"
                             size="sm"
                             variant="outline"
-                            className="h-7 px-2.5 text-[11px]"
-                            disabled={sendingInviteNow}
+                            className="h-7 px-2.5 text-[11px] gap-1"
+                            disabled={sendingInviteNow || !inviteRecipient}
+                            title={!inviteRecipient ? t('compStu.noInviteRecipient') : undefined}
                             onClick={() => void handleSendInviteNow()}
                           >
+                            <Mail className="w-3 h-3" />
                             {sendingInviteNow ? t('compStu.sendingNow') : t('compStu.sendInviteNow')}
                           </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-7 px-2.5 text-[11px]"
-                            disabled={sendingParentInvites || !selectedStudent}
-                            onClick={() => selectedStudent && void sendParentPortalInvites(selectedStudent.id, true)}
-                          >
-                            {sendingParentInvites ? t('common.loading') : t('parent.resendInvites')}
-                          </Button>
-                        </>
+                        );
+                      })()}
+                      {isSchoolView && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2.5 text-[11px]"
+                          disabled={sendingParentInvites || !selectedStudent}
+                          onClick={() => selectedStudent && void sendParentPortalInvites(selectedStudent.id, true)}
+                        >
+                          {sendingParentInvites ? t('common.loading') : t('parent.resendInvites')}
+                        </Button>
                       )}
                       {selectedStudent.linked_user_id ? (
                         <span className="inline-flex items-center gap-1 text-green-700 bg-green-50 border border-green-200 rounded-md px-2 py-1 text-xs">
@@ -2443,9 +2517,14 @@ export default function CompanyStudents() {
                               : tutors.slice(0, 5)
                             )
                               .filter((t) => !selectedStudentGroup.some((r) => r.tutor_id === t.id))
-                              .map((t) => (
-                                <SelectItem key={t.id} value={t.id}>
-                                  {t.full_name}
+                              .map((tu) => (
+                                <SelectItem key={tu.id} value={tu.id}>
+                                  <span className="flex flex-col items-start gap-0.5 min-w-0">
+                                    <span>{tu.full_name}</span>
+                                    <span className="text-[11px] text-gray-500 font-normal truncate max-w-full">
+                                      {formatTutorSubjectsLine(tu.subject_names, t('compSch.tutorNoSubjects'))}
+                                    </span>
+                                  </span>
                                 </SelectItem>
                               ))}
                           </SelectContent>
@@ -2936,49 +3015,16 @@ export default function CompanyStudents() {
                   {sendPackageOpen && (
                     <div className="mb-4 p-4 bg-violet-50 border border-violet-200 rounded-xl space-y-3">
                       <p className="text-xs font-semibold text-violet-800">{t('compStu.sendPackageTitle')}</p>
+                      <PackageItemsEditor
+                        compact
+                        disabled={pkgSending || orgFeaturesLoading}
+                        subjects={packageSubjects as PackageEditorSubject[]}
+                        individualPricing={pkgIndividualPricing}
+                        items={pkgItems}
+                        onChange={setPkgItems}
+                      />
                       <div className="grid grid-cols-3 gap-2">
-                        <div className="col-span-3 space-y-1">
-                          <Label className="text-xs">{t('compStu.subjectLabel')}</Label>
-                          <Select value={pkgSubjectId} onValueChange={(v) => {
-                            setPkgSubjectId(v);
-                            const s = packageSubjects.find(s => s.id === v);
-                            if (s) setPkgPrice(s.price);
-                          }}>
-                            <SelectTrigger className="rounded-lg h-8 text-xs">
-                              <SelectValue placeholder={t('compStu.selectPlaceholder')} />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {packageSubjects.map(s => (
-                                <SelectItem key={s.id} value={s.id}>
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
-                                    <span className="truncate text-left">
-                                      {t('compStu.packageSubjectOption', {
-                                        name: s.name,
-                                        tutor: selectedStudent.tutor?.full_name || '—',
-                                        minutes: String(s.duration_minutes ?? 60),
-                                        price: Number(s.price ?? 0).toFixed(2),
-                                      })}
-                                    </span>
-                                  </div>
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">{t('compStu.quantityLabel')}</Label>
-                          <Input type="number" min={1} max={100} value={pkgLessons}
-                            onChange={(e) => setPkgLessons(Math.max(1, parseInt(e.target.value) || 1))}
-                            className="h-8 text-xs rounded-lg" />
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">{t('compStu.pricePerLesson')}</Label>
-                          <Input type="number" min={0} step={0.01} value={pkgPrice}
-                            onChange={(e) => setPkgPrice(parseFloat(e.target.value) || 0)}
-                            className="h-8 text-xs rounded-lg" />
-                        </div>
-                        <div className="space-y-1 col-span-3 sm:col-span-1">
+                        <div className="space-y-1 col-span-2">
                           <Label className="text-xs">{t('package.validUntil')}</Label>
                           <DateInput
                             value={pkgExpiresAt}
@@ -2989,7 +3035,7 @@ export default function CompanyStudents() {
                         </div>
                         <div className="flex items-end">
                           <Button size="sm" className="h-8 w-full text-xs rounded-lg bg-violet-600 hover:bg-violet-700"
-                            onClick={handleSendPackage} disabled={pkgSending || !pkgSubjectId || orgFeaturesLoading}>
+                            onClick={handleSendPackage} disabled={pkgSending || pkgItems.length === 0 || orgFeaturesLoading}>
                             {pkgSending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : t('compStu.sendBtn')}
                           </Button>
                         </div>
@@ -3012,29 +3058,13 @@ export default function CompanyStudents() {
                       <p className="text-xs text-violet-600">
                         {orgUsesManualPackages ? t('compStu.manualPackageSendHint') : t('compStu.stripePaymentHint')}
                       </p>
-                          {pkgSubjectId && pkgLessons > 0 && (
+                      {pkgItems.length > 0 && pkgItems.some((it) => it.totalLessons > 0) && (
                         <p className="text-xs font-medium text-violet-800">
-                          {(() => {
-                            const s = packageSubjects.find((x) => x.id === pkgSubjectId);
-                            return s
-                              ? t('compStu.packageSubjectOption', {
-                                  name: s.name,
-                                  tutor: selectedStudent.tutor?.full_name || '—',
-                                  minutes: String(s.duration_minutes ?? 60),
-                                  price: Number(s.price ?? 0).toFixed(2),
-                                })
-                              : '—';
-                          })()}
+                          {t('package.totalAcrossSubjects')}: {pkgItems.reduce((acc, it) => acc + (Number(it.totalLessons) || 0), 0)}
                           {' · '}
-                          {pkgLessons}{' '}
-                          {pkgLessons === 1
-                            ? t('package.lessonUnit1')
-                            : pkgLessons < 10
-                              ? t('package.lessonUnit2to9')
-                              : t('package.lessonUnit10plus')}{' '}
-                          × {Number(pkgPrice).toFixed(2)} €
+                          {t('package.totalToPay')}: {pkgItems.reduce((acc, it) => acc + (Number(it.totalLessons) || 0) * (Number(it.pricePerLesson) || 0), 0).toFixed(2)} €
                           {!orgUsesManualPackages && (
-                          <span className="text-violet-500 font-normal"> {t('package.includingFeesNote')}</span>
+                            <span className="text-violet-500 font-normal"> {t('package.includingFeesNote')}</span>
                           )}
                         </p>
                       )}
@@ -3047,15 +3077,23 @@ export default function CompanyStudents() {
                     <p className="text-sm text-gray-400 text-center py-3">{t('compStu.noPackages')}</p>
                   ) : (
                     <div className="space-y-2">
-                      {studentPackages.map((pkg: any) => (
-                        <div key={pkg.id} className="flex items-center justify-between gap-2 p-3 bg-gray-50 rounded-xl text-sm flex-wrap">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            {pkg.subject?.color && <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: pkg.subject.color }} />}
-                            <span className="font-medium text-gray-800">{pkg.subject?.name || '—'}</span>
-                            <span className="text-gray-500">{t('compStu.lessonsCount', { count: String(pkg.total_lessons) })}</span>
-                          </div>
-                          <div className="flex items-center gap-2 flex-wrap justify-end">
-                            <span className="text-xs text-gray-500">{t('compStu.remaining', { count: String(pkg.available_lessons) })}</span>
+                      {studentPackages.map((pkg: any) => {
+                        const items = Array.isArray(pkg.lesson_package_items) ? pkg.lesson_package_items : [];
+                        const isMulti = items.length > 1;
+                        return (
+                        <div key={pkg.id} className="flex flex-col gap-2 p-3 bg-gray-50 rounded-xl text-sm">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {!isMulti && pkg.subject?.color && <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: pkg.subject.color }} />}
+                              <span className="font-medium text-gray-800">
+                                {isMulti
+                                  ? items.map((it: any) => it.subjects?.name).filter(Boolean).join(', ')
+                                  : (pkg.subject?.name || '—')}
+                              </span>
+                              <span className="text-gray-500">{t('compStu.lessonsCount', { count: String(pkg.total_lessons) })}</span>
+                            </div>
+                            <div className="flex items-center gap-2 flex-wrap justify-end">
+                              <span className="text-xs text-gray-500">{t('compStu.remaining', { count: String(pkg.available_lessons) })}</span>
                             {pkg.expires_at && (
                               <span className={`text-xs px-2 py-0.5 rounded-full ${new Date(pkg.expires_at) < new Date() ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
                                 {new Date(pkg.expires_at) < new Date()
@@ -3082,9 +3120,27 @@ export default function CompanyStudents() {
                                 {deactivatingPackageId === pkg.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
                               </Button>
                             )}
+                            </div>
                           </div>
+                          {isMulti && (
+                            <ul className="pl-2 space-y-0.5">
+                              {items
+                                .slice()
+                                .sort((a: any, b: any) => Number(a.position || 0) - Number(b.position || 0))
+                                .map((it: any) => (
+                                  <li key={it.subject_id} className="flex items-center justify-between gap-3 text-xs text-gray-600">
+                                    <span className="flex items-center gap-2 min-w-0">
+                                      {it.subjects?.color && <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: it.subjects.color }} />}
+                                      <span className="truncate">{it.subjects?.name || '—'}</span>
+                                    </span>
+                                    <span className="tabular-nums shrink-0">{Number(it.available_lessons || 0)}/{Number(it.total_lessons || 0)}</span>
+                                  </li>
+                                ))}
+                            </ul>
+                          )}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

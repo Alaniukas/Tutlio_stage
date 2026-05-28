@@ -146,7 +146,7 @@ export function tutorRecentPaidPackagesDeduped(tutorId: string) {
   return dedupeAsync(`tutor_recent_pkgs:${tutorId}`, () =>
     supabase
       .from('lesson_packages')
-      .select('id, paid_at, total_price, total_lessons, students!student_id(full_name), subjects!subject_id(name)')
+      .select('id, paid_at, total_price, total_lessons, students!student_id(full_name), subjects!subject_id(name), lesson_package_items(subject_id, total_lessons, position, subjects!inner(name))')
       .eq('tutor_id', tutorId)
       .eq('paid', true)
       .not('paid_at', 'is', null)

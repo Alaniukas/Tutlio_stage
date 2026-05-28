@@ -34,6 +34,7 @@ import { sendEmail } from '@/lib/email';
 import { resolveStudentNotificationEmail } from '@/lib/studentNotifyEmail';
 import { authHeaders } from '@/lib/apiHelpers';
 import { autoCloseBillingBatchIfAllPaid } from '@/lib/autoCloseBillingBatch';
+import { findActivePackageForBooking } from '@/lib/lessonPackageBooking';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -1350,24 +1351,30 @@ export default function CalendarPage() {
         }
       }
 
-      // Check for lesson packages for each student template (for recurring sessions)
-      const packagesByStudent = new Map();
+      // Check for lesson packages for each student template (for recurring sessions).
+      // Multi-subject packages live in `lesson_package_items` — look up the matching
+      // item for the recurring subject and remember both the package and the item.
+      const packagesByStudent = new Map<string, {
+        id: string;
+        available_lessons: number;
+        reserved_lessons: number;
+        item_id: string;
+        item_available_lessons: number;
+        item_reserved_lessons: number;
+      }>();
       if (!isPaid && selectedSubjectId) {
-        const uniqueStudentIds = [...new Set(recurringTemplates.map((t: any) => t.student_id))];
+        const uniqueStudentIds = [...new Set(recurringTemplates.map((t: any) => t.student_id))] as string[];
         for (const sid of uniqueStudentIds) {
-          const { data: packages } = await supabase
-            .from('lesson_packages')
-            .select('*')
-            .eq('student_id', sid)
-            .eq('subject_id', selectedSubjectId)
-            .eq('active', true)
-            .eq('paid', true)
-            .gt('available_lessons', 0)
-            .order('created_at', { ascending: true })
-            .limit(1);
-
-          if (packages && packages.length > 0) {
-            packagesByStudent.set(sid, packages[0]);
+          const match = await findActivePackageForBooking(supabase, { studentId: sid, subjectId: selectedSubjectId });
+          if (match) {
+            packagesByStudent.set(sid, {
+              id: match.pkg.id,
+              available_lessons: match.pkg.available_lessons,
+              reserved_lessons: match.pkg.reserved_lessons,
+              item_id: match.item.id,
+              item_available_lessons: match.item.available_lessons,
+              item_reserved_lessons: match.item.reserved_lessons,
+            });
           }
         }
       }
@@ -1390,7 +1397,7 @@ export default function CalendarPage() {
             const pkg = packagesByStudent.get(template.student_id);
             if (pkg) {
               const used = packagesUsage.get(pkg.id) || 0;
-              const remaining = pkg.available_lessons - used;
+              const remaining = Math.min(pkg.available_lessons, pkg.item_available_lessons) - used;
 
               if (remaining > 0) {
                 lessonPackageId = pkg.id;
@@ -1433,11 +1440,24 @@ export default function CalendarPage() {
           return;
         }
 
-        // Update lesson packages based on usage
+        // Update lesson packages based on usage (per-item + parent aggregate)
         if (packagesUsage.size > 0) {
           for (const [pkgId, usedCount] of packagesUsage.entries()) {
             const pkg = Array.from(packagesByStudent.values()).find(p => p.id === pkgId);
-            if (pkg) {
+            if (pkg && usedCount > 0) {
+              const { error: itemErr } = await supabase
+                .from('lesson_package_items')
+                .update({
+                  available_lessons: pkg.item_available_lessons - usedCount,
+                  reserved_lessons: pkg.item_reserved_lessons + usedCount,
+                })
+                .eq('id', pkg.item_id);
+
+              if (itemErr) {
+                console.error('Error updating lesson package item:', itemErr);
+                continue;
+              }
+
               const { error: pkgError } = await supabase
                 .from('lesson_packages')
                 .update({
@@ -1510,8 +1530,7 @@ export default function CalendarPage() {
             const normalizedPayer = String(studentData.payment_payer || '').trim().toLowerCase();
             const payerEmail = String(studentData.payer_email || '').trim();
             const hasPayer = normalizedPayer === 'parent' && payerEmail.length > 0;
-            const weekdayNames = ['sekmadienį', 'pirmadienį', 'antradienį', 'trečiadienį', 'ketvirtadienį', 'penktadienį', 'šeštadienį'];
-            const recurringWeekday = weekdayNames[getDay(firstStart)];
+            const recurringWeekday = getDay(firstStart);
             const recurringTime = format(firstStart, 'HH:mm');
 
             const studentNotifyTo = await resolveStudentNotificationEmail(studentData);
@@ -1673,37 +1692,37 @@ export default function CalendarPage() {
 
       // Check for lesson packages for each student and prepare sessions
       const sessionsToInsert = [];
-      const packagesToUpdate = [];
+      const packagesToUpdate: Array<{
+        id: string;
+        available_lessons: number;
+        reserved_lessons: number;
+        item_id: string;
+        item_available_lessons: number;
+        item_reserved_lessons: number;
+        studentId: string;
+      }> = [];
       for (const studentId of studentIdsToCreate) {
-        // Check if student has available lesson package for this subject
+        // Check if student has available lesson package item for this subject
         let sessionPaid = isPaid;
         let sessionPaymentStatus = isPaid ? 'paid' : 'pending';
         let lessonPackageId = null;
 
         if (!isPaid && selectedSubjectId) {
-          const { data: packages } = await supabase
-            .from('lesson_packages')
-            .select('*')
-            .eq('student_id', studentId)
-            .eq('subject_id', selectedSubjectId)
-            .eq('active', true)
-            .eq('paid', true)
-            .gt('available_lessons', 0)
-            .order('created_at', { ascending: true })
-            .limit(1);
-
-          if (packages && packages.length > 0) {
-            const pkg = packages[0];
+          const match = await findActivePackageForBooking(supabase, { studentId, subjectId: selectedSubjectId });
+          if (match) {
+            const { pkg, item } = match;
             lessonPackageId = pkg.id;
             sessionPaid = true;
             sessionPaymentStatus = 'confirmed';
 
-            // Track package update
             packagesToUpdate.push({
               id: pkg.id,
               available_lessons: pkg.available_lessons - 1,
               reserved_lessons: pkg.reserved_lessons + 1,
-              studentId: studentId
+              item_id: item.id,
+              item_available_lessons: item.available_lessons - 1,
+              item_reserved_lessons: item.reserved_lessons + 1,
+              studentId,
             });
           }
         }
@@ -1729,9 +1748,21 @@ export default function CalendarPage() {
 
       const { data: created, error } = await supabase.from('sessions').insert(sessionsToInsert).select();
 
-      // Update lesson packages
+      // Update lesson packages (per-item + parent aggregate)
       if (!error && packagesToUpdate.length > 0) {
         for (const pkgUpdate of packagesToUpdate) {
+          const { error: itemErr } = await supabase
+            .from('lesson_package_items')
+            .update({
+              available_lessons: pkgUpdate.item_available_lessons,
+              reserved_lessons: pkgUpdate.item_reserved_lessons,
+            })
+            .eq('id', pkgUpdate.item_id);
+          if (itemErr) {
+            console.error('Error updating lesson package item:', itemErr);
+            continue;
+          }
+
           const { error: pkgError } = await supabase
             .from('lesson_packages')
             .update({
@@ -2115,36 +2146,37 @@ export default function CalendarPage() {
         let lessonPackageId = null;
 
         if (assignSubjectId) {
-          const { data: packages } = await supabase
-            .from('lesson_packages')
-            .select('*')
-            .eq('student_id', studentId)
-            .eq('subject_id', assignSubjectId)
-            .eq('active', true)
-            .eq('paid', true)
-            .gt('available_lessons', 0)
-            .order('created_at', { ascending: true })
-            .limit(1);
-
-          if (packages && packages.length > 0) {
-            const pkg = packages[0];
+          const match = await findActivePackageForBooking(supabase, { studentId, subjectId: assignSubjectId });
+          if (match) {
+            const { pkg, item } = match;
             lessonPackageId = pkg.id;
             sessionPaid = true;
             sessionPaymentStatus = 'confirmed';
 
-            // Update package: available_lessons-- and reserved_lessons++
-            const { error: pkgError } = await supabase
-              .from('lesson_packages')
+            // Decrement item first, then parent aggregate
+            const { error: itemErr } = await supabase
+              .from('lesson_package_items')
               .update({
-                available_lessons: pkg.available_lessons - 1,
-                reserved_lessons: pkg.reserved_lessons + 1,
+                available_lessons: item.available_lessons - 1,
+                reserved_lessons: item.reserved_lessons + 1,
               })
-              .eq('id', pkg.id);
-
-            if (pkgError) {
-              console.error('Error updating lesson package:', pkgError);
+              .eq('id', item.id);
+            if (itemErr) {
+              console.error('Error updating lesson package item:', itemErr);
             } else {
-              console.log(`[Calendar] Auto-deducted 1 lesson from package ${pkg.id} for student ${studentId}`);
+              const { error: pkgError } = await supabase
+                .from('lesson_packages')
+                .update({
+                  available_lessons: pkg.available_lessons - 1,
+                  reserved_lessons: pkg.reserved_lessons + 1,
+                })
+                .eq('id', pkg.id);
+
+              if (pkgError) {
+                console.error('Error updating lesson package:', pkgError);
+              } else {
+                console.log(`[Calendar] Auto-deducted 1 lesson from package ${pkg.id} item ${item.id} for student ${studentId}`);
+              }
             }
           }
         }
@@ -2237,7 +2269,6 @@ export default function CalendarPage() {
             time: format(new Date(s.start_time), 'HH:mm'),
           }));
           const firstDow = getDay(new Date(first.start_time));
-          const weekdayNames = ['sekmadienį', 'pirmadienį', 'antradienį', 'trečiadienį', 'ketvirtadienį', 'penktadienį', 'šeštadienį'];
           const studentAssignTo = await resolveStudentNotificationEmail(student);
           if (studentAssignTo) {
             void sendEmail({
@@ -2251,7 +2282,7 @@ export default function CalendarPage() {
                 duration,
                 totalLessons: sorted.length,
                 sessions: sessionDates,
-                recurringWeekday: weekdayNames[firstDow],
+                recurringWeekday: firstDow,
                 recurringTime: assignSelectedSlot,
                 ...(orgIdAssign ? { organizationId: orgIdAssign } : {}),
               },
@@ -2271,7 +2302,7 @@ export default function CalendarPage() {
                 duration,
                 totalLessons: sorted.length,
                 sessions: sessionDates,
-                recurringWeekday: weekdayNames[firstDow],
+                recurringWeekday: firstDow,
                 recurringTime: assignSelectedSlot,
                 paymentReminderNote: true,
                 ...(orgIdAssign ? { organizationId: orgIdAssign } : {}),
@@ -3932,7 +3963,7 @@ export default function CalendarPage() {
                           )}
                           {subj.grade_min && subj.grade_max && (
                             <span className="text-xs text-emerald-600">
-                              ({subj.grade_min}-{subj.grade_max === 13 ? 'Studentas' : `${subj.grade_max} kl`})
+                              ({subj.grade_min}-{subj.grade_max === 13 ? t('lessonSet.gradeUniversity') : `${subj.grade_max} ${t('lessonSet.gradeShort')}`})
                             </span>
                           )}
                           · {subj.duration_minutes}min
@@ -4185,7 +4216,7 @@ export default function CalendarPage() {
                     />
                     {!recurringEndDate && (
                       <p className="text-xs text-gray-500">
-                        Jei paliksite tuščią, pamokos kartosis nuolat (sistemoje sugeneruojamos į priekį ~2 metus).
+                        {t('cal.recurringNoEndHint')}
                       </p>
                     )}
                     {recurringEndDate && startTime && (() => {
@@ -5392,7 +5423,7 @@ export default function CalendarPage() {
                         )}
                       </span>
                       {subject.grade_min && subject.grade_max && (
-                        <span className="text-[10px] text-gray-400">{subject.grade_min}-{subject.grade_max === 13 ? 'Stud.' : `${subject.grade_max} kl`}</span>
+                        <span className="text-[10px] text-gray-400">{subject.grade_min}-{subject.grade_max === 13 ? t('lessonSet.gradeUniversity') : `${subject.grade_max} ${t('lessonSet.gradeShort')}`}</span>
                       )}
                     </div>
                   </label>
@@ -5556,7 +5587,7 @@ export default function CalendarPage() {
                         )}
                         {s.grade_min && s.grade_max && (
                           <span className="text-xs text-gray-500 ml-2">
-                            ({s.grade_min}-{s.grade_max === 13 ? 'Stud.' : `${s.grade_max} kl`})
+                            ({s.grade_min}-{s.grade_max === 13 ? t('lessonSet.gradeUniversity') : `${s.grade_max} ${t('lessonSet.gradeShort')}`})
                           </span>
                         )}
                         <span className="text-xs text-gray-500 ml-2">

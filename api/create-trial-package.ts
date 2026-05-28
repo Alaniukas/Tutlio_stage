@@ -216,6 +216,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return json(res, 500, { error: 'Nepavyko sukurti bandomosios pamokos paketo', details: packageErr?.message });
     }
 
+    // Seed a one-item row so the multi-subject booking flow can still match trial packages.
+    const { error: trialItemErr } = await supabase
+      .from('lesson_package_items')
+      .insert({
+        package_id: lessonPackage.id,
+        subject_id: subjectId,
+        total_lessons: 1,
+        available_lessons: 1,
+        reserved_lessons: 0,
+        completed_lessons: 0,
+        price_per_lesson: trialPriceEur,
+        total_price: basePriceEur,
+        position: 0,
+      });
+    if (trialItemErr) {
+      await supabase.from('lesson_packages').delete().eq('id', lessonPackage.id);
+      return json(res, 500, { error: 'Nepavyko sukurti bandomosios pamokos paketo punkto', details: trialItemErr.message });
+    }
+
     const customerEmail = student.payer_email || student.email || undefined;
 
     // Try destination charge first; if Stripe says destination account doesn't exist,

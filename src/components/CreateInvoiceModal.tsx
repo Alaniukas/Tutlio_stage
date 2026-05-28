@@ -195,7 +195,7 @@ export default function CreateInvoiceModal({
             if (periodInvoices.length > 0) {
               const totalIssued = periodInvoices.reduce((sum, inv) => sum + Number(inv.total_amount || 0), 0);
               const nums = periodInvoices.map((inv) => inv.invoice_number).filter(Boolean).join(', ');
-              setError(`Už laikotarpį ${periodStart} – ${periodEnd} sąskaita jau išrašyta (${nums || 'be numerio'}), suma: €${totalIssued.toFixed(2)}.`);
+              setError(t('invoiceCreate.periodAlreadyIssuedDetailed', { start: periodStart, end: periodEnd, nums: nums || t('invoiceCreate.noNumber'), amount: totalIssued.toFixed(2) }));
               setSessions([]);
               setPreviewMode(false);
               return;
@@ -218,7 +218,7 @@ export default function CreateInvoiceModal({
           if (precheckResp.ok && precheckJson?.reason === 'duplicate') {
             setError(
               (precheckJson.error as string) ||
-                `Už laikotarpį ${periodStart} – ${periodEnd} sąskaita jau išrašyta.`,
+                t('invoiceCreate.periodAlreadyIssued', { start: periodStart, end: periodEnd }),
             );
             setSessions([]);
             setPreviewMode(false);

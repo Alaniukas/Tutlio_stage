@@ -315,7 +315,7 @@ export default function CompanyDashboard() {
         .limit(20),
       supabase
         .from('lesson_packages')
-        .select('id, paid_at, price_per_lesson, total_price, total_lessons, tutor_id, student_id, subject_id')
+        .select('id, paid_at, price_per_lesson, total_price, total_lessons, tutor_id, student_id, subject_id, lesson_package_items(subject_id, total_lessons, position, subjects!inner(name, is_trial))')
         .in('tutor_id', tutorIds)
         .eq('paid', true)
         .not('paid_at', 'is', null)
@@ -356,15 +356,19 @@ export default function CompanyDashboard() {
     }));
 
       const packagePayments: RecentOrgPayment[] = (paidPackagesRes.data || []).map((p: any) => {
+      const items = Array.isArray(p.lesson_package_items) ? p.lesson_package_items : [];
+      // Multi-subject: derive label from items (e.g. "Math, Physics"); single-subject keeps the legacy lookup.
+      const subjectLabel = items.length > 1
+        ? items.map((it: any) => it.subjects?.name).filter(Boolean).join(', ')
+        : (packageSubjectMap.get(p.subject_id)?.name || items[0]?.subjects?.name || t('common.lesson'));
       const subj = packageSubjectMap.get(p.subject_id);
-      const payoutAmount = Number(p.price_per_lesson || 0) > 0 && Number(p.total_lessons || 0) > 0
-        ? Number(p.price_per_lesson) * Number(p.total_lessons)
-        : Number(p.total_price || 0);
+      const payoutAmount = Number(p.total_price || 0)
+        || (Number(p.price_per_lesson || 0) * Number(p.total_lessons || 0));
       return {
         id: `package_${p.id}`,
         type: 'package',
         title: `${packageStudentMap.get(p.student_id) || t('common.student')} · ${tutorMap.get(p.tutor_id)?.full_name || ''}`.trim(),
-        subtitle: `${subj?.is_trial ? t('common.lesson') : `${p.total_lessons || 0} ${t('common.lessons').toLowerCase().slice(0, 4)}.`} · ${subj?.name || t('common.lesson')}`,
+        subtitle: `${subj?.is_trial ? t('common.lesson') : `${p.total_lessons || 0} ${t('common.lessons').toLowerCase().slice(0, 4)}.`} · ${subjectLabel}`,
         amount: payoutAmount,
         paidAt: p.paid_at,
       };

@@ -42,7 +42,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const lookback = new Date(Date.now() - 7 * 24 * 3600000).toISOString();
     const { data: sessions, error } = await supabase
       .from('sessions')
-      .select('id, tutor_id, end_time, status, paid, payment_status, lesson_package_id')
+      .select('id, tutor_id, end_time, status, paid, payment_status, lesson_package_id, subject_id')
       .eq('status', 'active')
       .lt('end_time', now)
       .gte('end_time', lookback)
@@ -86,21 +86,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // Update lesson packages: move from reserved to completed (batch optimized)
-    const sessionsWithPackages = sessions.filter((s: any) => s.lesson_package_id);
-    const packageIds = [...new Set(sessionsWithPackages.map((s: any) => s.lesson_package_id))];
+    // Update lesson packages: move from reserved to completed (batch optimized).
+    // For multi-subject packages, the per-subject item counters are also moved.
+    const sessionsWithPackages = (sessions as any[]).filter((s) => s.lesson_package_id);
+    const packageIds = [...new Set(sessionsWithPackages.map((s) => s.lesson_package_id))] as string[];
 
     if (packageIds.length > 0) {
-      // Batch fetch all packages at once
+      // 1. Update per-subject items first
+      const { data: items } = await supabase
+        .from('lesson_package_items')
+        .select('id, package_id, subject_id, reserved_lessons, completed_lessons')
+        .in('package_id', packageIds);
+
+      if (items && items.length > 0) {
+        for (const it of items as any[]) {
+          const completedCount = sessionsWithPackages.filter(
+            (s) => s.lesson_package_id === it.package_id && s.subject_id === it.subject_id,
+          ).length;
+          if (completedCount > 0) {
+            await supabase
+              .from('lesson_package_items')
+              .update({
+                reserved_lessons: Math.max(0, Number(it.reserved_lessons || 0) - completedCount),
+                completed_lessons: Number(it.completed_lessons || 0) + completedCount,
+              })
+              .eq('id', it.id);
+          }
+        }
+      }
+
+      // 2. Update parent package aggregates
       const { data: packages } = await supabase
         .from('lesson_packages')
         .select('id, reserved_lessons, completed_lessons')
         .in('id', packageIds);
 
       if (packages && packages.length > 0) {
-        // Calculate updates for each package
         const updates = packages.map(pkg => {
-          const completedCount = sessionsWithPackages.filter((s: any) => s.lesson_package_id === pkg.id).length;
+          const completedCount = sessionsWithPackages.filter((s) => s.lesson_package_id === pkg.id).length;
           return {
             id: pkg.id,
             reserved_lessons: Math.max(0, pkg.reserved_lessons - completedCount),
@@ -108,7 +131,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           };
         });
 
-        // Batch update all packages
         for (const update of updates) {
           await supabase
             .from('lesson_packages')
@@ -119,7 +141,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .eq('id', update.id);
         }
 
-        console.log(`[auto-complete-sessions] Batch updated ${updates.length} packages`);
+        console.log(`[auto-complete-sessions] Batch updated ${updates.length} packages + items`);
       }
     }
 

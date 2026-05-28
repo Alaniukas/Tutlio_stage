@@ -377,6 +377,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (packageId) {
         // ── PACKAGE payment model ──
+        // Return the cancelled lesson's credit to its per-subject item (and the
+        // package aggregate). Multi-subject packages can have multiple items;
+        // we use the session's own subject_id to pick the right one.
         const { data: pkg } = await supabase
             .from('lesson_packages')
             .select('available_lessons, reserved_lessons')
@@ -386,6 +389,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (pkg) {
             const penaltyCredits = hasPenaltyFee ? cancellationFeePercentValue / 100 : 0;
             const creditsToReturn = 1 - penaltyCredits;
+
+            const sessionSubjectId = session.subject_id ?? null;
+            if (sessionSubjectId) {
+                const { data: item } = await supabase
+                    .from('lesson_package_items')
+                    .select('id, available_lessons, reserved_lessons')
+                    .eq('package_id', packageId)
+                    .eq('subject_id', sessionSubjectId)
+                    .maybeSingle();
+                if (item) {
+                    await supabase
+                        .from('lesson_package_items')
+                        .update({
+                            available_lessons: Number((item as any).available_lessons || 0) + creditsToReturn,
+                            reserved_lessons: Math.max(0, Number((item as any).reserved_lessons || 0) - 1),
+                        })
+                        .eq('id', (item as any).id);
+                }
+            }
 
             await supabase
                 .from('lesson_packages')

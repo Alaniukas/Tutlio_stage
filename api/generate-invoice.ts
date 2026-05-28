@@ -163,11 +163,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (hasPackageIds) {
+      // Fetch the package shells (and items) so multi-subject packages can emit
+      // one invoice line per subject. Each pseudo-session below represents a
+      // single (package, item) pair.
       const baseSelect = `
           id, tutor_id, student_id, subject_id, total_price, total_lessons, paid_at, created_at,
           paid, payment_method, manual_sales_invoice_id,
           students!inner(id, full_name, email, payer_email, payer_name, payer_phone),
-          subjects(name)
+          subjects(name),
+          lesson_package_items(subject_id, total_lessons, total_price, position, subjects!inner(name))
         `;
 
       let paidPkgQuery = allowPendingStripePackages
@@ -212,25 +216,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const pkgs = [...(paidPkgs || []), ...pendingPkgs];
 
       const requested = new Set(resolvedPackageIds);
-      const pseudoSessions = (pkgs || []).filter(p => requested.has(p.id)).map(pkg => {
+      const matchedPackageIds = new Set<string>();
+      const pseudoSessions: any[] = [];
+      for (const pkg of pkgs) {
+        if (!requested.has(pkg.id)) continue;
+        matchedPackageIds.add(pkg.id);
         const when = pkg.paid_at || pkg.created_at || new Date().toISOString();
         const isPaid = !!pkg.paid;
-        return {
-          id: pkg.id,
-          tutor_id: pkg.tutor_id,
-          student_id: pkg.student_id,
-          subject_id: pkg.subject_id,
-          start_time: when,
-          price: Number(pkg.total_price) || 0,
-          students: pkg.students,
-          subjects: pkg.subjects,
-          payment_status: isPaid ? 'paid' : 'pending',
-          total_lessons: pkg.total_lessons,
-          __fromPackage: true,
-        };
-      });
+        const itemsRaw = Array.isArray(pkg.lesson_package_items) ? pkg.lesson_package_items : [];
+        const items = itemsRaw.length > 0
+          ? itemsRaw
+              .slice()
+              .sort((a: any, b: any) => Number(a.position || 0) - Number(b.position || 0))
+              .map((it: any) => ({
+                subjectName: (it.subjects?.name as string) || (pkg.subjects?.name as string) || 'Pamoka',
+                totalLessons: Number(it.total_lessons) || 0,
+                totalPrice: Number(it.total_price) || 0,
+              }))
+          : [{
+              subjectName: (pkg.subjects?.name as string) || 'Pamoka',
+              totalLessons: Number(pkg.total_lessons) || 0,
+              totalPrice: Number(pkg.total_price) || 0,
+            }];
+        items.forEach((it: { subjectName: string; totalLessons: number; totalPrice: number }, idx: number) => {
+          pseudoSessions.push({
+            id: `${pkg.id}::${idx}`,
+            tutor_id: pkg.tutor_id,
+            student_id: pkg.student_id,
+            subject_id: pkg.subject_id,
+            start_time: when,
+            price: it.totalPrice,
+            students: pkg.students,
+            subjects: { name: it.subjectName },
+            payment_status: isPaid ? 'paid' : 'pending',
+            total_lessons: it.totalLessons,
+            __fromPackage: true,
+            __packageId: pkg.id,
+          });
+        });
+      }
 
-      if (pseudoSessions.length < requested.size) {
+      if (matchedPackageIds.size < requested.size) {
         return res.status(400).json({
           error: allowPendingStripePackages
             ? 'One or more packages are not eligible (must be unpaid Stripe/manual package, not already on a sales invoice).'
@@ -630,7 +656,10 @@ function buildLineItems(
           quantity: 1,
           unitPrice: s.price || 0,
           totalPrice: s.price || 0,
-          sessionIds: [s.id],
+          // For package pseudo-sessions, store the package id in session_ids
+          // so the post-issue update `lesson_packages.manual_sales_invoice_id`
+          // step (and invoice display links) can find it.
+          sessionIds: [s.__packageId || s.id],
         };
       }
       return {
@@ -661,7 +690,11 @@ function buildLineItems(
       quantity: group.sessions.length,
       unitPrice: Math.round(avgPrice * 100) / 100,
       totalPrice: Math.round(totalPrice * 100) / 100,
-      sessionIds: group.sessions.map((s: any) => s.id),
+      // For package pseudo-sessions, use the underlying package id (multiple
+      // items share the same package id; dedupe with a Set).
+      sessionIds: Array.from(
+        new Set(group.sessions.map((s: any) => s.__packageId || s.id)),
+      ) as string[],
     };
   });
 }

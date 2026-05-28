@@ -432,14 +432,20 @@ export default function DashboardPage() {
                 paidAt: s.start_time,
             }));
 
-            const packagePayments: RecentPayment[] = (paidPackagesRes.data || []).map((p: any) => ({
-                id: `package_${p.id}`,
-                type: 'package',
-                title: p.students?.full_name || 'Mokinys',
-                subtitle: `${p.total_lessons || 0} pam. · ${p.subjects?.name || 'Paketas'}`,
-                amount: Number(p.total_price || 0),
-                paidAt: p.paid_at,
-            }));
+            const packagePayments: RecentPayment[] = (paidPackagesRes.data || []).map((p: any) => {
+                const items = Array.isArray(p.lesson_package_items) ? p.lesson_package_items : [];
+                const subjectLabel = items.length > 1
+                    ? items.map((it: any) => it.subjects?.name).filter(Boolean).join(', ')
+                    : (p.subjects?.name || items[0]?.subjects?.name || 'Paketas');
+                return {
+                    id: `package_${p.id}`,
+                    type: 'package',
+                    title: p.students?.full_name || 'Mokinys',
+                    subtitle: `${p.total_lessons || 0} pam. · ${subjectLabel}`,
+                    amount: Number(p.total_price || 0),
+                    paidAt: p.paid_at,
+                };
+            });
 
             const invoicePayments: RecentPayment[] = (paidInvoicesRes.data || []).map((b: any) => ({
                 id: `invoice_${b.id}`,
@@ -505,14 +511,20 @@ export default function DashboardPage() {
                 paidAt: s.start_time,
             }));
 
-            const packagePayments: RecentPayment[] = (paidPackagesRes.data || []).map((p: any) => ({
-                id: `package_${p.id}`,
-                type: 'package',
-                title: p.students?.full_name || 'Mokinys',
-                subtitle: `${p.total_lessons || 0} pam. · ${p.subjects?.name || 'Paketas'}`,
-                amount: Number(p.total_price || 0),
-                paidAt: p.paid_at,
-            }));
+            const packagePayments: RecentPayment[] = (paidPackagesRes.data || []).map((p: any) => {
+                const items = Array.isArray(p.lesson_package_items) ? p.lesson_package_items : [];
+                const subjectLabel = items.length > 1
+                    ? items.map((it: any) => it.subjects?.name).filter(Boolean).join(', ')
+                    : (p.subjects?.name || items[0]?.subjects?.name || 'Paketas');
+                return {
+                    id: `package_${p.id}`,
+                    type: 'package',
+                    title: p.students?.full_name || 'Mokinys',
+                    subtitle: `${p.total_lessons || 0} pam. · ${subjectLabel}`,
+                    amount: Number(p.total_price || 0),
+                    paidAt: p.paid_at,
+                };
+            });
 
             const invoicePayments: RecentPayment[] = (paidInvoicesRes.data || []).map((b: any) => ({
                 id: `invoice_${b.id}`,

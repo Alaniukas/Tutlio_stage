@@ -4,7 +4,7 @@ import { ArrowRight } from 'lucide-react';
 import LandingNavbar from '@/components/LandingNavbar';
 import LandingFooter from '@/components/LandingFooter';
 import { useTranslation } from '@/lib/i18n';
-import { resolveField, formatBlogDate } from '@/lib/blogLocale';
+import { resolveField, formatBlogDate, blogPostPath } from '@/lib/blogLocale';
 
 export default function Blog() {
   const { t, locale } = useTranslation();
@@ -44,7 +44,7 @@ export default function Blog() {
             ) : (
               <>
                 {featured && (
-                  <Link to={`/blog/${String(featured.slug)}`} className="group block mb-12">
+                  <Link to={blogPostPath(featured, locale)} className="group block mb-12">
                     <div className="grid md:grid-cols-2 gap-6 md:gap-10 items-center">
                       {featured.cover_image ? (
                         <div className="relative rounded-2xl overflow-hidden bg-gray-100 aspect-[16/10]">
@@ -73,7 +73,7 @@ export default function Blog() {
                 {rest.length > 0 && (
                   <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
                     {rest.map((post) => (
-                      <Link key={String(post.id)} to={`/blog/${String(post.slug)}`} className="group">
+                      <Link key={String(post.id)} to={blogPostPath(post, locale)} className="group">
                         {post.cover_image ? (
                           <div className="relative rounded-xl overflow-hidden bg-gray-100 aspect-[16/10] mb-4">
                             <img src={String(post.cover_image)} alt={title(post)}

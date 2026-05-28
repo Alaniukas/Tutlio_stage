@@ -202,6 +202,35 @@ function wrap(content: string, locale: Locale = 'lt', branding?: EmailBranding |
 const td = (label: string, value: string, border = true) =>
   `<tr><td style="padding:10px 0;${border ? ' border-bottom:1px solid #f0eeff;' : ''} color:#6b7280; font-size:14px;">${label}</td><td style="padding:10px 0;${border ? ' border-bottom:1px solid #f0eeff;' : ''} color:#1f2937; font-size:14px; font-weight:600; text-align:right;">${value}</td></tr>`;
 const table = (rows: string) => `<div class="info-card"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${rows}</table></div>`;
+
+/**
+ * Multi-subject package items, rendered as a small breakdown table. Returns an
+ * empty string when there's only one item (callers fall back to the existing
+ * single-line rendering).
+ */
+type PackageEmailItem = { subjectName?: string; totalLessons?: number; pricePerLesson?: string | number };
+function packageItemsBreakdownRows(
+  items: PackageEmailItem[] | undefined,
+  locale: Locale,
+): string {
+  if (!Array.isArray(items) || items.length < 2) return '';
+  const rows = items.map((it, idx) => {
+    const qty = Number(it.totalLessons) || 0;
+    const label = qty === 1 ? t(locale, 'em.lessonSingular') : qty < 10 ? t(locale, 'em.lessonFew') : t(locale, 'em.lessonMany');
+    const perLesson = formatMoney(it.pricePerLesson ?? 0, 'EUR', locale);
+    const lineTotal = formatMoney(Number(it.pricePerLesson ?? 0) * qty, 'EUR', locale);
+    const isLast = idx === items.length - 1;
+    const border = isLast ? '' : ' border-bottom:1px solid #f0eeff;';
+    return `<tr>
+      <td style="padding:8px 0;${border} color:#1f2937; font-size:13px;">
+        <strong>${esc(String(it.subjectName || ''))}</strong>
+        <span style="color:#6b7280;"> · ${qty} ${label} × ${perLesson}</span>
+      </td>
+      <td style="padding:8px 0;${border} color:#1f2937; font-size:13px; font-weight:600; text-align:right;">${lineTotal}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="info-card"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${rows}</table></div>`;
+}
 const footerFor = (locale: Locale) => `<div class="footer"><p>${t(locale, 'em.teamSignature')}</p><p style="margin:8px 0 0; font-size:11px; color:#9ca3af;">${t(locale, 'em.unsubscribe')}</p></div>`;
 
 const formatMoney = (value: string | number, currency = 'EUR', loc: Locale = 'lt') => {
@@ -553,7 +582,10 @@ function recurringBookingConfirmation(d: any, locale: Locale) {
     : t(locale, 'em.recurringSub', { count: String(count), tutor: d.tutorName });
 
   const accountLink = d.forPayer ? appUrl : `${appUrl}/student/sessions`;
-  const weekday = String(d.recurringWeekday || '').trim();
+  const weekday =
+    typeof d.recurringWeekday === 'number' && d.recurringWeekday >= 0 && d.recurringWeekday <= 6
+      ? t(locale, `em.weekday${d.recurringWeekday}`)
+      : String(d.recurringWeekday || '').trim();
   const recurTime = String(d.recurringTime || '').trim();
   const showCompactSummary = weekday && recurTime && count > 0;
   const showFullTable = !showCompactSummary || count <= 20;
@@ -561,7 +593,7 @@ function recurringBookingConfirmation(d: any, locale: Locale) {
   const summaryBlock = showCompactSummary
     ? `<div style="background:#eef2ff; border:1px solid #c7d2fe; border-radius:12px; padding:16px; margin:16px 0;">
         <p style="margin:0; color:#312e81; font-size:15px; font-weight:600; line-height:1.5;">
-          Suplanuota <strong>${count}</strong> pamokų — kiekvieną <strong>${weekday}</strong>, <strong>${recurTime}</strong>.
+          ${t(locale, 'em.recurringSummary', { count: String(count), weekday, time: recurTime })}
         </p>
       </div>`
     : '';
@@ -1280,6 +1312,9 @@ function prepaidPackageRequest(d: any, locale: Locale) {
   const totalLessonsLabel = d.totalLessons === 1 ? t(locale, 'em.lessonSingular') : d.totalLessons < 10 ? t(locale, 'em.lessonFew') : t(locale, 'em.lessonMany');
   const pricePerLesson = formatMoney(d.pricePerLesson, 'EUR', locale);
   const totalPrice = formatMoney(d.totalPrice, 'EUR', locale);
+  const items: PackageEmailItem[] = Array.isArray(d.items) ? d.items : [];
+  const isMulti = items.length > 1;
+  const itemsBreakdown = packageItemsBreakdownRows(items, locale);
   const payBlock = prefersManualInstructions(d)
     ? manualOffPlatformPaymentHtml(d, locale)
     : `<div style="text-align:center; margin-top: 24px;">
@@ -1300,12 +1335,17 @@ function prepaidPackageRequest(d: any, locale: Locale) {
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
           ${t(locale, 'em.packageReqBody', { tutor: d.tutorName, studentPart: d.studentName !== d.recipientName ? t(locale, 'em.packageReqStudentPart', { student: d.studentName }) : '' })}
         </p>
-        ${table(
-          td(t(locale, 'em.labelSubject'), d.subjectName) +
-          td(t(locale, 'em.labelLessonCount'), `${d.totalLessons} ${totalLessonsLabel}`) +
-          td(t(locale, 'em.labelPricePerLesson'), pricePerLesson) +
-          td(t(locale, 'em.labelPayable'), `<strong style="font-size:16px;">${totalPrice}</strong>`, false)
-        )}
+        ${isMulti
+          ? itemsBreakdown + table(
+              td(t(locale, 'em.labelLessonCount'), `${d.totalLessons} ${totalLessonsLabel}`) +
+              td(t(locale, 'em.labelPayable'), `<strong style="font-size:16px;">${totalPrice}</strong>`, false)
+            )
+          : table(
+              td(t(locale, 'em.labelSubject'), d.subjectName) +
+              td(t(locale, 'em.labelLessonCount'), `${d.totalLessons} ${totalLessonsLabel}`) +
+              td(t(locale, 'em.labelPricePerLesson'), pricePerLesson) +
+              td(t(locale, 'em.labelPayable'), `<strong style="font-size:16px;">${totalPrice}</strong>`, false)
+            )}
         <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:12px; padding:16px; margin:20px 0;">
           <p style="color:#166534; font-size:14px; margin:0; line-height:1.6;">
             ${t(locale, 'em.packageHowTitle')}<br/>
@@ -1323,7 +1363,12 @@ function prepaidPackageSuccess(d: any, locale: Locale) {
   const appUrl = getAppUrl();
   const avail = Math.max(0, Number(d.availableLessons) || 0);
   const total = Math.max(0, Number(d.totalLessons) || 0);
-  const subj = d.subjectName || '–';
+  const items: PackageEmailItem[] = Array.isArray(d.items) ? d.items : [];
+  const isMulti = items.length > 1;
+  const itemsBreakdown = packageItemsBreakdownRows(items, locale);
+  const subj = isMulti
+    ? items.map((it) => String(it.subjectName || '')).filter(Boolean).join(', ')
+    : (d.subjectName || '–');
   const availLabel = avail === 1 ? t(locale, 'em.lessonSingular') : avail < 10 ? t(locale, 'em.lessonFew') : t(locale, 'em.lessonMany');
   const totalLabel = total === 1 ? t(locale, 'em.lessonSingular') : total < 10 ? t(locale, 'em.lessonFew') : t(locale, 'em.lessonMany');
   return {
@@ -1338,11 +1383,16 @@ function prepaidPackageSuccess(d: any, locale: Locale) {
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
           ${t(locale, 'em.packageSuccessBody', { count: String(avail), subject: subj, label: availLabel })}
         </p>
-        ${table(
-          td(t(locale, 'em.labelSubject'), subj) +
-          td(t(locale, 'em.labelAvailable'), `${avail}/${total}`) +
-          td(t(locale, 'em.labelTotalPaid'), `€${d.totalPrice}`, false)
-        )}
+        ${isMulti
+          ? itemsBreakdown + table(
+              td(t(locale, 'em.labelAvailable'), `${avail}/${total}`) +
+              td(t(locale, 'em.labelTotalPaid'), `€${d.totalPrice}`, false)
+            )
+          : table(
+              td(t(locale, 'em.labelSubject'), subj) +
+              td(t(locale, 'em.labelAvailable'), `${avail}/${total}`) +
+              td(t(locale, 'em.labelTotalPaid'), `€${d.totalPrice}`, false)
+            )}
         <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:12px; padding:16px; margin:20px 0;">
           <p style="color:#1e40af; font-size:14px; margin:0; line-height:1.6;">
             ${t(locale, 'em.packageUseTitle')}<br/>
@@ -1360,6 +1410,13 @@ function prepaidPackageSuccess(d: any, locale: Locale) {
 
 function packageDepletedNotification(d: any, locale: Locale) {
   const appUrl = getAppUrl();
+  const items: PackageEmailItem[] = Array.isArray(d.items) ? d.items : [];
+  const isMulti = items.length > 1;
+  const itemsBreakdown = packageItemsBreakdownRows(items, locale);
+  // Combined subject label for the body sentence ("Math, Physics" etc.)
+  const subjectLabel = isMulti
+    ? items.map((it) => String(it.subjectName || '')).filter(Boolean).join(', ')
+    : (d.subjectName as string | undefined) || '';
   return {
     subject: t(locale, 'em.packageDepletedSub', { student: d.studentName }),
     html: wrap(`
@@ -1370,13 +1427,18 @@ function packageDepletedNotification(d: any, locale: Locale) {
       <div class="body">
         <p class="greeting">${t(locale, 'em.hiName', { name: d.tutorName || t(locale, 'em.roleAdmin') })}</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          ${t(locale, 'em.packageDepletedBody', { student: d.studentName, subject: d.subjectName })}
+          ${t(locale, 'em.packageDepletedBody', { student: d.studentName, subject: subjectLabel })}
         </p>
-        ${table(
-          td(t(locale, 'em.labelStudentAlt'), d.studentName) +
-          td(t(locale, 'em.labelSubject'), d.subjectName) +
-          td(t(locale, 'em.labelPackageSize'), `${d.totalLessons || 0} ${t(locale, 'em.lessonsOf')}`, false)
-        )}
+        ${isMulti
+          ? itemsBreakdown + table(
+              td(t(locale, 'em.labelStudentAlt'), d.studentName) +
+              td(t(locale, 'em.labelPackageSize'), `${d.totalLessons || 0} ${t(locale, 'em.lessonsOf')}`, false)
+            )
+          : table(
+              td(t(locale, 'em.labelStudentAlt'), d.studentName) +
+              td(t(locale, 'em.labelSubject'), d.subjectName) +
+              td(t(locale, 'em.labelPackageSize'), `${d.totalLessons || 0} ${t(locale, 'em.lessonsOf')}`, false)
+            )}
         <div style="text-align:center; margin-top: 24px;">
           ${outlookEmailButton(`${appUrl}/company/students`, t(locale, 'em.btnSendNewPackage'), '#4f46e5', { fontSize: '15px', padding: '14px 32px' })}
         </div>
@@ -1474,6 +1536,9 @@ function manualPackageRequest(d: any, locale: Locale) {
   const pricePerLesson = formatMoney(d.pricePerLesson, 'EUR', locale);
   const totalPrice = formatMoney(d.totalPrice, 'EUR', locale);
   const paymentUrl = typeof d.paymentUrl === 'string' && d.paymentUrl.trim().length > 0 ? String(d.paymentUrl).trim() : '';
+  const items: PackageEmailItem[] = Array.isArray(d.items) ? d.items : [];
+  const isMulti = items.length > 1;
+  const itemsBreakdown = packageItemsBreakdownRows(items, locale);
   return {
     subject: t(locale, 'em.manualPkgSub', { count: String(d.totalLessons), label: totalLessonsLabel, subject: d.subjectName }),
     html: wrap(`
@@ -1486,12 +1551,17 @@ function manualPackageRequest(d: any, locale: Locale) {
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
           ${t(locale, 'em.manualPkgBody', { student: d.studentName, org: d.orgName })}
         </p>
-        ${table(
-          td(t(locale, 'em.labelSubject'), d.subjectName) +
-          td(t(locale, 'em.labelLessonCount'), `${d.totalLessons} ${totalLessonsLabel}`) +
-          td(t(locale, 'em.labelPricePerLesson'), pricePerLesson) +
-          td(t(locale, 'em.labelPayable'), `<strong style="font-size:16px;">${totalPrice}</strong>`, false)
-        )}
+        ${isMulti
+          ? itemsBreakdown + table(
+              td(t(locale, 'em.labelLessonCount'), `${d.totalLessons} ${totalLessonsLabel}`) +
+              td(t(locale, 'em.labelPayable'), `<strong style="font-size:16px;">${totalPrice}</strong>`, false)
+            )
+          : table(
+              td(t(locale, 'em.labelSubject'), d.subjectName) +
+              td(t(locale, 'em.labelLessonCount'), `${d.totalLessons} ${totalLessonsLabel}`) +
+              td(t(locale, 'em.labelPricePerLesson'), pricePerLesson) +
+              td(t(locale, 'em.labelPayable'), `<strong style="font-size:16px;">${totalPrice}</strong>`, false)
+            )}
         ${
           typeof d.bankDetails === 'string' && d.bankDetails.trim().length > 0
             ? `<div style="background:#fefce8; border:1px solid #fde047; border-radius:12px; padding:16px; margin:16px 0;">
@@ -1526,6 +1596,9 @@ function manualPackageConfirmed(d: any, locale: Locale) {
   const availableLessons = Math.max(0, Number(d.availableLessons) || 0);
   const totalLessons = Math.max(0, Number(d.totalLessons) || 0);
   const lessonsLabel = availableLessons === 1 ? t(locale, 'em.lessonSingular') : availableLessons < 10 ? t(locale, 'em.lessonFew') : t(locale, 'em.lessonMany');
+  const items: PackageEmailItem[] = Array.isArray(d.items) ? d.items : [];
+  const isMulti = items.length > 1;
+  const itemsBreakdown = packageItemsBreakdownRows(items, locale);
   return {
     subject: t(locale, 'em.manualPkgConfSub', { student: d.studentName, count: String(availableLessons), label: lessonsLabel }),
     html: wrap(`
@@ -1538,11 +1611,16 @@ function manualPackageConfirmed(d: any, locale: Locale) {
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
           ${t(locale, 'em.manualPkgConfBody', { student: d.studentName })}
         </p>
-        ${table(
-          td(t(locale, 'em.labelSubject'), d.subjectName || '–') +
-          td(t(locale, 'em.labelRemaining'), `${availableLessons}/${totalLessons}`) +
-          td(t(locale, 'em.labelTotalPaid'), `€${d.totalPrice}`, false)
-        )}
+        ${isMulti
+          ? itemsBreakdown + table(
+              td(t(locale, 'em.labelRemaining'), `${availableLessons}/${totalLessons}`) +
+              td(t(locale, 'em.labelTotalPaid'), `€${d.totalPrice}`, false)
+            )
+          : table(
+              td(t(locale, 'em.labelSubject'), d.subjectName || '–') +
+              td(t(locale, 'em.labelRemaining'), `${availableLessons}/${totalLessons}`) +
+              td(t(locale, 'em.labelTotalPaid'), `€${d.totalPrice}`, false)
+            )}
         <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:12px; padding:16px; margin:20px 0;">
           <p style="color:#1e40af; font-size:14px; margin:0; line-height:1.6;">
             ${t(locale, 'em.manualPkgNextTitle')}<br/>
@@ -2013,8 +2091,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error('[send-email]', resendNotConfiguredMessage());
       return res.status(503).json({ error: resendNotConfiguredMessage() });
     }
-    const resend = new Resend(apiKey);
-
     const resend = new Resend(apiKey);
 
     if (type === 'school_contract') {

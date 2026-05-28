@@ -6,6 +6,7 @@ import {
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { sendEmail } from '@/lib/email';
 import { authHeaders } from '@/lib/apiHelpers';
+import { findActivePackageForBooking } from '@/lib/lessonPackageBooking';
 
 type SubjectLite = {
   id: string;
@@ -146,8 +147,7 @@ async function notifyAfterOrgAdminSessionsCreated(
         time: format(new Date(s.start_time), 'HH:mm'),
       }));
       const firstStart = new Date(firstSess.start_time);
-      const weekdayNames = ['sekmadienį', 'pirmadienį', 'antradienį', 'trečiadienį', 'ketvirtadienį', 'penktadienį', 'šeštadienį'];
-      const recurringWeekday = weekdayNames[getDay(firstStart)];
+      const recurringWeekday = getDay(firstStart);
       const recurringTime = format(firstStart, 'HH:mm');
 
       if (st.email) {
@@ -446,21 +446,29 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       }
     }
 
-    const packagesByStudent = new Map<string, any>();
+    type PackageForRecurring = {
+      id: string;
+      available_lessons: number;
+      reserved_lessons: number;
+      item_id: string;
+      item_available_lessons: number;
+      item_reserved_lessons: number;
+    };
+    const packagesByStudent = new Map<string, PackageForRecurring>();
     if (!createIsPaid && createSubjectId) {
       const uniqueStudentIds = [...new Set(recurringTemplates.map(t => t.student_id))];
       for (const sid of uniqueStudentIds) {
-        const { data: packages } = await supabase
-          .from('lesson_packages')
-          .select('*')
-          .eq('student_id', sid)
-          .eq('subject_id', createSubjectId)
-          .eq('active', true)
-          .eq('paid', true)
-          .gt('available_lessons', 0)
-          .order('created_at', { ascending: true })
-          .limit(1);
-        if (packages?.[0]) packagesByStudent.set(sid, packages[0]);
+        const match = await findActivePackageForBooking(supabase, { studentId: sid, subjectId: createSubjectId });
+        if (match) {
+          packagesByStudent.set(sid, {
+            id: match.pkg.id,
+            available_lessons: match.pkg.available_lessons,
+            reserved_lessons: match.pkg.reserved_lessons,
+            item_id: match.item.id,
+            item_available_lessons: match.item.available_lessons,
+            item_reserved_lessons: match.item.reserved_lessons,
+          });
+        }
       }
     }
 
@@ -479,7 +487,8 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
           const pkg = packagesByStudent.get(template.student_id);
           if (pkg) {
             const used = packagesUsage.get(pkg.id) || 0;
-            if (pkg.available_lessons - used > 0) {
+            const remaining = Math.min(pkg.available_lessons, pkg.item_available_lessons) - used;
+            if (remaining > 0) {
               lessonPackageId = pkg.id;
               sessionPaid = true;
               sessionPaymentStatus = 'confirmed';
@@ -534,16 +543,26 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     if (insErr) throw new Error(insErr.message);
 
     for (const [pkgId, usedCount] of packagesUsage.entries()) {
-      const pkg = Array.from(packagesByStudent.values()).find((x: any) => x.id === pkgId);
-      if (pkg) {
-        await supabase
-          .from('lesson_packages')
-          .update({
-            available_lessons: pkg.available_lessons - usedCount,
-            reserved_lessons: (pkg.reserved_lessons || 0) + usedCount,
-          })
-          .eq('id', pkgId);
+      const pkg = Array.from(packagesByStudent.values()).find((x) => x.id === pkgId);
+      if (!pkg || usedCount <= 0) continue;
+      const { error: itemErr } = await supabase
+        .from('lesson_package_items')
+        .update({
+          available_lessons: pkg.item_available_lessons - usedCount,
+          reserved_lessons: pkg.item_reserved_lessons + usedCount,
+        })
+        .eq('id', pkg.item_id);
+      if (itemErr) {
+        console.error('[OrgSchedule] item update failed:', itemErr);
+        continue;
       }
+      await supabase
+        .from('lesson_packages')
+        .update({
+          available_lessons: pkg.available_lessons - usedCount,
+          reserved_lessons: (pkg.reserved_lessons || 0) + usedCount,
+        })
+        .eq('id', pkgId);
     }
 
     const allCreated = ((inserted || []) as CreatedSessionRow[]).sort(
@@ -566,7 +585,14 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
   }
 
   const sessionsToInsert: Record<string, unknown>[] = [];
-  const packagesToUpdate: { id: string; available_lessons: number; reserved_lessons: number }[] = [];
+  const packagesToUpdate: Array<{
+    id: string;
+    available_lessons: number;
+    reserved_lessons: number;
+    item_id: string;
+    item_available_lessons: number;
+    item_reserved_lessons: number;
+  }> = [];
 
   for (const studentId of studentIdsToCreate) {
     let sessionPaid = createIsPaid;
@@ -574,25 +600,19 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     let lessonPackageId: string | null = null;
 
     if (!createIsPaid && createSubjectId) {
-      const { data: packages } = await supabase
-        .from('lesson_packages')
-        .select('*')
-        .eq('student_id', studentId)
-        .eq('subject_id', createSubjectId)
-        .eq('active', true)
-        .eq('paid', true)
-        .gt('available_lessons', 0)
-        .order('created_at', { ascending: true })
-        .limit(1);
-      if (packages?.[0]) {
-        const pkg = packages[0];
+      const match = await findActivePackageForBooking(supabase, { studentId, subjectId: createSubjectId });
+      if (match) {
+        const { pkg, item } = match;
         lessonPackageId = pkg.id;
         sessionPaid = true;
         sessionPaymentStatus = 'confirmed';
         packagesToUpdate.push({
           id: pkg.id,
           available_lessons: pkg.available_lessons - 1,
-          reserved_lessons: (pkg.reserved_lessons || 0) + 1,
+          reserved_lessons: pkg.reserved_lessons + 1,
+          item_id: item.id,
+          item_available_lessons: item.available_lessons - 1,
+          item_reserved_lessons: item.reserved_lessons + 1,
         });
       }
     }
@@ -623,6 +643,17 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
   if (error) throw new Error(error.message);
 
   for (const pkgUpdate of packagesToUpdate) {
+    const { error: itemErr } = await supabase
+      .from('lesson_package_items')
+      .update({
+        available_lessons: pkgUpdate.item_available_lessons,
+        reserved_lessons: pkgUpdate.item_reserved_lessons,
+      })
+      .eq('id', pkgUpdate.item_id);
+    if (itemErr) {
+      console.error('[OrgSchedule] item update failed:', itemErr);
+      continue;
+    }
     await supabase
       .from('lesson_packages')
       .update({

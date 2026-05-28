@@ -350,7 +350,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     .eq('id', packageId)
                     .eq('paid', false)
                     .select(
-                        'id, tutor_id, total_lessons, available_lessons, total_price, payment_method, manual_sales_invoice_id, paid_at, students(full_name, email, payer_email, payer_name), subject:subjects(name)'
+                        'id, tutor_id, total_lessons, available_lessons, total_price, payment_method, manual_sales_invoice_id, paid_at, students(full_name, email, payer_email, payer_name), subject:subjects(name), lesson_package_items(subject_id, total_lessons, price_per_lesson, position, subjects!inner(name))'
                     )
                     .maybeSingle();
 
@@ -359,6 +359,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 } else if (updatedPackage) {
                     const student = updatedPackage.students as any;
                     const subject = (updatedPackage as any).subject || (updatedPackage as any).subjects;
+                    const rawWebhookItems = Array.isArray((updatedPackage as any).lesson_package_items)
+                        ? (updatedPackage as any).lesson_package_items
+                        : [];
+                    const webhookEmailItems = rawWebhookItems
+                        .slice()
+                        .sort((a: any, b: any) => Number(a.position || 0) - Number(b.position || 0))
+                        .map((it: any) => ({
+                            subjectName: it.subjects?.name || '',
+                            totalLessons: Number(it.total_lessons || 0),
+                            pricePerLesson: Number(it.price_per_lesson || 0),
+                        }));
                     // Resolve tutor separately to avoid brittle relationship-name dependency in lesson_packages select.
                     const { data: tutor } = await supabase
                         .from('profiles')
@@ -398,10 +409,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                     recipientName: r.recipientName,
                                     studentName: student.full_name,
                                     tutorName: tutor?.full_name || 'Korepetitorius',
-                                    subjectName: subject?.name || '–',
+                                    subjectName: subject?.name || webhookEmailItems[0]?.subjectName || '–',
                                     totalLessons: updatedPackage.total_lessons,
                                     availableLessons: updatedPackage.available_lessons,
                                     totalPrice: updatedPackage.total_price.toFixed(2),
+                                    items: webhookEmailItems,
                                     ...(tutor?.organization_id ? { organizationId: tutor.organization_id } : {}),
                                 },
                             }),

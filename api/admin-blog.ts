@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { timingSafeEqual } from 'crypto';
 import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClientOptions.js';
+import { slugify } from './_lib/slugify.js';
 
 function getPlatformAdminSecret(): string {
   const s = process.env.ADMIN_SECRET || process.env.VITE_ADMIN_SECRET;
@@ -32,21 +33,15 @@ function requireAdmin(req: VercelRequest, res: VercelResponse): boolean {
   return true;
 }
 
-const LOCALES = ['lt', 'en', 'pl', 'lv', 'ee'] as const;
+const LOCALES = ['lt', 'en', 'pl', 'lv', 'ee', 'fr', 'es', 'de', 'se', 'dk', 'fi', 'no'] as const;
 const LOCALE_FIELDS = LOCALES.flatMap(l => [`title_${l}`, `excerpt_${l}`, `content_${l}`]);
+const SLUG_FIELDS = LOCALES.map(l => `slug_${l}`);
 const PUBLIC_LIST_FIELDS = ['id', 'slug', 'cover_image', 'tag', 'published_at',
-  ...LOCALES.flatMap(l => [`title_${l}`, `excerpt_${l}`])].join(', ');
+  ...LOCALES.flatMap(l => [`title_${l}`, `excerpt_${l}`]),
+  ...SLUG_FIELDS].join(', ');
 
-function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[ąčęėįšųūž]/g, (c) => {
-      const map: Record<string, string> = { ą: 'a', č: 'c', ę: 'e', ė: 'e', į: 'i', š: 's', ų: 'u', ū: 'u', ž: 'z' };
-      return map[c] || c;
-    })
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 80);
+function postSlug(post: Record<string, unknown>, locale: (typeof LOCALES)[number]): string {
+  return (post[`slug_${locale}`] as string) || (post.slug as string);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -56,15 +51,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Public GET for published posts (no admin auth needed)
   if (req.method === 'GET' && !req.headers['x-admin-secret']) {
     const slug = typeof req.query.slug === 'string' ? req.query.slug : '';
+    const localeParam = typeof req.query.locale === 'string' ? req.query.locale : '';
+    const locale = (LOCALES as readonly string[]).includes(localeParam) ? localeParam as (typeof LOCALES)[number] : null;
+
     if (slug) {
-      const { data, error } = await supabase
-        .from('blog_posts')
-        .select('*')
-        .eq('slug', slug)
-        .eq('status', 'published')
-        .single();
-      if (error || !data) return res.status(404).json({ error: 'Post not found' });
-      return res.status(200).json({ post: data });
+      let post: Record<string, unknown> | null = null;
+
+      if (locale) {
+        const { data } = await supabase
+          .from('blog_posts')
+          .select('*')
+          .eq(`slug_${locale}`, slug)
+          .eq('status', 'published')
+          .maybeSingle();
+        post = data;
+        if (!post) {
+          const { data: fb } = await supabase
+            .from('blog_posts')
+            .select('*')
+            .eq('slug', slug)
+            .eq('status', 'published')
+            .maybeSingle();
+          post = fb;
+        }
+      } else {
+        const { data } = await supabase
+          .from('blog_posts')
+          .select('*')
+          .eq('slug', slug)
+          .eq('status', 'published')
+          .maybeSingle();
+        post = data;
+      }
+
+      if (!post) return res.status(404).json({ error: 'Post not found' });
+
+      const canonicalSlug = locale ? postSlug(post, locale) : (post.slug as string);
+      const payload: Record<string, unknown> = { post };
+      if (locale && canonicalSlug && canonicalSlug !== slug) {
+        payload.redirectSlug = canonicalSlug;
+      }
+      return res.status(200).json(payload);
     }
     const { data, error } = await supabase
       .from('blog_posts')
@@ -109,6 +136,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const f of LOCALE_FIELDS) {
       if (f !== 'title_lt') row[f] = (body[f] || '').trim();
     }
+    for (const l of LOCALES) {
+      const key = `slug_${l}`;
+      const explicit = (body[key] || '').trim();
+      const title = (body[`title_${l}`] || '').trim();
+      row[key] = explicit || (title ? slugify(title) : (l === 'lt' ? slug : null));
+    }
 
     const { data, error } = await supabase.from('blog_posts').insert(row).select().single();
     if (error) return res.status(500).json({ error: error.message });
@@ -122,8 +155,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
     const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
 
-    for (const key of ['slug', ...LOCALE_FIELDS, 'cover_image', 'tag']) {
+    for (const key of ['slug', ...LOCALE_FIELDS, ...SLUG_FIELDS, 'cover_image', 'tag']) {
       if (body[key] !== undefined) updates[key] = (body[key] || '').trim();
+    }
+
+    // Auto-generate locale slugs when a title is provided but slug is empty
+    for (const l of LOCALES) {
+      const slugKey = `slug_${l}`;
+      const titleKey = `title_${l}`;
+      if (body[titleKey] && !body[slugKey]) {
+        const title = (body[titleKey] || '').trim();
+        if (title) updates[slugKey] = slugify(title);
+      }
     }
 
     if (body.status !== undefined) {

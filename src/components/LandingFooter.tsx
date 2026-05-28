@@ -32,7 +32,7 @@ export default function LandingFooter() {
             <ul className="space-y-2.5 text-[13px] text-gray-500">
               <li><Link to={buildLocalizedPath('/apie-mus', locale)} className="hover:text-white transition-colors">{t('nav.aboutUs')}</Link></li>
               <li><Link to={buildLocalizedPath('/kontaktai', locale)} className="hover:text-white transition-colors">{t('common.contacts')}</Link></li>
-              <li><Link to={buildLocalizedPath('/blog', locale)} className="hover:text-white transition-colors">{locale === 'lt' ? 'Tinklaraštis' : 'Blog'}</Link></li>
+              <li><Link to={buildLocalizedPath('/blog', locale)} className="hover:text-white transition-colors">{t('nav.blog')}</Link></li>
             </ul>
           </div>
 

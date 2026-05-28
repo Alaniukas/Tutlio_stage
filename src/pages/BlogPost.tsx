@@ -1,16 +1,17 @@
 import { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import LandingNavbar from '@/components/LandingNavbar';
 import LandingFooter from '@/components/LandingFooter';
 import { useTranslation } from '@/lib/i18n';
-import { resolveField, formatBlogDate } from '@/lib/blogLocale';
+import { resolveField, formatBlogDate, blogPostPath, postSlug } from '@/lib/blogLocale';
 import { markdownToHtml } from '@/lib/markdown';
 import { usePlatform } from '@/contexts/PlatformContext';
 import { applyDefaultDocumentMeta } from '@/lib/documentMeta';
 
 export default function BlogPost() {
   const { slug } = useParams<{ slug: string }>();
+  const navigate = useNavigate();
   const { t, locale } = useTranslation();
   const { platform } = usePlatform();
   const [post, setPost] = useState<Record<string, unknown> | null>(null);
@@ -19,12 +20,22 @@ export default function BlogPost() {
 
   useEffect(() => {
     if (!slug) return;
-    fetch(`/api/admin-blog?slug=${encodeURIComponent(slug)}`)
+    setLoading(true);
+    setNotFound(false);
+    fetch(`/api/admin-blog?slug=${encodeURIComponent(slug)}&locale=${encodeURIComponent(locale)}`)
       .then(r => { if (!r.ok) throw new Error('Not found'); return r.json(); })
-      .then(d => setPost(d.post))
+      .then((d: { post?: Record<string, unknown>; redirectSlug?: string }) => {
+        if (!d.post) throw new Error('Not found');
+        const target = d.redirectSlug || postSlug(d.post, locale);
+        if (target && target !== slug) {
+          navigate(blogPostPath(d.post, locale), { replace: true });
+          return;
+        }
+        setPost(d.post);
+      })
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
-  }, [slug]);
+  }, [slug, locale, navigate]);
 
   const title = post ? resolveField(post, 'title', locale) : '';
   const content = post ? resolveField(post, 'content', locale) : '';

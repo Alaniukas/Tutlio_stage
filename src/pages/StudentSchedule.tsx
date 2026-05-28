@@ -59,12 +59,22 @@ interface ExistingSession {
     subjects?: { is_group?: boolean; max_students?: number; name?: string } | null;
 }
 interface Subject { id: string; name: string; price: number; duration_minutes: number; color: string; grade_min?: number | null; grade_max?: number | null; has_individual_pricing?: boolean; meeting_link?: string | null; is_group?: boolean; max_students?: number | null; is_trial?: boolean | null; }
-interface LessonPackageSummary {
-    id: string;
+interface LessonPackageItemSummary {
     subject_id: string;
     available_lessons: number;
     reserved_lessons: number;
     total_lessons: number;
+}
+
+interface LessonPackageSummary {
+    id: string;
+    /** Denormalized "primary" subject from lesson_packages.subject_id (legacy single-subject reads). */
+    subject_id: string;
+    available_lessons: number;
+    reserved_lessons: number;
+    total_lessons: number;
+    /** Per-subject breakdown. Single-subject packages contain exactly one row. */
+    items: LessonPackageItemSummary[];
 }
 
 /** Be įterptų `subjects(*)`: RLS/postgres užklausos nerą lūžta nuo 57014 (statement timeout). */
@@ -744,6 +754,12 @@ export default function StudentSchedule() {
                     available_lessons: Number(p.available_lessons || 0),
                     reserved_lessons: Number(p.reserved_lessons || 0),
                     total_lessons: Number(p.total_lessons || 0),
+                    items: p.items.map((it) => ({
+                        subject_id: it.subject_id,
+                        available_lessons: it.available_lessons,
+                        reserved_lessons: it.reserved_lessons,
+                        total_lessons: it.total_lessons,
+                    })),
                 }),
             ),
         );
@@ -1088,7 +1104,17 @@ export default function StudentSchedule() {
         if (!selectedEvent || !selectedTime) return;
         setSaving(true);
         const selectedSubject = subjects.find(s => s.id === selectedSubjectId);
-        const activePackage = activePackages.find((pkg) => pkg.subject_id === selectedSubjectId && pkg.available_lessons > 0);
+        // Find a package whose items include the selected subject with available lessons > 0.
+        // Falls back to the legacy subject_id field when a package has no items rows yet.
+        const activePackage = activePackages.find((pkg) => {
+            if (pkg.available_lessons <= 0) return false;
+            if (pkg.items.length > 0) {
+                return pkg.items.some(
+                    (it) => it.subject_id === selectedSubjectId && it.available_lessons > 0,
+                );
+            }
+            return pkg.subject_id === selectedSubjectId;
+        });
         const usesPackage = shouldUsePackageForBooking(activePackage, studentPaymentModel, studentPaymentOverrideActive);
         const durationMs = (selectedSubject?.duration_minutes || 60) * 60000;
         const endDT = new Date(selectedTime.getTime() + durationMs);
@@ -1216,7 +1242,7 @@ export default function StudentSchedule() {
                     const reserveRes = await fetch('/api/reserve-package-lesson', {
                         method: 'POST',
                         headers: await authHeaders(),
-                        body: JSON.stringify({ packageId: activePackage.id }),
+                        body: JSON.stringify({ packageId: activePackage.id, subjectId: selectedSubjectId }),
                     });
                     const reserveJson = await reserveRes.json().catch(() => ({}));
                     if (!reserveRes.ok) {
@@ -1463,7 +1489,7 @@ export default function StudentSchedule() {
 
     const handleGoToStripe = async (sessionId: string) => {
         if (!shouldRequestPerLessonCheckout(studentPaymentModel, studentPaymentOverrideActive)) {
-            alert('Šiam mokiniui taikoma mėnesinė sąskaita arba kitas ne momentinis apmokėjimas. Sąskaita bus pateikta mėnesio pabaigoje.');
+            alert(t('stuSched.manualMonthlyAlert'));
             return;
         }
         setFetchingStripe(true);

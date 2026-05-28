@@ -42,7 +42,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!packageId) return res.status(400).send(errorPage('Klaida', 'Trūksta paketo identifikatoriaus.'));
 
     try {
-        // 1. Fetch package with student + tutor + subject
+        // 1. Fetch package with student + tutor (subject pulled from items below)
         const { data: pkg, error: pkgErr } = await supabase
             .from('lesson_packages')
             .select(`
@@ -52,8 +52,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 profiles!lesson_packages_tutor_id_fkey(
                     stripe_account_id, stripe_onboarding_complete, organization_id, full_name,
                     subscription_plan, manual_subscription_exempt, enable_manual_student_payments
-                ),
-                subjects!inner(name)
+                )
             `)
             .eq('id', packageId)
             .single();
@@ -68,10 +67,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const tutor = pkg.profiles as any;
         const student = pkg.students as any;
-        const subject = pkg.subjects as any;
 
         if (pkg.payment_method === 'manual') {
             return res.redirect(302, `${APP_URL}/student/sessions`);
+        }
+
+        // 1b. Fetch items to rebuild per-subject Stripe line items
+        const { data: itemsRaw } = await supabase
+            .from('lesson_package_items')
+            .select('id, subject_id, total_lessons, price_per_lesson, position, subjects!inner(name)')
+            .eq('package_id', packageId)
+            .order('position', { ascending: true });
+
+        type ItemForCheckout = { subjectName: string; totalLessons: number; pricePerLesson: number };
+        const items: ItemForCheckout[] = (itemsRaw || []).map((row: any) => ({
+            subjectName: (row.subjects?.name as string) || 'Pamoka',
+            totalLessons: Number(row.total_lessons) || 0,
+            pricePerLesson: Number(row.price_per_lesson) || 0,
+        }));
+        if (items.length === 0) {
+            return res.status(500).send(errorPage('Klaida', 'Paketas neturi pamokų sąrašo.'));
         }
 
         // 2. Determine Stripe account
@@ -111,11 +126,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         // 4. Calculate amounts
-        const totalLessons = pkg.total_lessons;
         const basePriceEur = Number(pkg.total_price);
         const customerEmail = student?.payer_email || student?.email || undefined;
 
-        // 5. Create Stripe Checkout Session
+        // 5. Build per-subject Stripe line items
+        const itemLineItems = items.map((it) => ({
+            price_data: {
+                currency: 'eur' as const,
+                product_data: {
+                    name: `${it.totalLessons} × ${it.subjectName}`,
+                    description: `Package – ${ownerName}`,
+                },
+                unit_amount: Math.round(it.pricePerLesson * 100),
+            },
+            quantity: it.totalLessons,
+        }));
+
+        const metadataBase = {
+            tutlio_package_id: packageId,
+            tutor_id: pkg.tutor_id,
+            student_id: pkg.student_id,
+            ...(pkg.subject_id ? { subject_id: pkg.subject_id } : {}),
+        };
+
         let checkoutSession: Stripe.Checkout.Session;
 
         if (useSchoolOrgAbsorbedFees) {
@@ -125,13 +158,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 mode: 'payment',
                 customer_email: customerEmail,
                 payment_method_types: ['card'],
-                line_items: [{ price_data: { currency: 'eur', product_data: { name: `${totalLessons} lessons – ${subject.name}`, description: `Package – ${ownerName}` }, unit_amount: chargeCents }, quantity: 1 }],
+                line_items: itemLineItems,
                 payment_intent_data: {
                     application_fee_amount: applicationFeeCents,
                     transfer_data: { destination: stripeAccountId! },
-                    metadata: { tutlio_package_id: packageId, tutor_id: pkg.tutor_id, student_id: pkg.student_id, subject_id: pkg.subject_id, tutlio_school_org_absorbed: 'true' },
+                    metadata: { ...metadataBase, tutlio_school_org_absorbed: 'true' },
                 },
-                metadata: { tutlio_package_id: packageId, tutor_id: pkg.tutor_id, student_id: pkg.student_id, subject_id: pkg.subject_id, tutlio_school_org_absorbed: 'true' },
+                metadata: { ...metadataBase, tutlio_school_org_absorbed: 'true' },
                 success_url: `${APP_URL}/package-success?session_id={CHECKOUT_SESSION_ID}`,
                 cancel_url: `${APP_URL}/package-cancelled`,
             });
@@ -142,14 +175,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 customer_email: customerEmail,
                 payment_method_types: ['card'],
                 line_items: [
-                    { price_data: { currency: 'eur', product_data: { name: `${totalLessons} lessons – ${subject.name}`, description: `Package – ${ownerName}` }, unit_amount: baseCents }, quantity: 1 },
+                    ...itemLineItems,
                     { price_data: { currency: 'eur', product_data: { name: 'Platformos administravimo mokestis', description: 'Tutlio platform fee and payment processing' }, unit_amount: feesCents }, quantity: 1 },
                 ],
                 payment_intent_data: {
                     transfer_data: { destination: stripeAccountId!, amount: baseCents },
-                    metadata: { tutlio_package_id: packageId, tutor_id: pkg.tutor_id, student_id: pkg.student_id, subject_id: pkg.subject_id },
+                    metadata: metadataBase,
                 },
-                metadata: { tutlio_package_id: packageId, tutor_id: pkg.tutor_id, student_id: pkg.student_id, subject_id: pkg.subject_id },
+                metadata: metadataBase,
                 success_url: `${APP_URL}/package-success?session_id={CHECKOUT_SESSION_ID}`,
                 cancel_url: `${APP_URL}/package-cancelled`,
             });

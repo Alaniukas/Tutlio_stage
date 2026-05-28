@@ -541,7 +541,7 @@ export default function LessonSettingsPage() {
                           )}
                           {subject.grade_min !== null && subject.grade_max !== null && (
                             <span className="flex items-center gap-1 text-emerald-600 text-xs font-medium">
-                              🎓 {subject.grade_min}-{subject.grade_max === 13 ? 'Studentas' : `${subject.grade_max} kl`}
+                              🎓 {subject.grade_min}-{subject.grade_max === 13 ? t('lessonSet.gradeUniversity') : `${subject.grade_max} ${t('lessonSet.gradeShort')}`}
                             </span>
                           )}
                           {subject.is_group && (
@@ -758,7 +758,7 @@ export default function LessonSettingsPage() {
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="space-y-2">
-              <Label>Dalyko pavadinimas</Label>
+              <Label>{t('lessonSet.subjectName')}</Label>
               <Input
                 placeholder={t('lessonSet.namePlaceholder')}
                 value={newSubject.name}
@@ -768,7 +768,7 @@ export default function LessonSettingsPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Prisijungimo nuoroda (neprivaloma)</Label>
+              <Label>{t('lessonSet.meetingLink')} ({t('common.optional')})</Label>
               <Input
                 placeholder="https://meet.google.com/..."
                 value={newSubject.meeting_link}
@@ -930,7 +930,7 @@ export default function LessonSettingsPage() {
                         max_students: parseInt(e.target.value) || null
                       })}
                       className="rounded-xl"
-                      placeholder="Pvz. 5"
+                      placeholder={t('lessonSet.maxStudentsPlaceholder')}
                     />
                     <p className="text-xs text-gray-500">
                       {t('lessonSet.maxStudentsHint')}

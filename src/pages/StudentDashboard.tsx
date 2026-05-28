@@ -29,6 +29,12 @@ interface StudentInfo {
     grade: string | null;
     tutor: { full_name: string; email?: string; phone?: string | null } | null;
 }
+interface LessonPackageItem {
+    subject_id: string;
+    subject_name?: string;
+    total_lessons: number;
+    available_lessons: number;
+}
 interface LessonPackage {
     id: string;
     total_lessons: number;
@@ -36,6 +42,7 @@ interface LessonPackage {
     expires_at?: string | null;
     subject_id: string;
     subjects?: any;
+    items: LessonPackageItem[];
 }
 
 interface InstallmentPayment {
@@ -297,10 +304,14 @@ export default function StudentDashboard() {
                 setSessions(merged);
             }
 
-            const nameMap = await fetchSubjectNamesByIds(
-                supabase,
-                pkgsRows.map((p) => p.subject_id).filter(Boolean) as string[],
-            );
+            const allSubjectIds = new Set<string>();
+            for (const p of pkgsRows) {
+                if (p.subject_id) allSubjectIds.add(p.subject_id);
+                for (const it of p.items || []) {
+                    if (it.subject_id) allSubjectIds.add(it.subject_id);
+                }
+            }
+            const nameMap = await fetchSubjectNamesByIds(supabase, [...allSubjectIds]);
             const nowTs = Date.now();
             const visiblePackages: LessonPackage[] = pkgsRows
                 .filter((pkg) => {
@@ -318,6 +329,12 @@ export default function StudentDashboard() {
                         p.subject_id && nameMap[p.subject_id]
                             ? { name: nameMap[p.subject_id] }
                             : undefined,
+                    items: (p.items || []).map((it) => ({
+                        subject_id: it.subject_id,
+                        subject_name: nameMap[it.subject_id],
+                        total_lessons: Number(it.total_lessons || 0),
+                        available_lessons: Number(it.available_lessons || 0),
+                    })),
                 }));
             setActivePackages(visiblePackages);
 
@@ -416,7 +433,7 @@ export default function StudentDashboard() {
                         <div className="flex items-center gap-2 mb-2">
                             <Package className="w-4 h-4 text-violet-700" />
                             <p className="text-sm font-bold text-violet-800">
-                                {activePackages.length === 1 && activePackages[0].subjects?.name
+                                {activePackages.length === 1 && activePackages[0].items.length === 1 && activePackages[0].subjects?.name
                                     ? activePackages[0].subjects.name
                                     : t('studentDash.lessonPackages')}{' '}
                                 {activePackages.length > 1 && `(${activePackages.length})`}
@@ -434,12 +451,26 @@ export default function StudentDashboard() {
                                 })}
                             </p>
                         )}
+                        {activePackages.length === 1 && activePackages[0].items.length > 1 && (
+                            <div className="space-y-1 mt-3 pt-3 border-t border-violet-200">
+                                {activePackages[0].items.map((it) => (
+                                    <div key={it.subject_id} className="flex items-center justify-between text-xs">
+                                        <span className="text-violet-600 truncate">{it.subject_name || '—'}</span>
+                                        <span className="font-semibold text-violet-800 tabular-nums">
+                                            {it.available_lessons}/{it.total_lessons} {t('studentDash.lessonsSuffix')}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                         {activePackages.length > 1 && (
                             <div className="space-y-2 mt-3 pt-3 border-t border-violet-200">
                                 {activePackages.map((pkg, idx) => (
                                     <div key={pkg.id} className="flex items-center justify-between text-xs">
                                         <span className="text-violet-600">
-                                            {pkg.subjects?.name || t('studentDash.packageN', { n: idx + 1 })}
+                                            {pkg.items.length > 1
+                                                ? pkg.items.map((it) => it.subject_name).filter(Boolean).join(', ')
+                                                : (pkg.subjects?.name || t('studentDash.packageN', { n: idx + 1 }))}
                                             {pkg.expires_at
                                                 ? ` · ${t('package.expiresAt', { date: format(new Date(pkg.expires_at), "yyyy 'm.' MMMM d 'd.'", { locale: dateFnsLocale }) })}`
                                                 : ''}

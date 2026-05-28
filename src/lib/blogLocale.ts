@@ -1,4 +1,5 @@
 import type { Locale } from '@/lib/i18n/core';
+import { buildLocalizedPath } from '@/lib/i18n';
 
 /**
  * Resolves a localized blog field with fallback: current locale -> en -> lt.
@@ -12,6 +13,18 @@ export function resolveField(post: Record<string, unknown>, field: string, local
   }
   const lt = post[`${field}_lt`];
   return (lt && typeof lt === 'string') ? lt : '';
+}
+
+/** Locale-specific URL slug, falling back to the universal slug column. */
+export function postSlug(post: Record<string, unknown>, locale: Locale): string {
+  const localized = post[`slug_${locale}`];
+  if (typeof localized === 'string' && localized.trim()) return localized.trim();
+  return String(post.slug || '');
+}
+
+/** Localized path to a blog post, e.g. `/se/blog/my-slug`. */
+export function blogPostPath(post: Record<string, unknown>, locale: Locale): string {
+  return buildLocalizedPath(`/blog/${postSlug(post, locale)}`, locale);
 }
 
 const DATE_LOCALE_MAP: Partial<Record<Locale, string>> = {

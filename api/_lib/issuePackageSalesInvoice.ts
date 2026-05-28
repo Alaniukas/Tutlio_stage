@@ -81,9 +81,31 @@ export async function tryIssueSalesInvoiceForStripePackage(
     contactPhone: (invoiceProfile.contact_phone as string) || undefined,
   };
 
-  const subject =
-    packageRow.subject || packageRow.subjects || (null as { name?: string } | null);
-  const subjectName = subject?.name || 'Pamoka';
+  // Look up per-subject items so we can emit one invoice line per subject.
+  const { data: itemsRaw } = await supabase
+    .from('lesson_package_items')
+    .select('subject_id, total_lessons, total_price, position, subjects!inner(name)')
+    .eq('package_id', packageRow.id)
+    .order('position', { ascending: true });
+  type InvoiceItem = { subjectName: string; totalLessons: number; totalPrice: number };
+  let invoiceItems: InvoiceItem[] = (itemsRaw || []).map((row: any) => ({
+    subjectName: (row.subjects?.name as string) || 'Pamoka',
+    totalLessons: Number(row.total_lessons) || 0,
+    totalPrice: Number(row.total_price) || 0,
+  }));
+
+  // Legacy fallback: package row without items still gets one line from the
+  // denormalized fields. After backfill this branch should never run.
+  if (invoiceItems.length === 0) {
+    const fallback = packageRow.subject || packageRow.subjects || null;
+    const subjectName = fallback?.name || 'Pamoka';
+    invoiceItems = [{
+      subjectName,
+      totalLessons: Number(packageRow.total_lessons) || 0,
+      totalPrice: Number(packageRow.total_price) || 0,
+    }];
+  }
+
   const totalAmount = Number(packageRow.total_price) || 0;
   if (totalAmount <= 0) return;
 
@@ -128,14 +150,15 @@ export async function tryIssueSalesInvoiceForStripePackage(
     return;
   }
 
-  await supabase.from('invoice_line_items').insert({
+  const lineRows = invoiceItems.map((it) => ({
     invoice_id: invoice.id,
-    description: `${subjectName} — pamokų paketas (${packageRow.total_lessons} pam.)`,
+    description: `${it.subjectName} — pamokų paketas (${it.totalLessons} pam.)`,
     quantity: 1,
-    unit_price: totalAmount,
-    total_price: totalAmount,
+    unit_price: it.totalPrice,
+    total_price: it.totalPrice,
     session_ids: [],
-  });
+  }));
+  await supabase.from('invoice_line_items').insert(lineRows);
 
   const { error: linkErr } = await supabase
     .from('lesson_packages')

@@ -56,12 +56,6 @@ const GRADES_LT = [
     '6 klasė', '7 klasė', '8 klasė', '9 klasė', '10 klasė',
     '11 klasė', '12 klasė', 'Studentas', 'Kita',
 ];
-const GRADES_EN = [
-    'Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5',
-    'Grade 6', 'Grade 7', 'Grade 8', 'Grade 9', 'Grade 10',
-    'Grade 11', 'Grade 12', 'University', 'Other',
-];
-
 function StepIndicator({ current }: { current: Step }) {
     const { t } = useTranslation();
     const STEP_LABELS = [t('onboard.stepVerify'), t('onboard.stepProfile'), t('onboard.stepAccount'), t('onboard.stepDone')];
@@ -413,7 +407,7 @@ export default function StudentOnboarding() {
                                     type="email"
                                     value={email}
                                     onChange={(e) => setEmail(e.target.value)}
-                                    placeholder={locale === 'en' ? 'your@email.com' : 'jūsų@email.lt'}
+                                    placeholder={t('onboard.emailPlaceholder')}
                                     required
                                     className="w-full px-4 py-3 rounded-2xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 bg-gray-50"
                                 />
@@ -483,7 +477,7 @@ export default function StudentOnboarding() {
                                                     : (error && !grade ? 'bg-red-50 border-red-300 text-gray-700 hover:border-violet-300' : 'bg-gray-50 border-gray-200 text-gray-700 hover:border-violet-300')
                                                 }`}
                                         >
-                                            {locale === 'en' ? GRADES_EN[idx] : g}
+                                            {idx < 12 ? t('onboard.gradeN', { n: idx + 1 }) : idx === 12 ? t('lessonSet.gradeUniversity') : t('onboard.gradeOther')}
                                         </button>
                                     ))}
                                 </div>
@@ -494,7 +488,7 @@ export default function StudentOnboarding() {
                                 {!isSchoolInvite && (
                                     <>
                                         <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                                            {locale === 'en' ? 'Parent account on Tutlio?' : 'Ar norite tėvų paskyros Tutlio?'} <span className="text-red-500">*</span>
+                                            {t('onboard.parentAccountQ')} <span className="text-red-500">*</span>
                                         </label>
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
                                             <button
@@ -506,9 +500,9 @@ export default function StudentOnboarding() {
                                                 )}
                                             >
                                                 <Users className="w-5 h-5 text-gray-600" />
-                                                <span className="text-sm font-semibold text-gray-900">{locale === 'en' ? 'Yes' : 'Taip'}</span>
+                                                <span className="text-sm font-semibold text-gray-900">{t('common.yes')}</span>
                                                 <span className="text-xs text-gray-500 leading-tight">
-                                                    {locale === 'en' ? 'Parents pay and get their own login' : 'Tėvai moka ir gauna atskirą prisijungimą'}
+                                                    {t('onboard.parentPaysDesc')}
                                                 </span>
                                             </button>
                                             <button
@@ -527,17 +521,15 @@ export default function StudentOnboarding() {
                                                 )}
                                             >
                                                 <User className="w-5 h-5 text-gray-600" />
-                                                <span className="text-sm font-semibold text-gray-900">{locale === 'en' ? 'No' : 'Ne'}</span>
+                                                <span className="text-sm font-semibold text-gray-900">{t('common.no')}</span>
                                                 <span className="text-xs text-gray-500 leading-tight">
-                                                    {locale === 'en' ? 'I book and pay myself' : 'Pats registruojuosi ir moku'}
+                                                    {t('onboard.selfPaysDesc')}
                                                 </span>
                                             </button>
                                         </div>
                                         {wantsParentAccount && (
                                             <p className="text-xs text-violet-800 bg-violet-50 border border-violet-100 rounded-xl px-3 py-2 mb-2">
-                                                {locale === 'en'
-                                                    ? 'Payer will be set to parent/guardian. We will email them a link and code to register.'
-                                                    : 'Mokėtojas bus nurodytas kaip tėvai / globėjai. Jiems bus išsiųstas el. laiškas su nuoroda ir kodu.'}
+                                                {t('onboard.parentWillBeSet')}
                                             </p>
                                         )}
                                     </>
@@ -546,7 +538,7 @@ export default function StudentOnboarding() {
                                 {(isSchoolInvite || wantsParentAccount) && !schoolInviteParentLocked && (
                                     <div className="space-y-3 pt-2 border-t border-gray-100">
                                         <p className="text-xs text-gray-500 pt-2">
-                                            {isSchoolInvite ? 'Tėvų duomenys (užpildykite)' : t('onboard.parentInfo')}
+                                            {isSchoolInvite ? t('onboard.parentDetailsFill') : t('onboard.parentInfo')}
                                         </p>
                                         <div>
                                             <label className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
@@ -715,31 +707,19 @@ export default function StudentOnboarding() {
                                 ) : parentInviteOutcome === 'sending' ? (
                                     <>
                                         <div className="w-4 h-4 inline-block mr-2 align-[-2px] border-2 border-violet-300 border-t-violet-700 rounded-full animate-spin" />
-                                        {locale === 'en'
-                                            ? 'Sending invite to parents…'
-                                            : 'Siunčiamas kvietimas tėvams…'}
+                                        {t('onboard.sendingParentInvite')}
                                     </>
                                 ) : (
                                     <>
                                         <AlertCircle className="w-4 h-4 inline mr-1" />
                                         {parentInviteCode ? (
-                                            locale === 'en' ? (
-                                                <>
-                                                    Could not send the email automatically. Share this code with your parent at{' '}
-                                                    <strong>tutlio.lt/parent-register</strong> (same email as above):{' '}
-                                                    <strong className="font-mono tracking-widest">{parentInviteCode}</strong>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    Nepavyko automatiškai išsiųsti el. laiško. Perduokite tėvams kodą svetainėje{' '}
-                                                    <strong>tutlio.lt/parent-register</strong> (tas pats el. paštas):{' '}
-                                                    <strong className="font-mono tracking-widest">{parentInviteCode}</strong>
-                                                </>
-                                            )
-                                        ) : locale === 'en' ? (
-                                            'Could not create parent invite. Ask your tutor to resend it from the school panel.'
+                                            <>
+                                                {t('onboard.parentInviteEmailFailedPre')}{' '}
+                                                <strong>tutlio.lt/parent-register</strong> {t('onboard.parentInviteEmailFailedMid')}{' '}
+                                                <strong className="font-mono tracking-widest">{parentInviteCode}</strong>
+                                            </>
                                         ) : (
-                                            'Nepavyko sukurti tėvų kvietimo. Kreipkitės į korepetitorių arba mokyklą – jie gali išsiųsti pakartotinai.'
+                                            t('onboard.parentInviteCreateFailed')
                                         )}
                                     </>
                                 )}

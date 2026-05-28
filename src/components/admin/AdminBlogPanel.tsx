@@ -3,6 +3,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ArrowLeft, Plus, Pencil, Trash2, Eye, Globe, Upload, X, Image as ImageIcon } from 'lucide-react';
 import { SUPPORTED_LOCALES, LOCALE_LABELS, type Locale } from '@/lib/i18n/core';
+import { blogPostPath } from '@/lib/blogLocale';
 
 type BlogFormData = Record<string, string>;
 
@@ -14,6 +15,7 @@ function buildEmptyForm(): BlogFormData {
   const f: BlogFormData = { slug: '', cover_image: '', tag: '', status: 'draft' };
   for (const loc of SUPPORTED_LOCALES) {
     for (const type of LOCALE_FIELD_TYPES) f[`${type}_${loc}`] = '';
+    f[`slug_${loc}`] = '';
   }
   return f;
 }
@@ -163,10 +165,11 @@ export default function AdminBlogPanel({ adminSecret }: { adminSecret: string })
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-slate-300">Slug</Label>
-              <Input value={form.slug} onChange={(e) => updateField('slug', e.target.value)} placeholder="auto-generated-from-title"
+              <Label className="text-slate-300">URL slug ({LOCALE_LABELS[lang]})</Label>
+              <Input value={form[`slug_${lang}`] || ''} onChange={(e) => updateField(`slug_${lang}`, e.target.value)}
+                placeholder="auto-generated-from-title"
                 className="bg-white/10 border-white/20 text-white placeholder:text-slate-500 rounded-xl" />
-              <p className="text-xs text-slate-500">Leave empty to auto-generate from Lithuanian title</p>
+              <p className="text-xs text-slate-500">Leave empty to auto-generate from {LOCALE_LABELS[lang]} title</p>
             </div>
 
             <div className="space-y-1.5">
@@ -238,9 +241,9 @@ export default function AdminBlogPanel({ adminSecret }: { adminSecret: string })
               {saving ? 'Saving...' : editId ? 'Update post' : 'Create post'}
             </button>
             {editId && form.status === 'published' && (
-              <a href={`/blog/${form.slug}`} target="_blank" rel="noopener noreferrer"
+              <a href={blogPostPath(form, lang)} target="_blank" rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-white/5 hover:bg-white/10 rounded-xl text-sm text-slate-300">
-                <Eye className="w-4 h-4" /> View
+                <Eye className="w-4 h-4" /> View ({LOCALE_LABELS[lang]})
               </a>
             )}
           </div>
@@ -290,7 +293,7 @@ export default function AdminBlogPanel({ adminSecret }: { adminSecret: string })
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
                   {post.status === 'published' && (
-                    <a href={`/blog/${String(post.slug)}`} target="_blank" rel="noopener noreferrer"
+                    <a href={blogPostPath(post, 'lt')} target="_blank" rel="noopener noreferrer"
                       className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-white/10" title="View">
                       <Globe className="w-4 h-4" />
                     </a>

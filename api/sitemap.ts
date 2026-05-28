@@ -33,9 +33,14 @@ const STATIC_PAGES: { path: string; changefreq: string; priority: string }[] = [
 ];
 
 const TITLE_COLUMNS = LOCALES.map((l) => `title_${l}`).join(', ');
+const SLUG_COLUMNS = LOCALES.map((l) => `slug_${l}`).join(', ');
 
 function postHasTranslation(post: Record<string, unknown>, locale: Locale): boolean {
   return !!post[`title_${locale}`];
+}
+
+function postSlug(post: Record<string, unknown>, locale: Locale): string {
+  return (post[`slug_${locale}`] as string) || (post.slug as string);
 }
 
 function alternatesXml(path: string, locales: Locale[] = LOCALES): string {
@@ -51,12 +56,34 @@ function alternatesXml(path: string, locales: Locale[] = LOCALES): string {
   return links.join('\n');
 }
 
+function blogPostAlternatesXml(post: Record<string, unknown>, locales: Locale[]): string {
+  const links: string[] = [];
+  for (const locale of locales) {
+    const slug = postSlug(post, locale);
+    const href = buildCanonicalUrl(`/blog/${slug}`, locale);
+    links.push(`    <xhtml:link rel="alternate" hreflang="${locale}" href="${href}" />`);
+  }
+  const enSlug = postSlug(post, 'en');
+  const xDefault = buildFullUrl(`/blog/${enSlug}`, 'en', 'com');
+  links.push(`    <xhtml:link rel="alternate" hreflang="x-default" href="${xDefault}" />`);
+  return links.join('\n');
+}
+
 function urlEntry(loc: string, changefreq: string, priority: string, path: string, altLocales: Locale[], lastmod?: string): string {
   return `  <url>
     <loc>${loc}</loc>${lastmod ? `\n    <lastmod>${lastmod}</lastmod>` : ''}
     <changefreq>${changefreq}</changefreq>
     <priority>${priority}</priority>
 ${alternatesXml(path, altLocales)}
+  </url>`;
+}
+
+function blogPostUrlEntry(loc: string, changefreq: string, priority: string, post: Record<string, unknown>, altLocales: Locale[], lastmod?: string): string {
+  return `  <url>
+    <loc>${loc}</loc>${lastmod ? `\n    <lastmod>${lastmod}</lastmod>` : ''}
+    <changefreq>${changefreq}</changefreq>
+    <priority>${priority}</priority>
+${blogPostAlternatesXml(post, altLocales)}
   </url>`;
 }
 
@@ -68,7 +95,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (supabase) {
     const { data } = await supabase
       .from('blog_posts')
-      .select(`slug, published_at, ${TITLE_COLUMNS}`)
+      .select(`slug, ${SLUG_COLUMNS}, published_at, ${TITLE_COLUMNS}`)
       .eq('status', 'published')
       .order('published_at', { ascending: false });
     blogPosts = data || [];
@@ -98,13 +125,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const today = new Date().toISOString().split('T')[0];
   for (const post of blogPosts) {
-    const blogPath = `/blog/${post.slug as string}`;
     const lastmod = post.published_at ? (post.published_at as string).split('T')[0] : today;
 
     const postLocales = myLocales.filter((l) => postHasTranslation(post, l));
     for (const locale of postLocales) {
-      const loc = buildCanonicalUrl(blogPath, locale);
-      entries.push(urlEntry(loc, 'monthly', '0.7', blogPath, postLocales, lastmod));
+      const slug = postSlug(post, locale);
+      const loc = buildCanonicalUrl(`/blog/${slug}`, locale);
+      entries.push(blogPostUrlEntry(loc, 'monthly', '0.7', post, postLocales, lastmod));
     }
   }
 

@@ -8,7 +8,9 @@ import {
   detectDomain,
   buildPath,
   buildCanonicalUrl,
+  buildFullUrl,
   hreflangTags,
+  esc as seoEsc,
 } from './_lib/seo-routing.js';
 
 function getSupabase() {
@@ -94,6 +96,28 @@ function detectLocaleFromQuery(req: VercelRequest): Locale {
   return domain === 'com' ? 'en' : 'lt';
 }
 
+function postSlug(post: Record<string, unknown>, locale: Locale): string {
+  return (post[`slug_${locale}`] as string) || (post.slug as string);
+}
+
+function blogPostHreflangTags(post: Record<string, unknown>): string {
+  const seen = new Set<string>();
+  const tags: string[] = [];
+  for (const l of LOCALES) {
+    if (!post[`title_${l}`]) continue;
+    const slug = postSlug(post, l);
+    const href = buildCanonicalUrl(`/blog/${slug}`, l);
+    const key = `${l}:${href}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    tags.push(`<link rel="alternate" hreflang="${l}" href="${seoEsc(href)}" />`);
+  }
+  const enSlug = postSlug(post, 'en');
+  const xDefault = buildFullUrl(`/blog/${enSlug}`, 'en', 'com');
+  tags.push(`<link rel="alternate" hreflang="x-default" href="${seoEsc(xDefault)}" />`);
+  return tags.join('\n');
+}
+
 const LABELS: Record<Locale, { blog: string; back: string; home: string; read: string }> = {
   lt: { blog: 'Tinklaraštis', back: 'Visi straipsniai', home: 'Pagrindinis', read: 'Skaityti daugiau' },
   en: { blog: 'Blog', back: 'All articles', home: 'Home', read: 'Read more' },
@@ -123,6 +147,7 @@ interface BlogShellOpts {
   modifiedTime?: string;
   tag?: string;
   noindex?: boolean;
+  hreflangHtml?: string;
 }
 
 const DEFAULT_OG = 'https://www.tutlio.com/og-image.png';
@@ -152,7 +177,7 @@ function shell(opts: BlogShellOpts): string {
 <meta name="description" content="${esc(description)}" />
 <meta name="robots" content="${noindex ? 'noindex, follow' : 'index, follow, max-image-preview:large'}" />
 <link rel="canonical" href="${esc(url)}" />
-${hreflangTags(blogPath)}
+${opts.hreflangHtml || hreflangTags(blogPath)}
 <meta property="og:type" content="article" />
 <meta property="og:title" content="${esc(title)}" />
 <meta property="og:description" content="${esc(description)}" />
@@ -233,16 +258,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const l = LABELS[locale];
 
   if (slug) {
-    const { data: post } = await supabase
-      .from('blog_posts').select('*').eq('slug', slug).eq('status', 'published').single();
+    // Try locale-specific slug first, then fall back to universal slug
+    let { data: post } = await supabase
+      .from('blog_posts').select('*').eq(`slug_${locale}`, slug).eq('status', 'published').single();
+    let matchedViaFallback = false;
+    if (!post) {
+      const { data: fbPost } = await supabase
+        .from('blog_posts').select('*').eq('slug', slug).eq('status', 'published').single();
+      post = fbPost;
+      matchedViaFallback = true;
+    }
     if (!post) return res.status(404).send('Not found');
+
+    // 301 redirect when the URL used the universal slug but a locale-specific one exists
+    const localeSlug = postSlug(post, locale);
+    if (matchedViaFallback && localeSlug !== slug) {
+      const redirectPath = buildPath(`/blog/${localeSlug}`, locale, domain);
+      res.writeHead(301, { Location: redirectPath });
+      res.end();
+      return;
+    }
 
     const hasNativeTitle = !!post[`title_${locale}`];
     const title = resolve(post, 'title', locale);
     const excerpt = resolve(post, 'excerpt', locale);
     const content = resolve(post, 'content', locale);
     const date = fmtDate(post.published_at as string, locale);
-    const blogPath = `/blog/${post.slug}`;
+    const blogPath = `/blog/${localeSlug}`;
     const url = buildCanonicalUrl(blogPath, locale);
     const image = (post.cover_image as string) || '';
 
@@ -281,6 +323,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       modifiedTime: (post.updated_at as string) || undefined,
       tag: (post.tag as string) || undefined,
       noindex: !hasNativeTitle,
+      hreflangHtml: blogPostHreflangTags(post),
     }), {
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Language': locale,
@@ -290,9 +333,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // Blog listing
+  const SLUG_COLS = LOCALES.map(l2 => `slug_${l2}`).join(', ');
   const { data: posts } = await supabase
     .from('blog_posts')
-    .select('slug, cover_image, tag, published_at, title_lt, title_en, title_pl, title_lv, title_ee, title_fr, title_es, title_de, title_se, title_dk, title_fi, title_no, excerpt_lt, excerpt_en, excerpt_pl, excerpt_lv, excerpt_ee, excerpt_fr, excerpt_es, excerpt_de, excerpt_se, excerpt_dk, excerpt_fi, excerpt_no')
+    .select(`slug, ${SLUG_COLS}, cover_image, tag, published_at, title_lt, title_en, title_pl, title_lv, title_ee, title_fr, title_es, title_de, title_se, title_dk, title_fi, title_no, excerpt_lt, excerpt_en, excerpt_pl, excerpt_lv, excerpt_ee, excerpt_fr, excerpt_es, excerpt_de, excerpt_se, excerpt_dk, excerpt_fi, excerpt_no`)
     .eq('status', 'published')
     .order('published_at', { ascending: false });
 
@@ -305,7 +349,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const t = resolve(p, 'title', locale);
     const e = resolve(p, 'excerpt', locale);
     const img = (p.cover_image as string) || '';
-    const href = `${buildPath(`/blog/${p.slug}`, locale, domain)}`;
+    const pSlug = postSlug(p, locale);
+    const href = `${buildPath(`/blog/${pSlug}`, locale, domain)}`;
     return `<a href="${href}" class="card" style="text-decoration:none;color:inherit">
   ${img ? `<img src="${esc(img)}" alt="${esc(t)}" loading="lazy" />` : ''}
   <div class="card-body">

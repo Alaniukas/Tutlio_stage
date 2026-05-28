@@ -52,12 +52,19 @@ interface WaitlistEntry {
     notes: string | null;
     session?: { start_time: string; end_time: string; topic: string | null; price: number | null } | null;
 }
+interface PackageItemSummary {
+    subject_id: string;
+    subject_name?: string;
+    total_lessons: number;
+    available_lessons: number;
+}
 interface PackageSummary {
     id: string;
     available_lessons: number;
     total_lessons: number;
     expires_at?: string | null;
     subjects?: { name: string } | null;
+    items: PackageItemSummary[];
 }
 
 function parseWaitlistNotes(notes: string | null) {
@@ -361,7 +368,7 @@ export default function StudentSessions() {
 
     const handleStripePayment = async (session: Session, penaltyAmount?: number) => {
         if (manualPaymentsOnly) {
-            alert('Šiam korepetitoriui taikomi rankiniai mokėjimai. Dėl apmokėjimo susisiekite tiesiogiai.');
+            alert(t('stuSess.manualPaymentContactTutor'));
             return;
         }
         setStripeLoading(true);
@@ -784,13 +791,22 @@ export default function StudentSessions() {
                         total_lessons: Number(pkg.total_lessons ?? 0),
                         expires_at: pkg.expires_at,
                         subjects: null,
+                        items: (pkg.items || []).map((it) => ({
+                            subject_id: it.subject_id,
+                            total_lessons: Number(it.total_lessons || 0),
+                            available_lessons: Number(it.available_lessons || 0),
+                        })),
                     }));
                 setActivePackages(quickPackages);
 
-                const subjectIdsForPkgs = [
-                    ...new Set(lightPkgs.map((p) => p.subject_id).filter(Boolean) as string[]),
-                ];
-                const subjectNameMap = await fetchSubjectNamesByIds(supabase, subjectIdsForPkgs);
+                const allSubjectIds = new Set<string>();
+                for (const p of lightPkgs) {
+                    if (p.subject_id) allSubjectIds.add(p.subject_id);
+                    for (const it of p.items || []) {
+                        if (it.subject_id) allSubjectIds.add(it.subject_id);
+                    }
+                }
+                const subjectNameMap = await fetchSubjectNamesByIds(supabase, [...allSubjectIds]);
                 if (sessionsSecondaryGenRef.current !== secondaryGen) return;
                 const visiblePackages: PackageSummary[] = lightPkgs
                     .filter((pkg) => {
@@ -807,6 +823,12 @@ export default function StudentSessions() {
                             pkg.subject_id && subjectNameMap[pkg.subject_id]
                                 ? { name: subjectNameMap[pkg.subject_id] }
                                 : null,
+                        items: (pkg.items || []).map((it) => ({
+                            subject_id: it.subject_id,
+                            subject_name: subjectNameMap[it.subject_id],
+                            total_lessons: Number(it.total_lessons || 0),
+                            available_lessons: Number(it.available_lessons || 0),
+                        })),
                     }));
                 setActivePackages(visiblePackages);
             } catch (e) {
@@ -1400,13 +1422,15 @@ export default function StudentSessions() {
                     const totalAvailable = activePackages.reduce((sum, p) => sum + Number(p.available_lessons), 0);
                     const totalLessons = activePackages.reduce((sum, p) => sum + p.total_lessons, 0);
                     const availableDisplay = Number.isInteger(totalAvailable) ? String(totalAvailable) : totalAvailable.toFixed(1);
+                    const onlyPkg = activePackages.length === 1 ? activePackages[0] : null;
+                    const onlyPkgMulti = onlyPkg && onlyPkg.items.length > 1;
                     return (
                         <div className="mb-4 bg-violet-50 border border-violet-200 rounded-2xl p-4">
                             <div className="flex items-center gap-2 mb-1">
                                 <Package className="w-4 h-4 text-violet-700" />
                                 <p className="text-sm font-semibold text-violet-800">
-                                    {activePackages.length === 1 && activePackages[0].subjects?.name
-                                        ? activePackages[0].subjects.name
+                                    {onlyPkg && !onlyPkgMulti && onlyPkg.subjects?.name
+                                        ? onlyPkg.subjects.name
                                         : t('stuSess.activePackage')}
                                 </p>
                             </div>
@@ -1415,12 +1439,22 @@ export default function StudentSessions() {
                                     {t('stuSess.packageCount', { available: availableDisplay, total: String(totalLessons) })}
                                 </strong>
                             </p>
-                            {activePackages.length === 1 && activePackages[0].expires_at && (
+                            {onlyPkg && onlyPkg.expires_at && (
                                 <p className="text-xs text-violet-700 mt-1">
                                     {t('package.expiresAt', {
-                                        date: format(new Date(activePackages[0].expires_at), "yyyy 'm.' MMMM d 'd.'", { locale: dateFnsLocale }),
+                                        date: format(new Date(onlyPkg.expires_at), "yyyy 'm.' MMMM d 'd.'", { locale: dateFnsLocale }),
                                     })}
                                 </p>
+                            )}
+                            {onlyPkgMulti && (
+                                <div className="space-y-1 mt-2 pt-2 border-t border-violet-200">
+                                    {onlyPkg!.items.map((it) => (
+                                        <div key={it.subject_id} className="flex items-center justify-between text-xs">
+                                            <span className="text-violet-600 truncate">{it.subject_name || '—'}</span>
+                                            <span className="font-semibold text-violet-800 tabular-nums">{it.available_lessons}/{it.total_lessons}</span>
+                                        </div>
+                                    ))}
+                                </div>
                             )}
                         </div>
                     );
