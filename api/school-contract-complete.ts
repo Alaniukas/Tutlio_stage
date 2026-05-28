@@ -8,6 +8,8 @@ import {
   isSchoolContractCompletionTokenUsed,
   markSchoolContractCompletionTokenUsed,
 } from './_lib/schoolContractCompletionToken.js';
+import { schoolContractPdfApiUrl } from './_lib/schoolContractPdfView.js';
+import { sendSchoolContractEmail } from './_lib/sendSchoolContractEmail.js';
 
 function pageHtml(content: string) {
   return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Sutarties duomenų papildymas</title></head><body style="margin:0;font-family:'Segoe UI',Arial,sans-serif;background:linear-gradient(135deg,#f5f3ff 0%,#ecfeff 50%,#f0fdf4 100%);padding:24px;"><div style="max-width:720px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:24px;box-shadow:0 10px 35px rgba(2,6,23,.08);">${content}</div></body></html>`;
@@ -538,6 +540,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     { cacheControl: '3600', upsert: true, contentType: 'application/pdf' },
   );
   const uploadedPath = uploadErr ? null : path;
+  if (uploadErr) {
+    console.error('[school-contract-complete] PDF upload failed:', uploadErr.message);
+    return res.status(500).send(pageHtml('<h2>Nepavyko sugeneruoti sutarties PDF. Bandykite dar kartą arba susisiekite su mokykla.</h2>'));
+  }
 
   await supabase
     .from('school_contracts')
@@ -550,34 +556,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .eq('id', (contract as any).id);
 
   if (parentEmail && uploadedPath) {
-    const emailPayload = JSON.stringify({
-      type: 'school_contract',
-      to: parentEmail,
-      data: {
-        schoolName: String((contract as any).organizations?.name || ''),
-        schoolEmail: String((contract as any).organizations?.email || ''),
-        studentName: String(st.full_name || ''),
-        parentName: parentName || String(st.full_name || ''),
-        recipientName: parentName || String(st.full_name || ''),
-        parentPhone,
-        parentPersonalCode,
-        childBirthDate: childBirthDateResolved,
-        address: fullAddress,
-        missingFields: [],
-        contractNumber: String((contract as any).contract_number || ''),
-        annualFee: (contract as any).annual_fee || 0,
-        contractBody: renderedBody,
-        date: new Date().toLocaleDateString('lt-LT'),
-        contractId: (contract as any).id,
-        ...((contract as any).organization_id ? { organizationId: (contract as any).organization_id } : {}),
-      },
+    const appBase = (process.env.APP_URL || process.env.VITE_APP_URL || 'https://www.tutlio.lt').replace(/\/$/, '');
+    const pdfViewUrl = token ? schoolContractPdfApiUrl(appBase, token) : null;
+    const emailResult = await sendSchoolContractEmail(parentEmail, {
+      schoolName: String((contract as any).organizations?.name || ''),
+      schoolEmail: String((contract as any).organizations?.email || ''),
+      studentName: String(st.full_name || ''),
+      parentName: parentName || String(st.full_name || ''),
+      recipientName: parentName || String(st.full_name || ''),
+      parentPhone,
+      parentPersonalCode,
+      childBirthDate: childBirthDateResolved,
+      address: fullAddress,
+      missingFields: [],
+      contractNumber: String((contract as any).contract_number || ''),
+      annualFee: (contract as any).annual_fee || 0,
+      date: new Date().toLocaleDateString('lt-LT'),
+      pdfUrl: pdfViewUrl || undefined,
     });
-    const emailUrl = `${(process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt').replace(/\/$/, '')}/api/send-email`;
-    void fetch(emailUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-internal-key': serviceRoleKey },
-      body: emailPayload,
-    }).catch(() => {});
+    if (!emailResult.ok) {
+      console.error('[school-contract-complete] follow-up email failed:', emailResult.error);
+    }
   }
 
   if (tokenRow?.id) {

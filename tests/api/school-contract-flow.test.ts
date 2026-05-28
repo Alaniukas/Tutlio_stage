@@ -220,6 +220,7 @@ describe('School contract full flow (API integration)', () => {
 
     // 4) Parent: POST missing data → regenerates contract PDF path
     const postRes = mockRes();
+    const resendCallsBeforePost = resendSend.mock.calls.length;
     await completeHandler(
       mockReq('POST', {
         body: {
@@ -241,7 +242,7 @@ describe('School contract full flow (API integration)', () => {
     expect(flowDb.contract.pdf_url).toContain('/contracts/');
     const used = flowDb.findToken(accessToken);
     expect(used?.used_at).toBeTruthy();
-    expect(fetchMock).toHaveBeenCalled();
+    expect(resendSend.mock.calls.length).toBeGreaterThan(resendCallsBeforePost);
 
     // 5) Parent: open PDF with same token (still valid for view after used_at — pdf endpoint does not check used_at)
     const pdfHandler = (await import('../../api/school-contract-pdf')).default;
