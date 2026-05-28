@@ -15,7 +15,13 @@ import { outlookEmailButton, headerInlineStyle } from './_lib/outlookEmail.js';
 import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClientOptions.js';
 import { sendPushForEmail } from './_lib/sendPush.js';
 import { getResendApiKey, resendNotConfiguredMessage } from './_lib/resendConfig.js';
-import { createSchoolContractPdfViewUrl } from './_lib/schoolContractPdfView.js';
+import {
+  createSchoolContractPdfViewUrl,
+  ensureSchoolContractAccessToken,
+  extractTokenFromSchoolContractUrl,
+  publicAppOriginFromRequest,
+  schoolContractCompletionPageUrl,
+} from './_lib/schoolContractPdfView.js';
 
 
 function randomToken() {
@@ -74,13 +80,24 @@ function isHtmlField(key: string): boolean {
   return key.endsWith('Html') || key.endsWith('HTML');
 }
 
+function isUrlField(key: string): boolean {
+  return (
+    key === 'completionUrl' ||
+    key === 'pdfUrl' ||
+    key === 'paymentUrl' ||
+    key === 'checkoutUrl' ||
+    key.endsWith('Url') ||
+    key.endsWith('URL')
+  );
+}
+
 function sanitizeEmailData(data: any): any {
   if (!data || typeof data !== 'object') return data;
   if (Array.isArray(data)) return data.map(sanitizeEmailData);
   const out: Record<string, any> = {};
   for (const [key, val] of Object.entries(data)) {
     if (typeof val === 'string') {
-      out[key] = isHtmlField(key) ? val : esc(val);
+      out[key] = isHtmlField(key) || isUrlField(key) ? val : esc(val);
     } else if (typeof val === 'object' && val !== null) {
       out[key] = sanitizeEmailData(val);
     } else {
@@ -2020,18 +2037,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const missingFields = Array.isArray(rawData?.missingFields)
         ? rawData.missingFields.map((x: any) => String(x || '').trim()).filter(Boolean)
         : [];
-      const hasCompletionUrl = typeof rawData?.completionUrl === 'string' && rawData.completionUrl.trim().length > 0;
       const contractId = typeof rawData?.contractId === 'string' ? rawData.contractId.trim() : '';
       const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
       const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
       if (contractId && supabaseUrl && serviceRoleKey) {
         const adminSb = createClient(supabaseUrl, serviceRoleKey, supabaseServiceRoleClientOptions);
-        const pdfViewUrl = await createSchoolContractPdfViewUrl(adminSb, contractId, req);
-        if (pdfViewUrl) rawData.pdfUrl = pdfViewUrl;
-      }
-      if (!hasCompletionUrl && missingFields.length > 0 && contractId) {
-        const generated = await createSchoolCompletionUrl(contractId, req);
-        if (generated) rawData.completionUrl = generated;
+        const existingToken = extractTokenFromSchoolContractUrl(
+          typeof rawData?.completionUrl === 'string' ? rawData.completionUrl : '',
+        );
+        const accessToken = await ensureSchoolContractAccessToken(adminSb, contractId, { existingToken });
+        if (accessToken) {
+          const appBase = publicAppOriginFromRequest(req);
+          if (missingFields.length > 0) {
+            rawData.completionUrl = schoolContractCompletionPageUrl(appBase, accessToken);
+          }
+          const pdfViewUrl = await createSchoolContractPdfViewUrl(adminSb, contractId, req, {
+            existingToken: accessToken,
+          });
+          if (pdfViewUrl) rawData.pdfUrl = pdfViewUrl;
+        } else if (!existingToken && missingFields.length > 0) {
+          const generated = await createSchoolCompletionUrl(contractId, req);
+          if (generated) rawData.completionUrl = generated;
+        }
       }
     }
 

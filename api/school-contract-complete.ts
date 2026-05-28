@@ -174,10 +174,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: contract, error: contractErr } = await supabase
     .from('school_contracts')
-    .select('id, student_id, organization_id, template_id, contract_number, annual_fee, filled_body, media_publicity_consent, template:school_contract_templates(pdf_url), organizations(name, email, entity_type)')
+    .select('id, student_id, organization_id, template_id, contract_number, annual_fee, filled_body, media_publicity_consent, template:school_contract_templates(pdf_url)')
     .eq('id', resolvedContractId)
     .maybeSingle();
   if (contractErr || !contract) return res.status(404).send(pageHtml('<h2>Sutartis nerasta.</h2>'));
+
+  const { data: orgRow } = await supabase
+    .from('organizations')
+    .select('name, email, entity_type')
+    .eq('id', (contract as any).organization_id)
+    .maybeSingle();
+  (contract as any).organizations = orgRow || null;
 
   const { data: studentRow } = await supabase
     .from('students')

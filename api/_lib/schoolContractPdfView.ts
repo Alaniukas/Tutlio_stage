@@ -17,18 +17,46 @@ export function publicAppOriginFromRequest(req: VercelRequest): string {
   return (process.env.APP_URL || process.env.VITE_APP_URL || inferred || 'https://tutlio.lt').replace(/\/$/, '');
 }
 
-/** Parent-safe link: tokenized app URL that streams PDF from private bucket (no login). */
-export async function createSchoolContractPdfViewUrl(
+export function extractTokenFromSchoolContractUrl(url: string): string | null {
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = trimmed.startsWith('http') ? new URL(trimmed) : new URL(trimmed, 'https://tutlio.lt');
+    const t = parsed.searchParams.get('token');
+    return t?.trim() || null;
+  } catch {
+    const m = trimmed.match(/[?&]token=([^&]+)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+}
+
+export function schoolContractCompletionPageUrl(appBase: string, token: string): string {
+  return `${appBase}/school-contract-complete?token=${encodeURIComponent(token)}`;
+}
+
+export function schoolContractPdfApiUrl(appBase: string, token: string): string {
+  return `${appBase}/api/school-contract-pdf?token=${encodeURIComponent(token)}`;
+}
+
+/**
+ * One access token per email: works for both PDF stream and parent completion form.
+ * Reuses token already embedded in completionUrl when the client created the link first.
+ */
+export async function ensureSchoolContractAccessToken(
   adminSb: SupabaseClient,
   contractId: string,
-  req: VercelRequest,
+  opts?: { existingToken?: string | null },
 ): Promise<string | null> {
-  const { data: contract } = await adminSb
-    .from('school_contracts')
-    .select('pdf_url')
-    .eq('id', contractId)
-    .maybeSingle();
-  if (!contract?.pdf_url || !String(contract.pdf_url).trim()) return null;
+  const reuse = opts?.existingToken?.trim();
+  if (reuse) {
+    const { data: row } = await adminSb
+      .from('school_contract_completion_tokens')
+      .select('token')
+      .eq('token', reuse)
+      .eq('contract_id', contractId)
+      .maybeSingle();
+    if (row?.token) return row.token;
+  }
 
   const token = randomToken();
   const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 90).toISOString();
@@ -41,9 +69,27 @@ export async function createSchoolContractPdfViewUrl(
     console.error('[schoolContractPdfView] token insert:', error);
     return null;
   }
+  return token;
+}
 
-  const appBase = publicAppOriginFromRequest(req);
-  return `${appBase}/api/school-contract-pdf?token=${encodeURIComponent(token)}`;
+/** Parent-safe PDF link (same token as completion form). */
+export async function createSchoolContractPdfViewUrl(
+  adminSb: SupabaseClient,
+  contractId: string,
+  req: VercelRequest,
+  opts?: { existingToken?: string | null },
+): Promise<string | null> {
+  const { data: contract } = await adminSb
+    .from('school_contracts')
+    .select('pdf_url')
+    .eq('id', contractId)
+    .maybeSingle();
+  if (!contract?.pdf_url || !String(contract.pdf_url).trim()) return null;
+
+  const token = await ensureSchoolContractAccessToken(adminSb, contractId, opts);
+  if (!token) return null;
+
+  return schoolContractPdfApiUrl(publicAppOriginFromRequest(req), token);
 }
 
 export async function loadSchoolContractPdfBuffer(
