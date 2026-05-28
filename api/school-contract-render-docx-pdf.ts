@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
-import { renderDocxTemplateUrlToPdfBuffer } from './_lib/renderSchoolContractDocxToPdf';
-import { schoolContractPdfStoragePath } from './_lib/schoolContractPdfPath';
+import { renderDocxTemplateUrlToPdfBuffer } from './_lib/renderSchoolContractDocxToPdf.js';
+import { schoolContractPdfStoragePath } from './_lib/schoolContractPdfPath.js';
 
 function json(res: VercelResponse, status: number, body: Record<string, unknown>) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');

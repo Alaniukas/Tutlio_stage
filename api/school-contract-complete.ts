@@ -1,8 +1,8 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
-import { renderDocxTemplateUrlToPdfBuffer } from './_lib/renderSchoolContractDocxToPdf';
-import { schoolContractPdfStoragePath } from './_lib/schoolContractPdfPath';
+import { renderDocxTemplateUrlToPdfBuffer } from './_lib/renderSchoolContractDocxToPdf.js';
+import { schoolContractPdfStoragePath } from './_lib/schoolContractPdfPath.js';
 
 function pageHtml(content: string) {
   return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Sutarties duomenų papildymas</title></head><body style="margin:0;font-family:'Segoe UI',Arial,sans-serif;background:linear-gradient(135deg,#f5f3ff 0%,#ecfeff 50%,#f0fdf4 100%);padding:24px;"><div style="max-width:720px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:24px;box-shadow:0 10px 35px rgba(2,6,23,.08);">${content}</div></body></html>`;

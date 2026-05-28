@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from './types';
-import { convertDocxBufferToPdfWithFallbacks } from './_lib/docxConverter';
+import { convertDocxBufferToPdfWithFallbacks } from './_lib/docxConverter.js';
 
 function toBase64(buffer: ArrayBuffer): string {
   return Buffer.from(buffer).toString('base64');
