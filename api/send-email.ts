@@ -15,6 +15,7 @@ import { outlookEmailButton, headerInlineStyle } from './_lib/outlookEmail.js';
 import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClientOptions.js';
 import { sendPushForEmail } from './_lib/sendPush.js';
 import { getResendApiKey, resendNotConfiguredMessage } from './_lib/resendConfig.js';
+import { createSchoolContractPdfViewUrl } from './_lib/schoolContractPdfView.js';
 
 
 function randomToken() {
@@ -2020,7 +2021,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? rawData.missingFields.map((x: any) => String(x || '').trim()).filter(Boolean)
         : [];
       const hasCompletionUrl = typeof rawData?.completionUrl === 'string' && rawData.completionUrl.trim().length > 0;
-      const contractId = typeof rawData?.contractId === 'string' ? rawData.contractId : '';
+      const contractId = typeof rawData?.contractId === 'string' ? rawData.contractId.trim() : '';
+      const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+      const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (contractId && supabaseUrl && serviceRoleKey) {
+        const adminSb = createClient(supabaseUrl, serviceRoleKey, supabaseServiceRoleClientOptions);
+        const pdfViewUrl = await createSchoolContractPdfViewUrl(adminSb, contractId, req);
+        if (pdfViewUrl) rawData.pdfUrl = pdfViewUrl;
+      }
       if (!hasCompletionUrl && missingFields.length > 0 && contractId) {
         const generated = await createSchoolCompletionUrl(contractId, req);
         if (generated) rawData.completionUrl = generated;

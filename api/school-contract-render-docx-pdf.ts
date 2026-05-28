@@ -105,8 +105,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error('[school-contract-render-docx-pdf] upload:', upErr);
       return json(res, 502, { error: upErr.message || 'Nepavyko įkelti PDF' });
     }
-    const { data: pub } = adminSb.storage.from('school-contracts').getPublicUrl(path);
-    return json(res, 200, { pdfUrl: pub.publicUrl, path });
+    return json(res, 200, { pdfUrl: path, path });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'PDF generavimas nepavyko';
     console.error('[school-contract-render-docx-pdf]', e);

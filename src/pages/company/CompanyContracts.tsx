@@ -35,6 +35,7 @@ import {
   SCHOOL_CONTRACT_STUDENT_SELECT,
   type SchoolContractStudentEmbed,
 } from '@/lib/schoolContractStudentEmbed';
+import { getContractSignedUrl } from '@/lib/contractStorage';
 
 interface Student {
   id: string;
@@ -211,6 +212,15 @@ export default function CompanyContracts() {
 
   const reload = () => { invalidateCache(CONTRACTS_CACHE_KEY); load(); };
 
+  const openPrivateStorageFile = async (urlOrPath: string) => {
+    const url = await getContractSignedUrl(urlOrPath, 3600);
+    if (!url) {
+      setToast({ message: tr('common.error'), type: 'error' });
+      return;
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
   const saveTemplate = async () => {
     if (!orgId) return;
     if (!isSchoolView && !tForm.name.trim()) return;
@@ -282,7 +292,7 @@ export default function CompanyContracts() {
         return;
       }
       const { data } = supabase.storage.from('school-contracts').getPublicUrl(signJson.path);
-      payload.pdf_url = data.publicUrl;
+      payload.pdf_url = signJson.path;
 
       // If admin uploads DOCX template, extract text once and keep as editable body placeholders source.
       // This allows populating contract fields from the exact template wording and still sending PDF output.
@@ -638,8 +648,7 @@ export default function CompanyContracts() {
       contentType: 'application/pdf',
     });
     if (uploadErr) return null;
-    const { data } = supabase.storage.from('school-contracts').getPublicUrl(path);
-    return data.publicUrl;
+    return path;
   };
 
   const buildTemplatePayload = (params: {
@@ -773,8 +782,12 @@ export default function CompanyContracts() {
           }),
         });
         const renderJson = (await renderResp.json().catch(() => ({}))) as { pdfUrl?: string; error?: string };
-        if (renderResp.ok && typeof renderJson.pdfUrl === 'string' && renderJson.pdfUrl) {
-          return renderJson.pdfUrl;
+        const storedPath =
+          (typeof renderJson.path === 'string' && renderJson.path) ||
+          (typeof renderJson.pdfUrl === 'string' && renderJson.pdfUrl) ||
+          '';
+        if (renderResp.ok && storedPath) {
+          return storedPath;
         }
         throw new Error(typeof renderJson.error === 'string' ? renderJson.error : 'DOCX → PDF nepavyko');
       } catch (error) {
@@ -1347,11 +1360,10 @@ export default function CompanyContracts() {
       setToast({ message: uploadErr.message, type: 'error' });
       return;
     }
-    const { data } = supabase.storage.from('school-contracts').getPublicUrl(path);
     const { error: updateErr } = await supabase
       .from('school_contracts')
       .update({
-        signed_contract_url: data.publicUrl,
+        signed_contract_url: path,
         signed_uploaded_at: new Date().toISOString(),
         signing_status: 'signed',
         signed_at: new Date().toISOString(),
@@ -1460,9 +1472,13 @@ export default function CompanyContracts() {
                       {c.signed_contract_url && (
                         <p className="text-xs text-emerald-700 mt-1">
                           Pasirašyta sutartis ({c.student?.full_name || 'mokinys'}):{' '}
-                          <a className="underline" href={c.signed_contract_url} target="_blank" rel="noreferrer">
+                          <button
+                            type="button"
+                            className="underline text-left"
+                            onClick={() => void openPrivateStorageFile(c.signed_contract_url!)}
+                          >
                             Atidaryti failą
-                          </a>
+                          </button>
                         </p>
                       )}
                     </div>
@@ -1505,9 +1521,13 @@ export default function CompanyContracts() {
                       {tr('school.defaultFee')} {tpl.annual_fee_default ? `€${tpl.annual_fee_default}` : tr('school.defaultFeeNotSet')}
                     </p>
                     {tpl.pdf_url && (
-                      <a className="text-xs text-emerald-700 hover:underline" href={tpl.pdf_url} target="_blank" rel="noreferrer">
+                      <button
+                        type="button"
+                        className="text-xs text-emerald-700 hover:underline"
+                        onClick={() => void openPrivateStorageFile(tpl.pdf_url!)}
+                      >
                         {tr('school.openPdfTemplate')}
-                      </a>
+                      </button>
                     )}
                   </div>
                   <div className="flex items-center gap-2">
@@ -1607,9 +1627,13 @@ export default function CompanyContracts() {
                 Pasirinkti faila
               </Button>
               {tForm.pdf_url && (
-                <a className="text-xs text-emerald-700 hover:underline" href={tForm.pdf_url} target="_blank" rel="noreferrer">
+                <button
+                  type="button"
+                  className="text-xs text-emerald-700 hover:underline"
+                  onClick={() => void openPrivateStorageFile(tForm.pdf_url)}
+                >
                   {tr('school.openPdfTemplate')}
-                </a>
+                </button>
               )}
             </div>
           </div>

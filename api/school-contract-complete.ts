@@ -510,9 +510,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     { cacheControl: '3600', upsert: true, contentType: 'application/pdf' },
   );
   const uploadedPath = uploadErr ? null : path;
-  const publicUrl = uploadedPath
-    ? (supabase.storage.from(BUCKET).getPublicUrl(uploadedPath).data.publicUrl || '')
-    : '';
 
   await supabase
     .from('school_contracts')
@@ -542,7 +539,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         contractNumber: String((contract as any).contract_number || ''),
         annualFee: (contract as any).annual_fee || 0,
         contractBody: renderedBody,
-        pdfUrl: publicUrl,
         date: new Date().toLocaleDateString('lt-LT'),
         contractId: (contract as any).id,
         ...((contract as any).organization_id ? { organizationId: (contract as any).organization_id } : {}),
