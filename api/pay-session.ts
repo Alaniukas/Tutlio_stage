@@ -96,19 +96,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             stripeAccountId = tutor.stripe_account_id;
         }
 
-        // 3. Try to reuse existing Stripe session if still open
-        if (session.stripe_checkout_session_id) {
-            try {
-                const existing = await stripe.checkout.sessions.retrieve(session.stripe_checkout_session_id);
-                if (existing.status === 'open' && existing.url) {
-                    return res.redirect(303, existing.url);
-                }
-            } catch {
-                // expired or invalid — create new below
-            }
-        }
-
-        // 4. Calculate price (apply credit balance)
+        // 3. Calculate price (apply credit balance)
         const rawPriceEur = session.price ?? 25;
         const creditBalance = Number(student?.credit_balance || 0);
         const creditToApply = Math.min(creditBalance, rawPriceEur);
@@ -118,6 +106,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             await supabase.from('students').update({ credit_balance: Math.max(0, creditBalance - creditToApply) }).eq('id', session.student_id);
             await supabase.from('sessions').update({ paid: true, payment_status: 'paid', credit_applied_amount: creditToApply }).eq('id', sessionId);
             return res.status(200).send(errorPage('Pamoka apmokėta ✓', 'Pamoka buvo apmokėta naudojant turimą kreditą.'));
+        }
+
+        // Expected Stripe total (in cents) for the CURRENT price/credit.
+        let expectedTotalCents: number;
+        if (useSchoolOrgAbsorbedFees) {
+            expectedTotalCents = schoolInstallmentCheckoutCents(basePriceEur).chargeCents;
+        } else {
+            const breakdown = lessonCheckoutBreakdownCents(basePriceEur);
+            expectedTotalCents = breakdown.baseCents + breakdown.feesCents;
+        }
+
+        // 4. Reuse the existing Stripe session only if it is still open AND its amount matches
+        //    the current price. If the lesson price changed after the checkout was created
+        //    (e.g. the tutor extended a single lesson into a double one and raised the price),
+        //    the stale session is expired so the payer is charged the up-to-date amount
+        //    instead of the old, smaller one.
+        if (session.stripe_checkout_session_id) {
+            try {
+                const existing = await stripe.checkout.sessions.retrieve(session.stripe_checkout_session_id);
+                if (existing.status === 'open' && existing.url && existing.amount_total === expectedTotalCents) {
+                    return res.redirect(303, existing.url);
+                }
+                if (existing.status === 'open') {
+                    await stripe.checkout.sessions.expire(session.stripe_checkout_session_id).catch(() => {});
+                }
+            } catch {
+                // expired or invalid — create new below
+            }
         }
 
         if (creditToApply > 0) {

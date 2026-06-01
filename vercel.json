@@ -3,20 +3,6 @@
     "outputDirectory": "dist",
     "framework": "vite",
     "devCommand": null,
-    "redirects": [
-        {
-            "source": "/:path((?!api/).*)",
-            "has": [{ "type": "host", "value": "tutlio.com" }],
-            "destination": "https://www.tutlio.com/:path",
-            "permanent": true
-        },
-        {
-            "source": "/:path((?!api/).*)",
-            "has": [{ "type": "host", "value": "tutlio.lt" }],
-            "destination": "https://www.tutlio.lt/:path",
-            "permanent": true
-        }
-    ],
     "functions": {
         "api/page-render.ts": {
             "maxDuration": 30
