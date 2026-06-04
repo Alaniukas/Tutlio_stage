@@ -1,7 +1,11 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { renderDocxTemplateUrlToPdfBuffer } from './_lib/renderSchoolContractDocxToPdf';
-import { schoolContractPdfStoragePath } from './_lib/schoolContractPdfPath';
+import {
+  schoolContractPdfStoragePath,
+  SCHOOL_CONTRACTS_BUCKET,
+  extractSchoolContractStoragePath,
+} from './_lib/schoolContractPdfPath';
 
 function json(res: VercelResponse, status: number, body: Record<string, unknown>) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -77,7 +81,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!adminRow?.organization_id) return json(res, 403, { error: 'Not authorized for this organization' });
 
   try {
-    const pdfBuffer = await renderDocxTemplateUrlToPdfBuffer({ templateUrl, payload: templatePayload });
+    // The `school-contracts` bucket is private, so the stored public URL returns
+    // 400 ("Bucket not found"). Resolve the object path and fetch the template via
+    // a short-lived signed URL minted with the service role (same approach as
+    // api/_lib/schoolContractPdf.ts). External (non-Storage) URLs are fetched as-is.
+    const templateObjectPath = extractSchoolContractStoragePath(templateUrl);
+    let fetchUrl = templateUrl;
+    if (templateObjectPath && templateObjectPath !== templateUrl) {
+      const { data: signed, error: signErr } = await adminSb.storage
+        .from(SCHOOL_CONTRACTS_BUCKET)
+        .createSignedUrl(templateObjectPath, 300);
+      if (signErr || !signed?.signedUrl) {
+        console.error('[school-contract-render-docx-pdf] sign template:', signErr);
+        return json(res, 502, { error: signErr?.message || 'Nepavyko paruošti šablono nuorodos' });
+      }
+      fetchUrl = signed.signedUrl;
+    }
+    const pdfBuffer = await renderDocxTemplateUrlToPdfBuffer({ templateUrl: fetchUrl, payload: templatePayload });
     const path = schoolContractPdfStoragePath({
       organizationId,
       contractId,
@@ -92,8 +112,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error('[school-contract-render-docx-pdf] upload:', upErr);
       return json(res, 502, { error: upErr.message || 'Nepavyko įkelti PDF' });
     }
-    const { data: pub } = adminSb.storage.from('school-contracts').getPublicUrl(path);
-    return json(res, 200, { pdfUrl: pub.publicUrl, path });
+    // The `school-contracts` bucket is private, so a public URL 404s with
+    // "Bucket not found". Return the bare object path; callers persist it and mint
+    // a short-lived signed URL on read (email + admin UI), matching uploadContractFile.
+    return json(res, 200, { pdfUrl: path, path });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'PDF generavimas nepavyko';
     console.error('[school-contract-render-docx-pdf]', e);

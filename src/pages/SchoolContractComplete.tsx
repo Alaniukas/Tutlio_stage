@@ -149,11 +149,10 @@ export default function SchoolContractComplete() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-violet-50 via-cyan-50 to-green-50 flex items-center justify-center p-6">
         <div className="max-w-lg w-full rounded-2xl border border-gray-200 bg-white p-8 shadow-xl">
-          <h1 className="text-xl font-bold text-gray-900 mb-3">Ačiū! Duomenys išsaugoti.</h1>
+          <h1 className="text-xl font-bold text-gray-900 mb-3">Ačiū! Duomenys pateikti.</h1>
           <p className="text-gray-700">
-            <strong>Atnaujinta PDF sutartis išsiųsta jūsų el. paštu.</strong>
+            Administratorius patikrins pateiktus duomenis ir atsiųs galutinę sutartį pasirašyti.
           </p>
-          <p className="text-gray-600 mt-2">Sutartį pasirašykite gavę atnaujintą versiją.</p>
         </div>
       </div>
     );
@@ -174,7 +173,7 @@ export default function SchoolContractComplete() {
         </div>
         <h1 className="text-2xl font-bold text-gray-900 mb-2">Papildykite sutarties duomenis</h1>
         <p className="text-gray-600 text-sm mb-4">
-          Po pateikimo mokykla gaus atnaujintus duomenis ir persiųs atnaujintą PDF sutartį.
+          Po pateikimo administratorius patikrins duomenis ir atsiųs galutinę sutartį pasirašyti.
         </p>
 
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 mb-5 text-amber-950">

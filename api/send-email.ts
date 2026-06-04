@@ -13,6 +13,7 @@ import { Resend } from 'resend';
 import { createClient } from '@supabase/supabase-js';
 import { outlookEmailButton, headerInlineStyle } from './_lib/outlookEmail.js';
 import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClientOptions.js';
+import { SCHOOL_CONTRACTS_BUCKET, extractSchoolContractStoragePath } from './_lib/schoolContractPdfPath.js';
 import { sendPushForEmail } from './_lib/sendPush.js';
 import { getResendApiKey, resendNotConfiguredMessage } from './_lib/resendConfig.js';
 
@@ -45,6 +46,29 @@ async function createSchoolCompletionUrl(contractId: string, req: VercelRequest)
   const inferredAppUrl = host ? `${protoHeader || 'https'}://${host}` : '';
   const appUrl = process.env.APP_URL || process.env.VITE_APP_URL || inferredAppUrl || 'https://tutlio.lt';
   return `${appUrl.replace(/\/$/, '')}/school-contract-complete?token=${encodeURIComponent(token)}`;
+}
+
+/**
+ * The `school-contracts` bucket is private, so the stored public URL won't open
+ * from an email. Mint a long-lived signed URL (service role) for the recipient.
+ * Returns the value untouched if it is an external URL, or null if signing fails
+ * (caller drops the broken link).
+ */
+async function signSchoolContractPdfUrl(urlOrPath: unknown): Promise<string | null> {
+  const value = typeof urlOrPath === 'string' ? urlOrPath.trim() : '';
+  if (!value) return null;
+  const path = extractSchoolContractStoragePath(value);
+  // No bucket marker and an absolute URL → external template, leave as-is.
+  if (path === value && /^https?:\/\//i.test(value)) return value;
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRoleKey) return null;
+  const supabase = createClient(supabaseUrl, serviceRoleKey);
+  const { data, error } = await supabase.storage
+    .from(SCHOOL_CONTRACTS_BUCKET)
+    .createSignedUrl(path, 60 * 60 * 24 * 14); // 14 days (matches completion-token lifetime)
+  if (error || !data?.signedUrl) return null;
+  return data.signedUrl;
 }
 
 function escapeHtml(unsafe: unknown): string {
@@ -1807,6 +1831,32 @@ function schoolInstallmentRequest(d: any, locale: Locale) {
   };
 }
 
+/** Admin alert: a parent supplemented contract data and the admin must confirm + send the final contract. */
+function schoolContractCompletionAdmin(d: any, locale: Locale) {
+  const appUrl = getAppUrl();
+  const contractsUrl = String(d.contractsUrl || `${appUrl.replace(/\/$/, '')}/school/contracts`).trim();
+  return {
+    subject: t(locale, 'em.contractCompletionAdminSub'),
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#059669', '#047857')}">
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">${t(locale, 'em.contractCompletionAdminTitle')}</h1>
+        <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'Mokykla')}</p>
+      </div>
+      <div class="body">
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          ${t(locale, 'em.contractCompletionAdminBody', { student: esc(d.studentName || '') })}
+        </p>
+        <div class="info-card">
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            ${td('Mokinys', esc(d.studentName || '—'))}
+            ${td('Sutarties Nr.', esc(d.contractNumber || '—'), false)}
+          </table>
+        </div>
+        <div style="margin:16px 0 8px;">${outlookEmailButton(contractsUrl, t(locale, 'em.contractCompletionAdminBtn'), '#059669', { fontWeight: '600', fontSize: '14px', padding: '12px 24px' })}</div>
+      </div>${footerFor(locale)}`, locale),
+  };
+}
+
 function productUpdateSfAndChat(d: any, locale: Locale) {
   const appUrl = getAppUrl();
   const title = locale === 'en' ? 'Updates in Tutlio' : 'Naujienos Tutlio sistemoje';
@@ -2103,6 +2153,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const generated = await createSchoolCompletionUrl(contractId, req);
         if (generated) rawData.completionUrl = generated;
       }
+      // Contract PDF lives in a private bucket — embed a signed URL the parent can
+      // open, or drop a link that would 404.
+      const signedPdfUrl = await signSchoolContractPdfUrl((rawData as any)?.pdfUrl);
+      if (rawData && typeof rawData === 'object') {
+        if (signedPdfUrl) (rawData as any).pdfUrl = signedPdfUrl;
+        else delete (rawData as any).pdfUrl;
+      }
     }
 
     const data = sanitizeEmailData(rawData);
@@ -2178,6 +2235,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Resolve org branding for whitelabel emails
     let orgBranding: EmailBranding | null = null;
+    // School-type orgs get a neutral parent-facing subject for contract/payment emails.
+    let isSchoolOrg = false;
     if (orgIdForBrandingLookup) {
       try {
         const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
@@ -2186,10 +2245,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const sb = createClient(supabaseUrl, serviceKey, supabaseServiceRoleClientOptions() as any) as any;
           const { data: org } = await sb
             .from('organizations')
-            .select('name, logo_url, brand_color, brand_color_secondary, features')
+            .select('name, logo_url, brand_color, brand_color_secondary, features, entity_type')
             .eq('id', orgIdForBrandingLookup)
             .maybeSingle();
           if (org) {
+            isSchoolOrg = String((org as { entity_type?: string }).entity_type || '').trim().toLowerCase() === 'school';
             const features = (org.features && typeof org.features === 'object' ? org.features : {}) as Record<string, unknown>;
             if (features.custom_branding) {
               orgBranding = {
@@ -2290,12 +2350,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'custom_html_announcement': emailContent = customHtmlAnnouncement(data, locale); break;
       case 'school_contract': emailContent = schoolContract(data, locale); break;
       case 'school_installment_request': emailContent = schoolInstallmentRequest(data, locale); break;
+      case 'school_contract_completion_admin': emailContent = schoolContractCompletionAdmin(data, locale); break;
       case 'tutor_student_assigned': emailContent = tutorStudentAssigned(data, locale); break;
       case 'parent_invite': emailContent = parentInvite(data, locale); break;
       default: return res.status(400).json({ error: `Unknown email type: ${type}` });
     }
 
     emailContent = applyBranding(emailContent);
+
+    // Parents at a school see a neutral subject ("Ugdymo šeimoje") for contract/payment emails.
+    if (isSchoolOrg && (type === 'school_contract' || type === 'school_installment_request')) {
+      emailContent = { ...emailContent, subject: 'Ugdymo šeimoje' };
+    }
 
     const emailPayload: Parameters<typeof resend.emails.send>[0] = {
       from: localizedFromEmail(locale),

@@ -120,6 +120,7 @@ export async function insertParentInviteAndSendEmail(opts: {
     code,
     locale,
     publicHost: origin,
+    isSchool: source === 'school_admin',
   });
 
   if (emailResult.ok === false) {

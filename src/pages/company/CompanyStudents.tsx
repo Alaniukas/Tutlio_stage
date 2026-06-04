@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
+import { openContractFileInNewTab } from '@/lib/contractStorage';
 import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
 import { Button } from '@/components/ui/button';
@@ -22,7 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, Trash2, User, Mail, Phone, GraduationCap, CheckCircle, XCircle, Sparkles, Package, Loader2, FileText, Search, Euro, Clock, MessageSquare, Archive, ArchiveRestore } from 'lucide-react';
+import { Plus, Trash2, User, Mail, Phone, GraduationCap, CheckCircle, XCircle, Sparkles, Package, Loader2, FileText, Search, Euro, Clock, MessageSquare, Archive, ArchiveRestore, Download } from 'lucide-react';
 import { sendEmail } from '@/lib/email';
 import Toast from '@/components/Toast';
 import { useTranslation } from '@/lib/i18n';
@@ -121,6 +122,30 @@ function mediaConsentBadge(consent: string | null | undefined) {
   return { labelKey: 'compStu.mediaConsentUnknown', className: 'text-gray-700 bg-gray-50 border border-gray-200' };
 }
 
+type StudentContractInfo = {
+  signing_status: 'draft' | 'sent' | 'signed';
+  pdf_url?: string | null;
+  signed_contract_url?: string | null;
+  completion_submitted_at?: string | null;
+};
+
+function studentContractBadge(info: StudentContractInfo | undefined) {
+  if (info?.signing_status === 'signed') {
+    return { labelKey: 'compStu.contractSigned', className: 'text-green-700 bg-green-50 border border-green-200' };
+  }
+  if (info?.signing_status === 'sent') {
+    return { labelKey: 'compStu.contractSent', className: 'text-blue-700 bg-blue-50 border border-blue-200' };
+  }
+  if (info) {
+    return { labelKey: 'compStu.contractNotSigned', className: 'text-amber-700 bg-amber-50 border border-amber-200' };
+  }
+  return { labelKey: 'compStu.contractNone', className: 'text-gray-600 bg-gray-50 border border-gray-200' };
+}
+
+function studentContractDownloadUrl(info: StudentContractInfo | undefined): string {
+  return String(info?.signed_contract_url || info?.pdf_url || '').trim();
+}
+
 function hasSchoolParentContacts(student: {
   payer_name?: string | null;
   payer_email?: string | null;
@@ -160,6 +185,7 @@ export default function CompanyStudents() {
   const stc = getCached<any>('company_students');
   const [students, setStudents] = useState<Student[]>(stc?.students ?? []);
   const [tutors, setTutors] = useState<Tutor[]>(stc?.tutors ?? []);
+  const [contractsByStudent, setContractsByStudent] = useState<Record<string, StudentContractInfo>>(stc?.contractsByStudent ?? {});
   const [loading, setLoading] = useState(!stc);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -674,7 +700,29 @@ export default function CompanyStudents() {
       setStudents(fetchedStudents);
     }
 
-    setCache('company_students', { students: fetchedStudents, tutors: tutorsWithSubjects });
+    // School-only: latest contract per student for the status badge + download link (#5).
+    let contractMap: Record<string, StudentContractInfo> = {};
+    if (isSchoolView) {
+      const { data: contractRows } = await supabase
+        .from('school_contracts')
+        .select('student_id, signing_status, pdf_url, signed_contract_url, completion_submitted_at, created_at')
+        .eq('organization_id', adminRow.organization_id)
+        .is('archived_at', null)
+        .order('created_at', { ascending: false });
+      for (const row of contractRows || []) {
+        const sid = String((row as any).student_id || '');
+        if (!sid || contractMap[sid]) continue; // first row per student = latest (desc order)
+        contractMap[sid] = {
+          signing_status: (row as any).signing_status,
+          pdf_url: (row as any).pdf_url,
+          signed_contract_url: (row as any).signed_contract_url,
+          completion_submitted_at: (row as any).completion_submitted_at,
+        };
+      }
+    }
+    setContractsByStudent(contractMap);
+
+    setCache('company_students', { students: fetchedStudents, tutors: tutorsWithSubjects, contractsByStudent: contractMap });
     setLoading(false);
   };
 
@@ -1312,6 +1360,11 @@ export default function CompanyStudents() {
     }
   };
 
+  const openContractFile = async (urlOrPath?: string | null) => {
+    const ok = await openContractFileInNewTab(urlOrPath);
+    if (!ok) setToastMessage({ message: t('compStu.contractOpenFail'), type: 'error' });
+  };
+
   const sendParentPortalInvites = async (studentId: string, showToast: boolean) => {
     setSendingParentInvites(true);
     try {
@@ -1930,13 +1983,34 @@ export default function CompanyStudents() {
                           )}
                         </div>
                         {isSchoolView && (
-                          <div className="mt-1">
+                          <div className="mt-1 flex items-center gap-2 flex-wrap">
                             {(() => {
                               const b = mediaConsentBadge(student.media_publicity_consent);
                               return (
                                 <span className={`text-[11px] border rounded-md px-1.5 py-0.5 inline-block ${b.className}`}>
                                   {t(b.labelKey)}
                                 </span>
+                              );
+                            })()}
+                            {(() => {
+                              const info = contractsByStudent[student.id];
+                              const cb = studentContractBadge(info);
+                              const url = studentContractDownloadUrl(info);
+                              return (
+                                <>
+                                  <span className={`text-[11px] border rounded-md px-1.5 py-0.5 inline-block ${cb.className}`}>
+                                    {t(cb.labelKey)}
+                                  </span>
+                                  {url && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); void openContractFile(url); }}
+                                      className="text-[11px] text-indigo-600 hover:underline inline-flex items-center gap-1"
+                                    >
+                                      <Download className="w-3 h-3" /> {t('compStu.contractDownload')}
+                                    </button>
+                                  )}
+                                </>
                               );
                             })()}
                           </div>
@@ -1974,18 +2048,32 @@ export default function CompanyStudents() {
                           <code className="font-mono font-bold text-indigo-700 text-xs tracking-widest bg-indigo-50 px-2 py-1 rounded">
                             {student.invite_code}
                           </code>
-                          <button
-                            type="button"
-                            className={`p-2 rounded-lg transition-colors ${showTrashBin ? 'text-green-400 hover:text-green-600 hover:bg-green-50' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              showTrashBin ? void handleRestoreStudent(student.id) : void handleDetachStudent(student.id);
-                            }}
-                            aria-label={showTrashBin ? t('compStu.restoreBtn') : t('compStu.deleteStudentLabel')}
-                            title={showTrashBin ? t('compStu.restoreBtn') : t('compStu.detachBtn')}
-                          >
-                            {showTrashBin ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            {isSchoolView && (student.payer_email || student.parent_secondary_email) && (
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); void sendParentPortalInvites(student.id, true); }}
+                                disabled={sendingParentInvites}
+                                className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50 px-2 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
+                                aria-label={t('compStu.inviteParent')}
+                                title={t('compStu.inviteParent')}
+                              >
+                                <Mail className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className={`p-2 rounded-lg transition-colors ${showTrashBin ? 'text-green-400 hover:text-green-600 hover:bg-green-50' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                showTrashBin ? void handleRestoreStudent(student.id) : void handleDetachStudent(student.id);
+                              }}
+                              aria-label={showTrashBin ? t('compStu.restoreBtn') : t('compStu.deleteStudentLabel')}
+                              title={showTrashBin ? t('compStu.restoreBtn') : t('compStu.detachBtn')}
+                            >
+                              {showTrashBin ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -2041,13 +2129,34 @@ export default function CompanyStudents() {
                                 )}
                               </p>
                               {isSchoolView && (
-                                <p className="text-xs mt-1">
+                                <p className="text-xs mt-1 flex items-center gap-2 flex-wrap">
                                   {(() => {
                                     const b = mediaConsentBadge(student.media_publicity_consent);
                                     return (
                                       <span className={`text-[11px] border rounded-md px-1.5 py-0.5 inline-block ${b.className}`}>
                                         {t(b.labelKey)}
                                       </span>
+                                    );
+                                  })()}
+                                  {(() => {
+                                    const info = contractsByStudent[student.id];
+                                    const cb = studentContractBadge(info);
+                                    const url = studentContractDownloadUrl(info);
+                                    return (
+                                      <>
+                                        <span className={`text-[11px] border rounded-md px-1.5 py-0.5 inline-block ${cb.className}`}>
+                                          {t(cb.labelKey)}
+                                        </span>
+                                        {url && (
+                                          <button
+                                            type="button"
+                                            onClick={(e) => { e.stopPropagation(); void openContractFile(url); }}
+                                            className="text-[11px] text-indigo-600 hover:underline inline-flex items-center gap-1"
+                                          >
+                                            <Download className="w-3 h-3" /> {t('compStu.contractDownload')}
+                                          </button>
+                                        )}
+                                      </>
                                     );
                                   })()}
                                 </p>
@@ -2103,13 +2212,26 @@ export default function CompanyStudents() {
                           </code>
                         </td>
                         <td className="px-6 py-4 text-right">
-                          <button
-                            onClick={() => showTrashBin ? handleRestoreStudent(student.id) : handleDetachStudent(student.id)}
-                            className={`p-2 rounded-lg transition-colors ${showTrashBin ? 'text-green-400 hover:text-green-600 hover:bg-green-50' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
-                            title={showTrashBin ? t('compStu.restoreBtn') : t('compStu.detachBtn')}
-                          >
-                            {showTrashBin ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
-                          </button>
+                          <div className="inline-flex items-center gap-1.5">
+                            {isSchoolView && (student.payer_email || student.parent_secondary_email) && (
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); void sendParentPortalInvites(student.id, true); }}
+                                disabled={sendingParentInvites}
+                                className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50 px-2 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
+                                title={t('compStu.inviteParent')}
+                              >
+                                <Mail className="w-3.5 h-3.5" /> {t('compStu.inviteParent')}
+                              </button>
+                            )}
+                            <button
+                              onClick={() => showTrashBin ? handleRestoreStudent(student.id) : handleDetachStudent(student.id)}
+                              className={`p-2 rounded-lg transition-colors ${showTrashBin ? 'text-green-400 hover:text-green-600 hover:bg-green-50' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
+                              title={showTrashBin ? t('compStu.restoreBtn') : t('compStu.detachBtn')}
+                            >
+                              {showTrashBin ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -2263,6 +2385,23 @@ export default function CompanyStudents() {
                     <p className="text-gray-600 text-sm">
                       {t('compStu.codeInline')} <code className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">{selectedStudent.invite_code}</code>
                     </p>
+                    {isSchoolView && (() => {
+                      const info = contractsByStudent[selectedStudent.id];
+                      const cb = studentContractBadge(info);
+                      const url = studentContractDownloadUrl(info);
+                      return (
+                        <div className="flex items-center gap-2 flex-wrap text-sm">
+                          <span className={`text-xs border rounded-md px-2 py-0.5 inline-block ${cb.className}`}>
+                            {t(cb.labelKey)}
+                          </span>
+                          {url && (
+                            <button type="button" onClick={() => openContractFile(url)} className="text-xs text-indigo-600 hover:underline inline-flex items-center gap-1">
+                              <Download className="w-3 h-3" /> {t('compStu.contractDownload')}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
                     {isSchoolView && (
                       <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-3">
                         <div className="flex items-center justify-between gap-2">
@@ -2400,7 +2539,7 @@ export default function CompanyStudents() {
                           disabled={sendingParentInvites || !selectedStudent}
                           onClick={() => selectedStudent && void sendParentPortalInvites(selectedStudent.id, true)}
                         >
-                          {sendingParentInvites ? t('common.loading') : t('parent.resendInvites')}
+                          {sendingParentInvites ? t('common.loading') : t('compStu.inviteParent')}
                         </Button>
                       )}
                       {selectedStudent.linked_user_id ? (

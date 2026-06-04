@@ -1,8 +1,5 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
-import { renderDocxTemplateUrlToPdfBuffer } from './_lib/renderSchoolContractDocxToPdf';
-import { schoolContractPdfStoragePath } from './_lib/schoolContractPdfPath';
 
 function pageHtml(content: string) {
   return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Sutarties duomenų papildymas</title></head><body style="margin:0;font-family:'Segoe UI',Arial,sans-serif;background:linear-gradient(135deg,#f5f3ff 0%,#ecfeff 50%,#f0fdf4 100%);padding:24px;"><div style="max-width:720px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:24px;box-shadow:0 10px 35px rgba(2,6,23,.08);">${content}</div></body></html>`;
@@ -41,103 +38,6 @@ function publicAppOriginForRedirect(req: VercelRequest): string {
       hostRaw.includes('localhost') || hostRaw.startsWith('127.') ? 'http' : 'https';
   }
   return `${proto}://${hostRaw}`.replace(/\/$/, '');
-}
-
-const BUCKET = 'school-contracts';
-const PUBLIC_MARKER = `/object/public/${BUCKET}/`;
-
-function extractStoragePath(urlOrPath: string): string {
-  const idx = urlOrPath.indexOf(PUBLIC_MARKER);
-  if (idx !== -1) return decodeURIComponent(urlOrPath.slice(idx + PUBLIC_MARKER.length));
-  return urlOrPath;
-}
-
-function fillPlaceholders(template: string, data: Record<string, string>) {
-  let result = template || '';
-  for (const [key, value] of Object.entries(data)) {
-    result = result.replace(new RegExp(key.replace(/[{}]/g, '\\$&'), 'g'), value || '');
-  }
-  result = result
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n');
-  return result;
-}
-
-function templateSafe(value: unknown): string {
-  if (value === null || value === undefined) return '';
-  const str = String(value).trim();
-  if (!str) return '';
-  const lower = str.toLowerCase();
-  if (lower === 'undefined' || lower === 'null') return '';
-  return str;
-}
-
-async function createSimpleContractPdf(params: {
-  contractNumber: string;
-  studentName: string;
-  parentName: string;
-  parentEmail: string;
-  parentPhone: string;
-  parentPersonalCode: string;
-  childBirthDate: string;
-  address: string;
-  annualFee: number | string;
-  body: string;
-}) {
-  const safePdfText = (value: string) =>
-    String(value || '')
-      .replace(/ą/g, 'a').replace(/Ą/g, 'A')
-      .replace(/č/g, 'c').replace(/Č/g, 'C')
-      .replace(/ę/g, 'e').replace(/Ę/g, 'E')
-      .replace(/ė/g, 'e').replace(/Ė/g, 'E')
-      .replace(/į/g, 'i').replace(/Į/g, 'I')
-      .replace(/š/g, 's').replace(/Š/g, 'S')
-      .replace(/ų/g, 'u').replace(/Ų/g, 'U')
-      .replace(/ū/g, 'u').replace(/Ū/g, 'U')
-      .replace(/ž/g, 'z').replace(/Ž/g, 'Z');
-
-  const pdfDoc = await PDFDocument.create();
-  const page = pdfDoc.addPage([595, 842]);
-  const font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
-  const bold = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
-  const left = 44;
-  let y = 804;
-
-  page.drawText(safePdfText('Metinio mokesčio sutartis'), { x: left, y, size: 18, font: bold, color: rgb(0.1, 0.1, 0.1) });
-  y -= 28;
-  const rows = [
-    `Sutarties Nr.: ${params.contractNumber || ''}`,
-    `Mokinys: ${params.studentName || ''}`,
-    `Tevai: ${params.parentName || ''}`,
-    `Tevu el. pastas: ${params.parentEmail || ''}`,
-    `Tevu tel.: ${params.parentPhone || ''}`,
-    `Tevu asm. kodas: ${params.parentPersonalCode || ''}`,
-    `Vaiko gimimo data: ${params.childBirthDate || ''}`,
-    `Adresas: ${params.address || ''}`,
-    `Metinis mokestis: EUR ${Number(params.annualFee || 0).toFixed(2)}`,
-    `Data: ${new Date().toLocaleDateString('lt-LT')}`,
-  ];
-  for (const row of rows) {
-    page.drawText(safePdfText(row), { x: left, y, size: 12, font, color: rgb(0.2, 0.2, 0.2) });
-    y -= 18;
-  }
-  y -= 8;
-  page.drawText(safePdfText('Sutarties tekstas:'), { x: left, y, size: 12, font: bold, color: rgb(0.12, 0.12, 0.12) });
-  y -= 18;
-  for (const line of String(params.body || '').split(/\r?\n/)) {
-    if (y < 56) break;
-    page.drawText(safePdfText(line), { x: left, y, size: 11, font, color: rgb(0.23, 0.23, 0.23) });
-    y -= 15;
-  }
-  return pdfDoc.save();
-}
-
-async function createDocxTemplatePdf(params: {
-  fetchUrl: string;
-  payload: Record<string, string>;
-}): Promise<Uint8Array> {
-  const pdfBuffer = await renderDocxTemplateUrlToPdfBuffer({ templateUrl: params.fetchUrl, payload: params.payload });
-  return new Uint8Array(pdfBuffer);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -258,7 +158,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         <div style="display:inline-block;font-size:30px;font-weight:900;color:#4f46e5;letter-spacing:-0.5px;">Tutlio 🎓</div>
       </div>
       <h2 style="margin:0 0 8px;font-size:26px;color:#111827;">Papildykite sutarties duomenis</h2>
-      <p style="color:#4b5563;margin:0 0 14px;font-size:14px;">Po pateikimo mokykla gaus atnaujintus duomenis ir persiųs atnaujintą PDF sutartį.</p>
+      <p style="color:#4b5563;margin:0 0 14px;font-size:14px;">Po pateikimo administratorius patikrins duomenis ir atsiųs galutinę sutartį pasirašyti.</p>
       <div style="color:#7c2d12;background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:12px 14px;margin-bottom:14px;">
         <p style="margin:0 0 8px;font-weight:700;">Prašome papildyti trūkstamus duomenis:</p>
         <ul style="margin:0 0 8px 18px;padding:0;line-height:1.5;">${fieldSummary || '<li>Trūkstamų laukų nerasta.</li>'}</ul>
@@ -356,14 +256,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ...(isMediaConsentMissing ? { media_publicity_consent: consentValue } : {}),
   };
 
-  const [studentResult, draftContractResult] = await Promise.all([
+  const [studentResult, contractResult] = await Promise.all([
     supabase.from('students').update(studentUpdatePayload).eq('id', (contract as any).student_id),
+    // Flag the supplement for admin review instead of auto-regenerating/sending the contract.
     supabase
       .from('school_contracts')
       .update({
-        pdf_url: null,
-        signing_status: 'draft',
-        sent_at: null,
+        completion_submitted_at: new Date().toISOString(),
         ...(isMediaConsentMissing ? { media_publicity_consent: consentValue } : {}),
       })
       .eq('id', (contract as any).id),
@@ -371,174 +270,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const studentErr = studentResult.error;
   if (studentErr) return res.status(500).send(pageHtml(`<h2>Nepavyko išsaugoti: ${studentErr.message}</h2>`));
-  if (draftContractResult.error) {
-    console.error('[school-contract-complete] nepavyko anuliuoti PDF:', draftContractResult.error.message);
+  if (contractResult.error) {
+    console.error('[school-contract-complete] nepavyko pažymėti papildymo:', contractResult.error.message);
   }
 
-  const fullAddress = [isAddressMissing ? studentAddress : st.student_address || '', isAddressMissing ? studentCity : st.student_city || '']
-    .filter(Boolean)
-    .join(', ');
+  // Notify the school admin to review the supplemented data and send the final contract.
+  // The contract is NOT regenerated or auto-sent here — the admin confirms via
+  // /api/school-contract-confirm-completion.
   const parentName = String((st.payer_name || '')).trim();
-  const parentEmail = String((st.payer_email || '')).trim();
-  const parentPhone = String((st.payer_phone || '')).trim();
-  const parentPersonalCode = String(isParentCodeMissing ? submittedParentPersonalCode : st.payer_personal_code || '').trim();
-  const childBirthDateResolved = String(isBirthDateMissing ? childBirthDate : st.child_birth_date || '').trim();
-  const parent2Name = submittedParent2Name || String(st.parent_secondary_name || '').trim();
-  const parent2Email = submittedParent2Email || String(st.parent_secondary_email || '').trim();
-  const parent2Phone = submittedParent2Phone || String(st.parent_secondary_phone || '').trim();
-  const parent2PersonalCode = submittedParent2PersonalCode || String(st.parent_secondary_personal_code || '').trim();
-  const parent2Address = submittedParent2Address || String(st.parent_secondary_address || '').trim();
-  const hasParent2 = [parent2Name, parent2Email, parent2Phone, parent2PersonalCode, parent2Address].some((v) => Boolean(String(v || '').trim()));
-  const parent2Inline = hasParent2
-    ? `${parent2Name}; asm. k.: ${parent2PersonalCode}; tel. nr.: ${parent2Phone}; el. paštas: ${parent2Email}; ${parent2Address};`
-    : '';
-  const parent2Block = hasParent2
-    ? `${parent2Name}\nasm. k.: ${parent2PersonalCode}\ntel. nr.: ${parent2Phone}\nel. paštas: ${parent2Email}\n${parent2Address}`
-    : '';
-
-  const renderedBody = fillPlaceholders(String((contract as any).filled_body || ''), {
-    '{{contract_number}}': String((contract as any).contract_number || ''),
-    '{{student_name}}': String(st.full_name || ''),
-    '{{student_email}}': String(st.email || ''),
-    '{{student_phone}}': String(st.phone || ''),
-    '{{parent_name}}': parentName,
-    '{{parent_email}}': parentEmail,
-    '{{parent_phone}}': parentPhone,
-    '{{parent_personal_code}}': parentPersonalCode,
-    '{{parent_address}}': fullAddress,
-    '{{parent2_name}}': parent2Name,
-    '{{parent2_email}}': parent2Email,
-    '{{parent2_phone}}': parent2Phone,
-    '{{parent2_personal_code}}': parent2PersonalCode,
-    '{{parent2_address}}': parent2Address,
-    '{{parent2_adress}}': parent2Address,
-    '{{parent2_block}}': parent2Block,
-    '{{parent2_inline}}': parent2Inline,
-    '{{child_birth_date}}': childBirthDateResolved,
-    '{{address}}': fullAddress,
-    '{{annual_fee}}': String((contract as any).annual_fee || ''),
-    '{{date}}': new Date().toLocaleDateString('lt-LT'),
-    '{{school_name}}': String((contract as any).organizations?.name || ''),
-  });
-
-  const resolvedConsent = (isMediaConsentMissing ? consentValue : existingConsent) || '';
-  const consentPending = !resolvedConsent;
-  const consentAgreeSelected = resolvedConsent === 'agree';
-  const consentDisagreeSelected = resolvedConsent === 'disagree';
-
-  const templatePayload: Record<string, string | boolean | null> = {
-    contract_number: templateSafe((contract as any).contract_number),
-    student_name: templateSafe(st.full_name),
-    student_email: templateSafe(st.email),
-    student_phone: templateSafe(st.phone),
-    parent_name: templateSafe(parentName),
-    parent_email: templateSafe(parentEmail),
-    parent_phone: templateSafe(parentPhone),
-    parent_personal_code: templateSafe(parentPersonalCode),
-    parent_address: templateSafe(fullAddress),
-    parent2_name: templateSafe(parent2Name),
-    parent2_email: templateSafe(parent2Email),
-    parent2_phone: templateSafe(parent2Phone),
-    parent2_personal_code: templateSafe(parent2PersonalCode),
-    parent2_address: templateSafe(parent2Address),
-    parent2_adress: templateSafe(parent2Address),
-    parent2_block: templateSafe(parent2Block),
-    parent2_inline: templateSafe(parent2Inline),
-    child_birth_date: templateSafe(childBirthDateResolved),
-    address: templateSafe(fullAddress),
-    annual_fee: templateSafe((contract as any).annual_fee),
-    date: new Date().toLocaleDateString('lt-LT'),
-    school_name: templateSafe((contract as any).organizations?.name),
-
-    // Docxtemplater boolean sections for the DOCX template
-    consent_pending: consentPending,
-    consent_agree_selected: consentAgreeSelected,
-    consent_disagree_selected: consentDisagreeSelected,
-  };
-
-  let pdfBytes: Uint8Array;
-  const templatePathOrUrl = String((contract as any).template?.pdf_url || '').trim();
-  const templatePath = templatePathOrUrl ? extractStoragePath(templatePathOrUrl) : '';
-  if (templatePath.toLowerCase().endsWith('.docx')) {
-    try {
-      const { data: signedData } = await supabase.storage
-        .from(BUCKET)
-        .createSignedUrl(templatePath, 300);
-      if (!signedData?.signedUrl) throw new Error('Failed to sign template URL');
-      pdfBytes = await createDocxTemplatePdf({ fetchUrl: signedData.signedUrl, payload: templatePayload as any });
-    } catch {
-      pdfBytes = await createSimpleContractPdf({
-        contractNumber: String((contract as any).contract_number || ''),
-        studentName: String(st.full_name || ''),
-        parentName,
-        parentEmail,
-        parentPhone,
-        parentPersonalCode,
-        childBirthDate: childBirthDateResolved,
-        address: fullAddress,
-        annualFee: (contract as any).annual_fee || 0,
-        body: renderedBody,
-      });
-    }
-  } else {
-    pdfBytes = await createSimpleContractPdf({
-      contractNumber: String((contract as any).contract_number || ''),
-      studentName: String(st.full_name || ''),
-      parentName,
-      parentEmail,
-      parentPhone,
-      parentPersonalCode,
-      childBirthDate: childBirthDateResolved,
-      address: fullAddress,
-      annualFee: (contract as any).annual_fee || 0,
-      body: renderedBody,
-    });
-  }
-  const path = schoolContractPdfStoragePath({
-    organizationId: String((contract as any).organization_id),
-    contractId: String((contract as any).id),
-    contractNumber: (contract as any).contract_number ?? null,
-  });
-  const { error: uploadErr } = await supabase.storage.from(BUCKET).upload(
-    path,
-    new Blob([pdfBytes], { type: 'application/pdf' }),
-    { cacheControl: '3600', upsert: true, contentType: 'application/pdf' },
-  );
-  const uploadedPath = uploadErr ? null : path;
-  const publicUrl = uploadedPath
-    ? (supabase.storage.from(BUCKET).getPublicUrl(uploadedPath).data.publicUrl || '')
-    : '';
-
-  await supabase
-    .from('school_contracts')
-    .update({
-      pdf_url: uploadedPath,
-      filled_body: renderedBody,
-      signing_status: uploadedPath ? 'sent' : 'draft',
-      sent_at: uploadedPath ? new Date().toISOString() : null,
-    })
-    .eq('id', (contract as any).id);
-
-  if (parentEmail && uploadedPath) {
+  const adminEmail = String((contract as any).organizations?.email || '').trim();
+  if (adminEmail) {
     const emailPayload = JSON.stringify({
-      type: 'school_contract',
-      to: parentEmail,
+      type: 'school_contract_completion_admin',
+      to: adminEmail,
       data: {
         schoolName: String((contract as any).organizations?.name || ''),
-        schoolEmail: String((contract as any).organizations?.email || ''),
         studentName: String(st.full_name || ''),
         parentName: parentName || String(st.full_name || ''),
-        recipientName: parentName || String(st.full_name || ''),
-        parentPhone,
-        parentPersonalCode,
-        childBirthDate: childBirthDateResolved,
-        address: fullAddress,
-        missingFields: [],
         contractNumber: String((contract as any).contract_number || ''),
-        annualFee: (contract as any).annual_fee || 0,
-        contractBody: renderedBody,
-        pdfUrl: publicUrl,
-        date: new Date().toLocaleDateString('lt-LT'),
         contractId: (contract as any).id,
         ...((contract as any).organization_id ? { organizationId: (contract as any).organization_id } : {}),
       },
@@ -558,6 +307,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq('id', tokenRow.id);
   }
 
-  return res.status(200).send(pageHtml('<h2>Ačiū! Duomenys išsaugoti.</h2><p><strong>Atnaujinta PDF sutartis išsiųsta jūsų el. paštu.</strong></p><p>Sutartį pasirašykite gavę atnaujintą versiją.</p>'));
+  return res.status(200).send(pageHtml('<h2>Ačiū! Duomenys pateikti.</h2><p>Administratorius patikrins pateiktus duomenis ir atsiųs galutinę sutartį pasirašyti.</p>'));
 }
 

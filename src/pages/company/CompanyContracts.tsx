@@ -30,6 +30,7 @@ import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
 import { useLocation } from 'react-router-dom';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { schoolContractPdfStoragePath } from '@/lib/schoolContractPdfPath';
+import { openContractFileInNewTab } from '@/lib/contractStorage';
 
 interface Student {
   id: string;
@@ -73,6 +74,7 @@ interface Contract {
   pdf_url?: string | null;
   signed_contract_url?: string | null;
   signed_uploaded_at?: string | null;
+  completion_submitted_at?: string | null;
   additional_fee_amount?: number | null;
   additional_fee_purpose?: string | null;
   student?: { full_name: string; email: string; phone?: string | null; payer_name: string | null; payer_email: string | null; payer_phone?: string | null; payer_personal_code?: string | null; parent_secondary_name?: string | null; parent_secondary_email?: string | null; parent_secondary_phone?: string | null; parent_secondary_personal_code?: string | null; parent_secondary_address?: string | null; student_address?: string | null; student_city?: string | null; child_birth_date?: string | null };
@@ -159,6 +161,7 @@ export default function CompanyContracts() {
   const [additionalFeePurpose, setAdditionalFeePurpose] = useState('');
   const [additionalFeeAmount, setAdditionalFeeAmount] = useState('');
   const [saving, setSaving] = useState(false);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
   const [tab, setTab] = useState<'contracts' | 'templates'>('contracts');
 
@@ -971,11 +974,6 @@ export default function CompanyContracts() {
 
       if (error) { setToast({ message: error.message, type: 'error' }); return; }
 
-      let firstInstallment:
-        | { id: string; installment_number: number; amount: number; due_date: string }
-        | null = null;
-      let totalInstallments = 0;
-
       if (paymentMode === 'installments' && created) {
       const schedule = installmentRows.map((r, idx) => ({
         contract_id: created.id,
@@ -983,44 +981,32 @@ export default function CompanyContracts() {
         amount: Number(r.amount) + (idx === 0 && hasAdditionalFee ? additionalFeeAmountNum : 0),
         due_date: r.due_date,
       }));
-      const { data: insertedInstallments, error: installmentsErr } = await supabase
+      const { error: installmentsErr } = await supabase
         .from('school_payment_installments')
-        .insert(schedule)
-        .select('id, installment_number, amount, due_date')
-        .order('installment_number', { ascending: true });
+        .insert(schedule);
       if (installmentsErr) {
         setToast({ message: installmentsErr.message, type: 'error' });
         reload();
         return;
       }
-      if (insertedInstallments?.length) {
-        firstInstallment = insertedInstallments[0] as any;
-        totalInstallments = insertedInstallments.length;
-      }
       }
 
       if (paymentMode === 'full' && created) {
       const dueDate = new Date().toISOString().slice(0, 10);
-      const { data: oneInstallment, error: oneInstallmentErr } = await supabase
+      const { error: oneInstallmentErr } = await supabase
         .from('school_payment_installments')
         .insert({
           contract_id: created.id,
           installment_number: 1,
           amount: Number(effectiveAnnualFee) + (hasAdditionalFee ? additionalFeeAmountNum : 0),
           due_date: dueDate,
-        })
-        .select('id, installment_number, amount, due_date')
-        .single();
+        });
       if (oneInstallmentErr) {
         setToast({ message: oneInstallmentErr.message, type: 'error' });
         reload();
         return;
       }
-      firstInstallment = oneInstallment as any;
-      totalInstallments = 1;
       }
-
-      let installmentCheckoutWarning: string | undefined;
 
       if (sendImmediately && created) {
         const recipient = contractParentEmail.trim() || created.student?.payer_email || created.student?.email;
@@ -1065,32 +1051,8 @@ export default function CompanyContracts() {
             return false;
           }
 
-          if (firstInstallment) {
-            try {
-              const pay = await sendFirstInstallmentPaymentLink({
-                installmentId: firstInstallment.id,
-                installmentNumber: firstInstallment.installment_number,
-                totalInstallments,
-                amount: Number(firstInstallment.amount),
-                dueDate: firstInstallment.due_date,
-                studentName: created.student?.full_name || '',
-                parentName: contractParentName.trim() || created.student?.payer_name || created.student?.full_name || '',
-                recipientEmail: recipient,
-                additionalFeeAmount: Number(created.additional_fee_amount || 0),
-                additionalFeePurpose: created.additional_fee_purpose || undefined,
-                annualFee: Number(created.annual_fee || 0),
-              });
-              if (!pay.paymentUrl && pay.checkoutError) {
-                installmentCheckoutWarning = pay.checkoutError;
-              }
-            } catch (paymentErr: any) {
-              setToast({
-                message: paymentErr?.message || tr('school.toastInstallmentEmailFail'),
-                type: 'error',
-              });
-              return false;
-            }
-          }
+          // Payment email is intentionally NOT sent here; it goes out when the admin
+          // marks the contract as signed (#3). Installment rows are created above.
           return true;
         })();
 
@@ -1103,18 +1065,67 @@ export default function CompanyContracts() {
         : paymentMode === 'installments'
           ? tr('school.toastContractAndInstallmentsCreated')
           : tr('school.toastContractCreated');
-      setToast({
-        message: installmentCheckoutWarning
-          ? `${baseSuccessMsg} (${tr('school.checkoutStripeDetail')}: ${installmentCheckoutWarning})`
-          : baseSuccessMsg,
-        type: installmentCheckoutWarning ? 'warning' : 'success',
-      });
+      setToast({ message: baseSuccessMsg, type: 'success' });
       reload();
     } catch (e: any) {
       setToast({ message: e?.message || 'Nepavyko sukurti sutarties.', type: 'error' });
     } finally {
       setSaving(false);
     }
+  };
+
+  /** Builds + sends the `school_contract` email for an existing contract row (no status/payment side effects). */
+  const sendSchoolContractEmail = async (
+    contract: Contract,
+    recipient: string,
+    pdfUrl?: string | null,
+  ): Promise<boolean> => {
+    const student = contract.student;
+    const missingFields = [
+      !(student?.student_address || '').trim() && !(student?.student_city || '').trim() ? 'Gyvenamoji vieta' : '',
+      !(student?.child_birth_date || '').trim() ? 'Vaiko gimimo data' : '',
+      !(student?.payer_personal_code || '').trim() ? 'Tėvų asmens kodas' : '',
+      isSchoolView && !(String((contract as any)?.media_publicity_consent || '').trim()) ? 'Vaiko atvaizdo naudojimo sutikimas' : '',
+    ].filter(Boolean);
+    const completionUrl = missingFields.length > 0 ? await createCompletionUrl(contract.id) : null;
+    return await sendEmail({
+      type: 'school_contract',
+      to: recipient,
+      data: {
+        schoolName: orgName,
+        schoolEmail: orgEmail,
+        studentName: student?.full_name || '',
+        parentName: student?.payer_name || student?.full_name || '',
+        recipientName: student?.payer_name || student?.full_name || '',
+        parentPhone: student?.payer_phone || undefined,
+        parentPersonalCode: student?.payer_personal_code || undefined,
+        missingFields,
+        completionUrl: completionUrl || undefined,
+        contractId: contract.id,
+        childBirthDate: student?.child_birth_date || undefined,
+        contractNumber: contract.contract_number || undefined,
+        annualFee: contract.annual_fee,
+        contractBody: contract.filled_body,
+        pdfUrl: pdfUrl || undefined,
+        date: new Date().toLocaleDateString('lt-LT'),
+        ...(orgId ? { organizationId: orgId } : {}),
+      },
+    });
+  };
+
+  /** Re-sends the contract email to the same recipient without status or payment changes (#4). */
+  const resendContract = async (contract: Contract) => {
+    const student = contract.student;
+    const recipient = (student?.payer_email || student?.email || '').trim();
+    if (!recipient) {
+      setToast({ message: tr('school.toastNoEmail'), type: 'error' });
+      return;
+    }
+    const ok = await sendSchoolContractEmail(contract, recipient, contract.pdf_url);
+    setToast({
+      message: ok ? tr('school.toastContractResent') : tr('school.toastContractResendFail'),
+      type: ok ? 'success' : 'error',
+    });
   };
 
   const sendContract = async (contract: Contract) => {
@@ -1152,37 +1163,8 @@ export default function CompanyContracts() {
         await supabase.from('school_contracts').update({ pdf_url: ensuredPdfUrl }).eq('id', contract.id);
       }
 
-      const missingFields = [
-      !(student?.student_address || '').trim() && !(student?.student_city || '').trim() ? 'Gyvenamoji vieta' : '',
-      !(student?.child_birth_date || '').trim() ? 'Vaiko gimimo data' : '',
-      !(student?.payer_personal_code || '').trim() ? 'Tėvų asmens kodas' : '',
-      isSchoolView && !(String((contract as any)?.media_publicity_consent || '').trim()) ? 'Vaiko atvaizdo naudojimo sutikimas' : '',
-    ].filter(Boolean);
-      const completionUrl = missingFields.length > 0 ? await createCompletionUrl(contract.id) : null;
       void (async () => {
-        const ok = await sendEmail({
-          type: 'school_contract',
-          to: recipient,
-          data: {
-            schoolName: orgName,
-            schoolEmail: orgEmail,
-            studentName: student?.full_name || '',
-            parentName: student?.payer_name || student?.full_name || '',
-            recipientName: student?.payer_name || student?.full_name || '',
-            parentPhone: student?.payer_phone || undefined,
-            parentPersonalCode: student?.payer_personal_code || undefined,
-            missingFields,
-            completionUrl: completionUrl || undefined,
-            contractId: contract.id,
-            childBirthDate: student?.child_birth_date || undefined,
-            contractNumber: contract.contract_number || undefined,
-            annualFee: contract.annual_fee,
-            contractBody: contract.filled_body,
-            pdfUrl: ensuredPdfUrl || undefined,
-            date: new Date().toLocaleDateString('lt-LT'),
-            ...(orgId ? { organizationId: orgId } : {}),
-          },
-        });
+        const ok = await sendSchoolContractEmail(contract, recipient, ensuredPdfUrl);
 
         if (!ok) {
           setToast({ message: tr('school.toastContractSendFail'), type: 'error' });
@@ -1190,64 +1172,24 @@ export default function CompanyContracts() {
           return;
         }
 
+        // Ensure a first installment row exists, but DO NOT send the payment email here.
+        // The payment email is sent only when the admin marks the contract as signed (#3).
         const { data: existingInstallments } = await supabase
           .from('school_payment_installments')
-          .select('id, installment_number, amount, due_date, payment_status')
+          .select('id')
           .eq('contract_id', contract.id)
-          .order('installment_number', { ascending: true });
-
-        const sendPendingInstallmentEmail = async (row: {
-          id: string;
-          installment_number: number;
-          amount: number | string;
-          due_date: string;
-        }, totalCnt: number) => {
-          try {
-            const pay = await sendFirstInstallmentPaymentLink({
-              installmentId: row.id,
-              installmentNumber: row.installment_number,
-              totalInstallments: totalCnt,
-              amount: Number(row.amount),
-              dueDate: row.due_date,
-              studentName: student?.full_name || '',
-              parentName: student?.payer_name || student?.full_name || '',
-              recipientEmail: recipient,
-              additionalFeeAmount: Number(contract.additional_fee_amount || 0),
-              additionalFeePurpose: contract.additional_fee_purpose || undefined,
-              annualFee: Number(contract.annual_fee || 0),
-            });
-            if (!pay.paymentUrl && pay.checkoutError) {
-              setToast({
-                message: `${tr('school.toastContractSendingSoon')} (${tr('school.checkoutStripeDetail')}: ${pay.checkoutError})`,
-                type: 'warning',
-              });
-            }
-          } catch {
-            /* contract email already sent; installment email failure is non-fatal */
-          }
-        };
+          .limit(1);
 
         if (!existingInstallments || existingInstallments.length === 0) {
           const dueDate = new Date().toISOString().slice(0, 10);
-          const { data: createdInstallment, error: installmentErr } = await supabase
+          await supabase
             .from('school_payment_installments')
             .insert({
               contract_id: contract.id,
               installment_number: 1,
               amount: Number(contract.annual_fee) + Number(contract.additional_fee_amount || 0),
               due_date: dueDate,
-            })
-            .select('id, installment_number, amount, due_date')
-            .single();
-
-          if (!installmentErr && createdInstallment) {
-            await sendPendingInstallmentEmail(createdInstallment, 1);
-          }
-        } else {
-          const pending = existingInstallments.find((i: { payment_status?: string }) => i.payment_status === 'pending');
-          if (pending) {
-            await sendPendingInstallmentEmail(pending, existingInstallments.length);
-          }
+            });
         }
 
         await supabase
@@ -1267,23 +1209,79 @@ export default function CompanyContracts() {
     }
   };
 
-  const markSigned = async (contractId: string) => {
+  /** Send the first/pending installment payment email. Called only after a contract is marked signed (#3). */
+  const sendPaymentEmailForSignedContract = async (contract: Contract) => {
+    const student = contract.student;
+    const recipient = (student?.payer_email || student?.email || '').trim();
+    if (!recipient) return;
+    const { data: installments } = await supabase
+      .from('school_payment_installments')
+      .select('id, installment_number, amount, due_date, payment_status')
+      .eq('contract_id', contract.id)
+      .order('installment_number', { ascending: true });
+    if (!installments || installments.length === 0) return;
+    const pending = installments.find((i: { payment_status?: string }) => i.payment_status !== 'paid') || installments[0];
+    try {
+      await sendFirstInstallmentPaymentLink({
+        installmentId: pending.id,
+        installmentNumber: pending.installment_number,
+        totalInstallments: installments.length,
+        amount: Number(pending.amount),
+        dueDate: pending.due_date,
+        studentName: student?.full_name || '',
+        parentName: student?.payer_name || student?.full_name || '',
+        recipientEmail: recipient,
+        additionalFeeAmount: Number(contract.additional_fee_amount || 0),
+        additionalFeePurpose: contract.additional_fee_purpose || undefined,
+        annualFee: Number(contract.annual_fee || 0),
+      });
+    } catch (e: any) {
+      setToast({ message: e?.message || tr('school.toastInstallmentEmailFail'), type: 'error' });
+    }
+  };
+
+  const markSigned = async (contract: Contract) => {
     try {
       const hdrs = await authHeaders();
       const res = await fetch('/api/school-contract-mark-signed', {
         method: 'POST',
         headers: hdrs,
-        body: JSON.stringify({ contractId }),
+        body: JSON.stringify({ contractId: contract.id }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data?.success !== true) {
         setToast({ message: data?.error || `HTTP ${res.status}`, type: 'error' });
       } else {
         setToast({ message: tr('school.toastContractSigned'), type: 'success' });
+        // Payment email is sent only now (after signing).
+        await sendPaymentEmailForSignedContract(contract);
       }
     } catch (e: any) {
       setToast({ message: e?.message || tr('common.error'), type: 'error' });
     } finally {
+      reload();
+    }
+  };
+
+  const confirmCompletion = async (contract: Contract) => {
+    setConfirmingId(contract.id);
+    try {
+      const hdrs = await authHeaders();
+      const res = await fetch('/api/school-contract-confirm-completion', {
+        method: 'POST',
+        headers: hdrs,
+        body: JSON.stringify({ contractId: contract.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.success !== true) {
+        setToast({ message: data?.error || tr('school.toastCompletionConfirmFail'), type: 'error' });
+      } else {
+        setToast({ message: tr('school.toastCompletionConfirmed'), type: 'success' });
+      }
+    } catch (e: any) {
+      setToast({ message: e?.message || tr('school.toastCompletionConfirmFail'), type: 'error' });
+    } finally {
+      setConfirmingId(null);
       reload();
     }
   };
@@ -1300,6 +1298,11 @@ export default function CompanyContracts() {
     }
     setContracts((prev) => prev.filter((c) => c.id !== id));
     reload();
+  };
+
+  const openContractFile = async (urlOrPath?: string | null) => {
+    const ok = await openContractFileInNewTab(urlOrPath);
+    if (!ok) setToast({ message: tr('school.toastFileOpenFail'), type: 'error' });
   };
 
   const uploadSignedContract = async (contract: Contract, file: File) => {
@@ -1435,21 +1438,31 @@ export default function CompanyContracts() {
                       {c.signed_contract_url && (
                         <p className="text-xs text-emerald-700 mt-1">
                           Pasirašyta sutartis ({c.student?.full_name || 'mokinys'}):{' '}
-                          <a className="underline" href={c.signed_contract_url} target="_blank" rel="noreferrer">
+                          <button type="button" className="underline" onClick={() => openContractFile(c.signed_contract_url)}>
                             Atidaryti failą
-                          </a>
+                          </button>
                         </p>
                       )}
                     </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
+                      {isSchoolView && c.completion_submitted_at && (
+                        <Button size="sm" onClick={() => confirmCompletion(c)} disabled={confirmingId === c.id} className="bg-amber-600 hover:bg-amber-700 text-white">
+                          <CheckCircle className="w-3.5 h-3.5 mr-1.5" /> {confirmingId === c.id ? tr('school.confirmingCompletion') : tr('school.confirmCompletionBtn')}
+                        </Button>
+                      )}
                       {c.signing_status === 'draft' && (
                         <Button size="sm" variant="outline" onClick={() => sendContract(c)}>
                           <Send className="w-3.5 h-3.5 mr-1.5" /> {tr('school.send')}
                         </Button>
                       )}
                       {c.signing_status === 'sent' && (
-                        <Button size="sm" variant="outline" onClick={() => markSigned(c.id)} className="text-green-700 border-green-200 hover:bg-green-50">
+                        <Button size="sm" variant="outline" onClick={() => markSigned(c)} className="text-green-700 border-green-200 hover:bg-green-50">
                           <CheckCircle className="w-3.5 h-3.5 mr-1.5" /> {tr('school.markSigned')}
+                        </Button>
+                      )}
+                      {c.signing_status !== 'draft' && (
+                        <Button size="sm" variant="outline" onClick={() => resendContract(c)}>
+                          <Send className="w-3.5 h-3.5 mr-1.5" /> {tr('school.resend')}
                         </Button>
                       )}
                       <Button size="sm" variant="outline" onClick={() => pickAndUploadSignedContract(c)} disabled={saving}>
@@ -1460,6 +1473,11 @@ export default function CompanyContracts() {
                       </button>
                     </div>
                   </div>
+                  {isSchoolView && c.completion_submitted_at && (
+                    <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                      {tr('school.completionPendingBanner')}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -1480,9 +1498,9 @@ export default function CompanyContracts() {
                       {tr('school.defaultFee')} {tpl.annual_fee_default ? `€${tpl.annual_fee_default}` : tr('school.defaultFeeNotSet')}
                     </p>
                     {tpl.pdf_url && (
-                      <a className="text-xs text-emerald-700 hover:underline" href={tpl.pdf_url} target="_blank" rel="noreferrer">
+                      <button type="button" className="text-xs text-emerald-700 hover:underline" onClick={() => openContractFile(tpl.pdf_url)}>
                         {tr('school.openPdfTemplate')}
-                      </a>
+                      </button>
                     )}
                   </div>
                   <div className="flex items-center gap-2">
@@ -1582,9 +1600,9 @@ export default function CompanyContracts() {
                 Pasirinkti faila
               </Button>
               {tForm.pdf_url && (
-                <a className="text-xs text-emerald-700 hover:underline" href={tForm.pdf_url} target="_blank" rel="noreferrer">
+                <button type="button" className="text-xs text-emerald-700 hover:underline" onClick={() => openContractFile(tForm.pdf_url)}>
                   {tr('school.openPdfTemplate')}
-                </a>
+                </button>
               )}
             </div>
           </div>

@@ -1167,24 +1167,28 @@ export default function CalendarPage() {
     return 60;
   };
 
-  // Calculate available time slots when assigning student to availability slot
+  // Calculate available time slots when assigning a student to an availability block.
+  // Slots sit on a fixed grid anchored to the block's start time, so round start
+  // times (e.g. 13:00) stay selectable even when another part of the block is busy.
   const calculateAssignSlots = useCallback(() => {
-    if (!editingSlot || !assignSubjectId || !assignStudentId) {
+    if (!editingSlot || !assignSubjectId) {
       setAssignAvailableSlots([]);
       return;
     }
 
-    const student = students.find(s => s.id === assignStudentId);
     const subject = subjects.find(s => s.id === assignSubjectId);
 
-    const pricing = individualPricing.find(
-      (p) => p.student_id === assignStudentId && p.subject_id === assignSubjectId
-    );
+    // Duration follows the student's individual pricing when a student is chosen,
+    // otherwise falls back to the tutor/subject default so slots can render before a
+    // student is picked (and for group lessons that use a multi-student list).
+    const pricing = assignStudentId
+      ? individualPricing.find(
+          (p) => p.student_id === assignStudentId && p.subject_id === assignSubjectId
+        )
+      : undefined;
     const tspCalc = getTutorSubjectPrice(subject?.name);
     const duration = pricing?.duration_minutes ?? tspCalc?.duration_minutes ?? subject?.duration_minutes ?? 60;
     setAssignDuration(duration);
-
-    const breakBetweenLessons = 0; // No break needed for tutor-side scheduling
 
     // Get the date from editingSlot
     let dateStr: string;
@@ -1196,16 +1200,20 @@ export default function CalendarPage() {
       dateStr = editingSlot.ruleDate || format(editingSlot.blockStart, 'yyyy-MM-dd');
     }
 
-    const slots: string[] = [];
     const toMinutes = (time: string) => {
       const [h, m] = time.split(':').map(Number);
       return h * 60 + m;
     };
 
-    let currentMin = toMinutes(editingSlot.ruleStart);
+    const startMin = toMinutes(editingSlot.ruleStart);
     const endMin = toMinutes(editingSlot.ruleEnd);
 
-    while (currentMin + duration <= endMin) {
+    const slots: string[] = [];
+    // Walk the block on a fixed `duration` grid. Every candidate start time that
+    // fits inside the block and doesn't overlap an active session is offered –
+    // a busy stretch only removes the slots it actually covers, it never shifts
+    // the remaining slots off their round start times.
+    for (let currentMin = startMin; currentMin + duration <= endMin; currentMin += duration) {
       const hh = Math.floor(currentMin / 60).toString().padStart(2, '0');
       const mm = (currentMin % 60).toString().padStart(2, '0');
       const timeStr = `${hh}:${mm}`;
@@ -1213,46 +1221,30 @@ export default function CalendarPage() {
       const slotStart = new Date(`${dateStr}T${timeStr}`);
       const slotEnd = new Date(slotStart.getTime() + duration * 60 * 1000);
 
-      // Check if this slot overlaps with existing sessions (ANY tutor's sessions or student's own sessions)
-      const overlappingSession = sessions.find(session => {
-        const sStart = new Date(session.start_time);
-        const sEnd = new Date(new Date(session.end_time).getTime() + breakBetweenLessons * 60000);
-        return session.status !== 'cancelled' && slotStart < sEnd && slotEnd > sStart;
-      });
-
-      // Also check if the selected student has any sessions at this time
-      const studentHasSession = sessions.find(session => {
-        if (session.student_id !== assignStudentId) return false;
+      const hasConflict = sessions.some(session => {
+        if (session.status === 'cancelled') return false;
         const sStart = new Date(session.start_time);
         const sEnd = new Date(session.end_time);
-        return session.status !== 'cancelled' && slotStart < sEnd && slotEnd > sStart;
+        return slotStart < sEnd && slotEnd > sStart;
       });
 
-      if (overlappingSession || studentHasSession) {
-        const blockingSession = overlappingSession || studentHasSession;
-        if (!blockingSession) {
-          currentMin += 5;
-          continue;
-        }
-        // Fast-forward currentMin to the end of the overlapping session
-        const sEnd = new Date(new Date(blockingSession.end_time).getTime() + breakBetweenLessons * 60000);
-        const overrideMin = sEnd.getHours() * 60 + sEnd.getMinutes();
-        currentMin = Math.max(currentMin + 5, overrideMin);
-      } else {
+      if (!hasConflict) {
         slots.push(timeStr);
-        currentMin += duration;
       }
     }
 
-    setAssignAvailableSlots(slots.sort());
-  }, [editingSlot, assignSubjectId, assignStudentId, students, subjects, individualPricing, tutorSubjectPrices, calOrgSubjectTemplates, sessions, getTutorSubjectPrice]);
+    setAssignAvailableSlots(slots);
+  }, [editingSlot, assignSubjectId, assignStudentId, subjects, individualPricing, sessions, getTutorSubjectPrice]);
 
-  // When assign student/subject/duration changes, recalculate slots
+  // Recalculate slots whenever the assign modal is open and its inputs change;
+  // clear them when it closes so stale slots never leak into a different block.
   useEffect(() => {
-    if (isAssignStudentOpen && assignStudentId && assignSubjectId) {
+    if (isAssignStudentOpen) {
       calculateAssignSlots();
+    } else {
+      setAssignAvailableSlots([]);
     }
-  }, [isAssignStudentOpen, assignStudentId, assignSubjectId, assignDuration, calculateAssignSlots]);
+  }, [isAssignStudentOpen, assignDuration, calculateAssignSlots]);
 
   // Keep selected subject valid when filters change
   useEffect(() => {
@@ -3617,9 +3609,13 @@ export default function CalendarPage() {
           </Button>
           <Button
             onClick={() => {
+              // Default the new lesson to the date the calendar is currently showing
+              // (not today) so navigating to another week/day keeps that date.
               const now = new Date();
-              const end = addHours(now, 1);
-              handleSelectSlot({ start: now, end }, { forceCreate: true });
+              const start = new Date(currentDate);
+              start.setHours(now.getHours(), now.getMinutes(), 0, 0);
+              const end = addHours(start, 1);
+              handleSelectSlot({ start, end }, { forceCreate: true });
             }}
             disabled={licenseFrozen}
             title={licenseFrozen ? t('cal.licenseFrozenTitle') : undefined}

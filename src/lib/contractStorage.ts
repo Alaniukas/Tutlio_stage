@@ -32,6 +32,27 @@ export async function getContractSignedUrl(
 }
 
 /**
+ * Open a stored contract file (private bucket) in a new tab via a short-lived
+ * signed URL. A blank tab is opened synchronously first to keep the user-gesture
+ * (avoids popup blockers), then redirected once the signed URL resolves.
+ * Returns false if signing failed (caller can surface a toast).
+ */
+export async function openContractFileInNewTab(
+  urlOrPath: string | null | undefined,
+): Promise<boolean> {
+  if (typeof window === 'undefined' || !urlOrPath) return false;
+  const tab = window.open('', '_blank');
+  const signed = await getContractSignedUrl(urlOrPath);
+  if (!signed) {
+    if (tab) tab.close();
+    return false;
+  }
+  if (tab) tab.location.href = signed;
+  else window.open(signed, '_blank', 'noopener,noreferrer');
+  return true;
+}
+
+/**
  * Upload a file to the school-contracts bucket and return just the storage path
  * (not a public URL). Use `getContractSignedUrl` to generate a temporary URL.
  */

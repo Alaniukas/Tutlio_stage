@@ -49,6 +49,8 @@ export type ParentInviteEmailData = {
   locale?: string;
   /** Shown in manual fallback copy (e.g. tutlio.com vs tutlio.lt). */
   publicHost?: string;
+  /** School-context invite uses the school-specific body copy (school-only scope). */
+  isSchool?: boolean;
 };
 
 export async function sendParentInviteEmail(
@@ -85,7 +87,7 @@ export async function sendParentInviteEmail(
       <div class="body">
         <p class="greeting">${t(locale, 'em.hiNameNoEmoji', { name: parentName || studentName })}</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          ${t(locale, 'em.parentInviteBody', { student: studentName })}
+          ${t(locale, data.isSchool ? 'em.parentInviteBodySchool' : 'em.parentInviteBody', { student: studentName })}
         </p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
           ${t(locale, 'em.parentInviteBenefits')}

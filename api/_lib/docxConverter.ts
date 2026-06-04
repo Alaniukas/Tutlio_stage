@@ -18,6 +18,15 @@ function sofficeCandidates(): string[] {
   return [
     ...fromEnv,
     'soffice',
+    'libreoffice',
+    // macOS default install location
+    '/Applications/LibreOffice.app/Contents/MacOS/soffice',
+    // Common Linux locations
+    '/usr/bin/soffice',
+    '/usr/local/bin/soffice',
+    '/opt/libreoffice/program/soffice',
+    '/snap/bin/libreoffice',
+    // Windows
     'soffice.exe',
     'C:\\Program Files\\LibreOffice\\program\\soffice.exe',
     'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe',

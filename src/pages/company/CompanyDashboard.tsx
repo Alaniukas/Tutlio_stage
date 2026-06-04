@@ -104,6 +104,7 @@ export default function CompanyDashboard() {
   const [attentionList, setAttentionList] = useState<OrgSessionRow[]>(cached?.attentionList ?? []);
   const [cancelledList, setCancelledList] = useState<OrgSessionRow[]>(cached?.cancelledList ?? []);
   const [recentPayments, setRecentPayments] = useState<RecentOrgPayment[]>(cached?.recentPayments ?? []);
+  const [pendingCompletionCount, setPendingCompletionCount] = useState<number>(cached?.pendingCompletionCount ?? 0);
   const [tutorPayMap, setTutorPayMap] = useState<Map<string, TutorPay>>(
     cached?.tutorPayEntries ? new Map(cached.tutorPayEntries) : new Map()
   );
@@ -427,6 +428,19 @@ export default function CompanyDashboard() {
         .slice(0, 5);
       setRecentPayments(finalRecentMerged);
 
+      // School-only: contracts where parents supplemented data, awaiting admin confirmation.
+      let pendingCompletion = 0;
+      if (orgBasePath === '/school') {
+        const { count: completionCount } = await supabase
+          .from('school_contracts')
+          .select('id', { count: 'exact', head: true })
+          .eq('organization_id', organizationId)
+          .is('archived_at', null)
+          .not('completion_submitted_at', 'is', null);
+        pendingCompletion = completionCount || 0;
+      }
+      setPendingCompletionCount(pendingCompletion);
+
       setCache(DASH_CACHE_KEY, {
         orgIdForDismiss: organizationId,
         orgName: org?.name || '',
@@ -442,6 +456,7 @@ export default function CompanyDashboard() {
         attentionList: cacheAttentionList,
         cancelledList: cacheCancelledList,
         recentPayments: finalRecentMerged,
+        pendingCompletionCount: pendingCompletion,
         tutorPayEntries: cacheTutorPayEntries,
       });
     } finally {
@@ -513,6 +528,26 @@ export default function CompanyDashboard() {
             {format(new Date(), 'cccc, d MMMM yyyy', { locale: dateFnsLocale })}
           </p>
         </div>
+
+        {orgBasePath === '/school' && pendingCompletionCount > 0 && (
+          <Link
+            to={`${orgBasePath}/contracts`}
+            className="flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 hover:bg-amber-100 transition-colors"
+          >
+            <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center flex-shrink-0">
+              <AlertCircle className="w-5 h-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold text-amber-900">{t('companyDash.contractsAwaitingTitle')}</p>
+              <p className="text-sm text-amber-800">
+                {t('companyDash.contractsAwaitingDesc', { count: String(pendingCompletionCount) })}
+              </p>
+            </div>
+            <span className="text-sm text-amber-800 flex items-center gap-1 flex-shrink-0">
+              {t('companyDash.contractsAwaitingCta')} <ChevronRight className="w-4 h-4" />
+            </span>
+          </Link>
+        )}
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {stats.map((s) => (
