@@ -16,6 +16,7 @@ import {
   Play,
   ChevronRight,
   AlertTriangle,
+  CreditCard,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -47,6 +48,15 @@ interface ChildSession {
   show_comment_to_student?: boolean;
 }
 
+interface InstallmentPayment {
+  id: string;
+  installment_number: number;
+  amount: number;
+  due_date: string;
+  payment_status: 'pending' | 'paid' | 'overdue' | 'failed';
+  paid_at: string | null;
+}
+
 interface ChildInfo {
   studentId: string;
   linkedUserId: string | null;
@@ -62,6 +72,7 @@ interface ChildInfo {
   nextSession: ChildSession | null;
   otherUpcoming: ChildSession[];
   tutorPolicy?: ChildTutorPolicy | null;
+  installments: InstallmentPayment[];
 }
 
 export default function ParentDashboard() {
@@ -139,7 +150,7 @@ export default function ParentDashboard() {
         ),
       ];
 
-      const [sessionsRes, tutorProfilesRes] = await Promise.all([
+      const [sessionsRes, tutorProfilesRes, installmentsRes] = await Promise.all([
         supabase
           .from('sessions')
           .select(
@@ -158,6 +169,13 @@ export default function ParentDashboard() {
               )
               .in('id', tutorIds)
           : Promise.resolve({ data: [], error: null } as any),
+        supabase
+          .from('school_payment_installments')
+          .select(
+            'id, installment_number, amount, due_date, payment_status, paid_at, contract:school_contracts!inner(student_id)',
+          )
+          .in('contract.student_id', studentIds)
+          .order('due_date', { ascending: true }),
       ]);
 
       const { data: sessions, error: sessErr } = sessionsRes;
@@ -225,6 +243,22 @@ export default function ParentDashboard() {
         byStudent.set((s as any).student_id, arr);
       }
 
+      const byStudentInstallments = new Map<string, InstallmentPayment[]>();
+      for (const row of ((installmentsRes as any).data ?? []) as any[]) {
+        const sid = row.contract?.student_id;
+        if (!sid) continue;
+        const arr = byStudentInstallments.get(sid) ?? [];
+        arr.push({
+          id: row.id,
+          installment_number: row.installment_number,
+          amount: Number(row.amount || 0),
+          due_date: row.due_date,
+          payment_status: row.payment_status,
+          paid_at: row.paid_at,
+        });
+        byStudentInstallments.set(sid, arr);
+      }
+
       const kids: ChildInfo[] = studentsRaw.map((s: any) => {
         const list = byStudent.get(s.id) ?? [];
         const upcoming = list.filter(
@@ -256,6 +290,7 @@ export default function ParentDashboard() {
           nextSession: upcoming[0] ?? null,
           otherUpcoming: upcoming.slice(1, 4),
           tutorPolicy: s.tutor_id ? tutorById.get(s.tutor_id) ?? null : null,
+          installments: byStudentInstallments.get(s.id) ?? [],
         };
       });
 
@@ -507,6 +542,7 @@ function ChildBlock({
   formatCountdown: (dateStr: string) => string;
 }) {
   const next = child.nextSession;
+  const installments = child.installments ?? [];
   const schedulePath = `/parent/calendar?studentId=${child.studentId}`;
   const lessonsPath = `/parent/lessons?studentId=${child.studentId}`;
   const messagesPath = `/parent/messages?studentId=${child.studentId}`;
@@ -719,6 +755,69 @@ function ChildBlock({
                     paid={s.paid}
                     endTime={s.end_time}
                   />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {installments.length > 0 && (
+        <div className="bg-white rounded-3xl p-4 border border-gray-100 shadow-sm">
+          <div className="flex items-center gap-2 mb-3 px-1">
+            <CreditCard className="w-4 h-4 text-violet-600" />
+            <h3 className="text-sm font-black text-gray-700 tracking-tight uppercase">
+              {t('school.paymentsTitle')}
+            </h3>
+          </div>
+          <div className="space-y-2">
+            {installments.map((i) => (
+              <div
+                key={i.id}
+                className="rounded-xl border border-gray-100 p-3 flex items-center justify-between gap-3"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-900">
+                    #{i.installment_number} · €{i.amount.toFixed(2)}
+                  </p>
+                  <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                    <Clock className="w-3 h-3" />
+                    {format(new Date(i.due_date), 'd MMM yyyy', { locale: dateFnsLocale })}
+                    {i.paid_at
+                      ? ` · ${format(new Date(i.paid_at), 'd MMM yyyy', { locale: dateFnsLocale })}`
+                      : ''}
+                  </p>
+                </div>
+                <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                  <span
+                    className={cn(
+                      'text-xs px-2 py-1 rounded-full font-semibold',
+                      i.payment_status === 'paid'
+                        ? 'bg-green-50 text-green-700'
+                        : i.payment_status === 'overdue' || i.payment_status === 'failed'
+                          ? 'bg-red-50 text-red-700'
+                          : 'bg-gray-100 text-gray-600',
+                    )}
+                  >
+                    {i.payment_status === 'paid'
+                      ? t('school.payStatusPaid')
+                      : i.payment_status === 'overdue'
+                        ? t('school.payStatusOverdue')
+                        : i.payment_status === 'failed'
+                          ? t('school.payStatusFailed')
+                          : t('school.payStatusPending')}
+                  </span>
+                  {i.payment_status !== 'paid' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        window.location.href = `/api/pay-school-installment?installment=${i.id}`;
+                      }}
+                      className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full bg-violet-600 text-white hover:bg-violet-700 transition-colors"
+                    >
+                      <CreditCard className="w-3.5 h-3.5" /> {t('school.payNowBtn')}
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

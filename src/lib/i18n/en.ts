@@ -278,6 +278,7 @@ export const en: Record<string, string> = {
   'school.payStatusPaid': 'Paid',
   'school.payStatusOverdue': 'Overdue',
   'school.payStatusFailed': 'Failed',
+  'school.payNowBtn': 'Pay now',
   'school.contract.defaultBody': `ANNUAL FEE CONTRACT\n\nSchool: {{school_name}}\nDate: {{date}}\n\nStudent: {{student_name}}\nParent/Guardian: {{parent_name}}\n\nAnnual fee: €{{annual_fee}}\n\nThis contract confirms enrollment and the obligation to pay the annual fee of €{{annual_fee}}.\n\nSignatures:\nSchool representative: ____________________\nParent/Guardian: ____________________`,
   'school.enterTemplatePlaceholder': 'Enter contract template...',
   'school.templateNamePlaceholder': 'Annual fee 2026',

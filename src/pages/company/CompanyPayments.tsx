@@ -21,7 +21,6 @@ import {
 } from '@/components/ui/select';
 import { Plus, CreditCard, Send, CheckCircle, Clock, AlertCircle, Trash2, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import Toast from '@/components/Toast';
-import { authHeaders } from '@/lib/apiHelpers';
 import { sendEmail } from '@/lib/email';
 import { useTranslation } from '@/lib/i18n';
 
@@ -56,11 +55,11 @@ const PAYMENTS_CACHE_KEY = 'company_payments';
 export default function CompanyPayments() {
   const { t } = useTranslation();
   const location = useLocation();
-  const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
   const pc = getCached<any>(PAYMENTS_CACHE_KEY);
   const [orgId, setOrgId] = useState<string | null>(pc?.orgId ?? null);
   const [orgName, setOrgName] = useState(pc?.orgName ?? '');
   const [orgEmail, setOrgEmail] = useState(pc?.orgEmail ?? '');
+  const [orgStripeConnected, setOrgStripeConnected] = useState<boolean>(pc?.orgStripeConnected ?? false);
   const [contracts, setContracts] = useState<Contract[]>(pc?.contracts ?? []);
   const [installments, setInstallments] = useState<Installment[]>(pc?.installments ?? []);
   const [loading, setLoading] = useState(!pc);
@@ -88,7 +87,7 @@ export default function CompanyPayments() {
 
     const { data: admin } = await supabase
       .from('organization_admins')
-      .select('organization_id, organizations(name, email)')
+      .select('organization_id, organizations(name, email, stripe_account_id, stripe_onboarding_complete)')
       .eq('user_id', user.id)
       .maybeSingle();
 
@@ -96,8 +95,10 @@ export default function CompanyPayments() {
     setOrgId(admin.organization_id);
     const name = (admin.organizations as any)?.name || '';
     const email = (admin.organizations as any)?.email || '';
+    const stripeConnected = !!(admin.organizations as any)?.stripe_onboarding_complete && !!(admin.organizations as any)?.stripe_account_id;
     setOrgName(name);
     setOrgEmail(email);
+    setOrgStripeConnected(stripeConnected);
 
     const [cRes, iRes] = await Promise.all([
       supabase
@@ -117,7 +118,7 @@ export default function CompanyPayments() {
     const filtered = (iRes.data || []).filter((i: any) => i.contract?.organization_id === admin.organization_id && !i.contract?.archived_at);
     setContracts(cData as unknown as Contract[]);
     setInstallments(filtered);
-    setCache(PAYMENTS_CACHE_KEY, { orgId: admin.organization_id, orgName: name, orgEmail: email, contracts: cData, installments: filtered });
+    setCache(PAYMENTS_CACHE_KEY, { orgId: admin.organization_id, orgName: name, orgEmail: email, orgStripeConnected: stripeConnected, contracts: cData, installments: filtered });
     setLoading(false);
   };
 
@@ -166,65 +167,49 @@ export default function CompanyPayments() {
   const sendPaymentLink = async (installment: Installment) => {
     setSendingId(installment.id);
     try {
-      const hdrs = await authHeaders();
-      const resp = await fetch('/api/create-school-installment-checkout', {
-        method: 'POST',
-        headers: { ...hdrs, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ installmentId: installment.id, returnPath: `${orgBasePath}/contracts` }),
-      });
-
-      const json = await resp.json().catch(() => ({}));
-      const paymentUrl = resp.ok && typeof json?.url === 'string' ? json.url : undefined;
-      const checkoutFailText = (() => {
-        if (paymentUrl) return undefined;
-        const raw =
-          (typeof json?.message === 'string' && json.message.trim()) ||
-          (typeof json?.error === 'string' && json.error) ||
-          `HTTP ${resp.status}`;
-        const code = typeof json?.code === 'string' ? json.code : '';
-        return code ? `${raw} (${code})` : raw;
-      })();
-
       const contract = installment.contract as any;
       const student = contract?.student;
       const recipient = student?.payer_email || student?.email;
 
-      if (recipient) {
-        const totalInstallments = installments.filter((i) => i.contract_id === installment.contract_id).length;
-        const emailed = await sendEmail({
-          type: 'school_installment_request',
-          to: recipient,
-          data: {
-            schoolName: orgName,
-            schoolEmail: orgEmail,
-            studentName: student?.full_name || '',
-            parentName: student?.payer_name || student?.full_name || '',
-            recipientName: student?.payer_name || student?.full_name || '',
-            installmentNumber: installment.installment_number,
-            totalInstallments,
-            amount: Number(installment.amount).toFixed(2),
-            dueDate: new Date(installment.due_date).toLocaleDateString('lt-LT'),
-            ...(paymentUrl ? { paymentUrl } : {}),
-            ...(orgId ? { organizationId: orgId } : {}),
-          },
-        });
-        if (!emailed) {
-          setToast({ message: t('school.toastInstallmentEmailFail'), type: 'error' });
-          setSendingId(null);
-          return;
-        }
-        setToast({
-          message: paymentUrl
-            ? t('school.toastPaymentLinkSent')
-            : `${t('school.toastInstallmentInfoSentNoCheckout')} (${checkoutFailText})`,
-          type: 'success',
-        });
-      } else if (paymentUrl) {
-        window.open(paymentUrl, '_blank');
+      // No payer email on file — open the self-service pay link so the admin can share it.
+      if (!recipient) {
+        window.open(`/api/pay-school-installment?installment=${installment.id}`, '_blank');
         setToast({ message: t('school.toastCheckoutCreated'), type: 'success' });
-      } else {
-        setToast({ message: checkoutFailText || t('school.toastPaymentError'), type: 'error' });
+        setSendingId(null);
+        return;
       }
+
+      const totalInstallments = installments.filter((i) => i.contract_id === installment.contract_id).length;
+      // The email's "Pay now" button links to /api/pay-school-installment (on-demand checkout).
+      const emailed = await sendEmail({
+        type: 'school_installment_request',
+        to: recipient,
+        data: {
+          schoolName: orgName,
+          schoolEmail: orgEmail,
+          studentName: student?.full_name || '',
+          parentName: student?.payer_name || student?.full_name || '',
+          recipientName: student?.payer_name || student?.full_name || '',
+          installmentNumber: installment.installment_number,
+          totalInstallments,
+          amount: Number(installment.amount).toFixed(2),
+          dueDate: new Date(installment.due_date).toLocaleDateString('lt-LT'),
+          installmentId: installment.id,
+          ...(orgId ? { organizationId: orgId } : {}),
+        },
+      });
+      if (!emailed) {
+        setToast({ message: t('school.toastInstallmentEmailFail'), type: 'error' });
+        setSendingId(null);
+        return;
+      }
+      // Warn the admin if the school can't actually receive card payments yet.
+      setToast({
+        message: orgStripeConnected
+          ? t('school.toastPaymentLinkSent')
+          : t('school.toastInstallmentInfoSentNoCheckout'),
+        type: orgStripeConnected ? 'success' : 'error',
+      });
     } catch {
       setToast({ message: t('school.toastPaymentError'), type: 'error' });
     }

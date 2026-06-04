@@ -127,7 +127,6 @@ export default function CompanyContracts() {
   const { t: tr } = useTranslation();
   const location = useLocation();
   const isSchoolView = location.pathname.startsWith('/school');
-  const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
   const cc = getCached<any>(CONTRACTS_CACHE_KEY);
   const [orgId, setOrgId] = useState<string | null>(cc?.orgId ?? null);
   const [orgName, setOrgName] = useState(cc?.orgName ?? '');
@@ -457,7 +456,8 @@ export default function CompanyContracts() {
     });
   };
 
-  /** Always emails installment details to the payer. Adds Stripe link only if checkout succeeds (e.g. org Connect ready). */
+  /** Emails installment details to the payer. The email's "Pay now" button links to the
+   *  on-demand /api/pay-school-installment checkout, so the payer can pay anytime. */
   const sendFirstInstallmentPaymentLink = async (params: {
     installmentId: string;
     installmentNumber: number;
@@ -470,33 +470,7 @@ export default function CompanyContracts() {
     additionalFeeAmount?: number;
     additionalFeePurpose?: string;
     annualFee?: number;
-  }): Promise<{ paymentUrl?: string; checkoutError?: string }> => {
-    let paymentUrl: string | undefined;
-    let checkoutError: string | undefined;
-    try {
-      const hdrs = await authHeaders();
-      const resp = await fetch('/api/create-school-installment-checkout', {
-        method: 'POST',
-        headers: { ...hdrs, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ installmentId: params.installmentId, returnPath: `${orgBasePath}/contracts` }),
-      });
-      const json = await resp.json().catch(() => ({}));
-      if (resp.ok && typeof json?.url === 'string') {
-        paymentUrl = json.url;
-      } else {
-        const raw =
-          (typeof json?.message === 'string' && json.message.trim()) ||
-          (typeof json?.error === 'string' && json.error) ||
-          `HTTP ${resp.status}`;
-        const code = typeof json?.code === 'string' ? json.code : '';
-        checkoutError = code ? `${raw} (${code})` : raw;
-        console.warn('[CompanyContracts] Checkout not created:', checkoutError);
-      }
-    } catch (e) {
-      checkoutError = tr('school.checkoutNetworkError');
-      console.warn('[CompanyContracts] create-school-installment-checkout failed:', e);
-    }
-
+  }): Promise<void> => {
     const emailed = await sendEmail({
       type: 'school_installment_request',
       to: params.recipientEmail,
@@ -513,18 +487,13 @@ export default function CompanyContracts() {
         additionalFeeAmount: params.additionalFeeAmount ? Number(params.additionalFeeAmount).toFixed(2) : undefined,
         additionalFeePurpose: params.additionalFeePurpose || undefined,
         annualFee: params.annualFee ? Number(params.annualFee).toFixed(2) : undefined,
-        ...(paymentUrl ? { paymentUrl } : {}),
+        installmentId: params.installmentId,
         ...(orgId ? { organizationId: orgId } : {}),
       },
     });
     if (!emailed) {
       throw new Error(tr('school.toastInstallmentEmailFail'));
     }
-
-    const out: { paymentUrl?: string; checkoutError?: string } = {};
-    if (paymentUrl) out.paymentUrl = paymentUrl;
-    else if (checkoutError) out.checkoutError = checkoutError;
-    return out;
   };
 
   const createCompletionUrl = async (contractId: string): Promise<string | null> => {

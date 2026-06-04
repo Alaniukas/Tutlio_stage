@@ -1802,6 +1802,11 @@ function schoolInstallmentRequest(d: any, locale: Locale) {
   const additionalFee = Number(d.additionalFeeAmount || 0);
   const hasBreakdown = annualFee > 0 || additionalFee > 0;
   const totalAmount = Number(d.amount || 0);
+  // Self-service on-demand pay link (mirrors per-lesson /api/pay-session). The
+  // payer can pay anytime; falls back to a pre-generated paymentUrl if provided.
+  const payUrl = d.installmentId
+    ? `${appUrl.replace(/\/$/, '')}/api/pay-school-installment?installment=${encodeURIComponent(String(d.installmentId))}`
+    : (typeof d.paymentUrl === 'string' && d.paymentUrl.trim().length > 0 ? String(d.paymentUrl).trim() : '');
   return {
     subject: `Mokėjimo prašymas — įmoka #${d.installmentNumber || ''}`,
     html: wrap(`
@@ -1825,7 +1830,7 @@ function schoolInstallmentRequest(d: any, locale: Locale) {
             ${td('Terminas', d.dueDate || '—', false)}
           </table>
         </div>
-        ${d.paymentUrl ? `<div style="text-align:center; margin:24px 0;">${outlookEmailButton(d.paymentUrl, 'Apmokėti dabar', '#059669', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}</div>` : `<p style="color:#4b5563; font-size:14px; line-height:1.6; margin:16px 0 0;">Kortele apmokėti galėsite nuoroda, kurią mokykla atsiųs atskirai (kai bus sukonfigūruotas mokėjimas), arba sutarkite mokėjimo būdą tiesiogiai su mokykla.</p>`}
+        ${payUrl ? `<div style="text-align:center; margin:24px 0;">${outlookEmailButton(payUrl, 'Apmokėti dabar', '#059669', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}</div>` : ''}
         <p style="color:#6b7280; font-size:13px;">Jei turite klausimų, susisiekite su mokykla: ${esc(d.schoolEmail || '')}.</p>
       </div>${footerFor(locale)}`, locale),
   };

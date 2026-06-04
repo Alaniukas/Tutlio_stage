@@ -485,7 +485,7 @@ export default function StudentDashboard() {
                     </div>
                 )}
 
-                {installments.length > 0 && !isSchoolOrgStudent && (
+                {installments.length > 0 && (
                     <div className="bg-white border border-gray-200 rounded-3xl p-4">
                         <button
                             type="button"
@@ -505,7 +505,7 @@ export default function StudentDashboard() {
                         {paymentsExpanded && (
                             <div className="mt-3 space-y-2">
                                 {installments.map((i) => (
-                                    <div key={i.id} className="rounded-xl border border-gray-100 p-3 flex items-center justify-between">
+                                    <div key={i.id} className="rounded-xl border border-gray-100 p-3 flex items-center justify-between gap-3">
                                         <div>
                                             <p className="text-sm font-semibold text-gray-900">Imoka #{i.installment_number} · €{i.amount.toFixed(2)}</p>
                                             <p className="text-xs text-gray-500">
@@ -513,16 +513,27 @@ export default function StudentDashboard() {
                                                 {i.paid_at ? ` · Apmoketa: ${new Date(i.paid_at).toLocaleDateString('lt-LT')}` : ''}
                                             </p>
                                         </div>
-                                        <span className={cn(
-                                            'text-xs px-2 py-1 rounded-full font-semibold',
-                                            i.payment_status === 'paid' ? 'bg-green-50 text-green-700' :
-                                                i.payment_status === 'overdue' ? 'bg-red-50 text-red-700' :
-                                                    i.payment_status === 'failed' ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'
-                                        )}>
-                                            {i.payment_status === 'paid' ? 'Apmoketa' :
-                                                i.payment_status === 'overdue' ? 'Pradelsta' :
-                                                    i.payment_status === 'failed' ? 'Nepavyko' : 'Laukia'}
-                                        </span>
+                                        <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                                            <span className={cn(
+                                                'text-xs px-2 py-1 rounded-full font-semibold',
+                                                i.payment_status === 'paid' ? 'bg-green-50 text-green-700' :
+                                                    i.payment_status === 'overdue' ? 'bg-red-50 text-red-700' :
+                                                        i.payment_status === 'failed' ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'
+                                            )}>
+                                                {i.payment_status === 'paid' ? 'Apmoketa' :
+                                                    i.payment_status === 'overdue' ? 'Pradelsta' :
+                                                        i.payment_status === 'failed' ? 'Nepavyko' : 'Laukia'}
+                                            </span>
+                                            {i.payment_status !== 'paid' && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { window.location.href = `/api/pay-school-installment?installment=${i.id}`; }}
+                                                    className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full bg-violet-600 text-white hover:bg-violet-700 transition-colors"
+                                                >
+                                                    <CreditCard className="w-3.5 h-3.5" /> {t('school.payNowBtn')}
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
                                 ))}
                             </div>

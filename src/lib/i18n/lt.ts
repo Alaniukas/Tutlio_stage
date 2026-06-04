@@ -276,6 +276,7 @@ export const lt: Record<string, string> = {
   'school.payStatusPaid': 'Apmokėta',
   'school.payStatusOverdue': 'Vėluoja',
   'school.payStatusFailed': 'Nepavyko',
+  'school.payNowBtn': 'Apmokėti',
   'school.contract.defaultBody': `METINIO MOKESČIO SUTARTIS\n\nMokykla: {{school_name}}\nData: {{date}}\n\nMokinys: {{student_name}}\nTėvas / globėjas: {{parent_name}}\n\nMetinis mokestis: €{{annual_fee}}\n\nŠia sutartimi patvirtinamas mokinio įrašymas ir įsipareigojimas sumokėti metinį mokestį €{{annual_fee}}.\n\nParašai:\nMokyklos atstovas: ____________________\nTėvas / globėjas: ____________________`,
   'school.enterTemplatePlaceholder': 'Įveskite sutarties šabloną...',
   'school.templateNamePlaceholder': 'Metinis mokestis 2026',
