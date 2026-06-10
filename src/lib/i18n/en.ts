@@ -1200,6 +1200,7 @@ export const en: Record<string, string> = {
   'compStu.contractNone': 'No contract',
   'compStu.contractDownload': 'Download contract',
   'compStu.contractOpenFail': 'Could not open the contract file.',
+  'compStu.contractFileMissing': 'Contract file not uploaded yet. Upload a signed contract or resend the contract.',
   'compStu.sendInvoice': 'Send invoice',
   'compStu.sendPackage': 'Send package',
   'compStu.sendPackageTitle': 'Send lessons package',

@@ -57,16 +57,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     (typeof req.query?.contractId === 'string' ? req.query.contractId : '') ||
     (typeof req.body?.contractId === 'string' ? req.body.contractId : '');
 
-  let tokenRow: { id: string; contract_id: string; used_at: string | null; expires_at: string } | null = null;
+  let tokenRow: { id: string; contract_id: string; expires_at: string } | null = null;
   let resolvedContractId = '';
   if (token) {
+    // `select('*')` keeps this working on databases that still have the legacy
+    // `used` boolean instead of `used_at` (see 20260605160000 migration).
     const { data, error: tokenErr } = await supabase
       .from('school_contract_completion_tokens')
-      .select('id, contract_id, used_at, expires_at')
+      .select('*')
       .eq('token', token)
       .maybeSingle();
     if (tokenErr || !data) return res.status(404).send(pageHtml('<h2>Nuoroda nerasta.</h2>'));
-    if (data.used_at) return res.status(410).send(pageHtml('<h2>Nuoroda jau panaudota.</h2>'));
+    const tokenUsed =
+      Boolean((data as { used_at?: string | null }).used_at) ||
+      (data as { used?: boolean | null }).used === true;
+    if (tokenUsed) return res.status(410).send(pageHtml('<h2>Nuoroda jau panaudota.</h2>'));
     if (new Date(data.expires_at).getTime() < Date.now()) return res.status(410).send(pageHtml('<h2>Nuoroda nebegalioja.</h2>'));
     tokenRow = data as any;
     resolvedContractId = data.contract_id;
@@ -348,10 +353,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (tokenRow?.id) {
-    await supabase
+    const { error: usedAtErr } = await supabase
       .from('school_contract_completion_tokens')
       .update({ used_at: new Date().toISOString() })
       .eq('id', tokenRow.id);
+    if (usedAtErr?.code === '42703') {
+      // Legacy schema without `used_at` — fall back to the old `used` boolean.
+      await supabase
+        .from('school_contract_completion_tokens')
+        .update({ used: true })
+        .eq('id', tokenRow.id);
+    }
   }
 
   return res.status(200).send(

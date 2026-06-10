@@ -2,8 +2,6 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 
-const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
-
 function json(res: VercelResponse, status: number, body: unknown) {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -57,69 +55,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   await supabase.from('school_contracts').update(updatePayload).eq('id', contractId);
 
   const student = (contract as any).student || {};
-  const org = (contract as any).org || {};
 
+  // Ensure invite code exists for later Stripe payment flow; do not email here.
+  // Child booking invite → first paid Stripe installment (confirm-school-installment-payment).
+  // Parent portal invite → admin "Pakviesti tėvą" only.
   let inviteCode = String(student.invite_code || '').trim();
   if (!inviteCode) {
     inviteCode = generateInviteCode();
     await supabase.from('students').update({ invite_code: inviteCode }).eq('id', String(student.id || (contract as any).student_id));
   }
 
-  const bookingUrl = `${APP_URL.replace(/\/$/, '')}/book/${encodeURIComponent(inviteCode)}`;
-
-  /**
-   * When a contract is marked signed, we send the CHILD access invite (booking code + link).
-   * This goes to:
-   * - student.email (if present)
-   * - payer_email and parent_secondary_email (if present)
-   *
-   * We do NOT send parent portal invites here (that was confusing for schools).
-   */
-  type Recipient = { email: string; label: 'student' | 'parent' | 'parent2' };
-  const recipients: Recipient[] = [];
-  const pushUnique = (email: unknown, label: Recipient['label']) => {
-    const raw = String(email || '').trim();
-    if (!raw.includes('@')) return;
-    const norm = raw.toLowerCase();
-    if (recipients.some((r) => r.email.toLowerCase() === norm)) return;
-    recipients.push({ email: raw, label });
-  };
-  pushUnique(student.email, 'student');
-  pushUnique(student.payer_email, 'parent');
-  pushUnique(student.parent_secondary_email, 'parent2');
-
-  const inviteResults: Array<{ email: string; ok: boolean; label: Recipient['label']; error?: string }> = [];
-  for (const r of recipients) {
-    try {
-      await fetch(`${APP_URL.replace(/\/$/, '')}/api/send-email`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-internal-key': serviceRoleKey },
-        body: JSON.stringify({
-          type: 'invite_email',
-          to: r.email,
-          data: {
-            context: 'school',
-            studentName: String(student.full_name || ''),
-            tutorName: String(org.name || 'Mokykla'),
-            inviteCode,
-            bookingUrl,
-            ...(orgId ? { organizationId: orgId } : {}),
-          },
-        }),
-      });
-      inviteResults.push({ email: r.email, label: r.label, ok: true });
-    } catch (e: any) {
-      inviteResults.push({ email: r.email, label: r.label, ok: false, error: e?.message || 'send failed' });
-    }
-  }
-
   return json(res, 200, {
     success: true,
     contractId,
     inviteCode,
-    bookingUrl,
-    sent: inviteResults.filter((x) => x.ok).length,
-    inviteResults,
+    alreadySigned: (contract as any).signing_status === 'signed',
   });
 }
 

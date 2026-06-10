@@ -1765,16 +1765,16 @@ function schoolContract(d: any, locale: Locale) {
       </div>`
     : '';
   return {
-    subject: `Metinio mokescio sutartis${d.contractNumber ? ` Nr. ${d.contractNumber}` : ''} — ${d.studentName || 'Mokinys'}`,
+    subject: `Ugdymo šeimoje sutartis${d.contractNumber ? ` Nr. ${d.contractNumber}` : ''} — ${d.studentName || 'Mokinys'}`,
     html: wrap(`
       <div class="header" style="${headerInlineStyle('#059669', '#047857')}">
-        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Metinio mokesčio sutartis</h1>
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Ugdymo šeimoje sutartis</h1>
         <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'Mokykla')}</p>
       </div>
       <div class="body">
         <p class="greeting">Sveiki, ${esc(d.recipientName || d.parentName || d.studentName)},</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          Prašome peržiūrėti metinio mokesčio sutartį mokiniui <strong>${esc(d.studentName)}</strong> (${esc(d.schoolName)}).
+          Prašome peržiūrėti Ugdymo šeimoje sutartį mokiniui <strong>${esc(d.studentName)}</strong> (${esc(d.schoolName)}).
         </p>
         <div class="info-card">
           <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
@@ -2337,7 +2337,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     emailContent = applyBranding(emailContent);
 
     // Parents at a school see a neutral subject ("Ugdymo šeimoje") for contract/payment emails.
-    if (isSchoolOrg && (type === 'school_contract' || type === 'school_installment_request')) {
+    if (isSchoolOrg && type === 'school_contract') {
+      emailContent = { ...emailContent, subject: 'Ugdymo šeimoje sutartis' };
+    } else if (isSchoolOrg && type === 'school_installment_request') {
       emailContent = { ...emailContent, subject: 'Ugdymo šeimoje' };
     }
 

@@ -1285,7 +1285,8 @@ export default function CompanyContracts() {
       return;
     }
     setToast({ message: 'Pasirašyta sutartis įkelta.', type: 'success' });
-    // Also send student/parent access emails (idempotent).
+    // Ensure the student invite code exists (no emails are sent here; the child
+    // invite goes out after the first paid Stripe installment).
     try {
       const hdrs = await authHeaders();
       void fetch('/api/school-contract-mark-signed', {

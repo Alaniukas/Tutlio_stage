@@ -105,19 +105,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const { data: cRow } = await supabase.from('school_contracts').select('organization_id').eq('id', effectiveInstallment.contract_id).maybeSingle();
             schoolOrgId = (cRow as any)?.organization_id || null;
           }
-          const recipientEmail = student.payer_email || student.email;
-          if (recipientEmail) {
+          // Child registration invite only — parent portal invite is sent separately by admin.
+          const childEmail = String(student.email || '').trim();
+          if (childEmail.includes('@')) {
             const bookingUrl = `${APP_URL}/book/${inviteCode}`;
+            let schoolName = 'Mokykla';
+            if (schoolOrgId) {
+              const { data: orgRow } = await supabase
+                .from('organizations')
+                .select('name')
+                .eq('id', schoolOrgId)
+                .maybeSingle();
+              if (orgRow?.name) schoolName = String(orgRow.name);
+            }
             await fetch(`${APP_URL}/api/send-email`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'x-internal-key': serviceRoleKey },
               body: JSON.stringify({
                 type: 'invite_email',
-                to: recipientEmail,
+                to: childEmail,
                 data: {
                   context: 'school',
                   studentName: student.full_name,
-                  tutorName: 'Mokykla',
+                  tutorName: schoolName,
                   inviteCode,
                   bookingUrl,
                   ...(schoolOrgId ? { organizationId: schoolOrgId } : {}),

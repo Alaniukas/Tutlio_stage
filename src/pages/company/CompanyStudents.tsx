@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
-import { openContractFileInNewTab } from '@/lib/contractStorage';
+import { extractStoragePath, openContractFileInNewTab } from '@/lib/contractStorage';
 import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
 import { Button } from '@/components/ui/button';
@@ -143,6 +143,46 @@ function studentContractBadge(info: StudentContractInfo | undefined) {
 
 function studentContractDownloadUrl(info: StudentContractInfo | undefined): string {
   return String(info?.signed_contract_url || info?.pdf_url || '').trim();
+}
+
+function SchoolStudentContractStatus({
+  student,
+  contractInfo,
+  onDownload,
+  t,
+}: {
+  student: { id: string; media_publicity_consent?: string | null };
+  contractInfo: StudentContractInfo | undefined;
+  onDownload: (path: string) => void;
+  t: (key: string) => string;
+}) {
+  const media = mediaConsentBadge(student.media_publicity_consent);
+  const contract = studentContractBadge(contractInfo);
+  const filePath = studentContractDownloadUrl(contractInfo);
+  const isSigned = contractInfo?.signing_status === 'signed';
+
+  return (
+    <div className="mt-2 flex flex-col items-start gap-1.5">
+      <div className="flex flex-wrap gap-1.5">
+        <span className={`text-[11px] border rounded-md px-2 py-0.5 ${media.className}`}>{t(media.labelKey)}</span>
+        <span className={`text-[11px] border rounded-md px-2 py-0.5 ${contract.className}`}>{t(contract.labelKey)}</span>
+      </div>
+      {filePath ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDownload(filePath);
+          }}
+          className="text-[11px] text-indigo-700 hover:text-indigo-900 inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1 font-medium"
+        >
+          <Download className="w-3 h-3" /> {t('compStu.contractDownload')}
+        </button>
+      ) : isSigned ? (
+        <span className="text-[11px] text-gray-500">{t('compStu.contractFileMissing')}</span>
+      ) : null}
+    </div>
+  );
 }
 
 function hasSchoolParentContacts(student: {
@@ -1359,6 +1399,31 @@ export default function CompanyStudents() {
   };
 
   const openContractFile = async (urlOrPath?: string | null) => {
+    if (!urlOrPath?.trim()) {
+      setToastMessage({ message: t('compStu.contractFileMissing'), type: 'error' });
+      return;
+    }
+    if (isSchoolView) {
+      try {
+        const res = await fetch('/api/school-contract-file-url', {
+          method: 'POST',
+          headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: extractStoragePath(urlOrPath) }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && typeof data?.signedUrl === 'string') {
+          window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+          return;
+        }
+        setToastMessage({
+          message: data?.error || t('compStu.contractOpenFail'),
+          type: 'error',
+        });
+        return;
+      } catch {
+        /* fallback below */
+      }
+    }
     const ok = await openContractFileInNewTab(urlOrPath);
     if (!ok) setToastMessage({ message: t('compStu.contractOpenFail'), type: 'error' });
   };
@@ -1981,37 +2046,12 @@ export default function CompanyStudents() {
                           )}
                         </div>
                         {isSchoolView && (
-                          <div className="mt-1 flex items-center gap-2 flex-wrap">
-                            {(() => {
-                              const b = mediaConsentBadge(student.media_publicity_consent);
-                              return (
-                                <span className={`text-[11px] border rounded-md px-1.5 py-0.5 inline-block ${b.className}`}>
-                                  {t(b.labelKey)}
-                                </span>
-                              );
-                            })()}
-                            {(() => {
-                              const info = contractsByStudent[student.id];
-                              const cb = studentContractBadge(info);
-                              const url = studentContractDownloadUrl(info);
-                              return (
-                                <>
-                                  <span className={`text-[11px] border rounded-md px-1.5 py-0.5 inline-block ${cb.className}`}>
-                                    {t(cb.labelKey)}
-                                  </span>
-                                  {url && (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => { e.stopPropagation(); void openContractFile(url); }}
-                                      className="text-[11px] text-indigo-600 hover:underline inline-flex items-center gap-1"
-                                    >
-                                      <Download className="w-3 h-3" /> {t('compStu.contractDownload')}
-                                    </button>
-                                  )}
-                                </>
-                              );
-                            })()}
-                          </div>
+                          <SchoolStudentContractStatus
+                            student={student}
+                            contractInfo={contractsByStudent[student.id]}
+                            onDownload={(path) => void openContractFile(path)}
+                            t={t}
+                          />
                         )}
                         <p className="text-xs text-gray-500 mt-1 truncate">
                           {t('compStu.tutorInline')}{' '}
@@ -2082,14 +2122,14 @@ export default function CompanyStudents() {
 
             {/* Desktop table */}
             <div className="hidden md:block overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full table-fixed min-w-[920px]">
                 <thead className="bg-gray-50 border-b border-gray-100">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('compStu.thStudent')}</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('compStu.thTutor')}</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('compStu.thContacts')}</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('compStu.thCode')}</th>
-                    <th className="px-6 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('compStu.thActions')}</th>
+                    <th className="w-[28%] px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('compStu.thStudent')}</th>
+                    <th className="w-[14%] px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('compStu.thTutor')}</th>
+                    <th className="w-[28%] px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('compStu.thContacts')}</th>
+                    <th className="w-[12%] px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('compStu.thCode')}</th>
+                    <th className="w-[18%] px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('compStu.thActions')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -2112,91 +2152,66 @@ export default function CompanyStudents() {
                           setIsStudentModalOpen(true);
                         }}
                       >
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-3">
+                        <td className="px-4 py-4 align-top">
+                          <div className="flex items-start gap-3 min-w-0">
                             <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
                               {initials || '?'}
                             </div>
-                            <div>
-                              <p className="font-semibold text-gray-900">{student.full_name}</p>
-                              <p className="text-xs mt-0.5">
+                            <div className="min-w-0 flex-1">
+                              <p className="font-semibold text-gray-900 truncate">{student.full_name}</p>
+                              <div className="mt-1">
                                 {student.linked_user_id ? (
-                                  <span className="text-green-700 bg-green-50 border border-green-200 rounded-md px-1.5 py-0.5">{t('compStu.connected')}</span>
+                                  <span className="text-[11px] text-green-700 bg-green-50 border border-green-200 rounded-md px-2 py-0.5">{t('compStu.connected')}</span>
                                 ) : (
-                                  <span className="text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-0.5">{t('compStu.notConnected')}</span>
+                                  <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-0.5">{t('compStu.notConnected')}</span>
                                 )}
-                              </p>
+                              </div>
                               {isSchoolView && (
-                                <p className="text-xs mt-1 flex items-center gap-2 flex-wrap">
-                                  {(() => {
-                                    const b = mediaConsentBadge(student.media_publicity_consent);
-                                    return (
-                                      <span className={`text-[11px] border rounded-md px-1.5 py-0.5 inline-block ${b.className}`}>
-                                        {t(b.labelKey)}
-                                      </span>
-                                    );
-                                  })()}
-                                  {(() => {
-                                    const info = contractsByStudent[student.id];
-                                    const cb = studentContractBadge(info);
-                                    const url = studentContractDownloadUrl(info);
-                                    return (
-                                      <>
-                                        <span className={`text-[11px] border rounded-md px-1.5 py-0.5 inline-block ${cb.className}`}>
-                                          {t(cb.labelKey)}
-                                        </span>
-                                        {url && (
-                                          <button
-                                            type="button"
-                                            onClick={(e) => { e.stopPropagation(); void openContractFile(url); }}
-                                            className="text-[11px] text-indigo-600 hover:underline inline-flex items-center gap-1"
-                                          >
-                                            <Download className="w-3 h-3" /> {t('compStu.contractDownload')}
-                                          </button>
-                                        )}
-                                      </>
-                                    );
-                                  })()}
-                                </p>
+                                <SchoolStudentContractStatus
+                                  student={student}
+                                  contractInfo={contractsByStudent[student.id]}
+                                  onDownload={(path) => void openContractFile(path)}
+                                  t={t}
+                                />
                               )}
                             </div>
                           </div>
                         </td>
-                        <td className="px-6 py-4">
+                        <td className="px-4 py-4 align-top">
                           {tutorNames.length > 0 ? (
-                            <>
+                            <div className="text-left">
                               <p className="text-sm text-gray-700">
                                 {tutorNames.length <= 1 ? tutorNames[0] : `${tutorNames[0]} +${tutorNames.length - 1}`}
                               </p>
                               {tutorNames.length > 1 && (
                                 <p className="text-[11px] text-gray-400 mt-0.5">{t('compStu.moreThanOneTutor')}</p>
                               )}
-                            </>
+                            </div>
                           ) : (
-                            <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-0.5">{t('compStu.tutorNotAssigned')}</span>
+                            <span className="inline-flex text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-0.5">{t('compStu.tutorNotAssigned')}</span>
                           )}
                         </td>
-                        <td className="px-6 py-4">
+                        <td className="px-4 py-4 align-top">
                           <div className="space-y-2 text-xs text-gray-700">
                             <div>
-                              <span className="text-gray-400 font-semibold uppercase tracking-wide">{t('compStu.studentLabel')}</span>
-                              <div className="flex items-center gap-1.5 mt-0.5">
-                                <Mail className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-                                <span>{adminShowEmail(student.email)}</span>
-                              </div>
+                              <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide mb-1">{t('compStu.studentLabel')}</p>
                               <div className="flex items-center gap-1.5">
+                                <Mail className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                                <span className="truncate">{adminShowEmail(student.email)}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5 mt-0.5">
                                 <Phone className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
                                 <span>{adminShowPhone(student.phone)}</span>
                               </div>
                             </div>
                             {shouldShowParentContacts(student) && (
-                              <div className="pt-1 border-t border-gray-100">
-                                <span className="text-gray-400 font-semibold uppercase tracking-wide">{t('compStu.payerLabel')}</span>
-                                <div className="flex items-center gap-1.5 mt-0.5">
-                                  <Mail className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-                                  <span>{adminShowEmail(student.payer_email)}</span>
-                                </div>
+                              <div className="pt-2 border-t border-gray-100">
+                                <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide mb-1">{t('compStu.payerLabel')}</p>
                                 <div className="flex items-center gap-1.5">
+                                  <Mail className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                                  <span className="truncate">{adminShowEmail(student.payer_email)}</span>
+                                </div>
+                                <div className="flex items-center gap-1.5 mt-0.5">
                                   <Phone className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
                                   <span>{adminShowPhone(student.payer_phone)}</span>
                                 </div>
@@ -2204,12 +2219,12 @@ export default function CompanyStudents() {
                             )}
                           </div>
                         </td>
-                        <td className="px-6 py-4">
-                          <code className="font-mono font-bold text-indigo-700 text-sm tracking-widest bg-indigo-50 px-2 py-1 rounded">
+                        <td className="px-4 py-4 align-top">
+                          <code className="inline-block font-mono font-bold text-indigo-700 text-sm tracking-widest bg-indigo-50 px-2 py-1 rounded">
                             {student.invite_code}
                           </code>
                         </td>
-                        <td className="px-6 py-4 text-right">
+                        <td className="px-4 py-4 text-right align-top">
                           <div className="inline-flex items-center gap-1.5">
                             {isSchoolView && (student.payer_email || student.parent_secondary_email) && (
                               <button
@@ -2383,23 +2398,14 @@ export default function CompanyStudents() {
                     <p className="text-gray-600 text-sm">
                       {t('compStu.codeInline')} <code className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">{selectedStudent.invite_code}</code>
                     </p>
-                    {isSchoolView && (() => {
-                      const info = contractsByStudent[selectedStudent.id];
-                      const cb = studentContractBadge(info);
-                      const url = studentContractDownloadUrl(info);
-                      return (
-                        <div className="flex items-center gap-2 flex-wrap text-sm">
-                          <span className={`text-xs border rounded-md px-2 py-0.5 inline-block ${cb.className}`}>
-                            {t(cb.labelKey)}
-                          </span>
-                          {url && (
-                            <button type="button" onClick={() => openContractFile(url)} className="text-xs text-indigo-600 hover:underline inline-flex items-center gap-1">
-                              <Download className="w-3 h-3" /> {t('compStu.contractDownload')}
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })()}
+                    {isSchoolView && selectedStudent && (
+                      <SchoolStudentContractStatus
+                        student={selectedStudent}
+                        contractInfo={contractsByStudent[selectedStudent.id]}
+                        onDownload={(path) => void openContractFile(path)}
+                        t={t}
+                      />
+                    )}
                     {isSchoolView && (
                       <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-3">
                         <div className="flex items-center justify-between gap-2">

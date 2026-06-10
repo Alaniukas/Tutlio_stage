@@ -1198,6 +1198,7 @@ export const lt: Record<string, string> = {
   'compStu.contractNone': 'Sutarties nėra',
   'compStu.contractDownload': 'Atsisiųsti sutartį',
   'compStu.contractOpenFail': 'Nepavyko atidaryti sutarties failo.',
+  'compStu.contractFileMissing': 'Sutarties failas dar neįkeltas. Įkelkite pasirašytą sutartį arba išsiųskite sutartį pakartotinai.',
   'compStu.sendInvoice': 'Siųsti mėnesinę sąskaitą (laikotarpis)',
   'compStu.sendPackage': 'Siųsti paketą',
   'compStu.sendPackageTitle': 'Siųsti pamokų paketą',
