@@ -1,13 +1,15 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { AlertCircle, CheckCircle2, Building2, Lock, Plus, Eye, EyeOff, ArrowLeft, List, Pencil, FileText, Users, BarChart3, Landmark, Mail } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Building2, Lock, Plus, Eye, EyeOff, ArrowLeft, List, Pencil, FileText, Users, BarChart3, Landmark, Mail, Calculator, UserCheck } from 'lucide-react';
 import { FEATURE_REGISTRY, FEATURE_CATEGORIES, getFeaturesByCategory } from '@/lib/featureRegistry';
 import { useTranslation } from '@/lib/i18n';
 import AdminBlogPanel from '@/components/admin/AdminBlogPanel';
 import AdminStatisticsPanel from '@/components/admin/AdminStatisticsPanel';
 import AdminPerlasPayoutsPanel from '@/components/admin/AdminPerlasPayoutsPanel';
 import AdminEnterpriseContactsPanel from '@/components/admin/AdminEnterpriseContactsPanel';
+import AdminBillingPanel from '@/components/admin/AdminBillingPanel';
+import AdminAttendancePanel from '@/components/admin/AdminAttendancePanel';
 type Step = 'lock' | 'panel';
 
 interface FormState {
@@ -73,7 +75,7 @@ interface AuditRow {
   details: Record<string, unknown>;
 }
 
-type PanelView = 'list' | 'create' | 'createSchool' | 'detail' | 'blog' | 'soloTutors' | 'statistics' | 'perlasPayouts' | 'enterpriseContacts';
+type PanelView = 'list' | 'create' | 'createSchool' | 'detail' | 'blog' | 'soloTutors' | 'statistics' | 'perlasPayouts' | 'enterpriseContacts' | 'billing' | 'attendance';
 
 interface SoloTutorAdminRow {
   id: string;
@@ -125,6 +127,8 @@ export default function AdminPanel() {
   const [detailAudit, setDetailAudit] = useState<AuditRow[]>([]);
   const [editTutorLicenseCount, setEditTutorLicenseCount] = useState(0);
   const [editStatus, setEditStatus] = useState<'active' | 'suspended'>('active');
+  /** Monthly B2B platform fee in EUR; '' = not invoiced (null). */
+  const [editPlatformMonthlyFee, setEditPlatformMonthlyFee] = useState('');
   const [editFeatures, setEditFeatures] = useState<Record<string, boolean>>({});
   const [editPerlasFinanceEnabled, setEditPerlasFinanceEnabled] = useState(false);
   const [detailName, setDetailName] = useState('');
@@ -330,6 +334,7 @@ export default function AdminPanel() {
       setDetailName(org.name);
       setEditTutorLicenseCount(Number(org.tutor_license_count) || 0);
       setEditStatus(org.status === 'suspended' ? 'suspended' : 'active');
+      setEditPlatformMonthlyFee(org.platform_monthly_fee_eur != null ? String(org.platform_monthly_fee_eur) : '');
 
       const orgFeatures = org.features && typeof org.features === 'object' ? org.features : {};
       const mergedFeatures: Record<string, boolean> = {};
@@ -394,6 +399,7 @@ export default function AdminPanel() {
           status: editStatus,
           features: merged,
           perlas_finance_enabled: perlasOn,
+          platform_monthly_fee_eur: editPlatformMonthlyFee.trim() === '' ? null : Number(editPlatformMonthlyFee),
           slug: editSlug.trim() || null,
           logo_url: editLogoUrl.trim() || null,
           brand_color: editBrandColor.trim() || '#6366f1',
@@ -701,11 +707,27 @@ export default function AdminPanel() {
           </button>
           <button
             type="button"
+            onClick={() => { setPanelView('billing'); setDetailId(null); }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${panelView === 'billing' ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+          >
+            <Calculator className="w-4 h-4" />
+            Buhalterija
+          </button>
+          <button
+            type="button"
             onClick={() => { setPanelView('enterpriseContacts'); setDetailId(null); }}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${panelView === 'enterpriseContacts' ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
           >
             <Mail className="w-4 h-4" />
             Enterprise Užklausos
+          </button>
+          <button
+            type="button"
+            onClick={() => { setPanelView('attendance'); setDetailId(null); }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${panelView === 'attendance' ? 'bg-amber-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+          >
+            <UserCheck className="w-4 h-4" />
+            Lankomumas
           </button>
         </div>
 
@@ -1034,6 +1056,19 @@ export default function AdminPanel() {
                           <option value="active">{t('admin.activeFull')}</option>
                           <option value="suspended">{t('admin.suspendedFull')}</option>
                         </select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-slate-300">Mėnesio platformos mokestis (€)</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          placeholder="pvz. 49.00"
+                          value={editPlatformMonthlyFee}
+                          onChange={(e) => setEditPlatformMonthlyFee(e.target.value)}
+                          className="bg-white/10 border-white/20 text-white rounded-xl"
+                        />
+                        <p className="text-[11px] text-slate-400">B2B abonementas agentūrai. Palikite tuščią, jei sąskaitos neišrašomos.</p>
                       </div>
                     </div>
                     <div className="space-y-3">
@@ -1439,6 +1474,14 @@ export default function AdminPanel() {
 
         {panelView === 'enterpriseContacts' && (
           <AdminEnterpriseContactsPanel adminSecret={platformAdminSecret} />
+        )}
+
+        {panelView === 'billing' && (
+          <AdminBillingPanel adminSecret={platformAdminSecret} />
+        )}
+
+        {panelView === 'attendance' && (
+          <AdminAttendancePanel adminSecret={platformAdminSecret} />
         )}
 
         {panelView === 'createSchool' && (

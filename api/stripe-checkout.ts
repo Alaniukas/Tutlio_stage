@@ -172,8 +172,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             : (session.topic || 'Pamoka');
         const creditNote = creditToApply > 0 ? ` (kreditas -€${creditToApply.toFixed(2)})` : '';
         const itemDesc = isPenaltyPayment
-            ? `Vėlyvo atšaukimo bauda – ${ownerName}`
-            : `Pamoka – ${ownerName}${creditNote}`;
+            ? `Vėlyvo atšaukimo bauda. Paslaugos teikėjas: ${ownerName}`
+            : `Mokymo paslaugos. Paslaugos teikėjas: ${ownerName}${creditNote}`;
 
         // 5. Checkout — school org Connect: single line item + application_fee; else legacy two-line payer gross-up.
         let checkoutSession;
@@ -245,7 +245,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             currency: 'eur',
                             product_data: {
                                 name: 'Platformos administravimo mokestis',
-                                description: 'Platform administration and payment processing fee',
+                                description: 'Paslaugos teikėjas: MB „Tutlio“',
                             },
                             unit_amount: feesCents,
                         },
@@ -265,6 +265,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 metadata: {
                     tutlio_session_id: sessionId,
                     is_penalty_payment: isPenaltyPayment ? 'true' : 'false',
+                    tutlio_base_eur: basePriceEur.toFixed(2),
                 },
                 success_url: `${APP_URL}/stripe-success?tutlio_session=${sessionId}&checkout_session={CHECKOUT_SESSION_ID}`,
                 cancel_url: `${APP_URL}/student/sessions`,

@@ -13,6 +13,7 @@ export {
   buildCanonicalUrl,
   generateHreflangLinks,
   hreflangTags,
+  hreflangCode,
 } from './seo-routing.js';
 
 export { preloadSsrLocales, t } from './ssr-i18n.js';
@@ -26,6 +27,7 @@ import {
   buildFullUrl,
   buildCanonicalUrl,
   hreflangTags,
+  hreflangCode,
 } from './seo-routing.js';
 import { t } from './ssr-i18n.js';
 
@@ -81,7 +83,7 @@ export function renderShell(opts: ShellOptions): string {
     : '';
 
   return `<!DOCTYPE html>
-<html lang="${locale}">
+<html lang="${hreflangCode(locale)}">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -99,7 +101,7 @@ ${ogLocaleAlternates}
 <meta property="og:site_name" content="Tutlio" />
 <meta property="og:image" content="${esc(ogImage)}" />
 <meta property="og:image:width" content="1200" />
-<meta property="og:image:height" content="630" />
+<meta property="og:image:height" content="800" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="${esc(title)}" />
 <meta name="twitter:description" content="${esc(description)}" />
@@ -171,7 +173,7 @@ ${body}
 </html>`;
 }
 
-export const DEFAULT_OG_IMAGE = 'https://www.tutlio.com/og-image.png';
+export const DEFAULT_OG_IMAGE = 'https://www.tutlio.com/og-image.jpg';
 
 export function organizationJsonLd(): string {
   return JSON.stringify({

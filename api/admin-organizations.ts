@@ -239,7 +239,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       let { data: org, error: orgErr } = await supabase
         .from('organizations')
-        .select('id, name, email, tutor_limit, tutor_license_count, status, features, slug, logo_url, brand_color, brand_color_secondary, perlas_finance_enabled, created_at')
+        .select('id, name, email, tutor_limit, tutor_license_count, status, features, slug, logo_url, brand_color, brand_color_secondary, perlas_finance_enabled, platform_monthly_fee_eur, created_at')
         .eq('id', idParam)
         .maybeSingle();
       if (orgErr?.message?.includes('does not exist') || orgErr?.message?.includes('Could not find')) {
@@ -441,7 +441,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       let { data: before, error: beforeErr } = await supabase
         .from('organizations')
-        .select('id, name, email, tutor_limit, tutor_license_count, status, features, slug, logo_url, brand_color, brand_color_secondary, perlas_finance_enabled')
+        .select('id, name, email, tutor_limit, tutor_license_count, status, features, slug, logo_url, brand_color, brand_color_secondary, perlas_finance_enabled, platform_monthly_fee_eur')
         .eq('id', idParam)
         .maybeSingle();
 
@@ -488,6 +488,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if ('brand_color' in body) patch.brand_color = typeof body.brand_color === 'string' ? body.brand_color : '#6366f1';
       if ('brand_color_secondary' in body) patch.brand_color_secondary = typeof body.brand_color_secondary === 'string' ? body.brand_color_secondary : '#8b5cf6';
       if (typeof body.perlas_finance_enabled === 'boolean') patch.perlas_finance_enabled = body.perlas_finance_enabled;
+      if ('platform_monthly_fee_eur' in body) {
+        const raw = body.platform_monthly_fee_eur;
+        if (raw === null || raw === '') {
+          patch.platform_monthly_fee_eur = null;
+        } else {
+          const n = Number(raw);
+          if (!Number.isFinite(n) || n < 0 || n > 100000) {
+            return res.status(400).json({ error: 'platform_monthly_fee_eur out of range' });
+          }
+          patch.platform_monthly_fee_eur = Math.round(n * 100) / 100;
+        }
+      }
 
       if (Object.keys(patch).length === 0) {
         return res.status(400).json({ error: 'No valid fields to update' });
@@ -497,7 +509,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .from('organizations')
         .update(patch as any)
         .eq('id', idParam)
-        .select('id, name, email, tutor_limit, tutor_license_count, status, features, slug, logo_url, brand_color, brand_color_secondary, perlas_finance_enabled')
+        .select('id, name, email, tutor_limit, tutor_license_count, status, features, slug, logo_url, brand_color, brand_color_secondary, perlas_finance_enabled, platform_monthly_fee_eur')
         .single();
 
       if (updErr?.message?.includes('does not exist') || updErr?.message?.includes('Could not find')) {

@@ -17,6 +17,7 @@ import {
     tutorUsesManualStudentPayments,
     trimManualPaymentBankDetails,
 } from './_lib/soloManualStudentPayments.js';
+import { requireCronAuth } from './_lib/cronAuth.js';
 
 const supabase = createClient(
     process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL!,
@@ -73,13 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    const cronSecret = process.env.CRON_SECRET;
-    if (cronSecret) {
-        const auth = typeof req.headers.authorization === 'string' ? req.headers.authorization : '';
-        if (auth !== `Bearer ${cronSecret}`) {
-            return res.status(401).json({ error: 'Unauthorized' });
-        }
-    }
+    if (!requireCronAuth(req, res)) return;
 
     try {
         const now = new Date();

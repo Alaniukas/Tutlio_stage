@@ -7,6 +7,7 @@ import {
   buildCanonicalUrl,
   buildFullUrl,
   canonicalDomain,
+  hreflangCode,
 } from './_lib/seo-routing.js';
 
 function getSupabase() {
@@ -48,7 +49,7 @@ function alternatesXml(path: string, locales: Locale[] = LOCALES): string {
 
   for (const locale of locales) {
     const href = buildCanonicalUrl(path, locale);
-    links.push(`    <xhtml:link rel="alternate" hreflang="${locale}" href="${href}" />`);
+    links.push(`    <xhtml:link rel="alternate" hreflang="${hreflangCode(locale)}" href="${href}" />`);
   }
 
   const xDefault = buildFullUrl(path, 'en', 'com');
@@ -61,7 +62,7 @@ function blogPostAlternatesXml(post: Record<string, unknown>, locales: Locale[])
   for (const locale of locales) {
     const slug = postSlug(post, locale);
     const href = buildCanonicalUrl(`/blog/${slug}`, locale);
-    links.push(`    <xhtml:link rel="alternate" hreflang="${locale}" href="${href}" />`);
+    links.push(`    <xhtml:link rel="alternate" hreflang="${hreflangCode(locale)}" href="${href}" />`);
   }
   const enSlug = postSlug(post, 'en');
   const xDefault = buildFullUrl(`/blog/${enSlug}`, 'en', 'com');

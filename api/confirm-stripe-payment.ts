@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { syncSessionToGoogle } from './_lib/google-calendar.js';
 import { isOrgTutor } from './_lib/isOrgTutor.js';
 import { verifyRequestAuth } from './_lib/auth.js';
+import { recordStripePlatformFee, metadataBaseEur } from './_lib/platformFeeLedger.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
@@ -55,13 +56,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Resolve Stripe Connect account (lesson payments go to tutor or org connected account)
         const tutorProfile = sessionData.profiles as any;
         let stripeAccountId: string | null = tutorProfile?.stripe_account_id || null;
+        let orgName: string | null = null;
         if (tutorProfile?.organization_id) {
             const { data: org } = await supabase
                 .from('organizations')
-                .select('stripe_account_id')
+                .select('stripe_account_id, name')
                 .eq('id', tutorProfile.organization_id)
                 .single();
             if (org?.stripe_account_id) stripeAccountId = org.stripe_account_id;
+            orgName = (org as { name?: string | null } | null)?.name || null;
         }
 
         // Checkout kuriamas platformoje (destination charge); senesni UI – ant Connect paskyros.
@@ -111,6 +114,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const timeStr = sessionStart.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' });
             const totalChargedEur =
                 checkoutSession?.amount_total != null ? checkoutSession.amount_total / 100 : undefined;
+            const providerName = orgName || tutor.full_name || 'Korepetitorius';
+            // Base actually charged for the lesson: metadata (exact) or price minus applied credit.
+            const lessonBaseEur =
+                metadataBaseEur(meta) ??
+                Math.max(0, Number(sessionData.price || 0) - Number((sessionData as any).credit_applied_amount || 0));
             const sendEmailUrl = `${APP_URL}/api/send-email`;
 
             // Late-cancellation penalty checkout: do NOT mark the lesson as paid (paid=true).
@@ -136,9 +144,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     return res.status(200).json({ success: true, already_confirmed: true });
                 }
 
+                // Penalty base comes only from checkout metadata (lesson price is not the penalty base).
+                await recordStripePlatformFee(supabase, {
+                    sourceType: 'penalty',
+                    sourceId: sessionId,
+                    baseAmountEur: metadataBaseEur(meta),
+                    grossAmountEur: totalChargedEur ?? null,
+                    organizationId: tutorProfile?.organization_id ?? null,
+                    tutorId: sessionData.tutor_id ?? null,
+                    stripeCheckoutSessionId: checkoutSessionId,
+                });
+
                 const emailData = {
                     studentName: student.full_name,
                     tutorName: tutor.full_name || 'Korepetitorius',
+                    providerName,
                     date: dateStr,
                     time: timeStr,
                     subject: sessionData.topic,
@@ -245,14 +265,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 console.error('[confirm-stripe-payment] Failed to sync Google Calendar:', e);
             }
 
+            await recordStripePlatformFee(supabase, {
+                sourceType: 'session',
+                sourceId: sessionId,
+                baseAmountEur: lessonBaseEur,
+                grossAmountEur: totalChargedEur ?? null,
+                organizationId: tutorProfile?.organization_id ?? null,
+                tutorId: sessionData.tutor_id ?? null,
+                stripeCheckoutSessionId: checkoutSessionId,
+            });
+
             const emailData = {
                 studentName: student.full_name,
                 tutorName: tutor.full_name || 'Korepetitorius',
+                providerName,
                 date: dateStr,
                 time: timeStr,
                 subject: sessionData.topic,
                 price: sessionData.price,
-                lessonPriceEur: sessionData.price,
+                lessonPriceEur: lessonBaseEur,
                 totalChargedEur,
                 duration: durationMinutes,
                 cancellationHours: tutor.cancellation_hours ?? 24,
@@ -296,6 +327,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                 date: dateStr,
                                 time: timeStr,
                                 subject: sessionData.topic,
+                                sessionId: sessionData.id,
                                 meetingLink: (sessionData as { meeting_link?: string | null }).meeting_link || '',
                                 organizationId: tutorProfile.organization_id,
                             }

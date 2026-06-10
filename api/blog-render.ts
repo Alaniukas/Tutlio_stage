@@ -10,6 +10,7 @@ import {
   buildCanonicalUrl,
   buildFullUrl,
   hreflangTags,
+  hreflangCode,
   esc as seoEsc,
 } from './_lib/seo-routing.js';
 
@@ -70,10 +71,21 @@ function mdToHtml(md: string): string {
   return html;
 }
 
+/** Allow only safe URL schemes; blocks javascript:, data:, etc. */
+function safeUrl(url: string): string {
+  const trimmed = url.trim();
+  if (/^(https?:\/\/|mailto:|tel:|\/|#|\.{1,2}\/)/i.test(trimmed)) return trimmed;
+  return '#';
+}
+
 function inl(t: string): string {
-  return t
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" loading="lazy" style="max-width:100%;border-radius:8px;margin:1em 0" />')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" rel="noopener">$1</a>')
+  // Escape first so raw HTML in post content is rendered inert; markdown tags
+  // are added afterwards. URLs are then validated against safe schemes.
+  return esc(t)
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt: string, url: string) =>
+      `<img src="${safeUrl(url)}" alt="${alt}" loading="lazy" style="max-width:100%;border-radius:8px;margin:1em 0" />`)
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label: string, url: string) =>
+      `<a href="${safeUrl(url)}" rel="noopener">${label}</a>`)
     .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
@@ -107,10 +119,10 @@ function blogPostHreflangTags(post: Record<string, unknown>): string {
     if (!post[`title_${l}`]) continue;
     const slug = postSlug(post, l);
     const href = buildCanonicalUrl(`/blog/${slug}`, l);
-    const key = `${l}:${href}`;
+    const key = `${hreflangCode(l)}:${href}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    tags.push(`<link rel="alternate" hreflang="${l}" href="${seoEsc(href)}" />`);
+    tags.push(`<link rel="alternate" hreflang="${hreflangCode(l)}" href="${seoEsc(href)}" />`);
   }
   const enSlug = postSlug(post, 'en');
   const xDefault = buildFullUrl(`/blog/${enSlug}`, 'en', 'com');
@@ -150,7 +162,7 @@ interface BlogShellOpts {
   hreflangHtml?: string;
 }
 
-const DEFAULT_OG = 'https://www.tutlio.com/og-image.png';
+const DEFAULT_OG = 'https://www.tutlio.com/og-image.jpg';
 
 function shell(opts: BlogShellOpts): string {
   const { locale, domain, blogPath, title, description, url, body, jsonLd, publishedTime, modifiedTime, tag, noindex } = opts;
@@ -169,7 +181,7 @@ function shell(opts: BlogShellOpts): string {
     : '';
 
   return `<!DOCTYPE html>
-<html lang="${locale}">
+<html lang="${hreflangCode(locale)}">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -326,7 +338,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       hreflangHtml: blogPostHreflangTags(post),
     }), {
       'Content-Type': 'text/html; charset=utf-8',
-      'Content-Language': locale,
+      'Content-Language': hreflangCode(locale),
       'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
     });
     return;
@@ -400,7 +412,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     noindex: !hasAnyTranslation,
   }), {
     'Content-Type': 'text/html; charset=utf-8',
-    'Content-Language': locale,
+    'Content-Language': hreflangCode(locale),
     'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
   });
 }

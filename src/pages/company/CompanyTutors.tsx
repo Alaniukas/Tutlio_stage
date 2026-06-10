@@ -4,7 +4,8 @@ import { getCached, setCache } from '@/lib/dataCache';
 import { COMPANY_TUTORS_CACHE_KEY } from '@/lib/preload';
 import {
   Users, Plus, Copy, Check, Trash2, UserCheck, UserX,
-  ChevronRight, ChevronDown, X, Pencil, Mail, Send, AlertCircle
+  ChevronRight, ChevronDown, X, Pencil, Mail, Send, AlertCircle,
+  CreditCard, Loader2
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
@@ -17,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import BuyLicensesDialog from '@/components/company/BuyLicensesDialog';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -346,6 +348,11 @@ export default function CompanyTutors() {
   const [licenseError, setLicenseError] = useState<string | null>(null);
   const [licenseInfoError, setLicenseInfoError] = useState<string | null>(null);
 
+  // ── Self-serve license purchase / billing portal ──
+  const [hasLicenseSubscription, setHasLicenseSubscription] = useState(false);
+  const [buyLicensesOpen, setBuyLicensesOpen] = useState(false);
+  const [licensePortalLoading, setLicensePortalLoading] = useState(false);
+
   // ── Invite modal ──
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [presetSubjects, setPresetSubjects] = useState<SubjectPreset[]>([]);
@@ -444,6 +451,14 @@ export default function CompanyTutors() {
     let effectiveLicenseCount = joinedLicenseCount;
     setLicenseInfoError(null);
 
+    // Separate query: column may not exist until the enterprise billing migration runs.
+    const { data: licenseOrgData } = await supabase
+      .from('organizations')
+      .select('license_subscription_id')
+      .eq('id', adminRow.organization_id)
+      .maybeSingle();
+    setHasLicenseSubscription(Boolean((licenseOrgData as any)?.license_subscription_id));
+
     // Try to load organization default settings (columns may not exist yet)
     const { data: orgData } = await supabase
       .from('organizations')
@@ -487,6 +502,9 @@ export default function CompanyTutors() {
           const json = await resp.json().catch(() => ({}));
           if (!resp.ok) return;
 
+          if (typeof json?.hasLicenseSubscription === 'boolean') {
+            setHasLicenseSubscription(json.hasLicenseSubscription);
+          }
           const apiCount = Number(json?.tutorLicenseCount) || 0;
           if (apiCount > 0) {
             setLicenseInfoError(null);
@@ -587,6 +605,40 @@ export default function CompanyTutors() {
   const showLicenseUi = tutorLicenseCount > 0;
 
   const unusedInvites = useMemo(() => invites.filter((i) => !i.used), [invites]);
+
+  /** Existing license subscription -> Stripe billing portal; otherwise the purchase dialog. */
+  const handleManageLicenses = async () => {
+    if (!hasLicenseSubscription) {
+      setBuyLicensesOpen(true);
+      return;
+    }
+    setLicensePortalLoading(true);
+    setLicenseError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        setLicensePortalLoading(false);
+        return;
+      }
+      const res = await fetch('/api/org-license-portal', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.url) {
+        window.location.href = data.url;
+        return;
+      }
+      if (data.code === 'NO_SUBSCRIPTION') {
+        setBuyLicensesOpen(true);
+      } else {
+        setLicenseError(data?.error || t('compTut.serverErrorGeneric'));
+      }
+    } catch (e: any) {
+      setLicenseError(e?.message || t('compTut.serverErrorGeneric'));
+    }
+    setLicensePortalLoading(false);
+  };
 
   const setTutorLicense = async (tutorId: string, next: boolean) => {
     if (!orgId) return;
@@ -943,8 +995,19 @@ export default function CompanyTutors() {
                 <p className="text-sm font-semibold text-gray-900">{t('compTut.license')}</p>
                 <p className="text-xs text-gray-500 mt-0.5">{t('compTut.licenseDesc')}</p>
               </div>
-              <div className="flex-shrink-0 text-sm font-semibold text-gray-900">
-                {licenseUsedCount} / {tutorLicenseCount}
+              <div className="flex-shrink-0 flex items-center gap-3">
+                <div className="text-sm font-semibold text-gray-900">
+                  {licenseUsedCount} / {tutorLicenseCount}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleManageLicenses}
+                  disabled={licensePortalLoading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors disabled:opacity-60"
+                >
+                  {licensePortalLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CreditCard className="w-3.5 h-3.5" />}
+                  {hasLicenseSubscription ? t('compTut.manageLicenses') : t('compTut.buyLicenses')}
+                </button>
               </div>
             </div>
             <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden mt-3">
@@ -970,6 +1033,24 @@ export default function CompanyTutors() {
               Nepavyko įkelti licencijų informacijos. Patikrinkite naršyklės Network, ar `GET /api/org-license-info` grąžina 200.
             </p>
             <p className="text-[11px] mt-1 text-amber-800 break-all">Detalės: {licenseInfoError}</p>
+          </div>
+        )}
+        {/* License subscription ended (count dropped to 0) — offer reactivation via portal */}
+        {!showLicenseUi && hasLicenseSubscription && (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-gray-900">{t('compTut.license')}</p>
+              <p className="text-xs text-gray-500 mt-0.5">{t('compTut.licenseSubscriptionInactive')}</p>
+            </div>
+            <button
+              type="button"
+              onClick={handleManageLicenses}
+              disabled={licensePortalLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors disabled:opacity-60 shrink-0"
+            >
+              {licensePortalLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CreditCard className="w-3.5 h-3.5" />}
+              {t('compTut.manageLicenses')}
+            </button>
           </div>
         )}
 
@@ -1494,6 +1575,12 @@ export default function CompanyTutors() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <BuyLicensesDialog
+        open={buyLicensesOpen}
+        onOpenChange={setBuyLicensesOpen}
+        currentLicenseCount={tutorLicenseCount}
+      />
     </>
   );
 }

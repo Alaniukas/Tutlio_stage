@@ -257,7 +257,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 currency: 'eur',
                 product_data: {
                   name: `Bandomoji pamoka – ${trialTopic}`,
-                  description: `Trial lesson – ${tutor.full_name || 'tutor'}`,
+                  description: `Mokymo paslaugos. Paslaugos teikėjas: ${tutor.full_name || 'Korepetitorius'}`,
                 },
                 unit_amount: chargeCents,
               },
@@ -300,7 +300,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 currency: 'eur',
                 product_data: {
                   name: `Bandomoji pamoka – ${trialTopic}`,
-                  description: `Trial lesson – ${tutor.full_name || 'tutor'}`,
+                  description: `Mokymo paslaugos. Paslaugos teikėjas: ${tutor.full_name || 'Korepetitorius'}`,
                 },
                 unit_amount: baseCents,
               },
@@ -311,7 +311,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 currency: 'eur',
                 product_data: {
                   name: 'Platformos administravimo mokestis',
-                  description: 'Tutlio platform fee and payment processing',
+                  description: 'Paslaugos teikėjas: MB „Tutlio“',
                 },
                 unit_amount: feesCents,
               },
@@ -337,6 +337,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             student_id: studentId,
             subject_id: subjectId,
             is_trial: 'true',
+            tutlio_base_eur: basePriceEur.toFixed(2),
           },
           success_url: `${APP_URL}/package-success?session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${APP_URL}/package-cancelled`,
@@ -361,7 +362,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               currency: 'eur',
               product_data: {
                 name: `Bandomoji pamoka – ${trialTopic}`,
-                description: `Trial lesson – ${tutor.full_name || 'tutor'}`,
+                description: `Mokymo paslaugos. Paslaugos teikėjas: ${tutor.full_name || 'Korepetitorius'}`,
               },
               unit_amount: baseCents,
             },
@@ -372,7 +373,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               currency: 'eur',
               product_data: {
                 name: 'Platformos administravimo mokestis',
-                description: 'Tutlio platform fee and payment processing',
+                description: 'Paslaugos teikėjas: MB „Tutlio“',
               },
               unit_amount: feesCents,
             },
@@ -385,6 +386,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           student_id: studentId,
           subject_id: subjectId,
           is_trial: 'true',
+          tutlio_base_eur: basePriceEur.toFixed(2),
         },
         success_url: `${APP_URL}/package-success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${APP_URL}/package-cancelled`,

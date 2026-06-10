@@ -160,7 +160,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const customerEmail = student?.payer_email || undefined;
         const itemName = session.topic || 'Pamoka';
         const creditNote = creditToApply > 0 ? ` (kreditas -€${creditToApply.toFixed(2)})` : '';
-        const itemDesc = `Pamoka – ${ownerName}${creditNote}`;
+        const itemDesc = `Mokymo paslaugos. Paslaugos teikėjas: ${ownerName}${creditNote}`;
 
         // 5. Create Stripe Checkout Session
         let checkoutSession: Stripe.Checkout.Session;
@@ -190,13 +190,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 payment_method_types: ['card'],
                 line_items: [
                     { price_data: { currency: 'eur', product_data: { name: itemName, description: itemDesc }, unit_amount: baseCents }, quantity: 1 },
-                    { price_data: { currency: 'eur', product_data: { name: 'Platformos administravimo mokestis', description: 'Platform administration and payment processing fee' }, unit_amount: feesCents }, quantity: 1 },
+                    { price_data: { currency: 'eur', product_data: { name: 'Platformos administravimo mokestis', description: 'Paslaugos teikėjas: MB „Tutlio“' }, unit_amount: feesCents }, quantity: 1 },
                 ],
                 payment_intent_data: {
                     transfer_data: { destination: stripeAccountId!, amount: baseCents },
                     metadata: { tutlio_session_id: sessionId },
                 },
-                metadata: { tutlio_session_id: sessionId },
+                metadata: { tutlio_session_id: sessionId, tutlio_base_eur: (baseCents / 100).toFixed(2) },
                 success_url: `${APP_URL}/stripe-success?tutlio_session=${sessionId}&checkout_session={CHECKOUT_SESSION_ID}`,
                 cancel_url: `${APP_URL}/student/sessions`,
             });

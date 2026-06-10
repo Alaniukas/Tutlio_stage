@@ -135,7 +135,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 currency: 'eur' as const,
                 product_data: {
                     name: `${it.totalLessons} × ${it.subjectName}`,
-                    description: `Package – ${ownerName}`,
+                    description: `Mokymo paslaugos. Paslaugos teikėjas: ${ownerName}`,
                 },
                 unit_amount: Math.round(it.pricePerLesson * 100),
             },
@@ -176,13 +176,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 payment_method_types: ['card'],
                 line_items: [
                     ...itemLineItems,
-                    { price_data: { currency: 'eur', product_data: { name: 'Platformos administravimo mokestis', description: 'Tutlio platform fee and payment processing' }, unit_amount: feesCents }, quantity: 1 },
+                    { price_data: { currency: 'eur', product_data: { name: 'Platformos administravimo mokestis', description: 'Paslaugos teikėjas: MB „Tutlio“' }, unit_amount: feesCents }, quantity: 1 },
                 ],
                 payment_intent_data: {
                     transfer_data: { destination: stripeAccountId!, amount: baseCents },
                     metadata: metadataBase,
                 },
-                metadata: metadataBase,
+                metadata: { ...metadataBase, tutlio_base_eur: basePriceEur.toFixed(2) },
                 success_url: `${APP_URL}/package-success?session_id={CHECKOUT_SESSION_ID}`,
                 cancel_url: `${APP_URL}/package-cancelled`,
             });

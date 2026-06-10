@@ -13,62 +13,13 @@ import {
   esc,
   webPageJsonLd,
   faqJsonLd,
+  hreflangCode,
 } from './_lib/ssr-shell.js';
 
-type FeatureId = 'calendar' | 'waitlist' | 'payments' | 'reminders' | 'cancellation' | 'comments';
-
-interface FeatureConfig {
-  path: string;
-  titleKey: string;
-  descKey: string;
-  detailKeys: string[];
-  faqKeys: string[];
-}
-
-const FEATURES: Record<FeatureId, FeatureConfig> = {
-  calendar: {
-    path: '/features/calendar',
-    titleKey: 'feature.calendar.pageTitle',
-    descKey: 'feature.calendar.pageDesc',
-    detailKeys: ['selfBooking', 'recurring', 'breaks', 'deadlines'],
-    faqKeys: ['howBook', 'groupLessons', 'mobileCalendar'],
-  },
-  waitlist: {
-    path: '/features/waitlist',
-    titleKey: 'feature.waitlist.pageTitle',
-    descKey: 'feature.waitlist.pageDesc',
-    detailKeys: ['autoFill', 'notifications', 'priority', 'revenue'],
-    faqKeys: ['howWorks', 'studentLimit', 'automatic'],
-  },
-  payments: {
-    path: '/features/payments',
-    titleKey: 'feature.payments.pageTitle',
-    descKey: 'feature.payments.pageDesc',
-    detailKeys: ['stripe', 'tracking', 'invoices', 'packages'],
-    faqKeys: ['methods', 'fees', 'invoiceAuto'],
-  },
-  reminders: {
-    path: '/features/reminders',
-    titleKey: 'feature.reminders.pageTitle',
-    descKey: 'feature.reminders.pageDesc',
-    detailKeys: ['beforeLesson', 'afterLesson', 'paymentDue', 'customTiming'],
-    faqKeys: ['channels', 'customize', 'disable'],
-  },
-  cancellation: {
-    path: '/features/cancellation',
-    titleKey: 'feature.cancellation.pageTitle',
-    descKey: 'feature.cancellation.pageDesc',
-    detailKeys: ['deadlines', 'fees', 'waitlistLink', 'transparency'],
-    faqKeys: ['howSet', 'studentSee', 'refund'],
-  },
-  comments: {
-    path: '/features/comments',
-    titleKey: 'feature.comments.pageTitle',
-    descKey: 'feature.comments.pageDesc',
-    detailKeys: ['lessonNotes', 'fileSharing', 'history', 'parentAccess'],
-    faqKeys: ['whoSees', 'fileTypes', 'storage'],
-  },
-};
+import {
+  type FeaturePageId as FeatureId,
+  FEATURE_PAGES as FEATURES,
+} from '../src/lib/featurePages.js';
 
 function renderFeature(featureId: FeatureId, locale: Locale, domain: DomainKey): string {
   const cfg = FEATURES[featureId];
@@ -146,7 +97,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   sendSsrHtml(req, res, html, {
     'Content-Type': 'text/html; charset=utf-8',
-    'Content-Language': locale,
+    'Content-Language': hreflangCode(locale),
     'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
   });
 }

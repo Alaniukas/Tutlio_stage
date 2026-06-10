@@ -49,22 +49,60 @@ export const LOCALE_NAMES: Record<Locale, string> = {
 
 const translations: Record<Locale, Record<string, string>> = { lt, en, pl, lv, ee, fr, es, de, se, dk, fi, no };
 
+/** HTML-escape a single interpolated value. Translation strings are trusted
+ *  (developer-authored) and may contain markup, but interpolated params can be
+ *  user-controlled, so they must never be injected raw into an HTML sink. */
+function escapeHtmlParam(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function resolveTemplate(locale: Locale, key: string, platform: Platform): string {
+  const text = translations[locale]?.[key] ?? translations.en[key] ?? translations.lt[key] ?? key;
+  if (platform !== DEFAULT_PLATFORM) {
+    return resolvePlatformTranslation(platform, locale, key, text);
+  }
+  return text;
+}
+
+function applyParams(
+  text: string,
+  params: Record<string, string | number> | undefined,
+  escape: (value: string) => string,
+): string {
+  if (!params) return text;
+  let out = text;
+  for (const [k, v] of Object.entries(params)) {
+    out = out.replaceAll(`{${k}}`, escape(String(v)));
+  }
+  return out;
+}
+
 export function t(
   locale: Locale,
   key: string,
   params?: Record<string, string | number>,
   platform: Platform = DEFAULT_PLATFORM,
 ): string {
-  let text = translations[locale]?.[key] ?? translations.en[key] ?? translations.lt[key] ?? key;
-  if (platform !== DEFAULT_PLATFORM) {
-    text = resolvePlatformTranslation(platform, locale, key, text);
-  }
-  if (params) {
-    for (const [k, v] of Object.entries(params)) {
-      text = text.replaceAll(`{${k}}`, String(v));
-    }
-  }
-  return text;
+  return applyParams(resolveTemplate(locale, key, platform), params, (v) => v);
+}
+
+/**
+ * Like `t`, but HTML-escapes interpolated param values. Use this — never `t` —
+ * whenever the result is rendered through `dangerouslySetInnerHTML`, so a
+ * user-controlled value (a name, email, etc.) cannot inject markup/script.
+ */
+export function tHtml(
+  locale: Locale,
+  key: string,
+  params?: Record<string, string | number>,
+  platform: Platform = DEFAULT_PLATFORM,
+): string {
+  return applyParams(resolveTemplate(locale, key, platform), params, escapeHtmlParam);
 }
 
 export function detectLocaleFromHost(host: string): Locale {

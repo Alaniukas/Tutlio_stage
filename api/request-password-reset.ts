@@ -5,6 +5,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { findAuthUserByEmail } from './_lib/findAuthUserByEmail.js';
+import { isAllowedRedirectUrl, publicOriginFromRequest } from './_lib/public-origin.js';
 
 type AuthEmailLocale = 'lt' | 'pl' | 'en';
 
@@ -36,6 +37,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     if (!redirectTo) {
       return res.status(400).json({ error: 'redirectTo is required' });
+    }
+    if (!isAllowedRedirectUrl(redirectTo, publicOriginFromRequest(req))) {
+      return res.status(400).json({ error: 'Invalid redirectTo' });
     }
 
     const admin = createClient(supabaseUrl, serviceKey, {

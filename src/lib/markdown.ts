@@ -96,15 +96,41 @@ export function markdownToHtml(md: string): string {
 }
 
 function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * Allow only safe URL schemes in links/images. Blocks javascript:, data:, vbscript:,
+ * etc. Accepts http(s), mailto, tel, and root/relative/anchor paths.
+ * Input is already HTML-escaped (so any `"`/`<` are entities) before this runs.
+ */
+function safeUrl(url: string): string {
+  const trimmed = url.trim();
+  if (/^(https?:\/\/|mailto:|tel:|\/|#|\.{1,2}\/)/i.test(trimmed)) return trimmed;
+  return '#';
 }
 
 function inline(text: string): string {
-  let result = text;
+  // Escape first so any raw HTML in the source becomes inert; markdown tags are
+  // added afterwards and remain real. URLs are escaped here too, then validated.
+  let result = escapeHtml(text);
   // Images before links so ![alt](url) doesn't get captured by link regex
-  result = result.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="blog-img" loading="lazy" />');
+  result = result.replace(
+    /!\[([^\]]*)\]\(([^)]+)\)/g,
+    (_m, alt: string, url: string) =>
+      `<img src="${safeUrl(url)}" alt="${alt}" class="blog-img" loading="lazy" />`,
+  );
   // Links
-  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  result = result.replace(
+    /\[([^\]]+)\]\(([^)]+)\)/g,
+    (_m, label: string, url: string) =>
+      `<a href="${safeUrl(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`,
+  );
   // Bold + italic
   result = result.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
   // Bold

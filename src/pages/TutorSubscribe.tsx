@@ -29,7 +29,8 @@ import {
 } from '@/components/ui/dialog';
 import { useTranslation, buildLocalizedPath } from '@/lib/i18n';
 
-const TRIAL_DISPLAY_CODE = 'TRIAL7D';
+// Legacy trial codes — recognized so they aren't sent to Stripe as discount
+// codes; the 7-day trial itself is applied by default server-side.
 const TRIAL_CODES = ['TRIAL7D', 'TRIAL', 'BANDYMAS'] as const;
 
 export default function TutorSubscribe() {
@@ -184,7 +185,7 @@ export default function TutorSubscribe() {
     { icon: TrendingUp, text: t('subscribe.feat_finance') },
   ];
 
-  const handleSubscribe = async (useTrial = false) => {
+  const handleSubscribe = async () => {
     setLoading(true);
     setError(null);
 
@@ -193,22 +194,15 @@ export default function TutorSubscribe() {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
 
-      if (useTrial && !session?.access_token) {
-        throw new Error(t('subscribe.loginFirst'));
-      }
-
-      const plan = useTrial ? 'monthly' : selectedPlan;
-      const applyTrial =
-        useTrial ||
-        (trialAvailable && plan === 'monthly' && isTrialCoupon);
-
+      // The 7-day trial is applied by default server-side; explicitly opt out
+      // only when this account has already used it.
       const response = await fetch('/api/create-subscription-checkout', {
         method: 'POST',
         headers,
         body: JSON.stringify({
-          plan,
-          startTrial: applyTrial,
-          couponCode: applyTrial ? undefined : (couponCode.trim() || undefined),
+          plan: selectedPlan,
+          ...(trialAvailable ? {} : { startTrial: false }),
+          couponCode: isTrialCoupon ? undefined : (couponCode.trim() || undefined),
           successRedirect: isRegistrationSubscription ? 'registration' : undefined,
           locale,
           audience: 'tutor',
@@ -232,7 +226,7 @@ export default function TutorSubscribe() {
 
   const primaryButtonLabel = (() => {
     if (loading) return t('subscribe.preparing');
-    if (selectedPlan === 'monthly' && isTrialCoupon) return t('subscribe.tryFreeBtn');
+    if (trialAvailable) return t('subscribe.tryFreeBtn');
     if (selectedPlan === 'yearly') return t('subscribe.payBtn');
     return effectiveCoupon ? t('subscribe.continueWithCode') : t('subscribe.continueBtn');
   })();
@@ -459,7 +453,6 @@ export default function TutorSubscribe() {
               <Input
                 id="coupon"
                 type="text"
-                placeholder={TRIAL_DISPLAY_CODE}
                 value={couponCode}
                 onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
                 className="bg-white/90 border-white/40 text-gray-900 placeholder:text-gray-500 font-mono tracking-wider"
@@ -481,20 +474,12 @@ export default function TutorSubscribe() {
           )}
           <Button
             type="button"
-            onClick={() => handleSubscribe(false)}
+            onClick={() => handleSubscribe()}
             disabled={loading}
             className="w-full py-6 text-lg font-semibold bg-white text-indigo-600 hover:bg-indigo-50 rounded-2xl shadow-xl"
           >
             {primaryButtonLabel}
           </Button>
-
-          {trialAvailable && selectedPlan === 'monthly' && (
-            <p className="text-center text-xs text-indigo-200/80 mt-3">
-              <a href={buildLocalizedPath('/pricing', locale)} className="underline hover:text-white">
-                {t('subscribe.trialSeePricing')}
-              </a>
-            </p>
-          )}
 
           <div className="mt-6 p-5 bg-white/10 backdrop-blur border border-white/20 rounded-2xl text-left">
             <div className="flex items-start gap-3">
@@ -504,8 +489,8 @@ export default function TutorSubscribe() {
               <div>
                 <p className="text-white font-semibold mb-1">{t('subscribe.cancelInfo')}</p>
                 <p className="text-indigo-200 text-sm">
-                  {isTrialCoupon
-                    ? t('subscribe.trialPaymentInfo', { price: selectedPlan === 'yearly' ? '€179.88/year' : '€19.99/mo' })
+                  {trialAvailable
+                    ? t('subscribe.trialPaymentInfo', { price: selectedPlan === 'yearly' ? '€179.88/year' : selectedPlan === 'subscription_only' ? '€35/mo' : '€19.99/mo' })
                     : t('subscribe.safePaymentInfo')}
                 </p>
               </div>

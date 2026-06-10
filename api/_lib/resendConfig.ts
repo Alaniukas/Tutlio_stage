@@ -16,3 +16,10 @@ export function getResendApiKey(): string | undefined {
 export function resendNotConfiguredMessage(): string {
   return 'Email service not configured (set RESEND_API_KEY or RESEND_API_KEY_STAGE)';
 }
+
+/** Internal team recipients for sales/enterprise notifications. */
+export const INTERNAL_NOTIFY_EMAILS = ['simas0423@gmail.com', 'alaniukasa@gmail.com'];
+
+export function getFromEmail(): string {
+  return process.env.FROM_EMAIL || 'Tutlio <onboarding@tutlio.lt>';
+}

@@ -1,26 +1,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
-import { defaultLocaleForOrigin, publicOriginFromRequest } from './_lib/public-origin.js';
+import { buildPublicPath, publicOriginFromRequest, type CheckoutAudience } from './_lib/public-origin.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 const DEFAULT_SUBSCRIPTION_ONLY_PRODUCT_ID = 'prod_UOWf5Nqxf1wPIg';
 const DEFAULT_YEARLY_PRODUCT_ID = 'prod_U9DYSN7YFtsyBI';
 
-type CheckoutAudience = 'tutor' | 'schools';
-
-function buildPublicPath(
-  pathname: string,
-  locale: string | undefined,
-  audience: CheckoutAudience,
-  appOrigin: string,
-): string {
-  const normalized = pathname.startsWith('/') ? pathname : `/${pathname}`;
-  const platformPrefix = audience === 'schools' ? '/schools' : '';
-  const defaultLocale = defaultLocaleForOrigin(appOrigin);
-  const localeSeg = locale && locale !== defaultLocale ? `/${locale}` : '';
-  return `${platformPrefix}${localeSeg}${normalized}`;
-}
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -62,6 +48,8 @@ async function resolveYearlyPriceId(stripeClient: Stripe): Promise<string | unde
   return undefined;
 }
 
+// Legacy trial promo codes still accepted, but the 7-day trial is now applied
+// by default to every individual subscription checkout (no code needed).
 const TRIAL_CODES = ['TRIAL7D', 'TRIAL', 'BANDYMAS'] as const;
 const TRIAL_PERIOD_DAYS = 7;
 
@@ -70,32 +58,19 @@ function isTrialCode(code?: string): boolean {
   return TRIAL_CODES.includes(code.trim().toUpperCase() as (typeof TRIAL_CODES)[number]);
 }
 
-async function assertTrialEligible(
-  authHeader: string | undefined,
-): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
-  if (!authHeader) {
-    return { ok: false, status: 401, error: 'You must be logged in to use the free trial.' };
-  }
+/** trial_used check for logged-in users; anonymous sign-up checkouts are eligible. */
+async function hasUsedTrial(authHeader: string | undefined): Promise<boolean> {
+  if (!authHeader) return false;
   const { data: { user }, error: authError } = await supabase.auth.getUser(
     authHeader.replace(/^Bearer\s+/i, ''),
   );
-  if (authError || !user) {
-    return { ok: false, status: 401, error: 'Neautorizuota' };
-  }
+  if (authError || !user) return false;
   const { data: profile, error: profileErr } = await supabase
     .from('profiles')
     .select('trial_used')
     .eq('id', user.id)
     .single();
-  if (!profileErr && profile?.trial_used) {
-    return {
-      ok: false,
-      status: 400,
-      error:
-        'Free trial has already been used with this account. You can subscribe without trial or use a different account.',
-    };
-  }
-  return { ok: true };
+  return !profileErr && Boolean(profile?.trial_used);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -107,17 +82,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { plan, couponCode, startTrial, successRedirect, locale, audience } = req.body as {
       plan: 'monthly' | 'yearly' | 'subscription_only';
       couponCode?: string;
-      /** 7-day trial via Stripe subscription_data.trial_period_days — no Dashboard promotion code needed */
+      /** Trial is ON by default; pass false to opt out (e.g. resubscribe). */
       startTrial?: boolean;
       successRedirect?: 'dashboard' | 'register' | 'registration';
       locale?: string;
       audience?: CheckoutAudience;
     };
 
-    const wantsTrial = startTrial === true || isTrialCode(couponCode);
-
     if (!plan || !['monthly', 'yearly', 'subscription_only'].includes(plan)) {
       return res.status(400).json({ error: 'Neteisingas planas' });
+    }
+
+    // 7-day trial by default for individual plans. Explicit requests (button /
+    // legacy code) error when the trial was already used; the default
+    // application just skips it silently.
+    const explicitTrial = startTrial === true || isTrialCode(couponCode);
+    let wantsTrial = false;
+    if (startTrial !== false) {
+      const trialUsed = await hasUsedTrial(req.headers.authorization);
+      if (trialUsed && explicitTrial) {
+        return res.status(400).json({
+          error:
+            'Free trial has already been used with this account. You can subscribe without trial or use a different account.',
+        });
+      }
+      wantsTrial = !trialUsed;
     }
 
     const appOrigin = publicOriginFromRequest(req);
@@ -239,15 +228,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     };
 
     if (wantsTrial) {
-      if (plan !== 'monthly') {
-        return res.status(400).json({
-          error: '7-day free trial is only available for the monthly plan.',
-        });
-      }
-      const trialCheck = await assertTrialEligible(req.headers.authorization);
-      if (!trialCheck.ok) {
-        return res.status(trialCheck.status).json({ error: trialCheck.error });
-      }
       // Stripe native trial — no promotion code in Dashboard required
       sessionParams.subscription_data = {
         trial_period_days: TRIAL_PERIOD_DAYS,
@@ -255,7 +235,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       };
       sessionParams.payment_method_collection = 'always';
       sessionParams.metadata = { ...(sessionParams.metadata || {}), tutlio_trial: '7d' };
-    } else if (couponCode?.trim()) {
+    }
+
+    // Discount codes combine with the trial (legacy trial codes are not Stripe codes).
+    if (couponCode?.trim() && !isTrialCode(couponCode)) {
       try {
         const code = couponCode.trim();
         const promotionCodes = await stripe.promotionCodes.list({ code, active: true, limit: 1 });

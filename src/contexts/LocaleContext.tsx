@@ -6,6 +6,7 @@ import {
   getStoredLocale,
   getLocaleFromPathname,
   t as translate,
+  tHtml as translateHtml,
   getDateFnsLocale,
   type Locale,
 } from '@/lib/i18n';
@@ -42,6 +43,7 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
     locale,
     setLocale,
     t: (key: string, params?: Record<string, string | number>) => translate(locale, key, params, platform),
+    tHtml: (key: string, params?: Record<string, string | number>) => translateHtml(locale, key, params, platform),
     dateFnsLocale: getDateFnsLocale(locale),
   }), [locale, setLocale, platform]);
 

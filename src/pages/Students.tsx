@@ -33,6 +33,7 @@ import SendInvoiceModal from '@/components/SendInvoiceModal';
 import { format, isAfter, isBefore } from 'date-fns';
 import { useTranslation } from '@/lib/i18n';
 import { cn, formatLithuanianPhone, normalizeUrl, validateLithuanianPhone } from '@/lib/utils';
+import { recordJoinClick } from '@/lib/joinTracking';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import {
@@ -48,6 +49,7 @@ import { cancelSessionAndFillWaitlist, releaseSessionSlotViaApi } from '@/lib/le
 import { Checkbox } from '@/components/ui/checkbox';
 import { copyTextToClipboard } from '@/lib/copyToClipboard';
 import StatusBadge from '@/components/StatusBadge';
+import AttendanceBadge from '@/components/AttendanceBadge';
 import Toast from '@/components/Toast';
 import { DateRangeFilter } from '@/components/DateRangeFilter';
 import { SessionStatCards } from '@/components/SessionStatCards';
@@ -1824,8 +1826,9 @@ export default function StudentsPage() {
                           <div className="flex justify-between items-start mb-1">
                             <div className="flex items-center gap-2">
                               <p className="font-semibold text-gray-900 pr-2">{session.student?.full_name}</p>
-                              <div className="scale-90 origin-left">
+                              <div className="scale-90 origin-left flex items-center gap-1 flex-wrap">
                                 <StatusBadge status={session.status} paymentStatus={session.payment_status} paid={session.paid} hidePaymentStatus={orgPolicy.isOrgTutor} endTime={session.end_time} />
+                                <AttendanceBadge session={session} />
                               </div>
                             </div>
                             {!orgPolicy.hideMoney && session.price && (
@@ -2853,11 +2856,14 @@ export default function StudentsPage() {
               )}
             </div>
 
+            {selectedSessionForModal && <AttendanceBadge session={selectedSessionForModal as any} />}
+
             {selectedSessionForModal?.meeting_link && (
               <a
                 href={normalizeUrl(selectedSessionForModal.meeting_link) || undefined}
                 target="_blank"
                 rel="noreferrer"
+                onClick={() => recordJoinClick(selectedSessionForModal as any, 'tutor')}
                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-50 text-blue-600 text-sm hover:bg-blue-100 transition-colors"
               >
                 {t('dash.joinVideoCall')}

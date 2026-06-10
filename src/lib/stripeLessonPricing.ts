@@ -20,6 +20,24 @@ export function formatCustomerChargeEur(lessonPriceEur: number | null | undefine
 }
 
 /**
+ * Mirrors `lessonCheckoutBreakdownCents` in api/_lib/stripeLessonPricing.ts so the
+ * in-app breakdown matches the Stripe Checkout line items to the cent.
+ */
+export function lessonStripeBreakdownEur(lessonPriceEur: number): {
+  base: number;
+  fee: number;
+  total: number;
+} {
+  const totalCents = Math.round(customerTotalEur(lessonPriceEur) * 100);
+  const baseCents = Math.round(lessonPriceEur * 100);
+  return {
+    base: baseCents / 100,
+    fee: (totalCents - baseCents) / 100,
+    total: totalCents / 100,
+  };
+}
+
+/**
  * Matches `api/stripe-checkout.ts`: tutors under org `entity_type = school` use Connect absorption
  * (payer pays list lesson price); others use gross-up (~2% + Stripe estimate).
  */

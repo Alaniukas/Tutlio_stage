@@ -2,10 +2,10 @@ import { createContext, useCallback, useContext } from 'react';
 import { lt as dateFnsLt, pl as dateFnsPl, lv as dateFnsLv, et as dateFnsEe, fr as dateFnsFr, es as dateFnsEs, de as dateFnsDe, sv as dateFnsSe, da as dateFnsDk, fi as dateFnsFi, nb as dateFnsNo } from 'date-fns/locale';
 import type { Locale as DateFnsLocale } from 'date-fns';
 
-export { t, detectLocaleFromHost, isValidLocale, SUPPORTED_LOCALES, LOCALE_LABELS, LOCALE_NAMES } from './core';
+export { t, tHtml, detectLocaleFromHost, isValidLocale, SUPPORTED_LOCALES, LOCALE_LABELS, LOCALE_NAMES } from './core';
 export type { Locale } from './core';
 import type { Locale } from './core';
-import { isValidLocale, t as coreTranslate } from './core';
+import { isValidLocale, t as coreTranslate, tHtml as coreTranslateHtml } from './core';
 import { stripPlatformPrefix } from '@/lib/platform';
 
 const LOCALE_STORAGE_KEY = 'tutlio_locale';
@@ -106,6 +106,8 @@ interface I18nContextValue {
   locale: Locale;
   setLocale: (locale: Locale) => void;
   t: (key: string, params?: Record<string, string | number>) => string;
+  /** HTML-escaped interpolation — use for `dangerouslySetInnerHTML` sinks. */
+  tHtml: (key: string, params?: Record<string, string | number>) => string;
   dateFnsLocale: DateFnsLocale | undefined;
 }
 
@@ -113,6 +115,7 @@ export const I18nContext = createContext<I18nContextValue>({
   locale: 'lt',
   setLocale: () => {},
   t: (key) => key,
+  tHtml: (key) => key,
   dateFnsLocale: dateFnsLt,
 });
 
@@ -128,8 +131,18 @@ export function useTranslation() {
     [ctx.t, ctx.locale],
   );
 
+  const safeTHtml = useCallback(
+    (key: string, params?: Record<string, string | number>) => {
+      const translated = ctx.tHtml(key, params);
+      if (translated !== key) return translated;
+      return coreTranslateHtml(ctx.locale, key, params);
+    },
+    [ctx.tHtml, ctx.locale],
+  );
+
   return {
     ...ctx,
     t: safeT,
+    tHtml: safeTHtml,
   };
 }

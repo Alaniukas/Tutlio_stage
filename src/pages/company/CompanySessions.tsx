@@ -29,6 +29,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import StatusBadge from '@/components/StatusBadge';
+import AttendanceBadge from '@/components/AttendanceBadge';
 import { cn } from '@/lib/utils';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
@@ -58,6 +59,8 @@ interface Session {
   show_comment_to_student?: boolean;
   student_admin_comment?: string | null;
   student_admin_comment_visible_to_tutor?: boolean;
+  tutor_joined_at?: string | null;
+  student_joined_at?: string | null;
 }
 
 interface Subject {
@@ -94,6 +97,8 @@ function mapOrgSessionRow(row: any, tutorList: { id: string; full_name: string }
     show_comment_to_student: row.show_comment_to_student ?? false,
     student_admin_comment: row.student?.admin_comment ?? null,
     student_admin_comment_visible_to_tutor: row.student?.admin_comment_visible_to_tutor ?? false,
+    tutor_joined_at: row.tutor_joined_at ?? null,
+    student_joined_at: row.student_joined_at ?? null,
   };
 }
 
@@ -674,6 +679,7 @@ export default function CompanySessions() {
                         {format(new Date(session.start_time), 'd MMM yyyy', { locale: dateFnsLocale })}{' '}
                         · {format(new Date(session.start_time), 'HH:mm')}–{format(new Date(session.end_time), 'HH:mm')}
                       </p>
+                      <AttendanceBadge session={session} className="mt-1.5" />
                     </div>
                     <div className="flex flex-col items-end gap-2 flex-shrink-0">
                       <div className="scale-90 origin-top-right">
@@ -740,12 +746,15 @@ export default function CompanySessions() {
                       {session.topic || '–'}
                     </td>
                     <td className="px-4 py-3">
-                      <StatusBadge
-                        status={session.status}
-                        paymentStatus={session.payment_status ?? undefined}
-                        paid={session.paid}
-                        endTime={session.end_time}
-                      />
+                      <div className="flex flex-col items-start gap-1">
+                        <StatusBadge
+                          status={session.status}
+                          paymentStatus={session.payment_status ?? undefined}
+                          paid={session.paid}
+                          endTime={session.end_time}
+                        />
+                        <AttendanceBadge session={session} />
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       {session.paid || session.payment_status === 'paid' || session.payment_status === 'confirmed' ? (
@@ -942,13 +951,14 @@ export default function CompanySessions() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <Label className="text-xs text-gray-500">{t('compSess.labelStatus')}</Label>
-                      <div className="mt-1">
+                      <div className="mt-1 flex flex-col items-start gap-1">
                         <StatusBadge
                           status={selectedSession.status}
                           paymentStatus={selectedSession.payment_status ?? undefined}
                           paid={selectedSession.paid}
                           endTime={selectedSession.end_time}
                         />
+                        <AttendanceBadge session={selectedSession} />
                       </div>
                     </div>
                     <div>

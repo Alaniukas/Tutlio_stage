@@ -6,6 +6,12 @@ import { tryIssueSalesInvoiceForStripePackage } from './_lib/issuePackageSalesIn
 import { markInvoicesPaidForPackage } from './_lib/markPackageInvoicePaid.js';
 import { syncSessionToGoogle } from './_lib/google-calendar.js';
 import { isOrgTutor } from './_lib/isOrgTutor.js';
+import { recordStripePlatformFee, metadataBaseEur } from './_lib/platformFeeLedger.js';
+import {
+    handleEnterpriseCheckoutCompleted,
+    handleEnterpriseLicenseSubscriptionDeleted,
+    syncEnterpriseLicenseSubscription,
+} from './_lib/enterpriseLicenseWebhook.js';
 
 const getStripe = () => {
     const key = process.env.STRIPE_SECRET_KEY;
@@ -44,6 +50,16 @@ function getStripeId(value: unknown): string | null {
         return typeof id === 'string' ? id : null;
     }
     return null;
+}
+
+/** Provider name for receipts: org name when the tutor belongs to one. */
+async function getOrgName(
+    supabase: NonNullable<ReturnType<typeof getSupabase>>,
+    orgId: string | null | undefined,
+): Promise<string | null> {
+    if (!orgId) return null;
+    const { data } = await supabase.from('organizations').select('name').eq('id', orgId).maybeSingle();
+    return (data as { name?: string | null } | null)?.name || null;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -109,6 +125,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 console.warn('[stripe-webhook] Missing customer id in subscription event');
                 return res.json({ received: true });
             }
+
+            // Enterprise license subscriptions belong to organizations, not tutor profiles.
+            if (await syncEnterpriseLicenseSubscription(supabase, subscription)) {
+                return res.json({ received: true });
+            }
+
             const isCanceledOrScheduled = subscription.status === 'canceled' || (subscription as any).cancel_at_period_end === true;
 
             const { data: profile } = await supabase
@@ -154,6 +176,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const customerId = getStripeId(subscription.customer);
             if (!customerId) {
                 console.warn('[stripe-webhook] Missing customer id in subscription.deleted event');
+                return res.json({ received: true });
+            }
+
+            // Enterprise license subscriptions belong to organizations, not tutor profiles.
+            if (await handleEnterpriseLicenseSubscriptionDeleted(supabase, subscription)) {
                 return res.json({ received: true });
             }
 
@@ -263,6 +290,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 const subscriptionId = getStripeId(session.subscription);
                 if (!customerId || !subscriptionId) {
                     console.warn('[stripe-webhook] Missing customer/subscription id in checkout.session.completed subscription mode');
+                    return res.json({ received: true });
+                }
+
+                // Enterprise license purchase: apply licenses to the org / provision a new one.
+                if (session.metadata?.tutlio_enterprise === '1') {
+                    await handleEnterpriseCheckoutCompleted({
+                        stripe,
+                        supabase,
+                        session,
+                        customerId,
+                        subscriptionId,
+                        appUrl: APP_URL,
+                    });
                     return res.json({ received: true });
                 }
 
@@ -377,6 +417,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         .eq('id', (updatedPackage as any).tutor_id)
                         .maybeSingle();
 
+                    const orgName = await getOrgName(supabase, tutor?.organization_id);
+                    const providerName = orgName || tutor?.full_name || 'Korepetitorius';
+                    const packageGrossEur = session.amount_total != null ? session.amount_total / 100 : null;
+                    const packageBaseEur = metadataBaseEur(session.metadata) ?? Number(updatedPackage.total_price);
+
+                    await recordStripePlatformFee(supabase, {
+                        sourceType: 'package',
+                        sourceId: packageId,
+                        baseAmountEur: packageBaseEur,
+                        grossAmountEur: packageGrossEur,
+                        organizationId: tutor?.organization_id ?? null,
+                        tutorId: (updatedPackage as any).tutor_id ?? null,
+                        stripeCheckoutSessionId: session.id,
+                    });
+
                     // Send success email to both payer and student (if different)
                     const recipientPairs: Array<{ email: string; recipientName: string }> = [];
                     if (student.payer_email) {
@@ -409,10 +464,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                     recipientName: r.recipientName,
                                     studentName: student.full_name,
                                     tutorName: tutor?.full_name || 'Korepetitorius',
+                                    providerName,
                                     subjectName: subject?.name || webhookEmailItems[0]?.subjectName || '–',
                                     totalLessons: updatedPackage.total_lessons,
                                     availableLessons: updatedPackage.available_lessons,
                                     totalPrice: updatedPackage.total_price.toFixed(2),
+                                    baseTotalEur: packageBaseEur,
+                                    ...(packageGrossEur != null ? { totalChargedEur: packageGrossEur } : {}),
                                     items: webhookEmailItems,
                                     ...(tutor?.organization_id ? { organizationId: tutor.organization_id } : {}),
                                 },
@@ -517,6 +575,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     const periodEnd = new Date(updatedBatch.period_end_date);
                     const periodText = `${periodStart.toLocaleDateString('lt-LT')} - ${periodEnd.toLocaleDateString('lt-LT')}`;
 
+                    const batchOrgName = await getOrgName(supabase, tutor?.organization_id);
+                    const batchProviderName = batchOrgName || tutor?.full_name || 'Korepetitorius';
+                    const batchGrossEur = session.amount_total != null ? session.amount_total / 100 : null;
+                    const batchBaseEur = metadataBaseEur(session.metadata) ?? Number(updatedBatch.total_amount || 0);
+
+                    await recordStripePlatformFee(supabase, {
+                        sourceType: 'billing_batch',
+                        sourceId: batchId,
+                        baseAmountEur: batchBaseEur,
+                        grossAmountEur: batchGrossEur,
+                        organizationId: tutor?.organization_id ?? null,
+                        tutorId: updatedBatch.tutor_id ?? null,
+                        stripeCheckoutSessionId: session.id,
+                    });
+
                     const sessionsCount = batchSessions?.length || 0;
                     const tutorName = tutor?.full_name || 'Korepetitorius';
                     const tutorEmail = tutor?.email || null;
@@ -563,8 +636,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                     data: {
                                         recipientName: r.recipientName,
                                         tutorName,
+                                        providerName: batchProviderName,
                                         periodText,
                                         totalAmount: Number(updatedBatch.total_amount || 0).toFixed(2),
+                                        baseTotalEur: batchBaseEur,
+                                        ...(batchGrossEur != null ? { totalChargedEur: batchGrossEur } : {}),
                                         sessionsCount,
                                         ...(tutor?.organization_id ? { organizationId: tutor.organization_id } : {}),
                                     },
@@ -629,7 +705,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     const { data: dbSession } = await supabase
                         .from('sessions')
                         .select(`
-                            id, price, topic, start_time, end_time, meeting_link, tutor_id,
+                            id, price, topic, start_time, end_time, meeting_link, tutor_id, credit_applied_amount,
                             students!inner(full_name, email, payment_payer, payer_email),
                             profiles!sessions_tutor_id_fkey(full_name, email, cancellation_hours, cancellation_fee_percent, organization_id)
                         `)
@@ -650,6 +726,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             (new Date((dbSession as any).end_time).getTime() - sessionStart.getTime()) / 60000
                         );
                         const amountTotal = (session as Stripe.Checkout.Session).amount_total;
+                        const grossEur = amountTotal != null ? amountTotal / 100 : null;
+                        const lessonOrgName = await getOrgName(supabase, tutor?.organization_id);
+                        const providerName = lessonOrgName || tutor?.full_name || 'Korepetitorius';
+                        // Base actually charged for the lesson: metadata (exact) or price minus applied credit.
+                        const lessonBaseEur =
+                            metadataBaseEur(session.metadata) ??
+                            Math.max(0, Number((dbSession as any).price || 0) - Number((dbSession as any).credit_applied_amount || 0));
 
                         const sendEmailUrl = `${APP_URL}/api/send-email`;
 
@@ -666,6 +749,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             if (penErr) {
                                 console.error('[stripe-webhook] Penalty timestamp error:', penErr);
                             } else if (penaltyFirst) {
+                                // Penalty base comes only from checkout metadata (lesson price is not the penalty base).
+                                await recordStripePlatformFee(supabase, {
+                                    sourceType: 'penalty',
+                                    sourceId: sessionId,
+                                    baseAmountEur: metadataBaseEur(session.metadata),
+                                    grossAmountEur: grossEur,
+                                    organizationId: tutor?.organization_id ?? null,
+                                    tutorId: (dbSession as any).tutor_id ?? null,
+                                    stripeCheckoutSessionId: session.id,
+                                });
+
                                 const emailData = {
                                     studentName: student.full_name,
                                     tutorName: tutor.full_name || 'Korepetitorius',
@@ -719,15 +813,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             } else if (updated) {
                                 syncSessionToGoogle(sessionId, (updated as any).tutor_id || (dbSession as any).tutor_id).catch(() => {});
 
+                                await recordStripePlatformFee(supabase, {
+                                    sourceType: 'session',
+                                    sourceId: sessionId,
+                                    baseAmountEur: lessonBaseEur,
+                                    grossAmountEur: grossEur,
+                                    organizationId: tutor?.organization_id ?? null,
+                                    tutorId: (dbSession as any).tutor_id ?? null,
+                                    stripeCheckoutSessionId: session.id,
+                                });
+
                                 const emailData = {
                                     studentName: student.full_name,
                                     tutorName: tutor.full_name || 'Korepetitorius',
+                                    providerName,
                                     date: dateStr,
                                     time: timeStr,
                                     subject: (dbSession as any).topic,
                                     price: (dbSession as any).price,
-                                    lessonPriceEur: (dbSession as any).price,
-                                    totalChargedEur: amountTotal != null ? amountTotal / 100 : undefined,
+                                    lessonPriceEur: lessonBaseEur,
+                                    totalChargedEur: grossEur ?? undefined,
                                     duration: durationMinutes,
                                     cancellationHours: tutor.cancellation_hours ?? 24,
                                     cancellationFeePercent: tutor.cancellation_fee_percent ?? 0,
@@ -759,6 +864,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                                                 date: dateStr,
                                                 time: timeStr,
                                                 subject: (dbSession as any).topic,
+                                                sessionId: dbSession.id,
                                                 meetingLink: (dbSession as any).meeting_link || '',
                                                 organizationId: tutor.organization_id,
                                             },

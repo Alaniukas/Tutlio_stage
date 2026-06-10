@@ -7,6 +7,7 @@ import {
   preloadSsrLocales,
   webPageJsonLd,
   esc,
+  hreflangCode,
 } from './_lib/ssr-shell.js';
 import { isSsrMethod, rejectSsrMethod, sendSsrHtml } from './_lib/ssr-http.js';
 import {
@@ -61,7 +62,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   sendSsrHtml(req, res, html, {
     'Content-Type': 'text/html; charset=utf-8',
-    'Content-Language': locale,
+    'Content-Language': hreflangCode(locale),
     'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
   });
 }

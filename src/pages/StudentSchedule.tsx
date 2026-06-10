@@ -14,6 +14,7 @@ import { ChevronLeft, ChevronRight, LayoutGrid, CalendarDays, List, Check, Calen
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { cn, normalizeUrl } from '@/lib/utils';
+import { recordJoinClick } from '@/lib/joinTracking';
 import WhiteboardButton from '@/components/WhiteboardButton';
 import { useSearchParams, useNavigate, useMatch } from 'react-router-dom';
 import { sendEmail } from '@/lib/email';
@@ -152,7 +153,7 @@ interface SlotEvent {
 }
 
 export default function StudentSchedule() {
-    const { t, dateFnsLocale } = useTranslation();
+    const { t, tHtml, dateFnsLocale } = useTranslation();
     const { user: ctxUser } = useUser();
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
@@ -256,8 +257,9 @@ export default function StudentSchedule() {
             paymentTiming,
             paymentDeadlineHours,
             perlasEnabled: tutorPerlasEnabled,
+            orgIsSchool: tutorOrgIsSchool,
         };
-    }, [isParentRoute, tutorId, tutorModalContact, cancellationHours, cancellationFeePercent, paymentTiming, paymentDeadlineHours, tutorPerlasEnabled]);
+    }, [isParentRoute, tutorId, tutorModalContact, cancellationHours, cancellationFeePercent, paymentTiming, paymentDeadlineHours, tutorPerlasEnabled, tutorOrgIsSchool]);
 
     const manualPaymentInBookingModal =
         tutorSoloManualPayments || pendingPaymentSession?.tutorSoloManual === true;
@@ -1344,6 +1346,7 @@ export default function StudentSchedule() {
                         type: 'booking_confirmation',
                         to: studentEmail,
                         data: {
+                            sessionId: sessionData.id,
                             studentName: studentName || 'Mokinys',
                             tutorName: tutorProfile?.full_name || 'Korepetitorius',
                             date: format(selectedTime, 'yyyy-MM-dd'),
@@ -1383,6 +1386,7 @@ export default function StudentSchedule() {
                         type: 'booking_confirmation',
                         to: payerEmail,
                         data: {
+                            sessionId: sessionData.id,
                             forPayer: true,
                             bookedBy: 'student',
                             studentName: studentName || 'Mokinys',
@@ -2036,9 +2040,9 @@ export default function StudentSchedule() {
                                     <ShieldAlert className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
                                     <div className="text-sm text-amber-700">
                                         <p className="font-semibold text-amber-800 mb-0.5">{t('stuSched.cancelRules')}</p>
-                                        <p><span dangerouslySetInnerHTML={{ __html: t('stuSched.cancelFreeNote', { hours: String(cancellationHours) }) }} />
+                                        <p><span dangerouslySetInnerHTML={{ __html: tHtml('stuSched.cancelFreeNote', { hours: String(cancellationHours) }) }} />
                                             {cancellationFeePercent > 0 ? (
-                                                <span dangerouslySetInnerHTML={{ __html: t('stuSched.cancelFeeNote', { percent: String(cancellationFeePercent) }) }} />
+                                                <span dangerouslySetInnerHTML={{ __html: tHtml('stuSched.cancelFeeNote', { percent: String(cancellationFeePercent) }) }} />
                                             ) : (
                                                 <span>{` ${t('stuSched.noPenalty')}`}</span>
                                             )}</p>
@@ -2234,6 +2238,7 @@ export default function StudentSchedule() {
                                     href={normalizeUrl(mySessionData.meeting_link) || undefined}
                                     target="_blank"
                                     rel="noreferrer"
+                                    onClick={() => recordJoinClick(mySessionData as any, 'student')}
                                     className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-indigo-50 text-indigo-600 font-bold hover:bg-indigo-100 transition-colors border border-indigo-100"
                                 >
                                     {t('studentDash.joinMeeting')}
@@ -2402,9 +2407,9 @@ export default function StudentSchedule() {
                                 <Info className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
                                 <p className="text-sm text-blue-800">
                                     {paymentTiming === 'after_lesson'
-                                        ? <span dangerouslySetInnerHTML={{ __html: t('stuSched.payerParentAfter', { email: studentPayerEmail || t('stuSched.payerEmailPlaceholder') }) }} />
+                                        ? <span dangerouslySetInnerHTML={{ __html: tHtml('stuSched.payerParentAfter', { email: studentPayerEmail || t('stuSched.payerEmailPlaceholder') }) }} />
                                         : studentPayerEmail?.trim()
-                                            ? <span dangerouslySetInnerHTML={{ __html: t('stuSched.payerParentBefore', { email: studentPayerEmail }) }} />
+                                            ? <span dangerouslySetInnerHTML={{ __html: tHtml('stuSched.payerParentBefore', { email: studentPayerEmail }) }} />
                                             : <>{t('stuSched.payerNoEmail')}</>}
                                 </p>
                             </div>

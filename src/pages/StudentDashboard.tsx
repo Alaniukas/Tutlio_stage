@@ -16,6 +16,7 @@ import { format, isAfter, isBefore } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 import { CalendarDays, Clock, Zap, BookOpen, Settings, Play, XCircle, CheckCircle, RefreshCw, CreditCard, Loader2, Package, Users, ChevronDown, ChevronUp, Landmark } from 'lucide-react';
 import { cn, normalizeUrl } from '@/lib/utils';
+import { recordJoinClick } from '@/lib/joinTracking';
 import { useStudentPaymentBlock } from '@/hooks/useStudentPaymentBlock';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
 import { formatLessonStripeChargeEur } from '@/lib/stripeLessonPricing';
@@ -760,6 +761,7 @@ export default function StudentDashboard() {
                                 href={normalizeUrl(selectedSession.meeting_link) || undefined}
                                 target="_blank"
                                 rel="noreferrer"
+                                onClick={() => recordJoinClick(selectedSession as any, 'student')}
                                 className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-indigo-50 text-indigo-600 font-bold hover:bg-indigo-100 transition-colors border border-indigo-100 mt-2"
                             >
                                 {t('studentDash.joinMeeting')}

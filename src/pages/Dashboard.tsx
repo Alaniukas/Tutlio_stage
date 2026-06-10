@@ -37,7 +37,9 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { cn, normalizeUrl } from '@/lib/utils';
+import { recordJoinClick } from '@/lib/joinTracking';
 import StatusBadge from '@/components/StatusBadge';
+import AttendanceBadge from '@/components/AttendanceBadge';
 import { DateTimeSpinner } from '@/components/TimeSpinner';
 import { Edit2 } from 'lucide-react';
 import { cancelSessionAndFillWaitlist, releaseSessionSlotViaApi } from '@/lib/lesson-actions';
@@ -1173,7 +1175,7 @@ export default function DashboardPage() {
                                           {isToday ? `${t('stuSched.today')}, ${format(start, 'HH:mm')}` : format(start, 'EEE d MMM, HH:mm', { locale: dateFnsLocale })}
                                           {s.topic && <span className="ml-1">· {s.topic}</span>}
                                         </span>
-                                        <div className="scale-90 origin-left"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} isTrial={s.subjects?.is_trial === true} orgTutorCopy={isOrgTutor === true} hidePaymentStatus={isOrgTutor === true} endTime={s.end_time} /></div>
+                                        <div className="scale-90 origin-left flex items-center gap-1 flex-wrap"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} isTrial={s.subjects?.is_trial === true} orgTutorCopy={isOrgTutor === true} hidePaymentStatus={isOrgTutor === true} endTime={s.end_time} /><AttendanceBadge session={s} /></div>
                                       </div>
                                     </div>
                                     {isOrgTutor !== true && s.price && <span className="text-sm font-semibold text-gray-700 flex-shrink-0">€{s.price}</span>}
@@ -1396,7 +1398,7 @@ export default function DashboardPage() {
                                                                 {isToday ? `${t('stuSched.today')}, ${format(start, 'HH:mm')}` : format(start, 'EEE d MMM, HH:mm', { locale: dateFnsLocale })}
                                                                 {s.topic && <span className="ml-1">· {s.topic}</span>}
                                                             </span>
-                                                            <div className="scale-90 origin-left"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} endTime={s.end_time} /></div>
+                                                            <div className="scale-90 origin-left flex items-center gap-1 flex-wrap"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} endTime={s.end_time} /><AttendanceBadge session={s} /></div>
                                                         </div>
                                                     </div>
                                                     {s.price && <span className="text-sm font-semibold text-gray-700 flex-shrink-0">€{s.price}</span>}
@@ -2040,11 +2042,14 @@ export default function DashboardPage() {
                             )}
                         </div>
 
+                        {selectedSession && <AttendanceBadge session={selectedSession as any} />}
+
                         {selectedSession?.meeting_link && (
                             <a
                                 href={normalizeUrl(selectedSession.meeting_link) || undefined}
                                 target="_blank"
                                 rel="noreferrer"
+                                onClick={() => recordJoinClick(selectedSession as any, 'tutor')}
                                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-50 text-blue-600 text-sm hover:bg-blue-100 transition-colors"
                             >
                                 {t('dash.joinVideoCall')}

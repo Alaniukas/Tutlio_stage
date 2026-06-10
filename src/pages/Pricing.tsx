@@ -10,7 +10,6 @@ import {
   TrendingUp,
   CheckCircle2,
   ArrowRight,
-  Building2,
   Package,
   Banknote,
   FileText,
@@ -23,6 +22,7 @@ import { usePlatform } from '@/contexts/PlatformContext';
 import LandingNavbar from '@/components/LandingNavbar';
 import LandingFooter from '@/components/LandingFooter';
 import EnterpriseContactModal from '@/components/EnterpriseContactModal';
+import EnterprisePlanCard from '@/components/pricing/EnterprisePlanCard';
 
 export default function Pricing() {
   const { t, locale } = useTranslation();
@@ -84,16 +84,6 @@ export default function Pricing() {
       <LandingNavbar />
 
       <main className="flex-1 pt-[60px] md:pt-[72px]">
-        <section className="bg-[#ecfdf5] border-b border-emerald-200">
-          <div className="max-w-[1200px] mx-auto px-6 py-3 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center text-sm text-emerald-950">
-            <span>{t('pricing.trialBannerPrefix')}</span>
-            <code className="font-mono text-base font-bold tracking-widest bg-white px-3 py-0.5 rounded-md border border-emerald-300 text-emerald-900">
-              TRIAL7D
-            </code>
-            <span className="text-emerald-800">{t('pricing.trialBannerSuffix')}</span>
-          </div>
-        </section>
-
         {/* Hero */}
         <section className="relative overflow-hidden bg-gradient-to-b from-[#f5f5f3] via-[#f0efed] to-white">
           <div className="absolute top-[10%] left-1/2 -translate-x-1/2 w-[700px] h-[400px] bg-white/40 rounded-full blur-[100px] pointer-events-none" />
@@ -139,7 +129,7 @@ export default function Pricing() {
 
         {/* Cards */}
         <section className="max-w-[1200px] mx-auto px-6 pb-20">
-          <div className="grid md:grid-cols-3 gap-6 max-w-[960px] mx-auto items-stretch pt-5">
+          <div className="grid md:grid-cols-2 gap-6 max-w-[760px] mx-auto items-stretch pt-5">
             {/* Standard — monthly or yearly via toggle */}
             <div className="relative bg-[#4f46e5] rounded-2xl p-7 shadow-lg shadow-indigo-200/40 ring-2 ring-[#4f46e5] flex flex-col">
               {isYearly && (
@@ -216,32 +206,11 @@ export default function Pricing() {
               </button>
             </div>
 
-            {/* Enterprise */}
-            <div className="bg-gray-900 rounded-2xl p-7 shadow-lg shadow-gray-900/20 flex flex-col">
-              <div className="mb-6">
-                <div className="flex items-center gap-2 mb-2">
-                  <Building2 className="w-5 h-5 text-gray-400" />
-                  <h3 className="text-xl font-bold text-white">{t('pricing.enterprise')}</h3>
-                </div>
-                <p className="text-gray-400 text-[13px] leading-relaxed">{t('pricing.enterpriseDesc')}</p>
-              </div>
-              <ul className="space-y-2.5 mb-7 flex-1">
-                <li className="flex items-center gap-2 text-gray-300 text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />{t('pricing.allFeatures')}</li>
-                <li className="flex items-center gap-2 text-gray-300 text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />{t('pricing.enterpriseMultiTutor')}</li>
-                <li className="flex items-center gap-2 text-gray-300 text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />{t('pricing.enterpriseStats')}</li>
-                <li className="flex items-center gap-2 text-gray-300 text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />{t('pricing.enterpriseAutoInvoices')}</li>
-                <li className="flex items-center gap-2 text-gray-300 text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />{t('pricing.enterpriseCancelStats')}</li>
-                <li className="flex items-center gap-2 text-gray-300 text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />{t('pricing.enterpriseCustom')}</li>
-                <li className="flex items-center gap-2 text-gray-300 text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />{t('pricing.enterpriseSupport')}</li>
-              </ul>
-              <button
-                type="button"
-                onClick={() => setEnterpriseOpen(true)}
-                className="flex items-center justify-center w-full h-11 rounded-full bg-white text-gray-900 font-semibold text-[13px] transition-all duration-200 hover:scale-[1.02] hover:bg-gray-100 active:scale-[0.98]"
-              >
-                {t('pricing.contactUs')}
-              </button>
-            </div>
+          </div>
+
+          {/* Enterprise — full-width row with the license calculator */}
+          <div className="max-w-[960px] mx-auto mt-6">
+            <EnterprisePlanCard audience={checkoutAudience} onBookDemo={() => setEnterpriseOpen(true)} />
           </div>
         </section>
 

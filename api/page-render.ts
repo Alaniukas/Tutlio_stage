@@ -16,6 +16,7 @@ import {
   webPageJsonLd,
   faqJsonLd,
   softwareAppJsonLd,
+  hreflangCode,
 } from './_lib/ssr-shell.js';
 
 type PageId = 'landing' | 'pricing' | 'about' | 'contacts';
@@ -289,7 +290,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   sendSsrHtml(req, res, html, {
     'Content-Type': 'text/html; charset=utf-8',
-    'Content-Language': locale,
+    'Content-Language': hreflangCode(locale),
     'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
   });
 }

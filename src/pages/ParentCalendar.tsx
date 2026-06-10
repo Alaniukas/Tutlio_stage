@@ -148,7 +148,7 @@ function parseStudentGrade(grade: string | number | null | undefined): number {
 const CHILD_STORAGE_KEY = 'tutlio_parent_calendar_child_id';
 
 export default function ParentCalendar() {
-  const { t, locale, dateFnsLocale } = useTranslation();
+  const { t, tHtml, locale, dateFnsLocale } = useTranslation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
@@ -1112,9 +1112,9 @@ export default function ParentCalendar() {
                 <div className="text-sm text-amber-700">
                   <p className="font-semibold text-amber-800 mb-0.5">{t('stuSched.cancelRules')}</p>
                   <p>
-                    <span dangerouslySetInnerHTML={{ __html: t('stuSched.cancelFreeNote', { hours: String(cancellationHours) }) }} />
+                    <span dangerouslySetInnerHTML={{ __html: tHtml('stuSched.cancelFreeNote', { hours: String(cancellationHours) }) }} />
                     {cancellationFeePercent > 0 ? (
-                      <span dangerouslySetInnerHTML={{ __html: t('stuSched.cancelFeeNote', { percent: String(cancellationFeePercent) }) }} />
+                      <span dangerouslySetInnerHTML={{ __html: tHtml('stuSched.cancelFeeNote', { percent: String(cancellationFeePercent) }) }} />
                     ) : (
                       <span>{` ${t('stuSched.noPenalty')}`}</span>
                     )}

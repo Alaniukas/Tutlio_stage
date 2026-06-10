@@ -16,6 +16,9 @@ import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClie
 import { SCHOOL_CONTRACTS_BUCKET, extractSchoolContractStoragePath } from './_lib/schoolContractPdfPath.js';
 import { sendPushForEmail } from './_lib/sendPush.js';
 import { getResendApiKey, resendNotConfiguredMessage } from './_lib/resendConfig.js';
+import { buildTrackedJoinUrl, type JoinRole } from './_lib/joinLink.js';
+import { isInternalRequest } from './_lib/auth.js';
+import { isCronAuthorized } from './_lib/cronAuth.js';
 
 
 function randomToken() {
@@ -122,6 +125,39 @@ const getAppUrl = () => {
 
 function prefersManualInstructions(d: any): boolean {
   return d?.manualPaymentInstructions === true || d?.manualPaymentInstructions === 'true';
+}
+
+/** Which attendance side the email recipient represents (parent/payer counts as the student side). */
+function joinRoleForEmailType(type: string, d: any): JoinRole | null {
+  switch (type) {
+    case 'booking_confirmation':
+    case 'session_reminder_payer':
+      return 'student';
+    case 'session_reminder':
+      return d?.isTutor ? 'tutor' : 'student';
+    case 'lesson_confirmed_tutor':
+      return 'tutor';
+    default:
+      return null;
+  }
+}
+
+/**
+ * Attendance tracking: lesson join links in emails go through /api/join-session
+ * (records the click, then redirects to the real Zoom/Meet link). Applied only
+ * when the caller provides `sessionId`; otherwise the raw link is kept.
+ */
+function applyTrackedMeetingLink(type: string, d: any): void {
+  const rawLink = typeof d?.meetingLink === 'string' ? d.meetingLink.trim() : '';
+  const sessionId = typeof d?.sessionId === 'string' ? d.sessionId.trim() : '';
+  if (!rawLink || !sessionId || rawLink.includes('/api/join-session')) return;
+  const role = joinRoleForEmailType(type, d);
+  if (!role) return;
+  try {
+    d.meetingLink = buildTrackedJoinUrl(getAppUrl(), sessionId, role);
+  } catch {
+    // No HMAC secret configured — keep the raw link (click just won't be tracked).
+  }
 }
 
 /** Nekintantys tekstai rankinio mokėjimo el. paštu – neklauso `src/lib/i18n` pakrovimo į serverio bundle / `t()` grandinės. */
@@ -1069,9 +1105,13 @@ function paymentSuccess(d: any, locale: Locale) {
   if (lessonNum != null && chargedNum != null && amountsCloseEuro(lessonNum, chargedNum)) {
     moneyRows = td(t(locale, 'em.labelTotalPaid'), `€${fmt(lessonNum)}`, false);
   } else if (lessonNum != null && chargedNum != null && chargedNum > lessonNum + 0.02) {
+    // Receipt breakdown: teaching service (tutor/agency) + platform fee (MB Tutlio) + total.
+    const providerName = String(d.providerName || d.tutorName || '').trim();
+    const platformFeeNum = Math.round((chargedNum - lessonNum) * 100) / 100;
     moneyRows =
-      td(t(locale, 'em.labelLessonPrice'), `€${fmt(lessonNum)}`) +
-      td(t(locale, 'em.labelTotalCharged'), `€${fmt(chargedNum)} ${t(locale, 'em.includingFees')}`, false);
+      td(t(locale, 'em.feeRowTeaching', { provider: providerName }), `€${fmt(lessonNum)}`) +
+      td(t(locale, 'em.feeRowPlatform'), `€${fmt(platformFeeNum)}`) +
+      td(t(locale, 'em.labelTotalCharged'), `€${fmt(chargedNum)}`, false);
   } else if (lessonNum != null && chargedNum != null && chargedNum < lessonNum - 0.02) {
     moneyRows =
       td(t(locale, 'em.labelLessonPrice'), `€${fmt(lessonNum)}`) +
@@ -1118,7 +1158,7 @@ function paymentSuccess(d: any, locale: Locale) {
 function lessonConfirmedTutor(d: any, locale: Locale) {
   const appUrl = getAppUrl();
   const linkRow = d.meetingLink
-    ? td(t(locale, 'em.labelLink'), `<a href="${d.meetingLink}" style="color:#6366f1; word-break:break-all;">${d.meetingLink}</a>`, false)
+    ? td(t(locale, 'em.labelLink'), `<a href="${d.meetingLink}" style="color:#6366f1; font-weight:600; text-decoration:none;">${t(locale, 'em.btnJoinNow')}</a>`, false)
     : td(t(locale, 'em.labelLink'), t(locale, 'em.joinLinkPlaceholder'), false);
   return {
     subject: t(locale, 'em.lessonConfTutorSub', { student: d.studentName, date: d.date, time: d.time }),
@@ -1395,6 +1435,23 @@ function prepaidPackageSuccess(d: any, locale: Locale) {
     : (d.subjectName || '–');
   const availLabel = avail === 1 ? t(locale, 'em.lessonSingular') : avail < 10 ? t(locale, 'em.lessonFew') : t(locale, 'em.lessonMany');
   const totalLabel = total === 1 ? t(locale, 'em.lessonSingular') : total < 10 ? t(locale, 'em.lessonFew') : t(locale, 'em.lessonMany');
+  // Fee breakdown when the payer was charged more than the package price.
+  const pkgBaseNum = Number(d.baseTotalEur ?? d.totalPrice);
+  const pkgChargedNum = d.totalChargedEur != null ? Number(d.totalChargedEur) : null;
+  let moneyRows: string;
+  if (
+    pkgChargedNum != null && Number.isFinite(pkgBaseNum) && Number.isFinite(pkgChargedNum) &&
+    pkgChargedNum > pkgBaseNum + 0.02
+  ) {
+    const providerName = String(d.providerName || d.tutorName || '').trim();
+    const feeNum = Math.round((pkgChargedNum - pkgBaseNum) * 100) / 100;
+    moneyRows =
+      td(t(locale, 'em.feeRowTeaching', { provider: providerName }), `€${pkgBaseNum.toFixed(2)}`) +
+      td(t(locale, 'em.feeRowPlatform'), `€${feeNum.toFixed(2)}`) +
+      td(t(locale, 'em.labelTotalCharged'), `€${pkgChargedNum.toFixed(2)}`, false);
+  } else {
+    moneyRows = td(t(locale, 'em.labelTotalPaid'), `€${d.totalPrice}`, false);
+  }
   return {
     subject: t(locale, 'em.packageSuccessSub', { count: String(total), label: totalLabel, subject: subj }),
     html: wrap(`
@@ -1410,12 +1467,12 @@ function prepaidPackageSuccess(d: any, locale: Locale) {
         ${isMulti
           ? itemsBreakdown + table(
               td(t(locale, 'em.labelAvailable'), `${avail}/${total}`) +
-              td(t(locale, 'em.labelTotalPaid'), `€${d.totalPrice}`, false)
+              moneyRows
             )
           : table(
               td(t(locale, 'em.labelSubject'), subj) +
               td(t(locale, 'em.labelAvailable'), `${avail}/${total}`) +
-              td(t(locale, 'em.labelTotalPaid'), `€${d.totalPrice}`, false)
+              moneyRows
             )}
         <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:12px; padding:16px; margin:20px 0;">
           <p style="color:#1e40af; font-size:14px; margin:0; line-height:1.6;">
@@ -1662,6 +1719,23 @@ function manualPackageConfirmed(d: any, locale: Locale) {
 
 function monthlyInvoicePaid(d: any, locale: Locale) {
   const appUrl = getAppUrl();
+  // Fee breakdown when the payer was charged more than the lessons total.
+  const batchBaseNum = Number(d.baseTotalEur ?? d.totalAmount);
+  const batchChargedNum = d.totalChargedEur != null ? Number(d.totalChargedEur) : null;
+  let moneyRows: string;
+  if (
+    batchChargedNum != null && Number.isFinite(batchBaseNum) && Number.isFinite(batchChargedNum) &&
+    batchChargedNum > batchBaseNum + 0.02
+  ) {
+    const providerName = String(d.providerName || d.tutorName || '').trim();
+    const feeNum = Math.round((batchChargedNum - batchBaseNum) * 100) / 100;
+    moneyRows =
+      td(t(locale, 'em.feeRowTeaching', { provider: providerName }), `€${batchBaseNum.toFixed(2)}`) +
+      td(t(locale, 'em.feeRowPlatform'), `€${feeNum.toFixed(2)}`) +
+      td(t(locale, 'em.labelTotalCharged'), `€${batchChargedNum.toFixed(2)}`, false);
+  } else {
+    moneyRows = td(t(locale, 'em.labelSum'), `€${d.totalAmount}`, false);
+  }
   return {
     subject: t(locale, 'em.invoicePaidSub', { period: d.periodText, amount: d.totalAmount }),
     html: wrap(`
@@ -1677,11 +1751,48 @@ function monthlyInvoicePaid(d: any, locale: Locale) {
         ${table(
           td(t(locale, 'em.labelPeriod'), d.periodText) +
           td(t(locale, 'em.labelLessonCount'), d.sessionsCount) +
-          td(t(locale, 'em.labelSum'), `€${d.totalAmount}`, false)
+          moneyRows
         )}
         <div style="text-align:center; margin-top: 24px;">
           ${outlookEmailButton(`${appUrl}/student/sessions`, t(locale, 'em.btnViewLessonsArrow'), '#4f46e5', { fontSize: '15px', padding: '14px 32px' })}
         </div>
+      </div>
+      ${footerFor(locale)}
+    `, locale),
+  };
+}
+
+function platformInvoice(d: any, locale: Locale) {
+  const fmt = (x: unknown) => {
+    const n = Number(x);
+    return Number.isFinite(n) ? n.toFixed(2) : String(x ?? '');
+  };
+  const deductedRow =
+    d.deductedAmount != null && Number(d.deductedAmount) > 0
+      ? td(t(locale, 'em.platformInvoiceDeducted'), `-€${fmt(d.deductedAmount)}`)
+      : '';
+  return {
+    subject: t(locale, 'em.platformInvoiceSub', { number: d.invoiceNumber, period: d.periodLabel }),
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#4f46e5', '#6366f1')}">
+        <h1>${t(locale, 'em.platformInvoiceHeader')}</h1>
+        <p>${t(locale, 'em.platformInvoiceHeaderSub')}</p>
+      </div>
+      <div class="body">
+        <p class="greeting">${t(locale, 'em.hiName', { name: d.organizationName || '' })}</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          ${t(locale, 'em.platformInvoiceBody', { period: d.periodLabel })}
+        </p>
+        ${table(
+          td(t(locale, 'em.platformInvoiceNumberLabel'), d.invoiceNumber) +
+          td(t(locale, 'em.labelPeriod'), d.periodLabel) +
+          td(t(locale, 'em.labelSum'), `€${fmt(d.totalAmount)}`) +
+          deductedRow +
+          td(t(locale, 'em.platformInvoiceDue'), `€${fmt(d.amountDue)}`, false)
+        )}
+        <p style="color:#6b7280; font-size:13px; line-height:1.5; margin-top:16px;">
+          ${t(locale, 'em.platformInvoiceFooter')}
+        </p>
       </div>
       ${footerFor(locale)}
     `, locale),
@@ -2017,17 +2128,42 @@ function customHtmlAnnouncement(d: any, locale: Locale) {
   };
 }
 
+/** Server-to-server (internal key) or cron — both compared in constant time. */
 function isAuthorizedRequest(req: VercelRequest): boolean {
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-  const internalKey = typeof req.headers['x-internal-key'] === 'string' ? req.headers['x-internal-key'] : '';
-  if (internalKey && serviceKey && internalKey === serviceKey) return true;
-
-  const cronSecret = process.env.CRON_SECRET;
-  const authHeader = typeof req.headers.authorization === 'string' ? req.headers.authorization : '';
-  if (cronSecret && authHeader === `Bearer ${cronSecret}`) return true;
-
-  return false;
+  return isInternalRequest(req) || isCronAuthorized(req);
 }
+
+/**
+ * Email types the browser legitimately triggers with a user JWT (see
+ * src/lib/email.ts and the waitlist panels). Everything else — announcements,
+ * digests, invoices, custom HTML, etc. — requires internal/cron authorization,
+ * so a regular logged-in user cannot use the platform as a phishing relay.
+ */
+const USER_TRIGGERABLE_EMAIL_TYPES = new Set([
+  'booking_confirmation',
+  'booking_notification',
+  'org_tutor_availability_notice',
+  'session_cancelled',
+  'session_reminder',
+  'package_depleted_notification',
+  'payment_rejection_reminder',
+  'invite_email',
+  'recurring_booking_confirmation',
+  'lesson_rescheduled',
+  'waitlist_added',
+  'waitlist_matched_student',
+  'waitlist_matched_tutor',
+  'payment_review_needed',
+  'stripe_payment_forwarding',
+  'payment_success',
+  'lesson_confirmed_tutor',
+  'payment_received_tutor',
+  'payment_failed',
+  'session_comment_added',
+  'tutor_student_assigned',
+  'school_contract',
+  'school_installment_request',
+]);
 
 async function isAuthenticatedUser(req: VercelRequest): Promise<boolean> {
   const authHeader = typeof req.headers.authorization === 'string' ? req.headers.authorization : '';
@@ -2107,13 +2243,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    if (!isAuthorizedRequest(req) && !(await isAuthenticatedUser(req))) {
+    const isPrivileged = isAuthorizedRequest(req);
+    if (!isPrivileged && !(await isAuthenticatedUser(req))) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
     const { type, to, data: rawData, locale: bodyLocale } = req.body;
     if (!type || !to) {
       return res.status(400).json({ error: 'Missing required fields: type, to' });
+    }
+    if (!isPrivileged && !USER_TRIGGERABLE_EMAIL_TYPES.has(String(type))) {
+      return res.status(403).json({ error: 'This email type requires server authorization' });
     }
     const apiKey = getResendApiKey();
     if (!apiKey) {
@@ -2141,6 +2281,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    // Before sanitize so the tracked URL gets the same HTML escaping as raw links.
+    applyTrackedMeetingLink(type, rawData);
     const data = sanitizeEmailData(rawData);
     const orgIdFromPayload =
       (typeof rawData?.organizationId === 'string' && rawData.organizationId.trim()) ||
@@ -2317,6 +2459,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'package_depleted_notification': emailContent = packageDepletedNotification(data, locale); break;
       case 'monthly_invoice': emailContent = monthlyInvoice(data, locale); break;
       case 'monthly_invoice_paid': emailContent = monthlyInvoicePaid(data, locale); break;
+      case 'platform_invoice': emailContent = platformInvoice(data, locale); break;
       case 'manual_package_request': emailContent = manualPackageRequest(data, locale); break;
       case 'manual_package_confirmed': emailContent = manualPackageConfirmed(data, locale); break;
       case 'org_tutor_availability_notice': emailContent = orgTutorAvailabilityNotice(data, locale); break;

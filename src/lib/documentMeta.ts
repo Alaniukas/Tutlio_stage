@@ -29,11 +29,15 @@ function setMeta(attr: 'name' | 'property', key: string, content: string) {
 /** Default SEO title + meta tags for the current UI locale (SPA shell). */
 export function applyDefaultDocumentMeta(locale: Locale, platform: Platform = DEFAULT_PLATFORM): void {
   const tagline = t(locale, 'landing.heroBadge', undefined, platform);
-  const fullTitle = `Tutlio - ${tagline}`;
-  document.title = fullTitle;
-  setMeta('name', 'description', tagline);
-  setMeta('property', 'og:title', fullTitle);
-  setMeta('property', 'og:description', tagline);
-  setMeta('name', 'twitter:title', fullTitle);
-  setMeta('name', 'twitter:description', tagline);
+  applyPageDocumentMeta(`Tutlio - ${tagline}`, tagline);
+}
+
+/** Page-specific title + meta tags for public marketing pages (SPA navigation). */
+export function applyPageDocumentMeta(title: string, description: string): void {
+  document.title = title;
+  setMeta('name', 'description', description);
+  setMeta('property', 'og:title', title);
+  setMeta('property', 'og:description', description);
+  setMeta('name', 'twitter:title', title);
+  setMeta('name', 'twitter:description', description);
 }

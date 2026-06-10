@@ -145,7 +145,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         currency: 'eur',
                         product_data: {
                             name: `Pamokos (${sessionCount}) – ${periodText}`,
-                            description: `Invoice – ${ownerName}`,
+                            description: `Mokymo paslaugos. Paslaugos teikėjas: ${ownerName}`,
                         },
                         unit_amount: chargeCents,
                     },
@@ -179,7 +179,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             currency: 'eur',
                             product_data: {
                                 name: `Pamokos (${sessionCount}) – ${periodText}`,
-                                description: `Invoice – ${ownerName}`,
+                                description: `Mokymo paslaugos. Paslaugos teikėjas: ${ownerName}`,
                             },
                             unit_amount: baseCents,
                         },
@@ -190,7 +190,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             currency: 'eur',
                             product_data: {
                                 name: 'Platformos administravimo mokestis',
-                                description: 'Platform administration and payment processing fee',
+                                description: 'Paslaugos teikėjas: MB „Tutlio“',
                             },
                             unit_amount: feesCents,
                         },
@@ -201,7 +201,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     transfer_data: { destination: stripeAccountId!, amount: baseCents },
                     metadata: { tutlio_billing_batch_id: batchId, tutor_id: batch.tutor_id },
                 },
-                metadata: { tutlio_billing_batch_id: batchId, tutor_id: batch.tutor_id },
+                metadata: { tutlio_billing_batch_id: batchId, tutor_id: batch.tutor_id, tutlio_base_eur: (baseCents / 100).toFixed(2) },
                 success_url: `${APP_URL}/student/sessions?invoice_paid=true&billing_batch_id=${batchId}&session_id={CHECKOUT_SESSION_ID}`,
                 cancel_url: `${APP_URL}/student/sessions`,
             });

@@ -27,6 +27,11 @@ import {
 import StatusBadge from '@/components/StatusBadge';
 import WhiteboardButton from '@/components/WhiteboardButton';
 import { normalizeUrl } from '@/lib/utils';
+import { recordJoinClick } from '@/lib/joinTracking';
+import {
+  formatLessonStripeChargeEur,
+  lessonStripeBreakdownEur,
+} from '@/lib/stripeLessonPricing';
 /** Tutor contact + payment / cancellation rules (from profiles). */
 export type ParentTutorContactPolicy = {
   tutorId: string;
@@ -38,6 +43,10 @@ export type ParentTutorContactPolicy = {
   paymentTiming: 'before_lesson' | 'after_lesson';
   paymentDeadlineHours: number;
   perlasEnabled?: boolean;
+  /** School orgs absorb fees — parent pays the list price, no breakdown shown. */
+  orgIsSchool?: boolean;
+  /** Service provider shown in the fee breakdown (org name when tutor belongs to one). */
+  providerName?: string | null;
 };
 
 /** Session row shape for the shared parent lesson modal. */
@@ -90,6 +99,10 @@ export function ParentLessonDetailModal({
     session?.subjectName ||
     session?.topic ||
     (session ? t('common.lesson') : '');
+
+  const orgIsSchool = !!tutorPolicy?.orgIsSchool;
+  const providerName =
+    tutorPolicy?.providerName || tutorPolicy?.tutorName || t('studentDash.tutorLabel');
 
   const [stripeLoading, setStripeLoading] = useState(false);
   const [perlasLoading, setPerlasLoading] = useState(false);
@@ -271,6 +284,7 @@ export function ParentLessonDetailModal({
               href={normalizeUrl(session.meeting_link) || undefined}
               target="_blank"
               rel="noreferrer"
+              onClick={() => recordJoinClick(session as any, 'student')}
               className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-indigo-50 text-indigo-600 font-bold hover:bg-indigo-100 transition-colors border border-indigo-100"
             >
               <Play className="w-4 h-4" />
@@ -342,6 +356,25 @@ export function ParentLessonDetailModal({
             !session.paid &&
             isAfter(new Date(session.end_time), now) && (
               <div className="space-y-2">
+                {session.price != null && !orgIsSchool && (() => {
+                  const b = lessonStripeBreakdownEur(Number(session.price));
+                  return (
+                    <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-sm space-y-1.5">
+                      <div className="flex items-start justify-between gap-3 text-gray-700">
+                        <span>{t('parent.feeBreakdownTeaching', { provider: providerName })}</span>
+                        <span className="font-semibold whitespace-nowrap">€{b.base.toFixed(2)}</span>
+                      </div>
+                      <div className="flex items-start justify-between gap-3 text-gray-700">
+                        <span>{t('parent.feeBreakdownPlatform')}</span>
+                        <span className="font-semibold whitespace-nowrap">€{b.fee.toFixed(2)}</span>
+                      </div>
+                      <div className="flex items-start justify-between gap-3 pt-1.5 border-t border-gray-200 font-bold text-gray-900">
+                        <span>{t('parent.feeBreakdownTotal')}</span>
+                        <span className="whitespace-nowrap">€{b.total.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
                 <button
                   type="button"
                   disabled={stripeLoading}
@@ -354,7 +387,9 @@ export function ParentLessonDetailModal({
                     <CreditCard className="w-4 h-4" />
                   )}
                   {t('studentDash.pay')}
-                  {session.price != null ? ` · €${session.price}` : ''}
+                  {session.price != null
+                    ? ` · €${formatLessonStripeChargeEur(Number(session.price), orgIsSchool)}`
+                    : ''}
                 </button>
                 {(perlasEnabled ?? tutorPolicy?.perlasEnabled) && session.price != null && (() => {
                   const sp = Number(session.price || 0);

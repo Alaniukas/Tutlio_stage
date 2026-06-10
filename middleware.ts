@@ -1,11 +1,13 @@
 import { next, rewrite } from '@vercel/functions';
 
-const LOCALES = new Set(['en', 'lt', 'pl', 'lv', 'ee', 'fr', 'es', 'de', 'se', 'dk', 'fi', 'no']);
-const FEATURES = new Set(['calendar', 'waitlist', 'payments', 'reminders', 'cancellation', 'comments']);
+// Kept dependency-free for the edge runtime; sync with api/_lib/seo-routing.ts
+// and src/lib/featurePages.ts is enforced by tests/lib/seo-visibility.test.ts.
+export const LOCALES = new Set(['en', 'lt', 'pl', 'lv', 'ee', 'fr', 'es', 'de', 'se', 'dk', 'fi', 'no']);
+export const FEATURES = new Set(['calendar', 'waitlist', 'payments', 'reminders', 'cancellation', 'comments']);
 
 /** Crawlers and AI fetchers — humans always get the Vite SPA. */
-const BOT_UA =
-  /googlebot|google-inspectiontool|bingbot|slurp|duckduckbot|baiduspider|yandexbot|applebot|facebookexternalhit|twitterbot|linkedinbot|embedly|slackbot|discordbot|whatsapp|telegrambot|semrush|ahrefs|mj12bot|dotbot|petalbot|bytespider|gptbot|chatgpt-user|claudebot|anthropic-ai|perplexity|cohere-ai|amazonbot/i;
+export const BOT_UA =
+  /googlebot|google-inspectiontool|bingbot|slurp|duckduckbot|duckassist|baiduspider|yandexbot|applebot|facebookexternalhit|facebookbot|meta-external|twitterbot|linkedinbot|embedly|slackbot|discordbot|whatsapp|telegrambot|semrush|ahrefs|mj12bot|dotbot|petalbot|bytespider|gptbot|chatgpt-user|oai-searchbot|claudebot|claude-web|anthropic-ai|perplexity|cohere|amazonbot|ccbot|mistral|youbot|kagibot|diffbot/i;
 
 function isBot(request: Request): boolean {
   const ua = request.headers.get('user-agent') || '';

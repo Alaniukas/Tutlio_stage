@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { DateInput } from '@/components/ui/date-input';
 import { Label } from '@/components/ui/label';
 import { cn, normalizeUrl } from '@/lib/utils';
+import { recordJoinClick } from '@/lib/joinTracking';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
 import { formatLessonStripeChargeEur } from '@/lib/stripeLessonPricing';
@@ -85,7 +86,7 @@ const STATUS_CONFIG = {
 type ModalStep = 'cancel-confirm' | 'cancel-reason' | 'penalty-choice' | 'picking' | 'confirming' | 'success' | 'cancel-success';
 
 export default function StudentSessions() {
-    const { t, dateFnsLocale } = useTranslation();
+    const { t, tHtml, dateFnsLocale } = useTranslation();
     const { user: ctxUser } = useUser();
     const location = useLocation();
     const navigate = useNavigate();
@@ -1588,7 +1589,7 @@ export default function StudentSessions() {
                                                 {format(new Date(s.start_time), 'HH:mm')} – {format(new Date(s.end_time), 'HH:mm')}
                                             </span>
                                             {s.meeting_link && !isPast && (
-                                                <a href={normalizeUrl(s.meeting_link) || undefined} target="_blank" rel="noreferrer" className="ml-2 bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors">
+                                                <a href={normalizeUrl(s.meeting_link) || undefined} target="_blank" rel="noreferrer" onClick={() => recordJoinClick(s as any, 'student')} className="ml-2 bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors">
                                                     {t('stuSess.joinLesson')}
                                                 </a>
                                             )}
@@ -1722,6 +1723,7 @@ export default function StudentSessions() {
                                     href={normalizeUrl(selectedSession.meeting_link) || undefined}
                                     target="_blank"
                                     rel="noreferrer"
+                                    onClick={() => recordJoinClick(selectedSession as any, 'student')}
                                     className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-indigo-50 text-indigo-600 font-bold hover:bg-indigo-100 transition-colors border border-indigo-100"
                                 >
                                     <Video className="w-4 h-4" /> {t('studentDash.joinMeeting')}
@@ -1873,7 +1875,7 @@ export default function StudentSessions() {
                                         <div>
                                             <p className="text-sm font-semibold text-red-800 mb-1">{t('stuSess.lateCancelWarning')}</p>
                                             <p className="text-sm text-red-700">
-                                                <span dangerouslySetInnerHTML={{ __html: t('stuSess.lateCancelDesc', { hours: String(cancellationHours), percent: String(cancellationFeePercent) }) }} />
+                                                <span dangerouslySetInnerHTML={{ __html: tHtml('stuSess.lateCancelDesc', { hours: String(cancellationHours), percent: String(cancellationFeePercent) }) }} />
                                                 <span className="block text-lg font-bold mt-1">€{penalty.toFixed(2)}</span>
                                             </p>
                                         </div>
@@ -1903,7 +1905,7 @@ export default function StudentSessions() {
                                 {!isLate && (
                                     <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
                                         <p className="text-xs text-gray-500">
-                                            <span dangerouslySetInnerHTML={{ __html: t('stuSess.freeCancelNote', { hours: String(cancellationHours) }) }} />
+                                            <span dangerouslySetInnerHTML={{ __html: tHtml('stuSess.freeCancelNote', { hours: String(cancellationHours) }) }} />
                                         </p>
                                     </div>
                                 )}
@@ -1964,7 +1966,7 @@ export default function StudentSessions() {
                                         <div>
                                             <p className="text-sm font-semibold text-red-800 mb-1">{t('stuSess.lateCancelTitle')}</p>
                                             <p className="text-sm text-red-700">
-                                                <span dangerouslySetInnerHTML={{ __html: t('stuSess.lateCancelPaidDesc', { hours: String(cancellationHours), percent: String(cancellationFeePercent) }) }} />
+                                                <span dangerouslySetInnerHTML={{ __html: tHtml('stuSess.lateCancelPaidDesc', { hours: String(cancellationHours), percent: String(cancellationFeePercent) }) }} />
                                                 <span className="block text-lg font-bold mt-1">€{penalty.toFixed(2)}</span>
                                             </p>
                                         </div>
@@ -2161,23 +2163,23 @@ export default function StudentSessions() {
                                 {lastPenaltyChoice === 'refund' && refundFollowUp?.kind === 'stripe' && (
                                     <div
                                         className="text-sm text-emerald-800 font-medium mt-3 px-3 py-3 bg-emerald-50 border border-emerald-200 rounded-xl text-left space-y-2"
-                                        dangerouslySetInnerHTML={{ __html: t('stuSess.refundSuccessStripeNote') }}
+                                        dangerouslySetInnerHTML={{ __html: tHtml('stuSess.refundSuccessStripeNote') }}
                                     />
                                 )}
                                 {lastPenaltyChoice === 'refund' && refundFollowUp?.kind === 'manual' && refundFollowUp.contact === 'tutor' && (
                                     <div
                                         className="text-sm text-amber-800 font-medium mt-3 px-3 py-3 bg-amber-50 border border-amber-200 rounded-xl text-left"
-                                        dangerouslySetInnerHTML={{ __html: t('stuSess.refundSuccessManualTutor', { tutor: tutorName || t('stuSess.refundTutorFallback') }) }}
+                                        dangerouslySetInnerHTML={{ __html: tHtml('stuSess.refundSuccessManualTutor', { tutor: tutorName || t('stuSess.refundTutorFallback') }) }}
                                     />
                                 )}
                                 {lastPenaltyChoice === 'refund' && refundFollowUp?.kind === 'manual' && refundFollowUp.contact === 'org_admin' && (
                                     <div
                                         className="text-sm text-amber-800 font-medium mt-3 px-3 py-3 bg-amber-50 border border-amber-200 rounded-xl text-left"
-                                        dangerouslySetInnerHTML={{ __html: t('stuSess.refundSuccessManualOrg') }}
+                                        dangerouslySetInnerHTML={{ __html: tHtml('stuSess.refundSuccessManualOrg') }}
                                     />
                                 )}
                                 {lastPenaltyChoice === 'refund' && !refundFollowUp && (
-                                    <p className="text-sm text-amber-700 font-medium mt-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl" dangerouslySetInnerHTML={{ __html: t('stuSess.refundContactNote') }} />
+                                    <p className="text-sm text-amber-700 font-medium mt-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl" dangerouslySetInnerHTML={{ __html: tHtml('stuSess.refundContactNote') }} />
                                 )}
                             </div>
                             <Button

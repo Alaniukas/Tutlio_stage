@@ -2,6 +2,7 @@
 
 import { Link } from 'react-router-dom';
 import { useTranslation, buildLocalizedPath } from '@/lib/i18n';
+import { FEATURE_PAGE_IDS, FEATURE_PAGES } from '@/lib/featurePages';
 
 export default function LandingFooter() {
   const { t, locale } = useTranslation();
@@ -22,6 +23,13 @@ export default function LandingFooter() {
           <div>
             <h4 className="font-semibold text-[13px] text-white mb-4">{t('landing.footerSolutions')}</h4>
             <ul className="space-y-2.5 text-[13px] text-gray-500">
+              {FEATURE_PAGE_IDS.map((id) => (
+                <li key={id}>
+                  <Link to={buildLocalizedPath(FEATURE_PAGES[id].path, locale)} className="hover:text-white transition-colors">
+                    {t(`landing.feature.${id}`)}
+                  </Link>
+                </li>
+              ))}
               <li><Link to={buildLocalizedPath('/pricing', locale)} className="hover:text-white transition-colors">{t('common.prices')}</Link></li>
               <li><Link to="/schools" className="hover:text-white transition-colors">{locale === 'lt' ? 'Mokykloms' : 'For Schools'}</Link></li>
             </ul>

@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { syncSessionToGoogle } from './_lib/google-calendar.js';
 import { markInvoicesPaidForPackage } from './_lib/markPackageInvoicePaid.js';
+import { recordStripePlatformFee, metadataBaseEur } from './_lib/platformFeeLedger.js';
 
 function getStripe() {
   return new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
@@ -96,6 +97,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       );
     } catch (e) {
       console.error('[confirm-package-payment] mark invoices paid:', e);
+    }
+
+    // Record platform fee (idempotent; webhook records it too — first writer wins).
+    // Bookkeeping must never fail an already-activated payment.
+    try {
+      const { data: tutorRow } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', finalPackage.tutor_id)
+        .maybeSingle();
+      await recordStripePlatformFee(supabase, {
+        sourceType: 'package',
+        sourceId: packageId,
+        baseAmountEur: metadataBaseEur(checkout.metadata) ?? Number(finalPackage.total_price),
+        grossAmountEur: checkout.amount_total != null ? checkout.amount_total / 100 : null,
+        organizationId: (tutorRow as { organization_id?: string | null } | null)?.organization_id ?? null,
+        tutorId: finalPackage.tutor_id ?? null,
+        stripeCheckoutSessionId: checkout.id,
+      });
+    } catch (e) {
+      console.error('[confirm-package-payment] platform fee record:', e);
     }
 
     // NOTE: Email sending is handled by stripe-webhook.ts to avoid duplicates.

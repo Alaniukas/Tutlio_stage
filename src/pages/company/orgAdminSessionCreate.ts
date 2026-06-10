@@ -214,6 +214,7 @@ async function notifyAfterOrgAdminSessionsCreated(
         type: 'booking_confirmation',
         to: st.email,
         data: {
+          sessionId: sess.id,
           studentName: st.full_name,
           tutorName: tutorProfile?.full_name || '',
           date: format(sStart, 'yyyy-MM-dd'),
@@ -236,6 +237,7 @@ async function notifyAfterOrgAdminSessionsCreated(
         type: 'booking_confirmation',
         to: payerRaw,
         data: {
+          sessionId: sess.id,
           forPayer: true,
           bookedBy: 'org_admin',
           studentName: st.full_name,
@@ -257,6 +259,7 @@ async function notifyAfterOrgAdminSessionsCreated(
         type: 'booking_confirmation',
         to: payerRaw,
         data: {
+          sessionId: sess.id,
           forPayer: true,
           bookedBy: 'org_admin',
           studentName: st.full_name,

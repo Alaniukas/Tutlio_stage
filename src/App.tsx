@@ -40,7 +40,9 @@ import InvoicesPage from '@/pages/Invoices';
 import Landing from '@/pages/Landing';
 import AboutUs from '@/pages/AboutUs';
 import Contact from '@/pages/Contact';
+import FeaturePage from '@/pages/FeaturePage';
 import StripeSuccess from '@/pages/StripeSuccess';
+import EnterpriseSuccess from '@/pages/EnterpriseSuccess';
 import PerlasSuccess from '@/pages/PerlasSuccess';
 import PackagePaymentSuccess from '@/pages/PackagePaymentSuccess';
 import PackagePaymentCancelled from '@/pages/PackagePaymentCancelled';
@@ -168,8 +170,15 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/:locale" element={<Landing />} />
         <Route path="/apie-mus" element={<AboutUs />} />
         <Route path="/:locale/apie-mus" element={<AboutUs />} />
+        {/* English aliases — same canonical pages, kept in sync with bot SSR (middleware.ts). */}
+        <Route path="/about" element={<AboutUs />} />
+        <Route path="/:locale/about" element={<AboutUs />} />
         <Route path="/kontaktai" element={<Contact />} />
         <Route path="/:locale/kontaktai" element={<Contact />} />
+        <Route path="/contacts" element={<Contact />} />
+        <Route path="/:locale/contacts" element={<Contact />} />
+        <Route path="/features/:feature" element={<FeaturePage />} />
+        <Route path="/:locale/features/:feature" element={<FeaturePage />} />
         <Route path="/pricing" element={<Pricing />} />
         <Route path="/:locale/pricing" element={<Pricing />} />
         <Route path="/blog" element={<Blog />} />
@@ -198,6 +207,8 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/:locale/parent-register" element={<ParentRegister />} />
         <Route path="/school-contract-complete" element={<SchoolContractComplete />} />
         <Route path="/stripe-success" element={<StripeSuccess />} />
+        <Route path="/enterprise/success" element={<EnterpriseSuccess />} />
+        <Route path="/:locale/enterprise/success" element={<EnterpriseSuccess />} />
         <Route path="/perlas-success" element={<PerlasSuccess />} />
         <Route path="/package-success" element={<PackagePaymentSuccess />} />
         <Route path="/package-cancelled" element={<PackagePaymentCancelled />} />

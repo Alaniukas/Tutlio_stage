@@ -102,6 +102,7 @@ import {
   recurringMaterializeEndDate,
 } from '@/lib/recurringSessions';
 import { resolveLessonMeetingLink } from '@/lib/meetingLink';
+import { recordJoinClick } from '@/lib/joinTracking';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { formatContactForTutorView } from '@/lib/orgContactVisibility';
@@ -1851,6 +1852,7 @@ export default function CalendarPage() {
               type: 'booking_confirmation',
               to: studentBookingTo,
               data: {
+                sessionId: session.id,
                 studentName: studentData!.full_name,
                 tutorName: tutorProfile?.full_name || '',
                 date: format(startDate, 'yyyy-MM-dd'),
@@ -1873,6 +1875,7 @@ export default function CalendarPage() {
               type: 'booking_confirmation',
               to: payerEmail,
               data: {
+                sessionId: session.id,
                 forPayer: true,
                 bookedBy: 'tutor',
                 studentName: studentData?.full_name || '',
@@ -3261,6 +3264,7 @@ export default function CalendarPage() {
                 type: 'booking_confirmation',
                 to: groupBookingTo,
                 data: {
+                  sessionId: firstSession.id,
                   studentName: studentData!.full_name,
                   tutorName: tutorProfile?.full_name || '',
                   date: format(new Date(firstSession.start_time), 'yyyy-MM-dd'),
@@ -3329,6 +3333,7 @@ export default function CalendarPage() {
               type: 'booking_confirmation',
               to: singleGroupBookingTo,
               data: {
+                sessionId: newSession.id,
                 studentName: studentData!.full_name,
                 tutorName: tutorProfile?.full_name || '',
                 date: format(selectedEvent.start_time, 'yyyy-MM-dd'),
@@ -4697,6 +4702,17 @@ export default function CalendarPage() {
                   href={normalizeUrl(selectedEvent.meeting_link) || undefined}
                   target="_blank"
                   rel="noreferrer"
+                  onClick={() => recordJoinClick({
+                    id: String((selectedEvent as any).id),
+                    tutor_id: currentUserId,
+                    start_time: selectedEvent.start_time instanceof Date
+                      ? selectedEvent.start_time.toISOString()
+                      : String((selectedEvent as any).start_time),
+                    end_time: selectedEvent.end_time instanceof Date
+                      ? selectedEvent.end_time.toISOString()
+                      : ((selectedEvent as any)?.end_time ? String((selectedEvent as any).end_time) : null),
+                    status: selectedEvent.status,
+                  }, 'tutor')}
                   className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-50 text-blue-600 text-sm font-semibold hover:bg-blue-100 transition-colors border border-blue-100 mt-2"
                 >
                   {t('cal.joinVideoCall')}

@@ -3,6 +3,31 @@ import type { VercelRequest } from '../types';
 export type Locale = 'lt' | 'en' | 'pl' | 'lv' | 'ee' | 'fr' | 'es' | 'de' | 'se' | 'dk' | 'fi' | 'no';
 export const LOCALES: Locale[] = ['lt', 'en', 'pl', 'lv', 'ee', 'fr', 'es', 'de', 'se', 'dk', 'fi', 'no'];
 
+/**
+ * Internal locale slugs are country-flavored (ee/se/dk), but hreflang and the
+ * html lang attribute require ISO 639-1 language codes — "ee" means Ewe and
+ * "se" means Northern Sami to Google, while "dk" is not a language at all.
+ * URL paths keep the internal slugs; only the announced language code maps.
+ */
+const HREFLANG_CODES: Record<Locale, string> = {
+  lt: 'lt',
+  en: 'en',
+  pl: 'pl',
+  lv: 'lv',
+  ee: 'et',
+  fr: 'fr',
+  es: 'es',
+  de: 'de',
+  se: 'sv',
+  dk: 'da',
+  fi: 'fi',
+  no: 'no',
+};
+
+export function hreflangCode(locale: Locale): string {
+  return HREFLANG_CODES[locale];
+}
+
 const DOMAINS = {
   lt: 'https://www.tutlio.lt',
   com: 'https://www.tutlio.com',
@@ -60,7 +85,7 @@ export function generateHreflangLinks(path: string): HreflangLink[] {
   const links: HreflangLink[] = [];
 
   for (const locale of LOCALES) {
-    links.push({ lang: locale, href: buildCanonicalUrl(path, locale) });
+    links.push({ lang: hreflangCode(locale), href: buildCanonicalUrl(path, locale) });
   }
 
   links.push({ lang: 'x-default', href: buildFullUrl(path, 'en', 'com') });

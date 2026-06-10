@@ -35,6 +35,11 @@ export interface InvoicePdfData {
   }[];
 
   totalAmount: number;
+
+  /** Already settled (e.g. deducted from payouts) — rendered as a negative row below the total. */
+  deductedAmount?: number;
+  /** Remaining amount to pay — rendered as the final highlighted row when provided. */
+  amountDue?: number;
 }
 
 const PAGE_WIDTH = 595.28;
@@ -49,7 +54,7 @@ const LT_MAP: Record<string, string> = {
 const LT_RE = new RegExp(`[${Object.keys(LT_MAP).join('')}]`, 'g');
 
 /** Strip Lithuanian diacritics so pdf-lib StandardFonts (WinAnsi) can render the text. */
-function asciify(text: string): string {
+export function asciify(text: string): string {
   return text.replace(LT_RE, (ch) => LT_MAP[ch] || ch);
 }
 
@@ -152,7 +157,20 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
   // --- Totals ---
   drawText('IS VISO:', colUnit - 30, y, { size: 11, bold: true });
   drawText(`${formatEur(data.totalAmount)} EUR`, colTotal, y, { size: 11, bold: true, color: headerBlue });
-  y -= 30;
+  y -= 18;
+
+  if (data.deductedAmount != null && data.deductedAmount > 0) {
+    drawText('Jau apmoketa (isskaityta is jusu lesu):', colDesc + 130, y, { size: 9, color: gray });
+    drawText(`-${formatEur(data.deductedAmount)} EUR`, colTotal, y, { size: 9, color: gray });
+    y -= 16;
+  }
+
+  if (data.amountDue != null) {
+    drawText('MOKETINA SUMA:', colUnit - 30, y, { size: 12, bold: true });
+    drawText(`${formatEur(data.amountDue)} EUR`, colTotal, y, { size: 12, bold: true, color: headerBlue });
+    y -= 18;
+  }
+  y -= 12;
 
   // --- Footer ---
   drawLine(MARGIN, y, PAGE_WIDTH - MARGIN);

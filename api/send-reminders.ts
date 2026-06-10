@@ -7,6 +7,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { isOrgTutor } from './_lib/isOrgTutor.js';
+import { requireCronAuth } from './_lib/cronAuth.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -22,13 +23,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const auth = typeof req.headers.authorization === 'string' ? req.headers.authorization : '';
-    if (auth !== `Bearer ${cronSecret}`) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-  }
+  if (!requireCronAuth(req, res)) return;
 
   const results: { session?: number; deadline?: any; afterLesson?: any; schoolInstallments?: any } = {};
   let totalSent = 0;
@@ -71,7 +66,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ? `${API_URL}/whiteboard/${(session as any).whiteboard_room_id}`
           : null;
         const orgId = (tutor as any)?.organization_id || null;
-        const baseData = { date: dateStr, time: timeStr, topic: session.topic, duration: durationMinutes, price: session.price, meetingLink: session.meeting_link, whiteboardLink, ...(orgId ? { organizationId: orgId } : {}) };
+        // sessionId lets /api/send-email swap the link for a tracked /api/join-session URL (attendance).
+        const baseData = { sessionId: session.id, date: dateStr, time: timeStr, topic: session.topic, duration: durationMinutes, price: session.price, meetingLink: session.meeting_link, whiteboardLink, ...(orgId ? { organizationId: orgId } : {}) };
 
         if (reminderStudentHours > 0 && !session.reminder_student_sent && diffHours <= reminderStudentHours && diffHours >= 0 && student?.email) {
           try {
@@ -140,6 +136,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (reminderTutorHours > 0 && !session.reminder_tutor_sent && diffHours <= reminderTutorHours && diffHours >= 0 && tutor?.email) {
           try {
             const tutorReminderCore = {
+              sessionId: session.id,
               date: dateStr,
               time: timeStr,
               topic: session.topic,
@@ -175,6 +172,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       results.session = totalSent;
     }
 
+    const cronSecret = process.env.CRON_SECRET;
     const cronHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
     if (cronSecret) cronHeaders['Authorization'] = `Bearer ${cronSecret}`;
 

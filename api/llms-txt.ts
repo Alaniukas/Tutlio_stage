@@ -29,7 +29,7 @@ All plans include every feature. Pricing is per-tutor, not per-student — unlim
 - **Monthly**: €19.99/month
 - **Yearly**: €14.99/month (billed annually)
 - **Subscription Only**: €9.99/month (no payment collection features)
-- All plans include a 7-day free trial (code: TRIAL)
+- All plans include a 7-day free trial (applied automatically at checkout)
 
 ## Links
 

@@ -19,7 +19,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { Trash2, Plus, BookOpen, Clock, Euro, Save, Pencil, ShieldAlert, Bell, CalendarClock, ChevronDown, Lock, Building2, AlertTriangle, Users } from 'lucide-react';
+import { Trash2, Plus, BookOpen, Clock, Euro, Save, Pencil, ShieldAlert, Bell, CalendarClock, ChevronDown, Lock, Building2, AlertTriangle, Users, Video } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useTranslation } from '@/lib/i18n';
@@ -188,7 +188,7 @@ function DropdownWithCustom({
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 export default function LessonSettingsPage() {
-  const { t } = useTranslation();
+  const { t, tHtml } = useTranslation();
   const { user: ctxUser } = useUser();
   const orgPolicy = useOrgTutorPolicy();
   const [orgName, setOrgName] = useState<string | null>(null);
@@ -207,6 +207,11 @@ export default function LessonSettingsPage() {
   const [saved, setSaved] = useState(false);
   const [paymentTiming, setPaymentTiming] = useState<'before_lesson' | 'after_lesson'>('before_lesson');
   const [paymentDeadlineHours, setPaymentDeadlineHours] = useState<number | null>(null);
+
+  // Tutor's permanent meeting link (profiles.personal_meeting_link)
+  const [personalMeetingLink, setPersonalMeetingLink] = useState('');
+  const [savingPersonalLink, setSavingPersonalLink] = useState(false);
+  const [personalLinkSaved, setPersonalLinkSaved] = useState(false);
 
   // Subject dialog state
   const [isSubjectDialogOpen, setIsSubjectDialogOpen] = useState(false);
@@ -247,7 +252,7 @@ export default function LessonSettingsPage() {
 
     const { data: tutorData } = await supabase
       .from('profiles')
-      .select('cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, payment_timing, payment_deadline_hours, organization_id, organizations(name)')
+      .select('cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, payment_timing, payment_deadline_hours, personal_meeting_link, organization_id, organizations(name)')
       .eq('id', user.id)
       .single();
 
@@ -265,6 +270,7 @@ export default function LessonSettingsPage() {
     });
     setPaymentTiming((tutorData?.payment_timing as 'before_lesson' | 'after_lesson') ?? 'before_lesson');
     setPaymentDeadlineHours(tutorData?.payment_deadline_hours ?? null);
+    setPersonalMeetingLink((tutorData as { personal_meeting_link?: string | null })?.personal_meeting_link || '');
 
     const { data: subjectsData, error } = await supabase
       .from('subjects')
@@ -338,6 +344,24 @@ export default function LessonSettingsPage() {
       setTimeout(() => setSaved(false), 3000);
     }
     setSaving(false);
+  };
+
+  const handleSavePersonalLink = async () => {
+    if (!ctxUser) return;
+    setSavingPersonalLink(true);
+    const { error } = await supabase
+      .from('profiles')
+      .update({ personal_meeting_link: personalMeetingLink.trim() || null })
+      .eq('id', ctxUser.id);
+
+    if (error) {
+      console.error('[LessonSettings] personal_meeting_link update', error);
+      alert(error.message || t('lessonSet.saveFailed'));
+    } else {
+      setPersonalLinkSaved(true);
+      setTimeout(() => setPersonalLinkSaved(false), 3000);
+    }
+    setSavingPersonalLink(false);
   };
 
   // Subject CRUD
@@ -474,6 +498,45 @@ export default function LessonSettingsPage() {
             </div>
           </div>
         )}
+
+        {/* === PERSONAL MEETING LINK === */}
+        <SettingsSection
+          icon={<Video className="w-5 h-5 text-sky-600" />}
+          iconBg="bg-sky-100"
+          title={t('lessonSet.personalLinkTitle')}
+          description={t('lessonSet.personalLinkDesc')}
+          defaultOpen={true}
+        >
+          <div className="pt-4 space-y-3">
+            <div className="space-y-2">
+              <Label>{t('lessonSet.personalLinkTitle')} ({t('common.optional')})</Label>
+              <Input
+                type="url"
+                placeholder="https://zoom.us/j/..."
+                value={personalMeetingLink}
+                onChange={(e) => setPersonalMeetingLink(e.target.value)}
+                className="rounded-xl"
+              />
+              <p className="text-xs text-gray-500">{t('lessonSet.personalLinkHint')}</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <Button
+                onClick={handleSavePersonalLink}
+                disabled={savingPersonalLink || loading}
+                size="sm"
+                className="rounded-xl gap-2"
+              >
+                <Save className="w-4 h-4" />
+                {savingPersonalLink ? t('lessonSet.saving') : t('common.save')}
+              </Button>
+              {personalLinkSaved && (
+                <span className="text-sm text-green-600 font-medium animate-fade-in">
+                  {t('lessonSet.saved')}
+                </span>
+              )}
+            </div>
+          </div>
+        </SettingsSection>
 
         {/* === SUBJECTS / PRICING === */}
         <SettingsSection
@@ -622,7 +685,7 @@ export default function LessonSettingsPage() {
               </div>
               {settings.cancellation_fee_percent > 0 && (
                 <div className="mt-3 p-3 bg-amber-50 border border-amber-100 rounded-xl text-sm text-amber-700">
-                  <span dangerouslySetInnerHTML={{ __html: t('lessonSet.cancelExample', {
+                  <span dangerouslySetInnerHTML={{ __html: tHtml('lessonSet.cancelExample', {
                     hours: String(settings.cancellation_hours),
                     price: String(subjects[0]?.price ?? 25),
                     fee: ((subjects[0]?.price ?? 25) * settings.cancellation_fee_percent / 100).toFixed(2),
@@ -912,7 +975,7 @@ export default function LessonSettingsPage() {
                       <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
                       <div>
                         <p className="text-sm font-semibold text-amber-900">{t('lessonSet.important')}</p>
-                        <p className="text-xs text-amber-800 mt-1" dangerouslySetInnerHTML={{ __html: t('lessonSet.groupDesc') }} />
+                        <p className="text-xs text-amber-800 mt-1" dangerouslySetInnerHTML={{ __html: tHtml('lessonSet.groupDesc') }} />
                       </div>
                     </div>
                   </div>

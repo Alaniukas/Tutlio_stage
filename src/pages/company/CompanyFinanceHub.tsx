@@ -1,14 +1,15 @@
 import { useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CreditCard, BarChart3, FileText } from 'lucide-react';
+import { CreditCard, BarChart3, FileText, Receipt } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/lib/i18n';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import CompanyFinance from './CompanyFinance';
 import CompanyInvoices from './CompanyInvoices';
 import CompanyPayments from './CompanyPayments';
+import CompanyPlatformInvoices from './CompanyPlatformInvoices';
 
-type TabId = 'payments' | 'finance' | 'invoices';
+type TabId = 'payments' | 'finance' | 'invoices' | 'billing';
 
 export default function CompanyFinanceHub() {
   const { t } = useTranslation();
@@ -23,6 +24,9 @@ export default function CompanyFinanceHub() {
     }
     all.push({ id: 'finance', label: t('companyNav.finance'), icon: BarChart3 });
     all.push({ id: 'invoices', label: t('companyNav.invoices'), icon: FileText });
+    if (!isSchool) {
+      all.push({ id: 'billing', label: t('companyNav.tutlioInvoices'), icon: Receipt });
+    }
     return all;
   }, [t, isSchool]);
 
@@ -65,6 +69,7 @@ export default function CompanyFinanceHub() {
       {activeTab === 'payments' && isSchool && <CompanyPayments />}
       {activeTab === 'finance' && <CompanyFinance />}
       {activeTab === 'invoices' && <CompanyInvoices />}
+      {activeTab === 'billing' && !isSchool && <CompanyPlatformInvoices />}
     </div>
   );
 }

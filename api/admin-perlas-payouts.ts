@@ -201,6 +201,18 @@ async function handleGenerateXml(sb: any, req: VercelRequest, res: VercelRespons
     console.error('[admin-perlas-payouts] reserve error:', reserveErr.message);
   }
 
+  // Record the per-entity bank transfer fee (invoiced to agencies as an already-deducted line)
+  if (payoutFee > 0) {
+    const feeRows = validEntities.map(e => ({
+      entity_type: e.entity_type,
+      entity_id: e.entity_id,
+      batch_id: batch.id,
+      fee_amount: payoutFee,
+    }));
+    const { error: feeErr } = await sb.from('payout_fee_records').insert(feeRows);
+    if (feeErr) console.error('[admin-perlas-payouts] payout fee records error:', feeErr.message);
+  }
+
   // Generate SEPA pain.001 XML
   const batchId = batch.id;
   const now = new Date().toISOString().slice(0, 19); // pain.001 ISODateTime: no millis/Z
@@ -355,6 +367,9 @@ async function handleMarkCancelled(sb: any, req: VercelRequest, res: VercelRespo
 
   if (ledgerErr) return res.status(500).json({ error: ledgerErr.message });
 
+  // Cancelled batch never deducted the bank transfer fee — drop its fee records.
+  await sb.from('payout_fee_records').delete().eq('batch_id', batchId);
+
   await sb.from('payout_batches').update({ status: 'cancelled', completed_at: new Date().toISOString() }).eq('id', batchId);
 
   return res.status(200).json({ ok: true });
@@ -379,6 +394,13 @@ async function handleMarkIndividual(sb: any, req: VercelRequest, res: VercelResp
       .eq('entity_type', entityType)
       .eq('entity_id', entityId)
       .eq('status', 'reserved');
+
+    // Returned to pending — the fee for this entity was not deducted in this batch.
+    await sb.from('payout_fee_records')
+      .delete()
+      .eq('batch_id', batchId)
+      .eq('entity_type', entityType)
+      .eq('entity_id', entityId);
   }
 
   return res.status(200).json({ ok: true });

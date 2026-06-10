@@ -34,6 +34,45 @@ export function publicOriginFromRequest(req: VercelRequest): string {
   );
 }
 
+const TRUSTED_REDIRECT_HOSTS = ['tutlio.lt', 'tutlio.com', 'tutlio.pl'];
+
+/**
+ * Open-redirect guard for caller-supplied redirect URLs (e.g. password reset).
+ * Accepts only http(s) URLs whose host is a trusted Tutlio domain, the
+ * configured APP_URL origin, the origin serving this request (covers preview
+ * deployments), or localhost for development.
+ */
+export function isAllowedRedirectUrl(redirectTo: string, requestOrigin?: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(redirectTo);
+  } catch {
+    return false;
+  }
+
+  const host = url.hostname.toLowerCase();
+
+  if (url.protocol === 'http:') {
+    // Plain http only for local development.
+    return host === 'localhost' || host === '127.0.0.1';
+  }
+  if (url.protocol !== 'https:') return false;
+
+  if (TRUSTED_REDIRECT_HOSTS.some((t) => host === t || host.endsWith(`.${t}`))) return true;
+
+  const candidates = [process.env.APP_URL, process.env.VITE_APP_URL, requestOrigin];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      if (new URL(candidate).hostname.toLowerCase() === host) return true;
+    } catch {
+      /* ignore malformed env/origin */
+    }
+  }
+
+  return false;
+}
+
 export function defaultLocaleForOrigin(origin: string): string {
   try {
     const host = new URL(origin).hostname.toLowerCase().replace(/^www\./, '');
@@ -43,6 +82,22 @@ export function defaultLocaleForOrigin(origin: string): string {
     /* ignore */
   }
   return 'lt';
+}
+
+export type CheckoutAudience = 'tutor' | 'schools';
+
+/** Platform + locale aware path (e.g. /schools/en/pricing) for checkout redirect URLs. */
+export function buildPublicPath(
+  pathname: string,
+  locale: string | undefined,
+  audience: CheckoutAudience,
+  appOrigin: string,
+): string {
+  const normalized = pathname.startsWith('/') ? pathname : `/${pathname}`;
+  const platformPrefix = audience === 'schools' ? '/schools' : '';
+  const defaultLocale = defaultLocaleForOrigin(appOrigin);
+  const localeSeg = locale && locale !== defaultLocale ? `/${locale}` : '';
+  return `${platformPrefix}${localeSeg}${normalized}`;
 }
 
 const VALID_LOCALES = new Set(['lt','en','pl','lv','ee','fr','es','de','se','dk','fi','no']);

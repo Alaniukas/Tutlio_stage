@@ -27,6 +27,7 @@ import StatusBadge from '@/components/StatusBadge';
 import ParentLayout from '@/components/ParentLayout';
 import { format, isAfter } from 'date-fns';
 import { cn, normalizeUrl } from '@/lib/utils';
+import { recordJoinClick } from '@/lib/joinTracking';
 
 type ChildTutorPolicy = ParentTutorContactPolicy;
 
@@ -202,21 +203,28 @@ export default function ParentDashboard() {
           paymentDeadlineHours: tp.payment_deadline_hours ?? 24,
           perlasEnabled: !!tp.perlas_finance_enabled,
         });
-        if (!tp.perlas_finance_enabled && tp.organization_id) {
+        if (tp.organization_id) {
           orgIdsToCheck.push(tp.organization_id);
         }
       }
       if (orgIdsToCheck.length > 0) {
         const { data: orgs } = await supabase
           .from('organizations')
-          .select('id, perlas_finance_enabled')
+          .select('id, perlas_finance_enabled, entity_type, name')
           .in('id', [...new Set(orgIdsToCheck)]);
-        const orgPerlas = new Map((orgs ?? []).map((o: any) => [o.id, !!o.perlas_finance_enabled]));
+        const orgById = new Map((orgs ?? []).map((o: any) => [o.id, o]));
         for (const tp of tutorProfilesList) {
-          if (!tp.perlas_finance_enabled && tp.organization_id && orgPerlas.get(tp.organization_id)) {
-            const existing = tutorById.get(tp.id);
-            if (existing) existing.perlasEnabled = true;
+          if (!tp.organization_id) continue;
+          const org = orgById.get(tp.organization_id);
+          if (!org) continue;
+          const existing = tutorById.get(tp.id);
+          if (!existing) continue;
+          if (!tp.perlas_finance_enabled && org.perlas_finance_enabled) {
+            existing.perlasEnabled = true;
           }
+          existing.orgIsSchool = org.entity_type === 'school';
+          // Stripe Checkout charges in the org's name — show the same provider here.
+          if (org.name) existing.providerName = org.name;
         }
       }
 
@@ -680,7 +688,10 @@ function ChildBlock({
                       href={normalizeUrl(next.meeting_link) || undefined}
                       target="_blank"
                       rel="noreferrer"
-                      onClick={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        recordJoinClick(next as any, 'student');
+                      }}
                       className="w-10 h-10 rounded-full bg-white text-violet-600 flex items-center justify-center hover:scale-105 transition-transform shadow-lg"
                     >
                       <Play className="w-4 h-4 ml-0.5 fill-current" />
