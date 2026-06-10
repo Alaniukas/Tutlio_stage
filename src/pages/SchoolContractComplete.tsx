@@ -151,7 +151,7 @@ export default function SchoolContractComplete() {
         <div className="max-w-lg w-full rounded-2xl border border-gray-200 bg-white p-8 shadow-xl">
           <h1 className="text-xl font-bold text-gray-900 mb-3">Ačiū! Duomenys pateikti.</h1>
           <p className="text-gray-700">
-            Administratorius patikrins pateiktus duomenis ir atsiųs galutinę sutartį pasirašyti.
+            Atnaujinta sutartis išsiųsta jūsų el. paštu. Patikrinkite pašto dėžutę.
           </p>
         </div>
       </div>
@@ -173,7 +173,7 @@ export default function SchoolContractComplete() {
         </div>
         <h1 className="text-2xl font-bold text-gray-900 mb-2">Papildykite sutarties duomenis</h1>
         <p className="text-gray-600 text-sm mb-4">
-          Po pateikimo administratorius patikrins duomenis ir atsiųs galutinę sutartį pasirašyti.
+          Patvirtinus duomenis, iš karto sugeneruosime atnaujintą sutartį ir atsiųsime ją jūsų el. paštu.
         </p>
 
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 mb-5 text-amber-950">
@@ -290,7 +290,7 @@ export default function SchoolContractComplete() {
           {submitError && <p className="text-sm text-red-600">{submitError}</p>}
 
           <Button type="submit" disabled={submitting} className="w-full rounded-xl bg-blue-600 hover:bg-blue-700">
-            {submitting ? 'Saugoma…' : 'Išsaugoti duomenis'}
+            {submitting ? 'Generuojama sutartis…' : 'Patvirtinti'}
           </Button>
         </form>
       </div>

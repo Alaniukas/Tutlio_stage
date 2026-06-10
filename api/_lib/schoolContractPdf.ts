@@ -1,7 +1,7 @@
 /**
  * Shared school-contract PDF rendering + storage.
- * Used by the parent-completion confirmation flow (admin confirms supplemented
- * data and the final contract PDF is regenerated from the student's current data).
+ * Used by the parent-completion flow (parent confirms supplemented data and the
+ * final contract PDF is regenerated from the student's current data and sent).
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';

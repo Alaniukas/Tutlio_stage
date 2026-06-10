@@ -26,8 +26,7 @@ type EmailType =
     | 'session_comment_added'
     | 'tutor_student_assigned'
     | 'school_contract'
-    | 'school_installment_request'
-    | 'school_contract_completion_admin';
+    | 'school_installment_request';
 
 interface SendEmailParams {
     type: EmailType;

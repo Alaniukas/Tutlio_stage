@@ -1836,32 +1836,6 @@ function schoolInstallmentRequest(d: any, locale: Locale) {
   };
 }
 
-/** Admin alert: a parent supplemented contract data and the admin must confirm + send the final contract. */
-function schoolContractCompletionAdmin(d: any, locale: Locale) {
-  const appUrl = getAppUrl();
-  const contractsUrl = String(d.contractsUrl || `${appUrl.replace(/\/$/, '')}/school/contracts`).trim();
-  return {
-    subject: t(locale, 'em.contractCompletionAdminSub'),
-    html: wrap(`
-      <div class="header" style="${headerInlineStyle('#059669', '#047857')}">
-        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">${t(locale, 'em.contractCompletionAdminTitle')}</h1>
-        <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'Mokykla')}</p>
-      </div>
-      <div class="body">
-        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          ${t(locale, 'em.contractCompletionAdminBody', { student: esc(d.studentName || '') })}
-        </p>
-        <div class="info-card">
-          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-            ${td('Mokinys', esc(d.studentName || '—'))}
-            ${td('Sutarties Nr.', esc(d.contractNumber || '—'), false)}
-          </table>
-        </div>
-        <div style="margin:16px 0 8px;">${outlookEmailButton(contractsUrl, t(locale, 'em.contractCompletionAdminBtn'), '#059669', { fontWeight: '600', fontSize: '14px', padding: '12px 24px' })}</div>
-      </div>${footerFor(locale)}`, locale),
-  };
-}
-
 function productUpdateSfAndChat(d: any, locale: Locale) {
   const appUrl = getAppUrl();
   const title = locale === 'en' ? 'Updates in Tutlio' : 'Naujienos Tutlio sistemoje';
@@ -2355,7 +2329,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'custom_html_announcement': emailContent = customHtmlAnnouncement(data, locale); break;
       case 'school_contract': emailContent = schoolContract(data, locale); break;
       case 'school_installment_request': emailContent = schoolInstallmentRequest(data, locale); break;
-      case 'school_contract_completion_admin': emailContent = schoolContractCompletionAdmin(data, locale); break;
       case 'tutor_student_assigned': emailContent = tutorStudentAssigned(data, locale); break;
       case 'parent_invite': emailContent = parentInvite(data, locale); break;
       default: return res.status(400).json({ error: `Unknown email type: ${type}` });

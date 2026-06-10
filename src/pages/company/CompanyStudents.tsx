@@ -126,7 +126,6 @@ type StudentContractInfo = {
   signing_status: 'draft' | 'sent' | 'signed';
   pdf_url?: string | null;
   signed_contract_url?: string | null;
-  completion_submitted_at?: string | null;
 };
 
 function studentContractBadge(info: StudentContractInfo | undefined) {
@@ -705,7 +704,7 @@ export default function CompanyStudents() {
     if (isSchoolView) {
       const { data: contractRows } = await supabase
         .from('school_contracts')
-        .select('student_id, signing_status, pdf_url, signed_contract_url, completion_submitted_at, created_at')
+        .select('student_id, signing_status, pdf_url, signed_contract_url, created_at')
         .eq('organization_id', adminRow.organization_id)
         .is('archived_at', null)
         .order('created_at', { ascending: false });
@@ -716,7 +715,6 @@ export default function CompanyStudents() {
           signing_status: (row as any).signing_status,
           pdf_url: (row as any).pdf_url,
           signed_contract_url: (row as any).signed_contract_url,
-          completion_submitted_at: (row as any).completion_submitted_at,
         };
       }
     }

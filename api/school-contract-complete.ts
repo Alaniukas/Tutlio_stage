@@ -1,5 +1,9 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
+import { renderAndStoreSchoolContractPdf } from './_lib/schoolContractPdf';
+
+const CONTRACT_SELECT =
+  'id, student_id, organization_id, template_id, contract_number, annual_fee, filled_body, media_publicity_consent, template:school_contract_templates(pdf_url), organizations(name, email, entity_type), student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent)';
 
 function pageHtml(content: string) {
   return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Sutarties duomenų papildymas</title></head><body style="margin:0;font-family:'Segoe UI',Arial,sans-serif;background:linear-gradient(135deg,#f5f3ff 0%,#ecfeff 50%,#f0fdf4 100%);padding:24px;"><div style="max-width:720px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:24px;box-shadow:0 10px 35px rgba(2,6,23,.08);">${content}</div></body></html>`;
@@ -74,7 +78,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: contract, error: contractErr } = await supabase
     .from('school_contracts')
-    .select('id, student_id, organization_id, template_id, contract_number, annual_fee, filled_body, media_publicity_consent, template:school_contract_templates(pdf_url), organizations(name, email, entity_type), student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent)')
+    .select(CONTRACT_SELECT)
     .eq('id', resolvedContractId)
     .maybeSingle();
   if (contractErr || !contract) return res.status(404).send(pageHtml('<h2>Sutartis nerasta.</h2>'));
@@ -158,7 +162,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         <div style="display:inline-block;font-size:30px;font-weight:900;color:#4f46e5;letter-spacing:-0.5px;">Tutlio 🎓</div>
       </div>
       <h2 style="margin:0 0 8px;font-size:26px;color:#111827;">Papildykite sutarties duomenis</h2>
-      <p style="color:#4b5563;margin:0 0 14px;font-size:14px;">Po pateikimo administratorius patikrins duomenis ir atsiųs galutinę sutartį pasirašyti.</p>
+      <p style="color:#4b5563;margin:0 0 14px;font-size:14px;">Patvirtinus duomenis, iš karto sugeneruosime atnaujintą sutartį ir atsiųsime ją jūsų el. paštu.</p>
       <div style="color:#7c2d12;background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:12px 14px;margin-bottom:14px;">
         <p style="margin:0 0 8px;font-weight:700;">Prašome papildyti trūkstamus duomenis:</p>
         <ul style="margin:0 0 8px 18px;padding:0;line-height:1.5;">${fieldSummary || '<li>Trūkstamų laukų nerasta.</li>'}</ul>
@@ -182,14 +186,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             <input id="parent2_address" placeholder="Antro tėvo adresas" style="padding:12px 14px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;" />
           </div>
         </div>
-        <button id="submitBtn" type="submit" style="padding:12px 16px;border:0;background:#2563eb;color:#fff;border-radius:10px;font-weight:700;cursor:pointer;">Išsaugoti duomenis</button>
+        <button id="submitBtn" type="submit" style="padding:12px 16px;border:0;background:#2563eb;color:#fff;border-radius:10px;font-weight:700;cursor:pointer;">Patvirtinti</button>
       </form>
       <script>
         const form = document.getElementById('f');
         const submitBtn = document.getElementById('submitBtn');
         form.addEventListener('submit', async (e) => {
           e.preventDefault();
-          if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saugoma...'; submitBtn.style.opacity = '0.8'; }
+          if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Generuojama sutartis...'; submitBtn.style.opacity = '0.8'; }
           const get = (id) => {
             const el = document.getElementById(id);
             return el ? el.value : '';
@@ -256,48 +260,91 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ...(isMediaConsentMissing ? { media_publicity_consent: consentValue } : {}),
   };
 
-  const [studentResult, contractResult] = await Promise.all([
+  const [studentResult, contractConsentResult] = await Promise.all([
     supabase.from('students').update(studentUpdatePayload).eq('id', (contract as any).student_id),
-    // Flag the supplement for admin review instead of auto-regenerating/sending the contract.
-    supabase
-      .from('school_contracts')
-      .update({
-        completion_submitted_at: new Date().toISOString(),
-        ...(isMediaConsentMissing ? { media_publicity_consent: consentValue } : {}),
-      })
-      .eq('id', (contract as any).id),
+    isMediaConsentMissing
+      ? supabase
+          .from('school_contracts')
+          .update({ media_publicity_consent: consentValue })
+          .eq('id', (contract as any).id)
+      : Promise.resolve({ error: null }),
   ]);
 
   const studentErr = studentResult.error;
   if (studentErr) return res.status(500).send(pageHtml(`<h2>Nepavyko išsaugoti: ${studentErr.message}</h2>`));
-  if (contractResult.error) {
-    console.error('[school-contract-complete] nepavyko pažymėti papildymo:', contractResult.error.message);
+  if (contractConsentResult.error) {
+    console.error('[school-contract-complete] nepavyko išsaugoti sutikimo:', contractConsentResult.error.message);
   }
 
-  // Notify the school admin to review the supplemented data and send the final contract.
-  // The contract is NOT regenerated or auto-sent here — the admin confirms via
-  // /api/school-contract-confirm-completion.
+  // Re-fetch the contract so the joined student row reflects the just-saved data,
+  // then regenerate the final PDF and send it to the parent right away (no admin review).
+  const { data: freshContract } = await supabase
+    .from('school_contracts')
+    .select(CONTRACT_SELECT)
+    .eq('id', (contract as any).id)
+    .maybeSingle();
+
+  let uploadedPath: string | null = null;
+  let renderedBody = '';
+  try {
+    const result = await renderAndStoreSchoolContractPdf(supabase, freshContract || contract);
+    uploadedPath = result.uploadedPath;
+    renderedBody = result.renderedBody;
+  } catch (e: any) {
+    console.error('[school-contract-complete] PDF generation failed:', e?.message || e);
+  }
+
+  if (uploadedPath) {
+    const { error: updateErr } = await supabase
+      .from('school_contracts')
+      .update({
+        pdf_url: uploadedPath,
+        filled_body: renderedBody,
+        signing_status: 'sent',
+        sent_at: new Date().toISOString(),
+      })
+      .eq('id', (contract as any).id);
+    if (updateErr) {
+      console.error('[school-contract-complete] nepavyko atnaujinti sutarties:', updateErr.message);
+    }
+  }
+
   const parentName = String((st.payer_name || '')).trim();
-  const adminEmail = String((contract as any).organizations?.email || '').trim();
-  if (adminEmail) {
-    const emailPayload = JSON.stringify({
-      type: 'school_contract_completion_admin',
-      to: adminEmail,
-      data: {
-        schoolName: String((contract as any).organizations?.name || ''),
-        studentName: String(st.full_name || ''),
-        parentName: parentName || String(st.full_name || ''),
-        contractNumber: String((contract as any).contract_number || ''),
-        contractId: (contract as any).id,
-        ...((contract as any).organization_id ? { organizationId: (contract as any).organization_id } : {}),
-      },
-    });
-    const emailUrl = `${(process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt').replace(/\/$/, '')}/api/send-email`;
-    void fetch(emailUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-internal-key': serviceRoleKey },
-      body: emailPayload,
-    }).catch(() => {});
+  const parentEmail = String((st.payer_email || '')).trim();
+  let emailSent = false;
+  if (parentEmail && uploadedPath) {
+    try {
+      const emailUrl = `${(process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt').replace(/\/$/, '')}/api/send-email`;
+      const emailRes = await fetch(emailUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-internal-key': serviceRoleKey },
+        body: JSON.stringify({
+          type: 'school_contract',
+          to: parentEmail,
+          data: {
+            schoolName: String((contract as any).organizations?.name || ''),
+            schoolEmail: String((contract as any).organizations?.email || ''),
+            studentName: String(st.full_name || ''),
+            parentName: parentName || String(st.full_name || ''),
+            recipientName: parentName || String(st.full_name || ''),
+            missingFields: [],
+            contractNumber: String((contract as any).contract_number || ''),
+            annualFee: (contract as any).annual_fee || 0,
+            contractBody: renderedBody,
+            pdfUrl: uploadedPath,
+            date: new Date().toLocaleDateString('lt-LT'),
+            contractId: (contract as any).id,
+            ...((contract as any).organization_id ? { organizationId: (contract as any).organization_id } : {}),
+          },
+        }),
+      });
+      emailSent = emailRes.ok;
+      if (!emailRes.ok) {
+        console.error('[school-contract-complete] email failed: HTTP', emailRes.status);
+      }
+    } catch (e: any) {
+      console.error('[school-contract-complete] email failed:', e?.message || e);
+    }
   }
 
   if (tokenRow?.id) {
@@ -307,6 +354,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq('id', tokenRow.id);
   }
 
-  return res.status(200).send(pageHtml('<h2>Ačiū! Duomenys pateikti.</h2><p>Administratorius patikrins pateiktus duomenis ir atsiųs galutinę sutartį pasirašyti.</p>'));
+  return res.status(200).send(
+    pageHtml(
+      emailSent
+        ? '<h2>Ačiū! Duomenys pateikti.</h2><p>Atnaujinta sutartis išsiųsta jūsų el. paštu.</p>'
+        : '<h2>Ačiū! Duomenys pateikti.</h2><p>Atnaujintą sutartį gausite el. paštu.</p>',
+    ),
+  );
 }
 

@@ -74,7 +74,6 @@ interface Contract {
   pdf_url?: string | null;
   signed_contract_url?: string | null;
   signed_uploaded_at?: string | null;
-  completion_submitted_at?: string | null;
   additional_fee_amount?: number | null;
   additional_fee_purpose?: string | null;
   student?: { full_name: string; email: string; phone?: string | null; payer_name: string | null; payer_email: string | null; payer_phone?: string | null; payer_personal_code?: string | null; parent_secondary_name?: string | null; parent_secondary_email?: string | null; parent_secondary_phone?: string | null; parent_secondary_personal_code?: string | null; parent_secondary_address?: string | null; student_address?: string | null; student_city?: string | null; child_birth_date?: string | null };
@@ -160,7 +159,6 @@ export default function CompanyContracts() {
   const [additionalFeePurpose, setAdditionalFeePurpose] = useState('');
   const [additionalFeeAmount, setAdditionalFeeAmount] = useState('');
   const [saving, setSaving] = useState(false);
-  const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
   const [tab, setTab] = useState<'contracts' | 'templates'>('contracts');
 
@@ -1232,29 +1230,6 @@ export default function CompanyContracts() {
     }
   };
 
-  const confirmCompletion = async (contract: Contract) => {
-    setConfirmingId(contract.id);
-    try {
-      const hdrs = await authHeaders();
-      const res = await fetch('/api/school-contract-confirm-completion', {
-        method: 'POST',
-        headers: hdrs,
-        body: JSON.stringify({ contractId: contract.id }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data?.success !== true) {
-        setToast({ message: data?.error || tr('school.toastCompletionConfirmFail'), type: 'error' });
-      } else {
-        setToast({ message: tr('school.toastCompletionConfirmed'), type: 'success' });
-      }
-    } catch (e: any) {
-      setToast({ message: e?.message || tr('school.toastCompletionConfirmFail'), type: 'error' });
-    } finally {
-      setConfirmingId(null);
-      reload();
-    }
-  };
-
   const deleteContract = async (id: string) => {
     if (!confirm(tr('school.confirmDeleteContract'))) return;
     const { error } = await supabase
@@ -1414,11 +1389,6 @@ export default function CompanyContracts() {
                       )}
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
-                      {isSchoolView && c.completion_submitted_at && (
-                        <Button size="sm" onClick={() => confirmCompletion(c)} disabled={confirmingId === c.id} className="bg-amber-600 hover:bg-amber-700 text-white">
-                          <CheckCircle className="w-3.5 h-3.5 mr-1.5" /> {confirmingId === c.id ? tr('school.confirmingCompletion') : tr('school.confirmCompletionBtn')}
-                        </Button>
-                      )}
                       {c.signing_status === 'draft' && (
                         <Button size="sm" variant="outline" onClick={() => sendContract(c)}>
                           <Send className="w-3.5 h-3.5 mr-1.5" /> {tr('school.send')}
@@ -1442,11 +1412,6 @@ export default function CompanyContracts() {
                       </button>
                     </div>
                   </div>
-                  {isSchoolView && c.completion_submitted_at && (
-                    <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                      {tr('school.completionPendingBanner')}
-                    </div>
-                  )}
                 </div>
               ))}
             </div>
