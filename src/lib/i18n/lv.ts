@@ -896,7 +896,7 @@ export const lv: Record<string, string> = {
   'settings.currentPasswordWrong': 'Pašreizējā parole ir nepareiza',
   'settings.fillAllFields': 'Aizpildiet visus laukus',
   'settings.inactive': 'Neaktīvs',
-  'settings.manageSubBtn': 'Ielādē...',
+  'settings.manageSubBtn': 'Pārvaldīt abonementu',
   'settings.manageSubHint': '💡 „Pārvaldīt abonementu" vai „Atcelt abonementu" atver Stripe portālu, kur varat veikt izmaiņas.',
   'settings.manageSubscription': 'Pārvaldīt abonementu',
   'settings.monthlyPlan': 'Gada (€14,99/mēn.)',

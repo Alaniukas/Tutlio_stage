@@ -3414,7 +3414,7 @@ export const ee: Record<string, string> = {
   'settings.company': 'Ettevõte',
   'settings.currentPasswordWrong': 'Praegune parool on vale',
   'settings.fillAllFields': 'Palun täitke kõik väljad',
-  'settings.manageSubBtn': 'Laeme...',
+  'settings.manageSubBtn': 'Halda tellimust',
   'settings.manageSubHint': '💡 "Halda tellimust" või "Tühista tellimus" avab Stripe portaali, kus saate muudatusi teha.',
   'settings.monthlyPlan': 'Aasta (€14,99/kuu)',
   'settings.namePlaceholder': 'Jaan Tamm',

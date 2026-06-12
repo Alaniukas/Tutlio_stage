@@ -96,7 +96,7 @@ function LocaleFromRouteSync() {
 function ProtectedWithUser() {
   return (
     <UserProvider>
-      <OrgBrandingProvider>
+      <OrgBrandingProvider scope="tutor">
         <ProtectedRoute />
       </OrgBrandingProvider>
     </UserProvider>
@@ -106,7 +106,7 @@ function ProtectedWithUser() {
 function StudentProtectedWithUser() {
   return (
     <UserProvider>
-      <OrgBrandingProvider>
+      <OrgBrandingProvider scope="student">
         <StudentProtectedRoute />
       </OrgBrandingProvider>
     </UserProvider>
@@ -116,7 +116,7 @@ function StudentProtectedWithUser() {
 function ParentProtectedWithUser() {
   return (
     <UserProvider>
-      <OrgBrandingProvider>
+      <OrgBrandingProvider scope="parent">
         <ParentProtectedRoute />
       </OrgBrandingProvider>
     </UserProvider>

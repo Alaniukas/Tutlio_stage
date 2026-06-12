@@ -2953,7 +2953,7 @@ export const se: Record<string, string> = {
   'settings.canResubscribe': 'Du kan prenumerera igen när som helst.',
   'settings.company': 'Företag',
   'settings.currentPasswordWrong': 'Nuvarande lösenord är felaktigt',
-  'settings.manageSubBtn': 'Laddar...',
+  'settings.manageSubBtn': 'Hantera prenumeration',
   'settings.manageSubHint': '💡 \"Hantera prenumeration\" eller \"Avbryt prenumeration\" öppnar Stripe-portalen där du kan göra ändringar.',
   'settings.monthlyPlan': 'Årsvis (€14,99/mån)',
   'settings.namePlaceholder': 'Anna Andersson',

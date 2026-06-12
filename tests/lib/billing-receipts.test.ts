@@ -3,8 +3,18 @@
 import { describe, expect, it } from 'vitest';
 import { lessonStripeBreakdownEur, customerTotalEur } from '../../src/lib/stripeLessonPricing';
 import { lessonCheckoutBreakdownCents } from '../../api/_lib/stripeLessonPricing';
-import { monthRangeUtc, summarizeB2cMonth, b2cSummaryCsv } from '../../api/_lib/b2cReport';
+import {
+  monthRangeUtc,
+  summarizeB2cMonth,
+  b2cSummaryCsv,
+  monthPeriodDates,
+} from '../../api/_lib/b2cReport';
 import { buildB2bInvoiceLines, lithuanianMonthLabel } from '../../api/_lib/b2bInvoice';
+import {
+  groupB2cFeesByCounterparty,
+  buildB2cCommissionLines,
+  formatB2cInvoiceNumber,
+} from '../../api/_lib/b2cCommissionInvoice';
 
 describe('lesson Stripe breakdown (client/server parity)', () => {
   it('splits a €20 lesson into base + fee that sum to the checkout total', () => {
@@ -78,6 +88,69 @@ describe('B2C monthly summary', () => {
     expect(csv).toContain('2026-05,Stripe,1,1.00,21.00');
     expect(csv).toContain('2026-05,Perlas Finance,1,0.75,20.75');
     expect(csv).toContain('2026-05,Is viso,2,1.75,41.75');
+  });
+});
+
+describe('B2C commission invoices (per-client sąskaitos faktūros)', () => {
+  it('computes the calendar period of the month', () => {
+    expect(monthPeriodDates('2026-06')).toEqual({ periodStart: '2026-06-01', periodEnd: '2026-06-30' });
+    expect(monthPeriodDates('2026-02')).toEqual({ periodStart: '2026-02-01', periodEnd: '2026-02-28' });
+    expect(monthPeriodDates('2028-02')).toEqual({ periodStart: '2028-02-01', periodEnd: '2028-02-29' });
+    expect(monthPeriodDates('garbage')).toBeNull();
+  });
+
+  it('groups Stripe and Perlas fees by counterparty (org takes precedence over tutor)', () => {
+    const { counterparties, unattributedOperations } = groupB2cFeesByCounterparty({
+      stripeRows: [
+        { organization_id: null, tutor_id: 't1', platform_fee: 0.96 },
+        { organization_id: null, tutor_id: 't1', platform_fee: '1.04' },
+        { organization_id: 'o1', tutor_id: 't2', platform_fee: 2 },
+        { organization_id: null, tutor_id: null, platform_fee: 0.5 }, // unattributed
+        { organization_id: null, tutor_id: 't1', platform_fee: 0 },   // zero fee — ignored
+      ],
+      perlasRows: [
+        { entity_type: 'tutor', entity_id: 't1', platform_fee: 0.5, perlas_fee: 0.18 },
+        { entity_type: 'org', entity_id: 'o1', platform_fee: 1, perlas_fee: 0.18 },
+      ],
+    });
+
+    expect(unattributedOperations).toBe(1);
+    expect(counterparties).toHaveLength(2);
+
+    const t1 = counterparties.find((c) => c.counterpartyId === 't1')!;
+    expect(t1.counterpartyType).toBe('tutor');
+    expect(t1.stripeOperations).toBe(2);
+    expect(t1.stripeFeesEur).toBeCloseTo(2.0, 2);
+    expect(t1.perlasOperations).toBe(1);
+    expect(t1.perlasFeesEur).toBeCloseTo(0.68, 2);
+
+    const o1 = counterparties.find((c) => c.counterpartyId === 'o1')!;
+    expect(o1.counterpartyType).toBe('org');
+    expect(o1.stripeFeesEur).toBe(2);
+    expect(o1.perlasFeesEur).toBeCloseTo(1.18, 2);
+  });
+
+  it('builds a single simple paid line: "Tutlio tarpininkavimo mokesčiai (mėnuo)"', () => {
+    const lines = buildB2cCommissionLines({
+      month: '2026-06',
+      fees: { stripeFeesEur: 2.0, perlasFeesEur: 0.68 },
+    });
+    expect(lines.lineItems).toHaveLength(1);
+    expect(lines.lineItems[0]).toEqual({
+      description: 'Tutlio tarpininkavimo mokesčiai (2026 m. birželis)',
+      quantity: 1,
+      unitPrice: 2.68,
+      totalPrice: 2.68,
+    });
+    expect(lines.totalAmount).toBeCloseTo(2.68, 2);
+    // Issued as paid: the fee was already deducted at settlement.
+    expect(lines.deductedAmount).toBeCloseTo(2.68, 2);
+    expect(lines.amountDue).toBe(0);
+  });
+
+  it('formats the B2C number series separately from B2B', () => {
+    expect(formatB2cInvoiceNumber(1)).toBe('TUT-B2C-00001');
+    expect(formatB2cInvoiceNumber(123)).toBe('TUT-B2C-00123');
   });
 });
 

@@ -2949,7 +2949,7 @@ export const dk: Record<string, string> = {
   'settings.canResubscribe': 'Du kan genabonnere når som helst.',
   'settings.company': 'Virksomhed',
   'settings.currentPasswordWrong': 'Nuværende adgangskode er forkert',
-  'settings.manageSubBtn': 'Indlæser...',
+  'settings.manageSubBtn': 'Administrér abonnement',
   'settings.manageSubHint': '💡 \"Administrér abonnement\" eller \"Opsig abonnement\" åbner Stripe-portalen, hvor du kan foretage ændringer.',
   'settings.monthlyPlan': 'Årlig (€14,99/md.)',
   'settings.namePlaceholder': 'Jens Jensen',

@@ -1586,7 +1586,7 @@ export const de: Record<string, string> = {
   'settings.currentPasswordWrong': 'Das aktuelle Passwort ist falsch',
   'settings.passwordChangeFailed': 'Fehler beim Ändern des Passworts: ',
   'settings.fillAllFields': 'Bitte füllen Sie alle Felder aus',
-  'settings.manageSubBtn': 'Wird geladen…',
+  'settings.manageSubBtn': 'Abonnement verwalten',
   'settings.manageSubHint': '💡 „Abonnement verwalten" oder „Abonnement kündigen" öffnet das Stripe-Portal, in dem Sie Änderungen vornehmen können.',
   'settings.canResubscribe': 'Sie können jederzeit erneut abonnieren.',
   'settings.noSubDesc': 'Ihre Abonnement-Informationen werden hier angezeigt',

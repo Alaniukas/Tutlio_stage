@@ -227,7 +227,6 @@ export default function PerlasFinanceSection({ entityType, entityId }: Props) {
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">
                       {`€${Number(l.net_amount).toFixed(2)}`}
-                      <span className="text-xs text-gray-400 ml-2">{`(apimtis: €${Number(l.volume).toFixed(2)})`}</span>
                     </p>
                     <p className="text-xs text-gray-500">
                       {new Date(l.created_at).toLocaleDateString('lt-LT')}

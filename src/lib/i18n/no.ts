@@ -2960,7 +2960,7 @@ export const no: Record<string, string> = {
   'settings.canResubscribe': 'Du kan abonnere på nytt når som helst.',
   'settings.company': 'Selskap',
   'settings.currentPasswordWrong': 'Nåværende passord er feil',
-  'settings.manageSubBtn': 'Laster...',
+  'settings.manageSubBtn': 'Administrer abonnement',
   'settings.manageSubHint': '💡 «Administrer abonnement» eller «Avslutt abonnement» åpner Stripe-portalen der du kan gjøre endringer.',
   'settings.monthlyPlan': 'Årlig (€14,99/mnd)',
   'settings.namePlaceholder': 'Ola Nordmann',

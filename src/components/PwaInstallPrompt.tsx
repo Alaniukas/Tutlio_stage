@@ -10,14 +10,7 @@ import {
   setBannerSessionDismissed,
   setPwaInstallPermanentlyHidden,
 } from '@/lib/pwaInstallPrefs';
-
-function isStandalonePwa(): boolean {
-  if (typeof window === 'undefined') return false;
-  return (
-    window.matchMedia('(display-mode: standalone)').matches ||
-    (window.navigator as any).standalone === true
-  );
-}
+import { isStandalonePwa } from '@/lib/pwaPortal';
 
 interface PwaInstallPromptProps {
   settingsPath: string;

@@ -887,7 +887,7 @@ export const fr: Record<string, string> = {
   'settings.passwordChangeFailed': 'Échec de la modification du mot de passe : ',
   'settings.fillAllFields': 'Veuillez remplir tous les champs',
   'settings.manageSubscription': 'Gérer votre abonnement',
-  'settings.manageSubBtn': 'Chargement…',
+  'settings.manageSubBtn': 'Gérer l\'abonnement',
   'settings.manageSubHint': '💡 « Gérer l\'abonnement » ou « Annuler l\'abonnement » ouvre le portail Stripe où vous pouvez effectuer des modifications.',
   'settings.cancelSubBtn': 'Annuler l\'abonnement',
   'settings.canResubscribe': 'Vous pouvez vous réabonner à tout moment.',

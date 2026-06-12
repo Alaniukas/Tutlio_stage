@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Download, FileSpreadsheet, FileText, Loader2, Mail, RefreshCw, Send } from 'lucide-react';
+import { Download, Loader2, Mail, RefreshCw, Send } from 'lucide-react';
+import AdminB2cInvoicesSection from './AdminB2cInvoicesSection';
+import { downloadBlob } from './adminDownload';
 
 interface Props {
   adminSecret: string;
@@ -31,22 +33,8 @@ function previousMonth(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-async function downloadBlob(res: Response, fallbackName: string) {
-  const blob = await res.blob();
-  const disposition = res.headers.get('Content-Disposition') || '';
-  const m = /filename="([^"]+)"/.exec(disposition);
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = m?.[1] || fallbackName;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(a.href);
-}
-
 export default function AdminBillingPanel({ adminSecret }: Props) {
   const [month, setMonth] = useState(previousMonth());
-  const [b2cLoading, setB2cLoading] = useState<'pdf' | 'csv' | null>(null);
   const [b2bGenerating, setB2bGenerating] = useState(false);
   const [genResult, setGenResult] = useState<GenerateResult | null>(null);
   const [invoices, setInvoices] = useState<PlatformInvoiceRow[]>([]);
@@ -75,25 +63,6 @@ export default function AdminBillingPanel({ adminSecret }: Props) {
     setError(null);
     void loadInvoices(month);
   }, [month, loadInvoices]);
-
-  const downloadB2cReport = async (format: 'pdf' | 'csv') => {
-    setB2cLoading(format);
-    setError(null);
-    try {
-      const res = await fetch(`/api/admin-b2c-report?month=${encodeURIComponent(month)}&format=${format}`, {
-        headers: { 'x-admin-secret': adminSecret },
-      });
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        throw new Error(json.error || 'Nepavyko sugeneruoti suvestinės');
-      }
-      await downloadBlob(res, `b2c-suvestine-${month}.${format}`);
-    } catch (e: any) {
-      setError(e.message || 'Nepavyko sugeneruoti suvestinės');
-    } finally {
-      setB2cLoading(null);
-    }
-  };
 
   const generateB2bInvoices = async () => {
     if (!window.confirm(`Generuoti ir išsiųsti ${month} mėn. sąskaitas agentūroms?`)) return;
@@ -153,33 +122,8 @@ export default function AdminBillingPanel({ adminSecret }: Props) {
         <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">{error}</div>
       )}
 
-      {/* B2C monthly summary */}
-      <div className="bg-white/5 border border-white/10 rounded-2xl p-5 space-y-3">
-        <h3 className="text-white font-semibold">Mėnesio B2C suvestinė</h3>
-        <p className="text-sm text-slate-400">
-          Platformos mokesčiai, surinkti iš fizinių asmenų per Stripe ir Perlas Finance (buhalterijai).
-        </p>
-        <div className="flex gap-2 flex-wrap">
-          <button
-            type="button"
-            onClick={() => downloadB2cReport('pdf')}
-            disabled={b2cLoading != null}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors"
-          >
-            {b2cLoading === 'pdf' ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
-            Generuoti suvestinę (PDF)
-          </button>
-          <button
-            type="button"
-            onClick={() => downloadB2cReport('csv')}
-            disabled={b2cLoading != null}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-white/5 text-slate-300 hover:bg-white/10 disabled:opacity-50 transition-colors"
-          >
-            {b2cLoading === 'csv' ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
-            CSV
-          </button>
-        </div>
-      </div>
+      {/* B2C commission invoices per client (agency / tutor) */}
+      <AdminB2cInvoicesSection adminSecret={adminSecret} month={month} />
 
       {/* B2B agency invoices */}
       <div className="bg-white/5 border border-white/10 rounded-2xl p-5 space-y-4">

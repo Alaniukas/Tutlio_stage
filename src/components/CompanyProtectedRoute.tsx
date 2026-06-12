@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useUser } from '@/contexts/UserContext';
 import { orgAdminRowByUserDeduped } from '@/lib/preload';
+import { setLastPortal } from '@/lib/pwaPortal';
 
 export default function CompanyProtectedRoute() {
   const location = useLocation();
@@ -11,6 +12,11 @@ export default function CompanyProtectedRoute() {
     location.pathname === '/school' ||
     location.pathname.startsWith('/school/');
   const loginPath = onSchoolPortal ? '/school/login' : '/company/login';
+
+  // Remember the portal so a logged-out installed PWA opens the right login.
+  useEffect(() => {
+    if (status === 'admin') setLastPortal(onSchoolPortal ? 'school' : 'company');
+  }, [status, onSchoolPortal]);
 
   useEffect(() => {
     let cancelled = false;

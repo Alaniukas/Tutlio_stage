@@ -40,6 +40,8 @@ export interface InvoicePdfData {
   deductedAmount?: number;
   /** Remaining amount to pay — rendered as the final highlighted row when provided. */
   amountDue?: number;
+  /** Lines rendered as a highlighted "invoice paid" note below the totals (first line bold). */
+  paidNote?: string[];
 }
 
 const PAGE_WIDTH = 595.28;
@@ -169,6 +171,17 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
     drawText('MOKETINA SUMA:', colUnit - 30, y, { size: 12, bold: true });
     drawText(`${formatEur(data.amountDue)} EUR`, colTotal, y, { size: 12, bold: true, color: headerBlue });
     y -= 18;
+  }
+
+  if (data.paidNote && data.paidNote.length > 0) {
+    y -= 6;
+    const [first, ...rest] = data.paidNote;
+    drawText(first, colDesc, y, { size: 10, bold: true, color: rgb(0.1, 0.5, 0.3) });
+    y -= 14;
+    for (const line of rest) {
+      drawText(line, colDesc, y, { size: 8, color: gray });
+      y -= 12;
+    }
   }
   y -= 12;
 

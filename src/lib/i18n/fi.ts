@@ -3382,7 +3382,7 @@ export const fi: Record<string, string> = {
   'pricing.enterpriseCancelStats': 'Peruutus- ja tuntitilastot',
   'settings.canResubscribe': 'Voit tilata uudelleen milloin tahansa.',
   'settings.currentPasswordWrong': 'Nykyinen salasana on virheellinen',
-  'settings.manageSubBtn': 'Ladataan...',
+  'settings.manageSubBtn': 'Hallitse tilausta',
   'settings.manageSubHint': '💡 \"Hallitse tilausta\" tai \"Peruuta tilaus\" avaa Stripe-portaalin, jossa voit tehdä muutoksia.',
   'settings.monthlyPlan': 'Vuosi (14,99 €/kk)',
   'settings.namePlaceholder': 'Matti Meikäläinen',

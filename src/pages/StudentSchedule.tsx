@@ -669,6 +669,9 @@ export default function StudentSchedule() {
                 perlasFlag = !!(orgP as any)?.perlas_finance_enabled;
             }
             setTutorPerlasEnabled(perlasFlag);
+            setTutorSoloManualPayments(
+                tutorUsesManualStudentPayments(td as Parameters<typeof tutorUsesManualStudentPayments>[0]),
+            );
         }
 
         {
@@ -2251,57 +2254,58 @@ export default function StudentSchedule() {
                               sessionEndTime={(mySessionData as any)?.end_time ?? null}
                             />
 
-                            {mySessionData?.status === 'active' && !mySessionData.paid && (studentPaymentPayer !== 'parent' || isParentRoute) &&
-                                (!tutorSoloManualPayments ? (
-                                    <div className="space-y-2">
-                                        {(() => {
-                                            const { remaining } = lessonCreditBreakdown(mySessionData.price);
-                                            return (
-                                                <button
-                                                    onClick={() => handleGoToStripe(mySessionData.id)}
-                                                    disabled={fetchingStripe}
-                                                    className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
-                                                >
-                                                    {fetchingStripe ? (
-                                                        <>
-                                                            <Loader2 className="w-4 h-4 animate-spin" /> {t('common.loading')}
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <CreditCard className="w-4 h-4" />
-                                                            {remaining > 0
-                                                                ? `${t('stuSched.payStripe')} — €${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}`
-                                                                : `${t('stuSched.payStripe')} — ${t('stuSess.payWithCredit')}`}
-                                                        </>
-                                                    )}
-                                                </button>
-                                            );
-                                        })()}
-                                        {tutorPerlasEnabled && (() => {
-                                            const sp = Number(mySessionData.price || 0);
-                                            const pf = Math.round(sp * 2) / 100;
-                                            const bf = 0.18;
-                                            const tot = Math.round((sp + pf + bf) * 100) / 100;
-                                            return (
-                                                <button
-                                                    onClick={() => handlePerlasPayment(mySessionData.id)}
-                                                    disabled={perlasLoading}
-                                                    className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 text-white font-semibold hover:from-teal-700 hover:to-emerald-700 transition-all shadow-sm disabled:opacity-60"
-                                                >
-                                                    {perlasLoading
-                                                        ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
-                                                        : <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank', { amount: tot.toFixed(2) })}</>
-                                                    }
-                                                </button>
-                                            );
-                                        })()}
-                                    </div>
-                                ) : (
-                                    <div className="flex items-start gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                                        <Info className="w-5 h-5 text-slate-500 flex-shrink-0 mt-0.5" />
-                                        <p className="text-sm text-slate-800 leading-snug">{t('stuSched.manualPaymentBookingHint')}</p>
-                                    </div>
-                                ))}
+                            {/* Stripe checkout is unavailable for manual-payment tutors (server rejects it), but Perlas bank payments stay available. */}
+                            {mySessionData?.status === 'active' && !mySessionData.paid && (studentPaymentPayer !== 'parent' || isParentRoute) && (
+                                <div className="space-y-2">
+                                    {!tutorSoloManualPayments && (() => {
+                                        const { remaining } = lessonCreditBreakdown(mySessionData.price);
+                                        return (
+                                            <button
+                                                onClick={() => handleGoToStripe(mySessionData.id)}
+                                                disabled={fetchingStripe}
+                                                className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
+                                            >
+                                                {fetchingStripe ? (
+                                                    <>
+                                                        <Loader2 className="w-4 h-4 animate-spin" /> {t('common.loading')}
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <CreditCard className="w-4 h-4" />
+                                                        {remaining > 0
+                                                            ? `${t('stuSched.payStripe')} — €${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}`
+                                                            : `${t('stuSched.payStripe')} — ${t('stuSess.payWithCredit')}`}
+                                                    </>
+                                                )}
+                                            </button>
+                                        );
+                                    })()}
+                                    {tutorPerlasEnabled && (() => {
+                                        const sp = Number(mySessionData.price || 0);
+                                        const pf = Math.round(sp * 2) / 100;
+                                        const bf = 0.18;
+                                        const tot = Math.round((sp + pf + bf) * 100) / 100;
+                                        return (
+                                            <button
+                                                onClick={() => handlePerlasPayment(mySessionData.id)}
+                                                disabled={perlasLoading}
+                                                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 text-white font-semibold hover:from-teal-700 hover:to-emerald-700 transition-all shadow-sm disabled:opacity-60"
+                                            >
+                                                {perlasLoading
+                                                    ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
+                                                    : <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank', { amount: tot.toFixed(2) })}</>
+                                                }
+                                            </button>
+                                        );
+                                    })()}
+                                    {tutorSoloManualPayments && !tutorPerlasEnabled && (
+                                        <div className="flex items-start gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                                            <Info className="w-5 h-5 text-slate-500 flex-shrink-0 mt-0.5" />
+                                            <p className="text-sm text-slate-800 leading-snug">{t('stuSched.manualPaymentBookingHint')}</p>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
 
                             {mySessionData?.status === 'active' && mySessionData.start_time && isAfter(new Date(mySessionData.start_time), new Date()) && (
                                 <div className="grid grid-cols-2 gap-3">

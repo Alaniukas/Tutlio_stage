@@ -11,7 +11,7 @@ import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClie
 import { generateInvoicePdf, type InvoicePdfData } from './_lib/invoicePdf.js';
 import { buildB2bInvoiceLines, lithuanianMonthLabel } from './_lib/b2bInvoice.js';
 import { TUTLIO_COMPANY } from './_lib/tutlioCompany.js';
-import { monthRangeUtc } from './_lib/b2cReport.js';
+import { monthRangeUtc, monthPeriodDates } from './_lib/b2cReport.js';
 
 function getPlatformAdminSecret(): string {
   const s = process.env.ADMIN_SECRET || process.env.VITE_ADMIN_SECRET;
@@ -64,18 +64,6 @@ async function postInternalJson(url: string, payload: unknown, timeoutMs = 20000
   }
 }
 
-/** "YYYY-MM" -> { periodStart: 'YYYY-MM-01', periodEnd: last day of the month }. */
-function monthPeriodDates(month: string): { periodStart: string; periodEnd: string } | null {
-  const m = /^(\d{4})-(\d{2})$/.exec(String(month || '').trim());
-  if (!m) return null;
-  const year = Number(m[1]);
-  const mon = Number(m[2]);
-  if (mon < 1 || mon > 12) return null;
-  const lastDay = new Date(Date.UTC(year, mon, 0)).getUTCDate();
-  const mm = String(mon).padStart(2, '0');
-  return { periodStart: `${year}-${mm}-01`, periodEnd: `${year}-${mm}-${String(lastDay).padStart(2, '0')}` };
-}
-
 async function nextInvoiceNumber(sb: any): Promise<string> {
   const { data, error } = await sb.rpc('next_platform_invoice_number');
   if (error || data == null) {
@@ -109,7 +97,7 @@ async function handleGenerate(sb: any, req: VercelRequest, res: VercelResponse) 
   const orgIds = eligible.map((o: any) => o.id);
 
   const [{ data: existingRows }, { data: feeRows, error: feeErr }, { data: invProfiles }] = await Promise.all([
-    sb.from('platform_invoices').select('organization_id').eq('period_start', period.periodStart).in('organization_id', orgIds),
+    sb.from('platform_invoices').select('organization_id').eq('invoice_type', 'b2b').eq('period_start', period.periodStart).in('organization_id', orgIds),
     sb.from('payout_fee_records')
       .select('entity_id, fee_amount')
       .eq('entity_type', 'org')
@@ -163,6 +151,7 @@ async function handleGenerate(sb: any, req: VercelRequest, res: VercelResponse) 
         .from('platform_invoices')
         .insert({
           invoice_number: invoiceNumber,
+          invoice_type: 'b2b',
           organization_id: org.id,
           period_start: period.periodStart,
           period_end: period.periodEnd,
@@ -258,6 +247,7 @@ async function handleList(sb: any, req: VercelRequest, res: VercelResponse) {
   const { data, error } = await sb
     .from('platform_invoices')
     .select('id, invoice_number, organization_id, period_start, period_end, total_amount, deducted_amount, amount_due, pdf_storage_path, sent_at, created_at, organizations(name)')
+    .eq('invoice_type', 'b2b')
     .eq('period_start', period.periodStart)
     .order('created_at', { ascending: true });
   if (error) return res.status(500).json({ error: error.message });

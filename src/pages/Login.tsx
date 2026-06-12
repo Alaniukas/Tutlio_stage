@@ -17,6 +17,7 @@ import { Label } from '@/components/ui/label';
 import { AlertCircle, ArrowLeft, ArrowRight, BookOpen, ChevronRight, Sparkles, Building2, Users } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { useOrgBranding } from '@/hooks/useOrgBranding';
+import { setLastPortal } from '@/lib/pwaPortal';
 
 // ─── SVG Illustrations ────────────────────────────────────────────────────────
 
@@ -319,6 +320,8 @@ export default function Login() {
   useEffect(() => {
     if (redirectOnceRef.current) return;
     redirectOnceRef.current = true;
+    // Remember this device uses the regular portal (installed-PWA login routing).
+    setLastPortal('regular');
     redirectByRole();
   }, []);
 

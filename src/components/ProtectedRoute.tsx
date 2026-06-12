@@ -4,6 +4,7 @@ import { resolveAccountPortals } from '@/lib/account-portal';
 import { supabase } from '@/lib/supabase';
 import { hasActiveSubscription, tutorHasPlatformSubscriptionAccess } from '@/lib/subscription';
 import { useUser } from '@/contexts/UserContext';
+import { isStandalonePwa, loginPathForLastPortal } from '@/lib/pwaPortal';
 
 export default function ProtectedRoute() {
   const location = useLocation();
@@ -207,5 +208,11 @@ export default function ProtectedRoute() {
     return <Navigate to="/registration/subscription" replace />;
   }
 
-  return status === 'tutor' ? <Outlet /> : <Navigate to="/login" replace />;
+  // Logged out: in the installed PWA open the login of the portal this device
+  // last used (e.g. /school/login for school admins); in the browser keep /login.
+  return status === 'tutor' ? (
+    <Outlet />
+  ) : (
+    <Navigate to={isStandalonePwa() ? loginPathForLastPortal() : '/login'} replace />
+  );
 }

@@ -271,8 +271,9 @@ const server = http.createServer(async (req, res) => {
 
 async function startListening(): Promise<void> {
   const killPort = (await import('kill-port')).default as (port: number) => Promise<unknown>;
+  const maxAttempts = 6;
 
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       await new Promise<void>((resolve, reject) => {
         const onErr = (err: NodeJS.ErrnoException) => {
@@ -292,18 +293,22 @@ async function startListening(): Promise<void> {
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code !== 'EADDRINUSE') throw err;
-      if (attempt >= 1) {
+      if (attempt >= maxAttempts - 1) {
         console.error(
           `[dev-api-local] Port ${PORT} is still busy. Run: npm run free:3002 — or set DEV_API_PORT`,
         );
         process.exit(1);
       }
-      console.warn(`[dev-api-local] Port ${PORT} busy (leftover server). Clearing it once…`);
-      try {
-        await killPort(PORT);
-      } catch {
-        /* nothing listening or kill-package message — retry listen anyway */
+      if (attempt === 0) {
+        console.warn(`[dev-api-local] Port ${PORT} busy (leftover server). Clearing it once…`);
+        try {
+          await killPort(PORT);
+        } catch {
+          /* nothing listening or kill-package message — retry listen anyway */
+        }
       }
+      // kill-port SIGKILLs asynchronously — give the OS time to release the socket before retrying.
+      await new Promise((resolve) => setTimeout(resolve, 500));
     }
   }
 }

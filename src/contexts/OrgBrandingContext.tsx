@@ -26,15 +26,30 @@ export function useOrgBrandingContext(): OrgBrandingData {
   return useContext(OrgBrandingContext);
 }
 
+/** Which portal the provider serves — branding must follow the viewed portal, not every role the account has. */
+export type OrgBrandingScope = 'tutor' | 'student' | 'parent';
+
 const CACHE_KEY = 'tutlio_org_branding';
 
-function getCached(): OrgBrandingData | null {
+/** Cache is bound to user + scope: a logout hard-redirect can race the SIGNED_OUT
+ *  cleanup, so the next account in the same tab must never reuse this entry. */
+interface CachedBranding {
+  userId: string;
+  scope: OrgBrandingScope;
+  data: OrgBrandingData;
+}
+
+function getCached(): CachedBranding | null {
   try {
     const raw = sessionStorage.getItem(CACHE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as OrgBrandingData;
-    if (parsed && typeof parsed.brand_color_secondary !== 'string') {
-      parsed.brand_color_secondary = '#8b5cf6';
+    const parsed = JSON.parse(raw) as CachedBranding;
+    // Legacy entries (plain OrgBrandingData without user binding) are ignored.
+    if (!parsed || typeof parsed.userId !== 'string' || typeof parsed.scope !== 'string' || !parsed.data) {
+      return null;
+    }
+    if (typeof parsed.data.brand_color_secondary !== 'string') {
+      parsed.data.brand_color_secondary = '#8b5cf6';
     }
     return parsed;
   } catch {
@@ -42,9 +57,9 @@ function getCached(): OrgBrandingData | null {
   }
 }
 
-function setCache(data: OrgBrandingData) {
+function setCache(userId: string, scope: OrgBrandingScope, data: OrgBrandingData) {
   try {
-    sessionStorage.setItem(CACHE_KEY, JSON.stringify(data));
+    sessionStorage.setItem(CACHE_KEY, JSON.stringify({ userId, scope, data } satisfies CachedBranding));
   } catch {
     /* ignore */
   }
@@ -80,51 +95,61 @@ async function resolveOrgFromStudentRow(row: { organization_id?: string | null; 
   return (tutorProf?.organization_id as string | null) ?? null;
 }
 
-/** Resolve organization UUID for branding: tutors (profile / org admin row), students, parents. */
-async function resolveOrganizationIdForUser(userId: string): Promise<string | null> {
-  // 1. Tutor profile
+/** Resolve organization UUID for branding, limited to the portal being viewed. */
+async function resolveOrganizationIdForUser(userId: string, scope: OrgBrandingScope): Promise<string | null> {
+  if (scope === 'tutor') return resolveOrgForTutorPortal(userId);
+  if (scope === 'student') return resolveOrgForStudentPortal(userId);
+  return resolveOrgForParentPortal(userId);
+}
+
+/** Tutor portal: only the tutor's own org (profile) or org-admin membership counts.
+ *  Never fall through to student/parent links — an individual tutor who is also
+ *  linked as someone's student must not inherit that org's branding here. */
+async function resolveOrgForTutorPortal(userId: string): Promise<string | null> {
   const { data: profile } = await tutorSidebarProfileDeduped(userId);
   const fromProfile = profile?.organization_id ?? null;
   if (fromProfile) return fromProfile;
 
-  // 2. Org admin
   const { data: adminRow } = await supabase
     .from('organization_admins')
     .select('organization_id')
     .eq('user_id', userId)
     .limit(1)
     .maybeSingle();
-  if (adminRow?.organization_id) return adminRow.organization_id as string;
+  return (adminRow?.organization_id as string | null) ?? null;
+}
 
-  // 3. Student — respect active profile selection
+/** Student portal: org via the student rows — respect active profile selection. */
+async function resolveOrgForStudentPortal(userId: string): Promise<string | null> {
   const { data: studentRows } = await supabase
     .from('students')
     .select('id, organization_id, tutor_id')
     .eq('linked_user_id', userId);
   const allStudentRows = (studentRows as any[]) ?? [];
+  if (allStudentRows.length === 0) return null;
 
-  if (allStudentRows.length > 0) {
-    const activeId = getActiveStudentProfileId();
-    const activeRow = activeId ? allStudentRows.find((r: any) => r.id === activeId) : null;
+  const activeId = getActiveStudentProfileId();
+  const activeRow = activeId ? allStudentRows.find((r: any) => r.id === activeId) : null;
 
-    if (activeRow) {
-      // Use org from the selected tutor — may be null (no whitelabel)
-      return resolveOrgFromStudentRow(activeRow);
-    }
-
-    // No explicit selection — prefer row with org, then first row
-    const withOrg = allStudentRows.find((r: any) => r.organization_id);
-    if (withOrg) return withOrg.organization_id as string;
-
-    for (const row of allStudentRows) {
-      const orgId = await resolveOrgFromStudentRow(row);
-      if (orgId) return orgId;
-    }
-
-    return null;
+  if (activeRow) {
+    // Use org from the selected tutor — may be null (no whitelabel)
+    return resolveOrgFromStudentRow(activeRow);
   }
 
-  // 4. Parent
+  // No explicit selection — prefer row with org, then first row
+  const withOrg = allStudentRows.find((r: any) => r.organization_id);
+  if (withOrg) return withOrg.organization_id as string;
+
+  for (const row of allStudentRows) {
+    const orgId = await resolveOrgFromStudentRow(row);
+    if (orgId) return orgId;
+  }
+
+  return null;
+}
+
+/** Parent portal: org via the first linked child. */
+async function resolveOrgForParentPortal(userId: string): Promise<string | null> {
   const { data: parentProfileId, error: parentErr } = await supabase.rpc('get_parent_profile_id_by_user_id', {
     p_user_id: userId,
   });
@@ -149,8 +174,10 @@ async function resolveOrganizationIdForUser(userId: string): Promise<string | nu
   return resolveOrgFromStudentRow(childOrg);
 }
 
-export function OrgBrandingProvider({ children }: { children: ReactNode }) {
-  const [branding, setBranding] = useState<OrgBrandingData>(() => getCached() || DEFAULT);
+export function OrgBrandingProvider({ scope, children }: { scope: OrgBrandingScope; children: ReactNode }) {
+  // Optimistic initial value to avoid flicker; load() re-validates it against the
+  // signed-in user + scope and resets if the cache belongs to another account.
+  const [branding, setBranding] = useState<OrgBrandingData>(() => getCached()?.data || DEFAULT);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -166,15 +193,9 @@ export function OrgBrandingProvider({ children }: { children: ReactNode }) {
   }, [branding.enabled, branding.brand_color, branding.brand_color_secondary]);
 
   useEffect(() => {
-    const cached = getCached();
-    if (cached) {
-      setBranding(cached);
-      return;
-    }
-
     let cancelled = false;
 
-    async function fetchOrgBranding(orgId: string) {
+    async function fetchOrgBranding(userId: string, orgId: string) {
       try {
         const res = await fetch(`/api/org-branding?id=${encodeURIComponent(orgId)}`);
         if (!res.ok) return;
@@ -190,7 +211,7 @@ export function OrgBrandingProvider({ children }: { children: ReactNode }) {
           enabled: true,
         };
         setBranding(data);
-        setCache(data);
+        setCache(userId, scope, data);
       } catch {
         /* network error — leave default branding */
       }
@@ -200,24 +221,33 @@ export function OrgBrandingProvider({ children }: { children: ReactNode }) {
       const user = await dedupeAuthGetUser();
       if (!user || cancelled) return;
 
-      const orgId = await resolveOrganizationIdForUser(user.id);
-      if (cancelled) return;
-
-      if (!orgId) {
-        // No org for this user/profile — cache default so we don't re-fetch on next mount
-        setBranding(DEFAULT);
-        setCache(DEFAULT);
+      const cached = getCached();
+      if (cached && cached.userId === user.id && cached.scope === scope) {
+        setBranding(cached.data);
         return;
       }
 
-      await fetchOrgBranding(orgId);
+      // Cache belongs to another account/portal (or none) — drop the optimistic
+      // value now so a previous user's branding never sticks.
+      setBranding(DEFAULT);
+
+      const orgId = await resolveOrganizationIdForUser(user.id, scope);
+      if (cancelled) return;
+
+      if (!orgId) {
+        // No org for this user/portal — cache default so we don't re-fetch on next mount
+        setCache(user.id, scope, DEFAULT);
+        return;
+      }
+
+      await fetchOrgBranding(user.id, orgId);
     }
 
     load();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [scope]);
 
   return <OrgBrandingContext.Provider value={branding}>{children}</OrgBrandingContext.Provider>;
 }

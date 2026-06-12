@@ -2905,7 +2905,7 @@ export const lt: Record<string, string> = {
   'settings.currentPasswordWrong': 'Dabartinis slaptažodis neteisingas',
   'settings.fillAllFields': 'Prašome užpildyti visus laukus',
   'settings.inactive': 'Neaktyvi',
-  'settings.manageSubBtn': 'Kraunama...',
+  'settings.manageSubBtn': 'Valdyti prenumeratą',
   'settings.manageSubHint': '💡 „Valdyti prenumeratą“ arba „Atšaukti prenumeratą“ atidaro Stripe portalą, kur galite atnaujinti mokėjimo būdą, pakeisti planą arba atšaukti prenumeratą.',
   'settings.manageSubscription': 'Valdykite savo prenumeratą',
   'settings.monthlyPlan': 'Metinis (€14.99/mėn)',

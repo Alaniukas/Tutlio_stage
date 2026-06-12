@@ -20,6 +20,7 @@ import { recordJoinClick } from '@/lib/joinTracking';
 import { useStudentPaymentBlock } from '@/hooks/useStudentPaymentBlock';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
 import { formatLessonStripeChargeEur } from '@/lib/stripeLessonPricing';
+import { tutorUsesManualStudentPayments } from '@/lib/subscription';
 import {
     isMonthlyBillingOnlyStudent,
     shouldShowPerLessonPaymentUi,
@@ -79,6 +80,7 @@ export default function StudentDashboard() {
     const [isSchoolOrgStudent, setIsSchoolOrgStudent] = useState(false);
     const [tutorOrgIsSchool, setTutorOrgIsSchool] = useState(false);
     const [tutorPerlasEnabled, setTutorPerlasEnabled] = useState(false);
+    const [manualPaymentsOnly, setManualPaymentsOnly] = useState(false);
     const [perlasLoading, setPerlasLoading] = useState(false);
     const [studentPaymentModel, setStudentPaymentModel] = useState<string | null>(null);
     const [studentPaymentOverrideActive, setStudentPaymentOverrideActive] = useState(false);
@@ -214,7 +216,7 @@ export default function StudentDashboard() {
             const [tutorResult, sessionsResult, pkgsRows, installmentsResult] = await Promise.all([
                 studentRow.tutor_id
                     ? Promise.all([
-                        supabase.from('profiles').select('email, phone, organization_id, perlas_finance_enabled, enable_per_lesson, enable_monthly_billing').eq('id', studentRow.tutor_id).single(),
+                        supabase.from('profiles').select('email, phone, organization_id, perlas_finance_enabled, enable_per_lesson, enable_monthly_billing, subscription_plan, manual_subscription_exempt, enable_manual_student_payments').eq('id', studentRow.tutor_id).single(),
                         supabase.rpc('get_tutor_contact_visibility_for_student', { p_tutor_id: studentRow.tutor_id }),
                     ])
                     : Promise.resolve(null),
@@ -266,6 +268,7 @@ export default function StudentDashboard() {
                     perlasFlag = !!(orgP as any)?.perlas_finance_enabled;
                 }
                 setTutorPerlasEnabled(perlasFlag);
+                setManualPaymentsOnly(tutorUsesManualStudentPayments(tutorProf as Parameters<typeof tutorUsesManualStudentPayments>[0]));
 
                 let enablePerLesson = (tutorProf as { enable_per_lesson?: boolean | null })?.enable_per_lesson ?? true;
                 let enableMonthlyBilling = !!(tutorProf as { enable_monthly_billing?: boolean | null })?.enable_monthly_billing;
@@ -287,6 +290,7 @@ export default function StudentDashboard() {
             } else {
                 setTutorOrgIsSchool(false);
                 setTutorPerlasEnabled(false);
+                setManualPaymentsOnly(false);
             }
 
             setStudent({
@@ -738,7 +742,7 @@ export default function StudentDashboard() {
                                 <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
                                     <p className="text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">{t('studentDash.priceLabel')}</p>
                                     <p className="font-bold text-gray-900">€{selectedSession?.price ?? '–'}</p>
-                                    {selectedSession?.status === 'active' && !selectedSession.paid && selectedSession.price != null && showPerLessonPayment && (
+                                    {selectedSession?.status === 'active' && !selectedSession.paid && selectedSession.price != null && showPerLessonPayment && !manualPaymentsOnly && (
                                         <p className="text-[11px] text-gray-500 mt-1">{t('studentDash.cardTotal', { amount: formatLessonStripeChargeEur(selectedSession.price, tutorOrgIsSchool) })}</p>
                                     )}
                                 </div>
@@ -781,18 +785,21 @@ export default function StudentDashboard() {
                             </div>
                         )}
 
-                        {selectedSession?.status === 'active' && !selectedSession.paid && paymentPayer !== 'parent' && isAfter(new Date(selectedSession.end_time), now) && showPerLessonPayment && (
+                        {/* Stripe checkout is unavailable for manual-payment tutors (server rejects it), but Perlas bank payments stay available. */}
+                        {selectedSession?.status === 'active' && !selectedSession.paid && paymentPayer !== 'parent' && isAfter(new Date(selectedSession.end_time), now) && showPerLessonPayment && (!manualPaymentsOnly || tutorPerlasEnabled) && (
                             <div className="space-y-2">
-                                <button
-                                    onClick={() => handleStripePayment(selectedSession)}
-                                    disabled={stripeLoading}
-                                    className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
-                                >
-                                    {stripeLoading
-                                        ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('common.loading')}</>
-                                        : <><CreditCard className="w-4 h-4" /> {t('studentDash.stripePayBtn', { amount: formatLessonStripeChargeEur(selectedSession.price, tutorOrgIsSchool) })}</>
-                                    }
-                                </button>
+                                {!manualPaymentsOnly && (
+                                    <button
+                                        onClick={() => handleStripePayment(selectedSession)}
+                                        disabled={stripeLoading}
+                                        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
+                                    >
+                                        {stripeLoading
+                                            ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('common.loading')}</>
+                                            : <><CreditCard className="w-4 h-4" /> {t('studentDash.stripePayBtn', { amount: formatLessonStripeChargeEur(selectedSession.price, tutorOrgIsSchool) })}</>
+                                        }
+                                    </button>
+                                )}
                                 {tutorPerlasEnabled && (() => {
                                     const sp = Number(selectedSession.price || 0);
                                     const pf = Math.round(sp * 2) / 100;

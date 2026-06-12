@@ -73,6 +73,21 @@ export function summarizeB2cMonth(params: {
   };
 }
 
+/** First and last calendar day of the month (for invoice periods). */
+export function monthPeriodDates(month: string): { periodStart: string; periodEnd: string } | null {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(month || '').trim());
+  if (!m) return null;
+  const year = Number(m[1]);
+  const mon = Number(m[2]);
+  if (mon < 1 || mon > 12) return null;
+  const lastDay = new Date(Date.UTC(year, mon, 0)).getUTCDate();
+  const mm = String(mon).padStart(2, '0');
+  return {
+    periodStart: `${year}-${mm}-01`,
+    periodEnd: `${year}-${mm}-${String(lastDay).padStart(2, '0')}`,
+  };
+}
+
 /** CSV (semicolon-free, comma-separated, UTF-8) for accountants. */
 export function b2cSummaryCsv(s: B2cMonthlySummary): string {
   const lines = [

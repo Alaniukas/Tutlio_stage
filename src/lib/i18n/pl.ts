@@ -2176,7 +2176,7 @@ export const pl: Record<string, string> = {
   'settings.currentPasswordWrong': 'Aktualne hasło jest nieprawidłowe',
   'settings.fillAllFields': 'Wypełnij wszystkie pola',
   'settings.inactive': 'Nieaktywna',
-  'settings.manageSubBtn': 'Ładowanie...',
+  'settings.manageSubBtn': 'Zarządzaj subskrypcją',
   'settings.manageSubHint': '💡 „Zarządzaj subskrypcją" lub „Anuluj subskrypcję" otwiera portal Stripe, gdzie możesz dokonać zmian.',
   'settings.manageSubscription': 'Zarządzaj subskrypcją',
   'settings.monthlyPlan': 'Roczny (€14,99/mies.)',

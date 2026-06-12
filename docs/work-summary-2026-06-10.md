@@ -2,6 +2,48 @@
 
 Verified before commit: `npm test` → 252 passed / 1 skipped, `npm run lint` (tsc) → clean.
 
+## Update — 2026-06-12
+
+Verified before commit: `npm test` → 256 passed / 1 skipped, `tsc --noEmit` → clean. Migration `20260613000000` applied to both TEST and PROD via the Supabase Management API — safe to deploy.
+
+### 1. B2C commission invoices per client (replaces the aggregate B2C PDF)
+
+Accountant feedback: the monthly B2C summary is not enough for VMI — we need real sąskaitos faktūros per client showing the intermediation fee that was already deducted.
+
+- Migration `20260613000000_b2c_commission_invoices.sql` generalizes `platform_invoices`: `organization_id` nullable, new `tutor_id`, `invoice_type` (`b2b` | `b2c_commission`), unique per type + counterparty + month, tutor read RLS, and a separate `TUT-B2C-00001` number sequence (`next_b2c_invoice_number`).
+- New `api/admin-b2c-invoices.ts`: `POST {month}` generates **one invoice per agency / individual tutor** with fees that month — Stripe `platform_fee_ledger` + Perlas `perlas_ledger` (platform + bank fee) grouped by counterparty; pure math in `api/_lib/b2cCommissionInvoice.ts` (unit-tested). `GET ?month` lists, `GET ?invoiceId&download=1` downloads the PDF. Idempotent — reruns skip `already_invoiced`.
+- Invoice content per the accountant's request: buyer is the client's name/company requisites, a single line **"Tutlio tarpininkavimo mokesčiai (\<mėnuo\>)"**, and a green paid note — **"SĄSKAITA APMOKĖTA (užskaitos būdu); tarpininkavimo mokestis išskaičiuotas atsiskaitymų metu — papildomai mokėti nieko nereikia."** (new `paidNote` support in `invoicePdf.ts`).
+- Seller requisites now always present on all invoices: įm. k. `307617263` and `A. Vivulskio g. 22, LT-03115 Vilnius` are code defaults in `tutlioCompany.ts` (env vars still override).
+- `api/admin-b2c-report.ts` is now **CSV-only** (the aggregate PDF was removed to avoid double-documenting the same income); B2B endpoints filter `invoice_type='b2b'`.
+- UI: Admin → Buhalterija → new **"B2C tarpininkavimo sąskaitos klientams"** section (`AdminB2cInvoicesSection`): generate, list (Nr. / Klientas / Tipas / Suma), download PDFs; the monthly CSV button lives here now.
+
+### 2. PWA: logged-out launches open the right login
+
+The installed PWA (start_url `/dashboard`) used to dump logged-out school admins onto the tutor `/login`, and `/` showed the marketing landing inside the app.
+
+- New `src/lib/pwaPortal.ts` remembers the device's last-used portal (`regular` | `company` | `school`) in localStorage; recorded on `Login` / `CompanyLogin` mounts and on org-admin success in `CompanyProtectedRoute`.
+- In standalone display mode only, `ProtectedRoute`'s logged-out fallback and `Landing` redirect to `/login`, `/company/login` or `/school/login` accordingly. Regular browser behavior is unchanged (verified via CDP standalone emulation).
+
+### 3. Smaller fixes since the 06-10 commit
+
+- `OrgBrandingContext` scoping: provider now takes `scope="tutor|student|parent"`, org resolution is limited to the viewed portal, and the sessionStorage cache is bound to user + scope — branding no longer leaks across roles/accounts in the same tab.
+- Manual-payment tutors: per-lesson **Stripe** payment UI hidden for students (the server rejects those checkouts anyway) while **Perlas** bank payment stays available (StudentDashboard / StudentSessions / StudentSchedule).
+- `PerlasFinanceSection`: removed the redundant "(apimtis: €X)" text next to payout net amounts.
+- i18n: `settings.manageSubBtn` was stuck on "Kraunama..." (lt/en).
+- `dev-api-local`: port-3002 takeover now retries up to 6× with 500 ms waits (kill-port releases the socket asynchronously).
+
+### How to test the 06-12 changes
+
+1. B2C invoices: Admin → Buhalterija → pick a month with B2C operations → **"Generuoti sąskaitas klientams"** → one `TUT-B2C-XXXXX` per client → PDF shows seller requisites (įm. k. + address), the single fee line and the APMOKĖTA note; rerun → "sąskaita jau išrašyta"; CSV still returns the monthly summary.
+
+```bash
+curl -X POST -H "x-admin-secret: $ADMIN_SECRET" -H "Content-Type: application/json" \
+  -d '{"month":"2026-06"}' http://localhost:3002/api/admin-b2c-invoices
+```
+
+2. PWA: install the app (or emulate standalone), log out, relaunch → school/company admins land on their login, everyone else on `/login`; a normal browser tab still shows the landing at `/`.
+3. Manual-payment tutor: student opens an unpaid lesson → no Stripe button/fee note; if the tutor has Perlas enabled, the bank-payment button is still there.
+
 ## What was done
 
 Committed earlier today: school-contract fixes ported from alano-local (`efb3e81`) and a PWA precache size fix (`0ee6aa7`). Everything below is the new work in this commit, grouped into five workstreams.
@@ -25,7 +67,7 @@ Accounting persistence + itemized receipts for the accountant.
 - **`platform_fee_ledger`** — one row per Stripe B2C payment (session / package / billing_batch / penalty) with base / fee / gross, written idempotently from both webhook and confirm endpoints. All checkout creators now set `tutlio_base_eur` metadata and Lithuanian line-item descriptions ("Mokymo paslaugos. Paslaugos teikėjas: …" / platform fee from MB „Tutlio"). Perlas fees stay in `perlas_ledger`.
 - **Receipt emails** (`payment_success`, `monthly_invoice_paid`, `prepaid_package_success`) show a 3-row breakdown — teaching service (org/tutor name), platform fee (MB „Tutlio"), total — whenever the payer paid a surcharge; single row when fees are absorbed.
 - **B2B platform invoices**: `payout_fee_records` written per SEPA payout batch; `POST /api/admin-b2b-invoices` generates monthly invoices (`TUT-00001` numbering via DB sequence) for companies with `platform_monthly_fee_eur` set — subscription + payout fees, `amount_due` = subscription only (fees already deducted from payouts). PDF stored in `invoices` bucket, emailed via new `platform_invoice` email type.
-- **B2C report**: `GET /api/admin-b2c-report?month=YYYY-MM&format=pdf|csv` — monthly platform-fee summary across Stripe + Perlas for accounting.
+- **B2C report**: `GET /api/admin-b2c-report?month=YYYY-MM&format=pdf|csv` — monthly platform-fee summary across Stripe + Perlas for accounting. *(Superseded 06-12: CSV-only; per-client invoices via `/api/admin-b2c-invoices` — see update above.)*
 - UI: Admin Panel → **"Buhalterija"** (`AdminBillingPanel`): B2C PDF/CSV download, B2B invoice generation + issued list; org detail gets "Mėnesio platformos mokestis (€)" field. Company side: Finances → **"Tutlio invoices"** (`CompanyPlatformInvoices`, non-school orgs) with PDF download via `GET /api/platform-invoice-pdf?id=…`.
 - Migration `20260610000000_billing_receipts_automation.sql`: 3 tables, invoice number sequence + RPC, `organizations.platform_monthly_fee_eur`, RLS.
 
@@ -94,7 +136,7 @@ New test files: `tests/api/` create-enterprise-checkout, create-subscription-che
 2. Generate a Perlas SEPA payout batch with a payout fee → `payout_fee_records` rows appear (deleted if batch cancelled).
 3. Admin Panel → Buhalterija → pick month → "Generuoti sąskaitas agentūroms" (org needs `entity_type=company` + monthly fee set in org detail) → invoice TUT-XXXXX created, PDF in `invoices` bucket, email sent; rerun → skipped `already_invoiced`.
 4. As that org's admin → Finances → Tutlio invoices → download PDF.
-5. B2C: Buhalterija → download month PDF/CSV; cross-check against ledger rows. API equivalents:
+5. B2C: Buhalterija → download month CSV; cross-check against ledger rows *(06-12: the PDF became per-client invoices — see update section)*. API equivalents:
 
 ```bash
 curl -H "x-admin-secret: $ADMIN_SECRET" "http://localhost:3002/api/admin-b2c-report?month=2026-05&format=csv"

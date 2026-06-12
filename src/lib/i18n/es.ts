@@ -1593,7 +1593,7 @@ export const es: Record<string, string> = {
   'settings.currentPasswordWrong': 'La contraseña actual es incorrecta',
   'settings.passwordChangeFailed': 'Error al cambiar la contraseña: ',
   'settings.fillAllFields': 'Complete todos los campos',
-  'settings.manageSubBtn': 'Cargando…',
+  'settings.manageSubBtn': 'Gestionar suscripción',
   'settings.manageSubHint': '💡 «Gestionar suscripción» o «Cancelar suscripción» abre el portal Stripe donde puede realizar cambios.',
   'settings.canResubscribe': 'Puede volver a suscribirse en cualquier momento.',
   'settings.noSubDesc': 'La información de su suscripción aparecerá aquí',

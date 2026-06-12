@@ -10,6 +10,7 @@ import { useTranslation } from '@/lib/i18n';
 import { buildPlatformPath, detectPlatformFromPathname } from '@/lib/platform';
 import { usePlatform } from '@/contexts/PlatformContext';
 import { getOrgAdminDashboardPath } from '@/lib/orgAdminDashboardPath';
+import { setLastPortal } from '@/lib/pwaPortal';
 
 export default function CompanyLogin() {
   const { t } = useTranslation();
@@ -33,6 +34,11 @@ export default function CompanyLogin() {
   const portalBadge = isSchoolLogin ? t('school.loginPortalBadge') : t('companyLogin.adminLogin');
   const cardBadge = isSchoolLogin ? t('school.loginCardBadge') : t('companyLogin.loginTitle');
   const cardTitle = isSchoolLogin ? t('school.loginCardTitle') : t('companyLogin.loginSubtitle');
+
+  // Remember the portal so a logged-out installed PWA opens the right login.
+  useEffect(() => {
+    setLastPortal(isSchoolLogin ? 'school' : 'company');
+  }, [isSchoolLogin]);
 
   useEffect(() => {
     (async () => {

@@ -1671,7 +1671,7 @@ export default function StudentSessions() {
                                 <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
                                     <p className="text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">{t('stuSess.price')}</p>
                                     <p className="font-bold text-gray-900">€{selectedSession?.price ?? '–'}</p>
-                                    {selectedSession?.status === 'active' && !selectedSession.paid && selectedSession.price != null && showPerLessonStripeButton && (
+                                    {selectedSession?.status === 'active' && !selectedSession.paid && selectedSession.price != null && showPerLessonStripeButton && !manualPaymentsOnly && (
                                         <p className="text-[11px] text-gray-500 mt-1 leading-snug">
                                             {t('stuSess.stripeChargeNote', { amount: formatLessonStripeChargeEur(selectedSession.price, tutorOrgIsSchool) })}
                                         </p>
@@ -1750,27 +1750,32 @@ export default function StudentSessions() {
                             </div>
                         )}
 
-                        {/* Credit balance + Stripe payment button for unpaid sessions (only for self-payers, not monthly billing) */}
-                        {selectedSession?.status === 'active' && !selectedSession.paid && paymentPayer !== 'parent' && !manualPaymentsOnly && showPerLessonStripeButton && (
+                        {/* Credit balance + payment buttons for unpaid sessions (only for self-payers, not monthly billing).
+                            Stripe checkout is unavailable for manual-payment tutors (server rejects it), but Perlas bank payments stay available. */}
+                        {selectedSession?.status === 'active' && !selectedSession.paid && paymentPayer !== 'parent' && showPerLessonStripeButton && (!manualPaymentsOnly || tutorPerlasEnabled) && (
                             <div className="space-y-2">
-                                {creditBalance > 0 && (
-                                    <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-green-50 border border-green-200 text-sm">
-                                        <span className="text-green-700 font-medium">{t('stuSess.creditAvailable')}</span>
-                                        <span className="text-green-800 font-bold">€{creditBalance.toFixed(2)}</span>
-                                    </div>
+                                {!manualPaymentsOnly && (
+                                    <>
+                                        {creditBalance > 0 && (
+                                            <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-green-50 border border-green-200 text-sm">
+                                                <span className="text-green-700 font-medium">{t('stuSess.creditAvailable')}</span>
+                                                <span className="text-green-800 font-bold">€{creditBalance.toFixed(2)}</span>
+                                            </div>
+                                        )}
+                                        <button
+                                            onClick={() => handleStripePayment(selectedSession)}
+                                            disabled={stripeLoading}
+                                            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
+                                        >
+                                            {stripeLoading
+                                                ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
+                                                : creditBalance >= (selectedSession.price || 0) && (selectedSession.price || 0) > 0
+                                                    ? <><CreditCard className="w-4 h-4" /> {t('stuSess.payWithCredit')}</>
+                                                    : <><CreditCard className="w-4 h-4" /> {t('stuSess.payStripe', { amount: formatLessonStripeChargeEur(Math.max(0, (selectedSession.price || 0) - creditBalance), tutorOrgIsSchool) })}</>
+                                            }
+                                        </button>
+                                    </>
                                 )}
-                                <button
-                                    onClick={() => handleStripePayment(selectedSession)}
-                                    disabled={stripeLoading}
-                                    className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md disabled:opacity-60"
-                                >
-                                    {stripeLoading
-                                        ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
-                                        : creditBalance >= (selectedSession.price || 0) && (selectedSession.price || 0) > 0
-                                            ? <><CreditCard className="w-4 h-4" /> {t('stuSess.payWithCredit')}</>
-                                            : <><CreditCard className="w-4 h-4" /> {t('stuSess.payStripe', { amount: formatLessonStripeChargeEur(Math.max(0, (selectedSession.price || 0) - creditBalance), tutorOrgIsSchool) })}</>
-                                    }
-                                </button>
                                 {tutorPerlasEnabled && (() => {
                                     const sp = Number(selectedSession.price || 0);
                                     const pf = Math.round(sp * 2) / 100;
