@@ -28,6 +28,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useTranslation, buildLocalizedPath } from '@/lib/i18n';
+import { TUTOR_PLANS, eur } from '@/lib/pricing';
 
 // Legacy trial codes — recognized so they aren't sent to Stripe as discount
 // codes; the 7-day trial itself is applied by default server-side.
@@ -327,7 +328,7 @@ export default function TutorSubscribe() {
             <div className="mb-6 mt-2">
               <h3 className="text-2xl font-bold text-gray-900 mb-2">{t('subscribe.monthlyTitle')}</h3>
               <div className="flex items-baseline gap-2">
-                <span className="text-5xl font-bold text-indigo-600">€19.99</span>
+                <span className="text-5xl font-bold text-indigo-600">{eur(TUTOR_PLANS.monthly.pricePerMonthEur)}</span>
                 <span className="text-gray-500 inline-flex items-center gap-1.5">
                   {t('subscribe.perMonth')}
                   <span className="relative inline-flex items-center group">
@@ -375,7 +376,7 @@ export default function TutorSubscribe() {
             <div className="mb-6 mt-2">
               <h3 className="text-2xl font-bold text-gray-900 mb-2">{t('subscribe.yearlyTitle')}</h3>
               <div className="flex items-baseline gap-2">
-                <span className="text-5xl font-bold text-indigo-600">€14.99</span>
+                <span className="text-5xl font-bold text-indigo-600">{eur(TUTOR_PLANS.yearly.pricePerMonthEur)}</span>
                 <span className="text-gray-500 inline-flex items-center gap-1.5">
                   {t('subscribe.perMonth')}
                   <span className="relative inline-flex items-center group">
@@ -421,7 +422,7 @@ export default function TutorSubscribe() {
             <div className="mb-6">
               <h3 className="text-2xl font-bold text-gray-900 mb-2">{t('subscribe.subscriptionOnlyTitle')}</h3>
               <div className="flex items-baseline gap-2">
-                <span className="text-5xl font-bold text-amber-600">€35</span>
+                <span className="text-5xl font-bold text-amber-600">{eur(TUTOR_PLANS.subscriptionOnly.pricePerMonthEur)}</span>
                 <span className="text-gray-500">{t('subscribe.perMonth')}</span>
               </div>
               <p className="text-sm text-gray-500 mt-2">{t('subscribe.subscriptionOnlyDesc')}</p>
@@ -490,7 +491,7 @@ export default function TutorSubscribe() {
                 <p className="text-white font-semibold mb-1">{t('subscribe.cancelInfo')}</p>
                 <p className="text-indigo-200 text-sm">
                   {trialAvailable
-                    ? t('subscribe.trialPaymentInfo', { price: selectedPlan === 'yearly' ? '€179.88/year' : selectedPlan === 'subscription_only' ? '€35/mo' : '€19.99/mo' })
+                    ? t('subscribe.trialPaymentInfo', { price: selectedPlan === 'yearly' ? `${eur(TUTOR_PLANS.yearly.pricePerYearEur)}/year` : selectedPlan === 'subscription_only' ? `${eur(TUTOR_PLANS.subscriptionOnly.pricePerMonthEur)}/mo` : `${eur(TUTOR_PLANS.monthly.pricePerMonthEur)}/mo` })
                     : t('subscribe.safePaymentInfo')}
                 </p>
               </div>

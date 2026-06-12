@@ -6,9 +6,9 @@ import {
   type DomainKey,
   LOCALES,
   detectDomain,
+  detectLocale,
   buildPath,
   buildCanonicalUrl,
-  buildFullUrl,
   hreflangTags,
   hreflangCode,
   esc as seoEsc,
@@ -101,22 +101,18 @@ function fmtDate(d: string | null, locale: Locale): string {
   return new Date(d).toLocaleDateString(map[locale] || 'en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
-function detectLocaleFromQuery(req: VercelRequest): Locale {
-  const q = typeof req.query.locale === 'string' ? req.query.locale : '';
-  if (LOCALES.includes(q as Locale)) return q as Locale;
-  const domain = detectDomain(req);
-  return domain === 'com' ? 'en' : 'lt';
-}
-
 function postSlug(post: Record<string, unknown>, locale: Locale): string {
   return (post[`slug_${locale}`] as string) || (post.slug as string);
+}
+
+function postTranslatedLocales(post: Record<string, unknown>): Locale[] {
+  return LOCALES.filter((l) => !!post[`title_${l}`]);
 }
 
 function blogPostHreflangTags(post: Record<string, unknown>): string {
   const seen = new Set<string>();
   const tags: string[] = [];
-  for (const l of LOCALES) {
-    if (!post[`title_${l}`]) continue;
+  for (const l of postTranslatedLocales(post)) {
     const slug = postSlug(post, l);
     const href = buildCanonicalUrl(`/blog/${slug}`, l);
     const key = `${hreflangCode(l)}:${href}`;
@@ -124,10 +120,29 @@ function blogPostHreflangTags(post: Record<string, unknown>): string {
     seen.add(key);
     tags.push(`<link rel="alternate" hreflang="${hreflangCode(l)}" href="${seoEsc(href)}" />`);
   }
-  const enSlug = postSlug(post, 'en');
-  const xDefault = buildFullUrl(`/blog/${enSlug}`, 'en', 'com');
-  tags.push(`<link rel="alternate" hreflang="x-default" href="${seoEsc(xDefault)}" />`);
+  // x-default only when a real English translation exists — never point it
+  // at a fallback-rendered (noindex) URL.
+  if (post.title_en) {
+    const xDefault = buildCanonicalUrl(`/blog/${postSlug(post, 'en')}`, 'en');
+    tags.push(`<link rel="alternate" hreflang="x-default" href="${seoEsc(xDefault)}" />`);
+  }
   return tags.join('\n');
+}
+
+/** Crawlable cross-locale links for the footer (mirrors ssr-shell.ts). */
+const LOCALE_NATIVE_NAMES: Record<Locale, string> = {
+  lt: 'Lietuvių', en: 'English', pl: 'Polski', lv: 'Latviešu', ee: 'Eesti', fr: 'Français',
+  es: 'Español', de: 'Deutsch', se: 'Svenska', dk: 'Dansk', fi: 'Suomi', no: 'Norsk',
+};
+
+function localeLinksHtml(locales: Locale[], urlFor: (l: Locale) => string, current: Locale): string {
+  if (locales.length < 2) return '';
+  const links = locales.map((l) =>
+    l === current
+      ? `<span lang="${hreflangCode(l)}" style="color:#1a1a1a;font-weight:600">${LOCALE_NATIVE_NAMES[l]}</span>`
+      : `<a href="${seoEsc(urlFor(l))}" hreflang="${hreflangCode(l)}" lang="${hreflangCode(l)}" style="color:#666">${LOCALE_NATIVE_NAMES[l]}</a>`,
+  );
+  return `<nav aria-label="Languages" style="display:flex;flex-wrap:wrap;justify-content:center;gap:12px;margin-bottom:12px;font-size:.8rem">${links.join('\n')}</nav>`;
 }
 
 const LABELS: Record<Locale, { blog: string; back: string; home: string; read: string }> = {
@@ -160,6 +175,7 @@ interface BlogShellOpts {
   tag?: string;
   noindex?: boolean;
   hreflangHtml?: string;
+  localeLinks?: string;
 }
 
 const DEFAULT_OG = 'https://www.tutlio.com/og-image.jpg';
@@ -189,6 +205,7 @@ function shell(opts: BlogShellOpts): string {
 <meta name="description" content="${esc(description)}" />
 <meta name="robots" content="${noindex ? 'noindex, follow' : 'index, follow, max-image-preview:large'}" />
 <link rel="canonical" href="${esc(url)}" />
+<link rel="alternate" type="application/rss+xml" title="Tutlio Blog" href="${esc(buildCanonicalUrl('/blog/rss.xml', locale))}" />
 ${opts.hreflangHtml || hreflangTags(blogPath)}
 <meta property="og:type" content="article" />
 <meta property="og:title" content="${esc(title)}" />
@@ -252,7 +269,7 @@ a:hover{text-decoration:underline}
   </div>
 </nav>
 ${body}
-<footer class="footer">&copy; ${new Date().getFullYear()} Tutlio</footer>
+<footer class="footer">${opts.localeLinks || ''}&copy; ${new Date().getFullYear()} Tutlio</footer>
 </body>
 </html>`;
 }
@@ -264,7 +281,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!supabase) return res.status(503).send('Database not configured');
 
   const domain = detectDomain(req);
-  const locale = detectLocaleFromQuery(req);
+  const locale = detectLocale(req);
   const slug = typeof req.query.slug === 'string' ? req.query.slug : '';
   const blogListPath = buildPath('/blog', locale, domain);
   const l = LABELS[locale];
@@ -336,6 +353,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       tag: (post.tag as string) || undefined,
       noindex: !hasNativeTitle,
       hreflangHtml: blogPostHreflangTags(post),
+      localeLinks: localeLinksHtml(
+        postTranslatedLocales(post),
+        (l) => buildCanonicalUrl(`/blog/${postSlug(post, l)}`, l),
+        locale,
+      ),
     }), {
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Language': hreflangCode(locale),
@@ -407,9 +429,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     publisher: { '@type': 'Organization', name: 'Tutlio', url: 'https://www.tutlio.com' },
   });
 
+  const listTranslatedLocales = LOCALES.filter(
+    (l2) => items.some((p: Record<string, unknown>) => !!p[`title_${l2}`]),
+  );
+
   sendSsrHtml(req, res, shell({
     locale, domain, blogPath, title: `${l.blog} | Tutlio`, description: blogDesc, url, image: '', body, jsonLd: blogListJsonLd,
     noindex: !hasAnyTranslation,
+    localeLinks: localeLinksHtml(
+      listTranslatedLocales,
+      (l2) => buildCanonicalUrl('/blog', l2),
+      locale,
+    ),
   }), {
     'Content-Type': 'text/html; charset=utf-8',
     'Content-Language': hreflangCode(locale),

@@ -1,12 +1,12 @@
 import { Link } from 'react-router-dom';
-import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
+import { buildLocalizedPath, localizedPagePath, useTranslation } from '@/lib/i18n';
 import Reveal from './Reveal';
 import type { LandingVariant } from './HeroSection';
 
 export default function CtaBanner({ variant = 'tutor' }: { variant?: LandingVariant }) {
   const { t, locale } = useTranslation();
   const p = variant === 'schools' ? 'schoolsLanding' : 'landing';
-  const ctaLink = variant === 'schools' ? buildLocalizedPath('/kontaktai', locale) : buildLocalizedPath('/pricing', locale);
+  const ctaLink = variant === 'schools' ? buildLocalizedPath(localizedPagePath('contacts', locale), locale) : buildLocalizedPath('/pricing', locale);
 
   return (
     <section className="py-10 sm:py-16 lg:py-20">

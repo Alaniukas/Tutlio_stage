@@ -2,73 +2,78 @@ import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useParams, useLocation } from 'react-router-dom';
 import { UserProvider } from '@/contexts/UserContext';
 import { OrgBrandingProvider } from '@/contexts/OrgBrandingContext';
-import Login from '@/pages/Login';
-import AuthCallback from '@/pages/AuthCallback';
-import Register from '@/pages/Register';
-import ResetPassword from '@/pages/ResetPassword';
-import DashboardPage from '@/pages/Dashboard';
-import CalendarPage from '@/pages/Calendar';
-import StudentsPage from '@/pages/Students';
-import WaitlistPage from '@/pages/Waitlist';
-import SettingsPage from '@/pages/Settings';
-import LessonSettingsPage from '@/pages/LessonSettings';
-import FinancePage from '@/pages/Finance';
 import ProtectedRoute from '@/components/ProtectedRoute';
-import StudentOnboarding from '@/pages/StudentOnboarding';
-import StudentDashboard from '@/pages/StudentDashboard';
-import StudentSchedule from '@/pages/StudentSchedule';
-import StudentSessions from '@/pages/StudentSessions';
-import StudentSettings from '@/pages/StudentSettings';
-import StudentWaitlist from '@/pages/StudentWaitlist';
 import StudentProtectedRoute from '@/components/StudentProtectedRoute';
 import CompanyProtectedRoute from '@/components/CompanyProtectedRoute';
-import AdminPanel from '@/pages/AdminPanel';
-import CompanyLogin from '@/pages/CompanyLogin';
-import CompanyLayout from '@/components/CompanyLayout';
-import CompanyDashboard from '@/pages/company/CompanyDashboard';
-import CompanyTutors from '@/pages/company/CompanyTutors';
-import CompanyStudents from '@/pages/company/CompanyStudents';
-import CompanyWaitlist from '@/pages/company/CompanyWaitlist';
-import CompanySessions from '@/pages/company/CompanySessions';
-import CompanyTvarkarastis from '@/pages/company/CompanyTvarkarastis';
-import CompanyStats from '@/pages/company/CompanyStats';
-import CompanySettings from '@/pages/company/CompanySettings';
-const CompanyContracts = lazy(() => import('@/pages/company/CompanyContracts'));
-import CompanyFinanceHub from '@/pages/company/CompanyFinanceHub';
-import InvoicesPage from '@/pages/Invoices';
+import ParentProtectedRoute from '@/components/ParentProtectedRoute';
 
+// Marketing/SEO pages stay in the main bundle: they are the entry point for
+// every organic visitor and must paint instantly (Core Web Vitals).
 import Landing from '@/pages/Landing';
 import AboutUs from '@/pages/AboutUs';
 import Contact from '@/pages/Contact';
 import FeaturePage from '@/pages/FeaturePage';
-import StripeSuccess from '@/pages/StripeSuccess';
-import EnterpriseSuccess from '@/pages/EnterpriseSuccess';
-import PerlasSuccess from '@/pages/PerlasSuccess';
-import PackagePaymentSuccess from '@/pages/PackagePaymentSuccess';
-import PackagePaymentCancelled from '@/pages/PackagePaymentCancelled';
-import SchoolPaymentSuccess from '@/pages/SchoolPaymentSuccess';
-import TutorSubscribe from '@/pages/TutorSubscribe';
 import Pricing from '@/pages/Pricing';
 import Blog from '@/pages/Blog';
 import BlogPost from '@/pages/BlogPost';
 import PrivacyPolicy from '@/pages/PrivacyPolicy';
 import TermsOfService from '@/pages/TermsOfService';
 import DataProcessingAgreement from '@/pages/DataProcessingAgreement';
-import Instructions from '@/pages/Instructions';
-import StudentInstructions from '@/pages/StudentInstructions';
-import CompanyInstructions from '@/pages/company/CompanyInstructions';
-import Messages from '@/pages/Messages';
-import StudentMessages from '@/pages/StudentMessages';
-import CompanyMessages from '@/pages/company/CompanyMessages';
-import ParentProtectedRoute from '@/components/ParentProtectedRoute';
-import ParentDashboard from '@/pages/ParentDashboard';
-import ParentSessions from '@/pages/ParentSessions';
-import ParentInvoices from '@/pages/ParentInvoices';
-import ParentMessages from '@/pages/ParentMessages';
-import ParentInstructions from '@/pages/ParentInstructions';
-import ParentSettings from '@/pages/ParentSettings';
-import ParentRegister from '@/pages/ParentRegister';
-import SchoolContractComplete from '@/pages/SchoolContractComplete';
+
+// Everything behind auth (and one-off payment/callback pages) loads on demand
+// so marketing visitors never download the app.
+const Login = lazy(() => import('@/pages/Login'));
+const AuthCallback = lazy(() => import('@/pages/AuthCallback'));
+const Register = lazy(() => import('@/pages/Register'));
+const ResetPassword = lazy(() => import('@/pages/ResetPassword'));
+const DashboardPage = lazy(() => import('@/pages/Dashboard'));
+const CalendarPage = lazy(() => import('@/pages/Calendar'));
+const StudentsPage = lazy(() => import('@/pages/Students'));
+const WaitlistPage = lazy(() => import('@/pages/Waitlist'));
+const SettingsPage = lazy(() => import('@/pages/Settings'));
+const LessonSettingsPage = lazy(() => import('@/pages/LessonSettings'));
+const FinancePage = lazy(() => import('@/pages/Finance'));
+const InvoicesPage = lazy(() => import('@/pages/Invoices'));
+const Instructions = lazy(() => import('@/pages/Instructions'));
+const Messages = lazy(() => import('@/pages/Messages'));
+const StudentOnboarding = lazy(() => import('@/pages/StudentOnboarding'));
+const StudentDashboard = lazy(() => import('@/pages/StudentDashboard'));
+const StudentSchedule = lazy(() => import('@/pages/StudentSchedule'));
+const StudentSessions = lazy(() => import('@/pages/StudentSessions'));
+const StudentSettings = lazy(() => import('@/pages/StudentSettings'));
+const StudentWaitlist = lazy(() => import('@/pages/StudentWaitlist'));
+const StudentMessages = lazy(() => import('@/pages/StudentMessages'));
+const StudentInstructions = lazy(() => import('@/pages/StudentInstructions'));
+const AdminPanel = lazy(() => import('@/pages/AdminPanel'));
+const CompanyLogin = lazy(() => import('@/pages/CompanyLogin'));
+const CompanyLayout = lazy(() => import('@/components/CompanyLayout'));
+const CompanyDashboard = lazy(() => import('@/pages/company/CompanyDashboard'));
+const CompanyTutors = lazy(() => import('@/pages/company/CompanyTutors'));
+const CompanyStudents = lazy(() => import('@/pages/company/CompanyStudents'));
+const CompanyWaitlist = lazy(() => import('@/pages/company/CompanyWaitlist'));
+const CompanySessions = lazy(() => import('@/pages/company/CompanySessions'));
+const CompanyTvarkarastis = lazy(() => import('@/pages/company/CompanyTvarkarastis'));
+const CompanyStats = lazy(() => import('@/pages/company/CompanyStats'));
+const CompanySettings = lazy(() => import('@/pages/company/CompanySettings'));
+const CompanyContracts = lazy(() => import('@/pages/company/CompanyContracts'));
+const CompanyFinanceHub = lazy(() => import('@/pages/company/CompanyFinanceHub'));
+const CompanyInstructions = lazy(() => import('@/pages/company/CompanyInstructions'));
+const CompanyMessages = lazy(() => import('@/pages/company/CompanyMessages'));
+const ParentDashboard = lazy(() => import('@/pages/ParentDashboard'));
+const ParentSessions = lazy(() => import('@/pages/ParentSessions'));
+const ParentInvoices = lazy(() => import('@/pages/ParentInvoices'));
+const ParentMessages = lazy(() => import('@/pages/ParentMessages'));
+const ParentInstructions = lazy(() => import('@/pages/ParentInstructions'));
+const ParentSettings = lazy(() => import('@/pages/ParentSettings'));
+const ParentRegister = lazy(() => import('@/pages/ParentRegister'));
+const SchoolContractComplete = lazy(() => import('@/pages/SchoolContractComplete'));
+const StripeSuccess = lazy(() => import('@/pages/StripeSuccess'));
+const EnterpriseSuccess = lazy(() => import('@/pages/EnterpriseSuccess'));
+const PerlasSuccess = lazy(() => import('@/pages/PerlasSuccess'));
+const PackagePaymentSuccess = lazy(() => import('@/pages/PackagePaymentSuccess'));
+const PackagePaymentCancelled = lazy(() => import('@/pages/PackagePaymentCancelled'));
+const SchoolPaymentSuccess = lazy(() => import('@/pages/SchoolPaymentSuccess'));
+const TutorSubscribe = lazy(() => import('@/pages/TutorSubscribe'));
 const WhiteboardPage = lazy(() => import('@/pages/Whiteboard'));
 import SupabaseAuthHashErrors from '@/components/SupabaseAuthHashErrors';
 import ThemeColorManager from '@/hooks/useThemeColor';
@@ -148,13 +153,12 @@ function CompanyProtectedWithUser() {
   );
 }
 
-function CompanyContractsRoute() {
+/** Language-neutral fallback shown while a lazy route chunk downloads. */
+function RouteLoadingFallback() {
   return (
-    <Suspense
-      fallback={<div className="flex min-h-[40vh] items-center justify-center p-6 text-gray-600">Kraunama…</div>}
-    >
-      <CompanyContracts />
-    </Suspense>
+    <div className="flex min-h-screen items-center justify-center" role="status" aria-label="Loading">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent" />
+    </div>
   );
 }
 
@@ -164,6 +168,7 @@ export default function App({ basename }: { basename: string }) {
       <LocaleFromRouteSync />
       <SupabaseAuthHashErrors />
       <ThemeColorManager />
+      <Suspense fallback={<RouteLoadingFallback />}>
       <Routes>
         {/* Public Landing Pages - NO UserProvider wrapper */}
         <Route path="/" element={<Landing />} />
@@ -219,9 +224,7 @@ export default function App({ basename }: { basename: string }) {
           path="/whiteboard/:roomId"
           element={
             <UserProvider>
-              <Suspense fallback={<div className="flex h-screen items-center justify-center text-gray-500">Loading...</div>}>
-                <WhiteboardPage />
-              </Suspense>
+              <WhiteboardPage />
             </UserProvider>
           }
         />
@@ -293,7 +296,7 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/company/instructions" element={<CompanyInstructions />} />
             <Route path="/company/settings" element={<CompanySettings />} />
             <Route path="/company/finance" element={<CompanyFinanceHub />} />
-            <Route path="/company/contracts" element={<CompanyContractsRoute />} />
+            <Route path="/company/contracts" element={<CompanyContracts />} />
 
             <Route path="/school" element={<CompanyDashboard />} />
             <Route path="/school/tutors" element={<CompanyTutors />} />
@@ -306,12 +309,13 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/school/instructions" element={<CompanyInstructions />} />
             <Route path="/school/settings" element={<CompanySettings />} />
             <Route path="/school/finance" element={<CompanyFinanceHub />} />
-            <Route path="/school/contracts" element={<CompanyContractsRoute />} />
+            <Route path="/school/contracts" element={<CompanyContracts />} />
           </Route>
         </Route>
 
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
+      </Suspense>
     </Router>
   );
 }

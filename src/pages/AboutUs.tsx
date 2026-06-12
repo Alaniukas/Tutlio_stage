@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import LandingNavbar from '@/components/LandingNavbar';
 import LandingFooter from '@/components/LandingFooter';
 import { Target, Heart, Shield, Sparkles } from 'lucide-react';
-import { useTranslation, buildLocalizedPath } from '@/lib/i18n';
+import { useTranslation, buildLocalizedPath, localizedPagePath } from '@/lib/i18n';
 
 export default function AboutUs() {
   const { t, locale } = useTranslation();
@@ -78,7 +78,7 @@ export default function AboutUs() {
           <h2 className="font-display text-2xl sm:text-3xl font-bold text-gray-900 mb-4">{t('about.joinTitle')}</h2>
           <p className="text-gray-500 text-[15px] mb-8 max-w-md mx-auto leading-relaxed">{t('about.joinDesc')}</p>
           <Link
-            to={buildLocalizedPath('/kontaktai', locale)}
+            to={buildLocalizedPath(localizedPagePath('contacts', locale), locale)}
             className="inline-flex items-center justify-center h-12 px-8 text-sm rounded-full bg-[#4f46e5] hover:bg-[#4338ca] text-white font-semibold transition-all duration-200 hover:scale-[1.03] hover:shadow-lg active:scale-[0.98]"
           >
             {t('about.contactButton')}

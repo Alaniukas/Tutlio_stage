@@ -31,7 +31,8 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         maximumFileSizeToCacheInBytes: 7 * 1024 * 1024,
         navigateFallback: 'index.html',
-        navigateFallbackDenylist: [/^\/api\//],
+        // SEO/crawler files must never be answered with the SPA shell from the SW.
+        navigateFallbackDenylist: [/^\/api\//, /^\/(robots\.txt|sitemap\.xml|llms(-full)?\.txt)$/, /\/blog\/rss\.xml$/],
         importScripts: ['/push-sw.js'],
         runtimeCaching: [
           // Storage object GET/POST must not be served stale from SW during whiteboard collaboration.

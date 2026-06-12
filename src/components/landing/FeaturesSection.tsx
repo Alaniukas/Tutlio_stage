@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
+import { buildLocalizedPath, localizedPagePath, useTranslation } from '@/lib/i18n';
 import {
   CalendarDays, Users, Users2, CreditCard, BellRing, LineChart, CheckCircle,
   Bell, MessageSquare, Package, Banknote, FileText, FolderOpen, BarChart3,
@@ -68,7 +68,7 @@ export default function FeaturesSection({ variant = 'tutor' }: { variant?: Landi
   const [active, setActive] = useState(0);
   const p = variant === 'schools' ? 'schoolsLanding' : 'landing';
   const ICONS = variant === 'schools' ? SCHOOLS_ICONS : TUTOR_ICONS;
-  const ctaLink = variant === 'schools' ? buildLocalizedPath('/kontaktai', locale) : buildLocalizedPath('/pricing', locale);
+  const ctaLink = variant === 'schools' ? buildLocalizedPath(localizedPagePath('contacts', locale), locale) : buildLocalizedPath('/pricing', locale);
 
   const features = [
     {

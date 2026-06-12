@@ -1,57 +1,77 @@
 import type { VercelRequest, VercelResponse } from './types';
+import { detectDomain } from './_lib/seo-routing.js';
+
+const SITEMAP_URLS = {
+  lt: 'https://www.tutlio.lt/sitemap.xml',
+  com: 'https://www.tutlio.com/sitemap.xml',
+  pl: 'https://www.tutlio.pl/sitemap.xml',
+} as const;
+
+const ALLOW_PATHS = [
+  '/',
+  '/apie-mus',
+  '/about',
+  '/kontaktai',
+  '/contacts',
+  '/pricing',
+  '/privacy-policy',
+  '/terms',
+  '/dpa',
+  '/blog',
+  '/blog/',
+  '/features/',
+  '/schools',
+  '/schools/',
+  '/teachers',
+  '/teachers/',
+  '/llms.txt',
+  '/llms-full.txt',
+];
+
+/** App/auth surfaces — kept in sync with APP_ROUTES in middleware.ts (tested). */
+export const DISALLOW_PATHS = [
+  '/login',
+  '/register',
+  '/reset-password',
+  '/auth/',
+  '/dashboard',
+  '/calendar',
+  '/students',
+  '/waitlist',
+  '/messages',
+  '/finance',
+  '/invoices',
+  '/instructions',
+  '/lesson-settings',
+  '/settings',
+  '/student/',
+  '/parent/',
+  '/parent-register',
+  '/company/',
+  '/school/',
+  '/admin',
+  '/book/',
+  '/registration/',
+  '/tutor-subscribe',
+  '/stripe-success',
+  '/perlas-success',
+  '/school-contract-complete',
+  '/package-success',
+  '/package-cancelled',
+  '/school-payment-success',
+  '/enterprise/',
+  '/whiteboard/',
+  '/api/',
+];
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
-  const host = (req.headers['x-forwarded-host'] as string) || (req.headers.host as string) || '';
-  const domain = host.includes('tutlio.com') ? 'com' : 'lt';
-  const sitemapUrl =
-    domain === 'com'
-      ? 'https://www.tutlio.com/sitemap.xml'
-      : 'https://www.tutlio.lt/sitemap.xml';
+  const domain = detectDomain(req);
+  const sitemapUrl = SITEMAP_URLS[domain];
 
   const body = `User-agent: *
-Allow: /
-Allow: /apie-mus
-Allow: /about
-Allow: /kontaktai
-Allow: /contacts
-Allow: /pricing
-Allow: /privacy-policy
-Allow: /terms
-Allow: /dpa
-Allow: /blog
-Allow: /blog/
-Allow: /features/
-Allow: /llms.txt
-Allow: /llms-full.txt
+${ALLOW_PATHS.map((p) => `Allow: ${p}`).join('\n')}
 
-Disallow: /login
-Disallow: /register
-Disallow: /reset-password
-Disallow: /auth/
-Disallow: /dashboard
-Disallow: /calendar
-Disallow: /students
-Disallow: /waitlist
-Disallow: /messages
-Disallow: /finance
-Disallow: /invoices
-Disallow: /instructions
-Disallow: /lesson-settings
-Disallow: /settings
-Disallow: /student/
-Disallow: /parent/
-Disallow: /parent-register
-Disallow: /company/
-Disallow: /school/
-Disallow: /admin
-Disallow: /book/
-Disallow: /registration/
-Disallow: /tutor-subscribe
-Disallow: /stripe-success
-Disallow: /package-success
-Disallow: /package-cancelled
-Disallow: /school-payment-success
-Disallow: /api/
+${DISALLOW_PATHS.map((p) => `Disallow: ${p}`).join('\n')}
 
 Sitemap: ${sitemapUrl}
 `;

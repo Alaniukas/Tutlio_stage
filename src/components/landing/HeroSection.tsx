@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Building2, CalendarDays, ListOrdered, Users } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
+import { buildLocalizedPath, localizedPagePath, useTranslation } from '@/lib/i18n';
 import Reveal from './Reveal';
 
 export type LandingVariant = 'tutor' | 'schools';
@@ -60,7 +60,7 @@ function scrollToFeaturesSection() {
 export default function HeroSection({ variant = 'tutor' }: { variant?: LandingVariant }) {
   const { t, locale } = useTranslation();
   const p = variant === 'schools' ? 'schoolsLanding' : 'landing';
-  const ctaLink = variant === 'schools' ? buildLocalizedPath('/kontaktai', locale) : buildLocalizedPath('/pricing', locale);
+  const ctaLink = variant === 'schools' ? buildLocalizedPath(localizedPagePath('contacts', locale), locale) : buildLocalizedPath('/pricing', locale);
   const spotIcons = variant === 'schools' ? HERO_SPOT_ICONS_SCHOOLS : HERO_SPOT_ICONS_TUTOR;
 
   const [lessonCount, setLessonCount] = useState<number | null>(null);

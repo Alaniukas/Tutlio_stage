@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { ChevronDown, Menu, X } from 'lucide-react';
-import { useTranslation, buildLocalizedPath } from '@/lib/i18n';
+import { useTranslation, buildLocalizedPath, localizedPagePath } from '@/lib/i18n';
 import LanguageSelector from '@/components/LanguageSelector';
 import { usePlatform } from '@/contexts/PlatformContext';
 import { useEffect, useRef, useState, useCallback } from 'react';
@@ -56,9 +56,9 @@ export default function LandingNavbar() {
   const pricingHref = buildLocalizedPath('/pricing', locale);
 
   const navLinks = [
-    { to: buildLocalizedPath('/apie-mus', locale), label: t('nav.aboutUs') },
+    { to: buildLocalizedPath(localizedPagePath('about', locale), locale), label: t('nav.aboutUs') },
     { to: buildLocalizedPath('/pricing', locale), label: t('common.prices') },
-    { to: buildLocalizedPath('/kontaktai', locale), label: t('common.contacts') },
+    { to: buildLocalizedPath(localizedPagePath('contacts', locale), locale), label: t('common.contacts') },
   ];
 
   const showPill = scrolled && !isMobile;

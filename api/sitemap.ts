@@ -5,7 +5,8 @@ import {
   LOCALES,
   detectDomain,
   buildCanonicalUrl,
-  buildFullUrl,
+  buildPlatformCanonicalUrl,
+  localizedPagePath,
   canonicalDomain,
   hreflangCode,
 } from './_lib/seo-routing.js';
@@ -17,20 +18,35 @@ function getSupabase() {
   return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } }) as any;
 }
 
-const STATIC_PAGES: { path: string; changefreq: string; priority: string }[] = [
-  { path: '/', changefreq: 'weekly', priority: '1.0' },
-  { path: '/pricing', changefreq: 'monthly', priority: '0.8' },
-  { path: '/apie-mus', changefreq: 'monthly', priority: '0.7' },
-  { path: '/kontaktai', changefreq: 'monthly', priority: '0.6' },
-  { path: '/features/calendar', changefreq: 'monthly', priority: '0.7' },
-  { path: '/features/waitlist', changefreq: 'monthly', priority: '0.7' },
-  { path: '/features/payments', changefreq: 'monthly', priority: '0.7' },
-  { path: '/features/reminders', changefreq: 'monthly', priority: '0.7' },
-  { path: '/features/cancellation', changefreq: 'monthly', priority: '0.7' },
-  { path: '/features/comments', changefreq: 'monthly', priority: '0.7' },
-  { path: '/privacy-policy', changefreq: 'yearly', priority: '0.3' },
-  { path: '/terms', changefreq: 'yearly', priority: '0.3' },
-  { path: '/dpa', changefreq: 'yearly', priority: '0.2' },
+/** Bump when marketing copy meaningfully changes — emitted as <lastmod>. */
+const STATIC_LASTMOD = '2026-06-12';
+
+interface SitemapPage {
+  urlFor: (locale: Locale) => string;
+  changefreq: string;
+  priority: string;
+}
+
+function plainPage(path: string, changefreq: string, priority: string): SitemapPage {
+  return { urlFor: (locale) => buildCanonicalUrl(path, locale), changefreq, priority };
+}
+
+export const STATIC_PAGES: SitemapPage[] = [
+  plainPage('/', 'weekly', '1.0'),
+  plainPage('/pricing', 'monthly', '0.8'),
+  { urlFor: (l) => buildCanonicalUrl(localizedPagePath('about', l), l), changefreq: 'monthly', priority: '0.7' },
+  { urlFor: (l) => buildCanonicalUrl(localizedPagePath('contacts', l), l), changefreq: 'monthly', priority: '0.6' },
+  { urlFor: (l) => buildPlatformCanonicalUrl('/schools', '/', l), changefreq: 'weekly', priority: '0.8' },
+  { urlFor: (l) => buildPlatformCanonicalUrl('/schools', '/pricing', l), changefreq: 'monthly', priority: '0.7' },
+  plainPage('/features/calendar', 'monthly', '0.7'),
+  plainPage('/features/waitlist', 'monthly', '0.7'),
+  plainPage('/features/payments', 'monthly', '0.7'),
+  plainPage('/features/reminders', 'monthly', '0.7'),
+  plainPage('/features/cancellation', 'monthly', '0.7'),
+  plainPage('/features/comments', 'monthly', '0.7'),
+  plainPage('/privacy-policy', 'yearly', '0.3'),
+  plainPage('/terms', 'yearly', '0.3'),
+  plainPage('/dpa', 'yearly', '0.2'),
 ];
 
 const TITLE_COLUMNS = LOCALES.map((l) => `title_${l}`).join(', ');
@@ -44,47 +60,42 @@ function postSlug(post: Record<string, unknown>, locale: Locale): string {
   return (post[`slug_${locale}`] as string) || (post.slug as string);
 }
 
-function alternatesXml(path: string, locales: Locale[] = LOCALES): string {
-  const links: string[] = [];
+function postLastmod(post: Record<string, unknown>): string | undefined {
+  const raw = (post.updated_at as string) || (post.published_at as string) || '';
+  return raw ? raw.split('T')[0] : undefined;
+}
 
-  for (const locale of locales) {
-    const href = buildCanonicalUrl(path, locale);
-    links.push(`    <xhtml:link rel="alternate" hreflang="${hreflangCode(locale)}" href="${href}" />`);
+/**
+ * hreflang alternates for one URL. Spans every locale with content —
+ * including locales canonical on the other Tutlio domains — so the
+ * cross-domain hreflang cluster stays reciprocal in all three sitemaps.
+ */
+export function alternatesXmlFor(
+  urlFor: (locale: Locale) => string,
+  locales: Locale[] = LOCALES,
+  includeXDefault = true,
+): string {
+  const links = locales.map(
+    (locale) => `    <xhtml:link rel="alternate" hreflang="${hreflangCode(locale)}" href="${urlFor(locale)}" />`,
+  );
+  if (includeXDefault) {
+    links.push(`    <xhtml:link rel="alternate" hreflang="x-default" href="${urlFor('en')}" />`);
   }
-
-  const xDefault = buildFullUrl(path, 'en', 'com');
-  links.push(`    <xhtml:link rel="alternate" hreflang="x-default" href="${xDefault}" />`);
   return links.join('\n');
 }
 
-function blogPostAlternatesXml(post: Record<string, unknown>, locales: Locale[]): string {
-  const links: string[] = [];
-  for (const locale of locales) {
-    const slug = postSlug(post, locale);
-    const href = buildCanonicalUrl(`/blog/${slug}`, locale);
-    links.push(`    <xhtml:link rel="alternate" hreflang="${hreflangCode(locale)}" href="${href}" />`);
-  }
-  const enSlug = postSlug(post, 'en');
-  const xDefault = buildFullUrl(`/blog/${enSlug}`, 'en', 'com');
-  links.push(`    <xhtml:link rel="alternate" hreflang="x-default" href="${xDefault}" />`);
-  return links.join('\n');
-}
-
-function urlEntry(loc: string, changefreq: string, priority: string, path: string, altLocales: Locale[], lastmod?: string): string {
+function urlEntry(
+  loc: string,
+  changefreq: string,
+  priority: string,
+  alternates: string,
+  lastmod?: string,
+): string {
   return `  <url>
     <loc>${loc}</loc>${lastmod ? `\n    <lastmod>${lastmod}</lastmod>` : ''}
     <changefreq>${changefreq}</changefreq>
     <priority>${priority}</priority>
-${alternatesXml(path, altLocales)}
-  </url>`;
-}
-
-function blogPostUrlEntry(loc: string, changefreq: string, priority: string, post: Record<string, unknown>, altLocales: Locale[], lastmod?: string): string {
-  return `  <url>
-    <loc>${loc}</loc>${lastmod ? `\n    <lastmod>${lastmod}</lastmod>` : ''}
-    <changefreq>${changefreq}</changefreq>
-    <priority>${priority}</priority>
-${blogPostAlternatesXml(post, altLocales)}
+${alternates}
   </url>`;
 }
 
@@ -96,7 +107,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (supabase) {
     const { data } = await supabase
       .from('blog_posts')
-      .select(`slug, ${SLUG_COLUMNS}, published_at, ${TITLE_COLUMNS}`)
+      .select(`slug, ${SLUG_COLUMNS}, published_at, updated_at, ${TITLE_COLUMNS}`)
       .eq('status', 'published')
       .order('published_at', { ascending: false });
     blogPosts = data || [];
@@ -107,32 +118,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   for (const page of STATIC_PAGES) {
     for (const locale of myLocales) {
-      const loc = buildCanonicalUrl(page.path, locale);
-      entries.push(urlEntry(loc, page.changefreq, page.priority, page.path, LOCALES));
+      entries.push(
+        urlEntry(page.urlFor(locale), page.changefreq, page.priority, alternatesXmlFor(page.urlFor), STATIC_LASTMOD),
+      );
     }
   }
 
-  // Only include blog URLs for locales that have at least one translated post
-  const blogTranslatedLocales = myLocales.filter(
-    (l) => blogPosts.some((p) => postHasTranslation(p, l)),
-  );
+  // Blog listing: <loc> for this domain's translated locales, alternates
+  // across every translated locale on any domain.
+  const blogUrlFor = (l: Locale) => buildCanonicalUrl('/blog', l);
+  const myBlogLocales = myLocales.filter((l) => blogPosts.some((p) => postHasTranslation(p, l)));
+  const allBlogLocales = LOCALES.filter((l) => blogPosts.some((p) => postHasTranslation(p, l)));
+  const latestPostLastmod = blogPosts.map(postLastmod).filter(Boolean).sort().pop();
 
-  if (blogTranslatedLocales.length > 0) {
-    for (const locale of blogTranslatedLocales) {
-      const loc = buildCanonicalUrl('/blog', locale);
-      entries.push(urlEntry(loc, 'weekly', '0.8', '/blog', blogTranslatedLocales));
-    }
+  for (const locale of myBlogLocales) {
+    entries.push(
+      urlEntry(
+        blogUrlFor(locale),
+        'weekly',
+        '0.8',
+        alternatesXmlFor(blogUrlFor, allBlogLocales, allBlogLocales.includes('en')),
+        latestPostLastmod,
+      ),
+    );
   }
 
-  const today = new Date().toISOString().split('T')[0];
   for (const post of blogPosts) {
-    const lastmod = post.published_at ? (post.published_at as string).split('T')[0] : today;
+    const postUrlFor = (l: Locale) => buildCanonicalUrl(`/blog/${postSlug(post, l)}`, l);
+    const myPostLocales = myLocales.filter((l) => postHasTranslation(post, l));
+    const allPostLocales = LOCALES.filter((l) => postHasTranslation(post, l));
+    const lastmod = postLastmod(post);
 
-    const postLocales = myLocales.filter((l) => postHasTranslation(post, l));
-    for (const locale of postLocales) {
-      const slug = postSlug(post, locale);
-      const loc = buildCanonicalUrl(`/blog/${slug}`, locale);
-      entries.push(blogPostUrlEntry(loc, 'monthly', '0.7', post, postLocales, lastmod));
+    for (const locale of myPostLocales) {
+      entries.push(
+        urlEntry(
+          postUrlFor(locale),
+          'monthly',
+          '0.7',
+          alternatesXmlFor(postUrlFor, allPostLocales, allPostLocales.includes('en')),
+          lastmod,
+        ),
+      );
     }
   }
 

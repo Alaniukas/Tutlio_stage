@@ -10,6 +10,9 @@
         "api/feature-render.ts": {
             "maxDuration": 30
         },
+        "api/schools-render.ts": {
+            "maxDuration": 30
+        },
         "api/blog-render.ts": {
             "maxDuration": 30
         },
@@ -17,6 +20,9 @@
             "maxDuration": 30
         },
         "api/sitemap.ts": {
+            "maxDuration": 30
+        },
+        "api/blog-feed.ts": {
             "maxDuration": 30
         }
     },
@@ -65,6 +71,14 @@
             "destination": "/api/llms-txt"
         },
         {
+            "source": "/blog/rss.xml",
+            "destination": "/api/blog-feed"
+        },
+        {
+            "source": "/:locale/blog/rss.xml",
+            "destination": "/api/blog-feed?locale=:locale"
+        },
+        {
             "source": "/((?!api/|@|src/|assets/|node_modules/|\\.vite/|favicon\\.ico|favicon\\.svg|robots\\.txt|sitemap\\.xml|manifest\\.webmanifest|llms\\.txt|llms-full\\.txt).*)",
             "destination": "/index.html"
         }
@@ -85,6 +99,10 @@
         {
             "path": "/api/cleanup-whiteboard-data",
             "schedule": "20 * * * *"
+        },
+        {
+            "path": "/api/indexnow-ping",
+            "schedule": "40 */6 * * *"
         }
     ]
 }

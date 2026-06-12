@@ -18,6 +18,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
+import { TUTOR_PLANS, eur } from '@/lib/pricing';
 import { usePlatform } from '@/contexts/PlatformContext';
 import LandingNavbar from '@/components/LandingNavbar';
 import LandingFooter from '@/components/LandingFooter';
@@ -143,7 +144,7 @@ export default function Pricing() {
                 </h3>
                 <div className="flex items-baseline gap-1.5 mb-3">
                   <span className="text-4xl font-bold text-white">
-                    {isYearly ? '€14.99' : '€19.99'}
+                    {isYearly ? eur(TUTOR_PLANS.yearly.pricePerMonthEur) : eur(TUTOR_PLANS.monthly.pricePerMonthEur)}
                   </span>
                   <span className="text-indigo-200 text-sm inline-flex items-center gap-1.5">
                     {t('common.perMonth')}
@@ -184,7 +185,7 @@ export default function Pricing() {
               <div className="mb-6">
                 <h3 className="text-xl font-bold text-gray-900 mb-2">{t('pricing.subscriptionOnly')}</h3>
                 <div className="flex items-baseline gap-1.5 mb-3">
-                  <span className="text-4xl font-bold text-gray-900">€35</span>
+                  <span className="text-4xl font-bold text-gray-900">{eur(TUTOR_PLANS.subscriptionOnly.pricePerMonthEur)}</span>
                   <span className="text-gray-400 text-sm">{t('common.perMonth')}</span>
                 </div>
                 <p className="text-gray-500 text-[13px] leading-relaxed">{t('pricing.subscriptionOnlyDesc')}</p>

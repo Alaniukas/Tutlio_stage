@@ -1,7 +1,7 @@
 
 
 import { Link } from 'react-router-dom';
-import { useTranslation, buildLocalizedPath } from '@/lib/i18n';
+import { useTranslation, buildLocalizedPath, localizedPagePath } from '@/lib/i18n';
 import { FEATURE_PAGE_IDS, FEATURE_PAGES } from '@/lib/featurePages';
 
 export default function LandingFooter() {
@@ -38,8 +38,8 @@ export default function LandingFooter() {
           <div>
             <h4 className="font-semibold text-[13px] text-white mb-4">{t('landing.footerResources')}</h4>
             <ul className="space-y-2.5 text-[13px] text-gray-500">
-              <li><Link to={buildLocalizedPath('/apie-mus', locale)} className="hover:text-white transition-colors">{t('nav.aboutUs')}</Link></li>
-              <li><Link to={buildLocalizedPath('/kontaktai', locale)} className="hover:text-white transition-colors">{t('common.contacts')}</Link></li>
+              <li><Link to={buildLocalizedPath(localizedPagePath('about', locale), locale)} className="hover:text-white transition-colors">{t('nav.aboutUs')}</Link></li>
+              <li><Link to={buildLocalizedPath(localizedPagePath('contacts', locale), locale)} className="hover:text-white transition-colors">{t('common.contacts')}</Link></li>
               <li><Link to={buildLocalizedPath('/blog', locale)} className="hover:text-white transition-colors">{t('nav.blog')}</Link></li>
             </ul>
           </div>

@@ -31,9 +31,10 @@ export function hreflangCode(locale: Locale): string {
 const DOMAINS = {
   lt: 'https://www.tutlio.lt',
   com: 'https://www.tutlio.com',
+  pl: 'https://www.tutlio.pl',
 } as const;
 
-export type DomainKey = 'lt' | 'com';
+export type DomainKey = 'lt' | 'com' | 'pl';
 
 export function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -42,11 +43,14 @@ export function esc(s: string): string {
 export function detectDomain(req: VercelRequest): DomainKey {
   const host = (req.headers['x-forwarded-host'] as string) || (req.headers.host as string) || '';
   if (host.includes('tutlio.com')) return 'com';
+  if (host.includes('tutlio.pl')) return 'pl';
   return 'lt';
 }
 
 export function getDefaultLocale(domain: DomainKey): Locale {
-  return domain === 'com' ? 'en' : 'lt';
+  if (domain === 'com') return 'en';
+  if (domain === 'pl') return 'pl';
+  return 'lt';
 }
 
 export function detectLocale(req: VercelRequest): Locale {
@@ -74,26 +78,65 @@ export interface HreflangLink {
 }
 
 export function canonicalDomain(locale: Locale): DomainKey {
-  return locale === 'lt' ? 'lt' : 'com';
+  if (locale === 'lt') return 'lt';
+  if (locale === 'pl') return 'pl';
+  return 'com';
 }
 
 export function buildCanonicalUrl(path: string, locale: Locale): string {
   return buildFullUrl(path, locale, canonicalDomain(locale));
 }
 
-export function generateHreflangLinks(path: string): HreflangLink[] {
+/**
+ * Platform-prefixed URLs nest the locale after the prefix
+ * (e.g. /schools/fr/pricing) — the plain builders would wrongly
+ * produce /fr/schools/pricing.
+ */
+export function buildPlatformPath(prefix: string, path: string, locale: Locale, domain: DomainKey): string {
+  const defaultLocale = getDefaultLocale(domain);
+  const normalizedPath = path === '/' ? '' : path;
+  const localeSeg = locale === defaultLocale ? '' : `/${locale}`;
+  return `${prefix}${localeSeg}${normalizedPath}`;
+}
+
+export function buildPlatformCanonicalUrl(prefix: string, path: string, locale: Locale): string {
+  const domain = canonicalDomain(locale);
+  return `${DOMAINS[domain]}${buildPlatformPath(prefix, path, locale, domain)}`;
+}
+
+/**
+ * Pages whose canonical slug is domain-flavored: the .lt domain keeps the
+ * Lithuanian slugs, while the international domains use the English ones.
+ * Both slug variants stay routable; the non-canonical one 308s in middleware.
+ */
+const LOCALIZED_PAGE_PATHS = {
+  about: { lt: '/apie-mus', com: '/about', pl: '/about' },
+  contacts: { lt: '/kontaktai', com: '/contacts', pl: '/contacts' },
+} as const;
+
+export type LocalizedPageId = keyof typeof LOCALIZED_PAGE_PATHS;
+
+export function localizedPagePath(page: LocalizedPageId, locale: Locale): string {
+  return LOCALIZED_PAGE_PATHS[page][canonicalDomain(locale)];
+}
+
+export function generateHreflangLinksFor(urlFor: (locale: Locale) => string): HreflangLink[] {
   const links: HreflangLink[] = [];
 
   for (const locale of LOCALES) {
-    links.push({ lang: hreflangCode(locale), href: buildCanonicalUrl(path, locale) });
+    links.push({ lang: hreflangCode(locale), href: urlFor(locale) });
   }
 
-  links.push({ lang: 'x-default', href: buildFullUrl(path, 'en', 'com') });
+  links.push({ lang: 'x-default', href: urlFor('en') });
   return links;
 }
 
-export function hreflangTags(path: string): string {
-  const links = generateHreflangLinks(path);
+export function generateHreflangLinks(path: string): HreflangLink[] {
+  return generateHreflangLinksFor((locale) => buildCanonicalUrl(path, locale));
+}
+
+export function hreflangTagsFor(urlFor: (locale: Locale) => string): string {
+  const links = generateHreflangLinksFor(urlFor);
   const seen = new Set<string>();
   return links
     .filter((l) => {
@@ -104,4 +147,8 @@ export function hreflangTags(path: string): string {
     })
     .map((l) => `<link rel="alternate" hreflang="${l.lang}" href="${esc(l.href)}" />`)
     .join('\n');
+}
+
+export function hreflangTags(path: string): string {
+  return hreflangTagsFor((locale) => buildCanonicalUrl(path, locale));
 }

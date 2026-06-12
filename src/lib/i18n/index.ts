@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext } from 'react';
 import { lt as dateFnsLt, pl as dateFnsPl, lv as dateFnsLv, et as dateFnsEe, fr as dateFnsFr, es as dateFnsEs, de as dateFnsDe, sv as dateFnsSe, da as dateFnsDk, fi as dateFnsFi, nb as dateFnsNo } from 'date-fns/locale';
 import type { Locale as DateFnsLocale } from 'date-fns';
 
-export { t, tHtml, detectLocaleFromHost, isValidLocale, SUPPORTED_LOCALES, LOCALE_LABELS, LOCALE_NAMES } from './core';
+export { t, tHtml, detectLocaleFromHost, isValidLocale, SUPPORTED_LOCALES, LOCALE_LABELS, LOCALE_NAMES, loadLocaleDict, isLocaleLoaded } from './core';
 export type { Locale } from './core';
 import type { Locale } from './core';
 import { isValidLocale, t as coreTranslate, tHtml as coreTranslateHtml } from './core';
@@ -15,7 +15,15 @@ function getDomainStorageKey(): string {
   const host = window.location.hostname;
   if (host === 'tutlio.com' || host.endsWith('.tutlio.com')) return `${LOCALE_STORAGE_KEY}_com`;
   if (host === 'tutlio.lt' || host.endsWith('.tutlio.lt')) return `${LOCALE_STORAGE_KEY}_lt`;
+  if (host === 'tutlio.pl' || host.endsWith('.tutlio.pl')) return `${LOCALE_STORAGE_KEY}_pl`;
   return LOCALE_STORAGE_KEY;
+}
+
+/** Default UI locale per host — mirrors getDefaultLocale in api/_lib/seo-routing.ts. */
+export function defaultLocaleForHost(host: string): Locale {
+  if (host === 'tutlio.com' || host.endsWith('.tutlio.com')) return 'en';
+  if (host === 'tutlio.pl' || host.endsWith('.tutlio.pl')) return 'pl';
+  return 'lt';
 }
 
 export function getStoredLocale(): Locale | null {
@@ -42,12 +50,24 @@ export function detectLocale(): Locale {
   if (langOverride && isValidLocale(langOverride)) return langOverride;
 
   const host = window.location.hostname;
-  // On tutlio.com (and subdomains like www.tutlio.com), default to EN unless URL explicitly sets locale.
-  if (host === 'tutlio.com' || host.endsWith('.tutlio.com')) return 'en';
+  // On tutlio.com / tutlio.pl, default to the domain locale unless the URL
+  // explicitly sets one. Stored preference only applies on the .lt domain.
+  const domainDefault = defaultLocaleForHost(host);
+  if (domainDefault !== 'lt') return domainDefault;
 
   const stored = getStoredLocale();
   if (stored) return stored;
   return 'lt';
+}
+
+/**
+ * Canonical slug for pages with domain-flavored paths — Lithuanian slugs for
+ * the lt locale, English everywhere else. Mirrors localizedPagePath() in
+ * api/_lib/seo-routing.ts (sync enforced by tests/lib/seo-visibility.test.ts).
+ */
+export function localizedPagePath(page: 'about' | 'contacts', locale: Locale): string {
+  if (page === 'about') return locale === 'lt' ? '/apie-mus' : '/about';
+  return locale === 'lt' ? '/kontaktai' : '/contacts';
 }
 
 export function getLocaleFromPathname(pathname: string): Locale | null {
@@ -70,7 +90,7 @@ export function stripLocalePrefix(pathname: string): string {
 export function buildLocalizedPath(pathname: string, locale: Locale, host?: string): string {
   const normalized = stripLocalePrefix(pathname);
   const effectiveHost = host ?? (typeof window !== 'undefined' ? window.location.hostname : 'localhost');
-  const defaultLocale = effectiveHost === 'tutlio.com' || effectiveHost.endsWith('.tutlio.com') ? 'en' : 'lt';
+  const defaultLocale = defaultLocaleForHost(effectiveHost);
 
   if (locale === defaultLocale) {
     return normalized;

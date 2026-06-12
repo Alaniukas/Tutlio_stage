@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   I18nContext,
   detectLocale,
@@ -8,6 +8,8 @@ import {
   t as translate,
   tHtml as translateHtml,
   getDateFnsLocale,
+  loadLocaleDict,
+  isLocaleLoaded,
   type Locale,
 } from '@/lib/i18n';
 import { isValidLocale } from '@/lib/i18n/core';
@@ -19,11 +21,25 @@ import { applyDefaultDocumentMeta } from '@/lib/documentMeta';
 export function LocaleProvider({ children }: { children: ReactNode }) {
   const { platform } = usePlatform();
   const [locale, setLocaleState] = useState<Locale>(detectLocale);
+  // Bumped when a lazy-loaded dictionary arrives so consumers re-render
+  // with the real translations instead of the en/lt fallback.
+  const [dictVersion, setDictVersion] = useState(0);
+
+  useEffect(() => {
+    if (isLocaleLoaded(locale)) return;
+    let cancelled = false;
+    void loadLocaleDict(locale).then(() => {
+      if (!cancelled) setDictVersion((v) => v + 1);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [locale]);
 
   useLayoutEffect(() => {
     document.documentElement.lang = locale;
     applyDefaultDocumentMeta(locale, platform);
-  }, [locale, platform]);
+  }, [locale, platform, dictVersion]);
 
   const setLocale = useCallback((next: Locale) => {
     storeLocale(next);
@@ -45,7 +61,8 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
     t: (key: string, params?: Record<string, string | number>) => translate(locale, key, params, platform),
     tHtml: (key: string, params?: Record<string, string | number>) => translateHtml(locale, key, params, platform),
     dateFnsLocale: getDateFnsLocale(locale),
-  }), [locale, setLocale, platform]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dictVersion invalidates t/tHtml closures
+  }), [locale, setLocale, platform, dictVersion]);
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }

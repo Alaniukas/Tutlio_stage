@@ -9,7 +9,9 @@ import {
   BOT_UA,
   LOCALES as MIDDLEWARE_LOCALES,
   FEATURES as MIDDLEWARE_FEATURES,
+  APP_ROUTES,
 } from '../../middleware.js';
+import { DISALLOW_PATHS } from '../../api/robots.js';
 import { FEATURE_PAGES, FEATURE_PAGE_IDS } from '../../src/lib/featurePages.js';
 import { en } from '../../src/lib/i18n/en.js';
 import { lt } from '../../src/lib/i18n/lt.js';
@@ -118,6 +120,20 @@ describe('middleware stays in sync with shared SEO config', () => {
   it('middleware feature slugs match the shared feature-page config', () => {
     expect([...MIDDLEWARE_FEATURES].sort()).toEqual([...FEATURE_PAGE_IDS].sort());
   });
+
+  it('middleware APP_ROUTES match robots.txt disallow paths', () => {
+    const disallowSegments = DISALLOW_PATHS
+      .map((p) => p.replace(/^\//, '').replace(/\/$/, ''))
+      .filter((p) => p !== 'api');
+    // Every robots-disallowed surface keeps its SPA shell in middleware…
+    for (const segment of disallowSegments) {
+      expect(APP_ROUTES.has(segment), `APP_ROUTES missing "${segment}"`).toBe(true);
+    }
+    // …and middleware never shelters a route robots does not also disallow.
+    for (const route of APP_ROUTES) {
+      expect(disallowSegments, `robots.txt missing "${route}"`).toContain(route);
+    }
+  });
 });
 
 describe('feature page config integrity', () => {
@@ -143,6 +159,31 @@ describe('feature page config integrity', () => {
   it('feature page paths match their ids', () => {
     for (const id of FEATURE_PAGE_IDS) {
       expect(FEATURE_PAGES[id].path).toBe(`/features/${id}`);
+    }
+  });
+});
+
+describe('schools SSR content integrity', () => {
+  it('every key rendered by schools-render has translations (en + lt)', async () => {
+    const { SCHOOLS_FEATURE_KEYS, SCHOOLS_HIGHLIGHT_KEYS } = await import('../../api/schools-render.js');
+    const baseKeys = [
+      'schoolsLanding.heroTitle', 'schoolsLanding.heroTitleHighlight', 'schoolsLanding.heroSubtitle',
+      'schoolsLanding.heroCta', 'schoolsLanding.stepsTitle', 'schoolsLanding.stepsDesc',
+      'schoolsLanding.featuresHeading', 'schoolsLanding.featuresHighlight', 'schoolsLanding.featuresSubtitle',
+      'schoolsLanding.highlightsTitle', 'schoolsLanding.highlightsHighlight', 'schoolsLanding.highlightsSubtitle',
+      'schoolsLanding.highlightsBadge', 'schoolsLanding.integCta',
+      'schoolsLanding.ctaBannerTitle', 'schoolsLanding.ctaBannerDesc', 'schoolsLanding.ctaBannerBtn',
+      ...[1, 2, 3].flatMap((n) => [`schoolsLanding.step${n}Title`, `schoolsLanding.step${n}Desc`]),
+      ...SCHOOLS_FEATURE_KEYS.flatMap((k: string) => [
+        `schoolsLanding.feat.${k}`, `schoolsLanding.feat.${k}Desc`,
+        `schoolsLanding.feat.${k}B1`, `schoolsLanding.feat.${k}B2`, `schoolsLanding.feat.${k}B3`,
+      ]),
+      ...SCHOOLS_HIGHLIGHT_KEYS.flatMap((k: string) => [`schoolsLanding.hl.${k}`, `schoolsLanding.hl.${k}Desc`]),
+    ];
+    for (const dict of [en, lt]) {
+      for (const key of baseKeys) {
+        expect(dict[key], key).toBeTruthy();
+      }
     }
   });
 });

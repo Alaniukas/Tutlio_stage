@@ -8,6 +8,7 @@ import {
   buildPath,
   buildFullUrl,
   buildCanonicalUrl,
+  localizedPagePath,
   renderShell,
   preloadSsrLocales,
   t,
@@ -18,6 +19,7 @@ import {
   softwareAppJsonLd,
   hreflangCode,
 } from './_lib/ssr-shell.js';
+import { TUTOR_PLANS, eur } from '../src/lib/pricing.js';
 
 type PageId = 'landing' | 'pricing' | 'about' | 'contacts';
 
@@ -124,19 +126,19 @@ function renderPricing(locale: Locale, domain: DomainKey): string {
   <div class="grid">
     <div class="card">
       <h3>${esc(t(locale, 'pricing.monthly'))}</h3>
-      <p style="font-size:2rem;font-weight:700;margin:12px 0">€19.99<span style="font-size:.9rem;font-weight:400;color:#666">/mo</span></p>
+      <p style="font-size:2rem;font-weight:700;margin:12px 0">${eur(TUTOR_PLANS.monthly.pricePerMonthEur)}<span style="font-size:.9rem;font-weight:400;color:#666">/mo</span></p>
       <p>${esc(t(locale, 'pricing.monthlyDesc'))}</p>
       <a href="${registerPath}" class="btn" style="margin-top:16px">${esc(t(locale, 'pricing.start7DayTrial'))}</a>
     </div>
     <div class="card">
       <h3>${esc(t(locale, 'pricing.yearly'))}</h3>
-      <p style="font-size:2rem;font-weight:700;margin:12px 0">€14.99<span style="font-size:.9rem;font-weight:400;color:#666">/mo</span></p>
+      <p style="font-size:2rem;font-weight:700;margin:12px 0">${eur(TUTOR_PLANS.yearly.pricePerMonthEur)}<span style="font-size:.9rem;font-weight:400;color:#666">/mo</span></p>
       <p>${esc(t(locale, 'pricing.yearlyDesc'))}</p>
       <a href="${registerPath}" class="btn" style="margin-top:16px">${esc(t(locale, 'pricing.start7DayTrial'))}</a>
     </div>
     <div class="card">
       <h3>${esc(t(locale, 'pricing.subscriptionOnly'))}</h3>
-      <p style="font-size:2rem;font-weight:700;margin:12px 0">€9.99<span style="font-size:.9rem;font-weight:400;color:#666">/mo</span></p>
+      <p style="font-size:2rem;font-weight:700;margin:12px 0">${eur(TUTOR_PLANS.subscriptionOnly.pricePerMonthEur)}<span style="font-size:.9rem;font-weight:400;color:#666">/mo</span></p>
       <p>${esc(t(locale, 'pricing.subscriptionOnlyDesc'))}</p>
       <a href="${registerPath}" class="btn" style="margin-top:16px">${esc(t(locale, 'pricing.start7DayTrial'))}</a>
     </div>
@@ -219,11 +221,12 @@ const PAGE_RENDERERS: Record<PageId, (locale: Locale, domain: DomainKey) => stri
   contacts: renderContacts,
 };
 
-const PAGE_PATHS: Record<PageId, string> = {
-  landing: '/',
-  pricing: '/pricing',
-  about: '/apie-mus',
-  contacts: '/kontaktai',
+/** Canonical path per locale — about/contact slugs are domain-flavored. */
+const PAGE_PATHS: Record<PageId, (locale: Locale) => string> = {
+  landing: () => '/',
+  pricing: () => '/pricing',
+  about: (locale) => localizedPagePath('about', locale),
+  contacts: (locale) => localizedPagePath('contacts', locale),
 };
 
 const PAGE_TITLE_KEYS: Record<PageId, string> = {
@@ -250,7 +253,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const locale = detectLocale(req);
   await preloadSsrLocales(locale, 'en', 'lt');
   const renderer = PAGE_RENDERERS[page];
-  const path = PAGE_PATHS[page];
+  const path = PAGE_PATHS[page](locale);
+  const urlFor = (l: Locale) => buildCanonicalUrl(PAGE_PATHS[page](l), l);
 
   const rawTitle = t(locale, PAGE_TITLE_KEYS[page]);
   const title = page === 'landing' ? `Tutlio - ${rawTitle}` : `${rawTitle} | Tutlio`;
@@ -286,7 +290,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ];
 
   const body = renderer(locale, domain);
-  const html = renderShell({ locale, domain, path, title, description, body, jsonLd, extraHead, breadcrumbs });
+  const html = renderShell({ locale, domain, path, title, description, body, jsonLd, extraHead, breadcrumbs, urlFor });
 
   sendSsrHtml(req, res, html, {
     'Content-Type': 'text/html; charset=utf-8',

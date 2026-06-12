@@ -10,6 +10,7 @@ import { User, Mail, Phone, Save, Lock, Building2, Eye, EyeOff, CreditCard, Cale
 import { formatLithuanianPhone, validateLithuanianPhone } from '@/lib/utils';
 import { hasActiveSubscription } from '@/lib/subscription';
 import { useTranslation } from '@/lib/i18n';
+import { TUTOR_PLANS, eur } from '@/lib/pricing';
 import PwaInstallGuide from '@/components/PwaInstallGuide';
 import OrgTutorPolicyModal from '@/components/OrgTutorPolicyModal';
 
@@ -314,15 +315,15 @@ export default function SettingsPage() {
           ? t('subscribe.subscriptionOnlyTitle')
           : t('settings.monthlyPlan');
     if (price) return `${title} (${price}${suffix})`;
-    if (profile.subscription_plan === 'yearly') return `${t('settings.yearlyPlan')} (€14.99${t('subscribe.perMonth')})`;
-    if (profile.subscription_plan === 'subscription_only') return `${t('subscribe.subscriptionOnlyTitle')} (€35${t('subscribe.perMonth')})`;
-    return `${t('settings.monthlyPlan')} (€19.99${t('subscribe.perMonth')})`;
+    if (profile.subscription_plan === 'yearly') return `${t('settings.yearlyPlan')} (${eur(TUTOR_PLANS.yearly.pricePerMonthEur)}${t('subscribe.perMonth')})`;
+    if (profile.subscription_plan === 'subscription_only') return `${t('subscribe.subscriptionOnlyTitle')} (${eur(TUTOR_PLANS.subscriptionOnly.pricePerMonthEur)}${t('subscribe.perMonth')})`;
+    return `${t('settings.monthlyPlan')} (${eur(TUTOR_PLANS.monthly.pricePerMonthEur)}${t('subscribe.perMonth')})`;
   };
 
   const getTrialChargeText = () => {
     const price = formatPrice(profile.subscription_price_amount, profile.subscription_price_currency);
     if (price) return price;
-    return profile.subscription_plan === 'yearly' ? '€179.88' : '€19.99';
+    return profile.subscription_plan === 'yearly' ? eur(TUTOR_PLANS.yearly.pricePerYearEur) : eur(TUTOR_PLANS.monthly.pricePerMonthEur);
   };
 
   return (

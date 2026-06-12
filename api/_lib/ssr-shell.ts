@@ -3,6 +3,7 @@ export {
   LOCALES,
   type DomainKey,
   type HreflangLink,
+  type LocalizedPageId,
   esc,
   detectDomain,
   getDefaultLocale,
@@ -11,8 +12,13 @@ export {
   buildFullUrl,
   canonicalDomain,
   buildCanonicalUrl,
+  buildPlatformPath,
+  buildPlatformCanonicalUrl,
+  localizedPagePath,
   generateHreflangLinks,
+  generateHreflangLinksFor,
   hreflangTags,
+  hreflangTagsFor,
   hreflangCode,
 } from './seo-routing.js';
 
@@ -24,12 +30,15 @@ import {
   LOCALES,
   esc,
   buildPath,
+  buildPlatformPath,
   buildFullUrl,
   buildCanonicalUrl,
-  hreflangTags,
+  localizedPagePath,
+  hreflangTagsFor,
   hreflangCode,
 } from './seo-routing.js';
 import { t } from './ssr-i18n.js';
+import { TUTOR_PLANS } from '../../src/lib/pricing.js';
 
 const OG_LOCALE_MAP: Record<Locale, string> = {
   lt: 'lt_LT',
@@ -46,6 +55,22 @@ const OG_LOCALE_MAP: Record<Locale, string> = {
   no: 'nb_NO',
 };
 
+/** Native language names for the crawlable locale-links footer block. */
+const LOCALE_NATIVE_NAMES: Record<Locale, string> = {
+  lt: 'Lietuvių',
+  en: 'English',
+  pl: 'Polski',
+  lv: 'Latviešu',
+  ee: 'Eesti',
+  fr: 'Français',
+  es: 'Español',
+  de: 'Deutsch',
+  se: 'Svenska',
+  dk: 'Dansk',
+  fi: 'Suomi',
+  no: 'Norsk',
+};
+
 export interface ShellOptions {
   locale: Locale;
   domain: DomainKey;
@@ -57,12 +82,28 @@ export interface ShellOptions {
   jsonLd?: string;
   extraHead?: string;
   breadcrumbs?: { name: string; url: string }[];
+  /**
+   * Per-locale canonical URL builder. Override for pages whose locale variant
+   * is not a simple `/{locale}{path}` prefix (e.g. /schools/:locale, /about
+   * vs /apie-mus). Drives canonical, hreflang, and the locale-links footer.
+   */
+  urlFor?: (locale: Locale) => string;
+}
+
+function localeLinksHtml(urlFor: (locale: Locale) => string, current: Locale): string {
+  const links = LOCALES.map((l) =>
+    l === current
+      ? `<span lang="${hreflangCode(l)}">${LOCALE_NATIVE_NAMES[l]}</span>`
+      : `<a href="${esc(urlFor(l))}" hreflang="${hreflangCode(l)}" lang="${hreflangCode(l)}">${LOCALE_NATIVE_NAMES[l]}</a>`,
+  );
+  return `<nav class="footer-langs" aria-label="Languages">${links.join('\n    ')}</nav>`;
 }
 
 export function renderShell(opts: ShellOptions): string {
   const { locale, domain, path, title, description, body, jsonLd, extraHead, breadcrumbs } = opts;
   const ogImage = opts.ogImage || DEFAULT_OG_IMAGE;
-  const canonicalUrl = buildCanonicalUrl(path, locale);
+  const urlFor = opts.urlFor || ((l: Locale) => buildCanonicalUrl(path, l));
+  const canonicalUrl = urlFor(locale);
 
   const ogLocaleAlternates = LOCALES
     .filter((l) => l !== locale)
@@ -91,7 +132,8 @@ export function renderShell(opts: ShellOptions): string {
 <meta name="description" content="${esc(description)}" />
 <meta name="robots" content="index, follow, max-image-preview:large" />
 <link rel="canonical" href="${esc(canonicalUrl)}" />
-${hreflangTags(path)}
+<link rel="alternate" type="application/rss+xml" title="Tutlio Blog" href="${esc(buildCanonicalUrl('/blog/rss.xml', locale))}" />
+${hreflangTagsFor(urlFor)}
 <meta property="og:type" content="website" />
 <meta property="og:locale" content="${OG_LOCALE_MAP[locale]}" />
 ${ogLocaleAlternates}
@@ -143,6 +185,9 @@ a:hover{text-decoration:underline}
 .footer{border-top:1px solid #e5e7eb;text-align:center;padding:24px;color:#888;font-size:.85rem;margin-top:auto}
 .footer-links{display:flex;flex-wrap:wrap;justify-content:center;gap:16px;margin-bottom:12px}
 .footer-links a{color:#4f46e5}
+.footer-langs{display:flex;flex-wrap:wrap;justify-content:center;gap:12px;margin-bottom:12px;font-size:.8rem}
+.footer-langs a{color:#666}
+.footer-langs span{color:#1a1a1a;font-weight:600}
 .legal-sub{color:#555;margin-bottom:24px}
 .legal h2{font-size:1.25rem;font-weight:600;margin:28px 0 10px}
 .legal h3{font-size:1.05rem;font-weight:600;margin:20px 0 8px}
@@ -155,7 +200,7 @@ a:hover{text-decoration:underline}
   <a href="${buildPath('/', locale, domain)}" class="nav-logo">Tutlio</a>
   <div class="nav-links">
     <a href="${buildPath('/pricing', locale, domain)}">${t(locale, 'common.prices')}</a>
-    <a href="${buildPath('/apie-mus', locale, domain)}">${t(locale, 'nav.aboutUs')}</a>
+    <a href="${buildPath(localizedPagePath('about', locale), locale, domain)}">${t(locale, 'nav.aboutUs')}</a>
     <a href="${buildPath('/blog', locale, domain)}">${({ lt: 'Tinklaraštis', en: 'Blog', pl: 'Blog', lv: 'Emuārs', ee: 'Blogi', fr: 'Blog', es: 'Blog', de: 'Blog', se: 'Blogg', dk: 'Blog', fi: 'Blogi', no: 'Blogg' })[locale]}</a>
   </div>
 </nav>
@@ -165,8 +210,10 @@ ${body}
     <a href="${buildPath('/privacy-policy', locale, domain)}">${t(locale, 'footer.privacyPolicy')}</a>
     <a href="${buildPath('/terms', locale, domain)}">${t(locale, 'footer.terms')}</a>
     <a href="${buildPath('/dpa', locale, domain)}">${t(locale, 'footer.dpa')}</a>
-    <a href="${buildPath('/kontaktai', locale, domain)}">${t(locale, 'contact.title')}</a>
+    <a href="${buildPath(localizedPagePath('contacts', locale), locale, domain)}">${t(locale, 'contact.title')}</a>
+    <a href="${buildPlatformPath('/schools', '/', locale, domain)}">${({ lt: 'Mokykloms', en: 'For Schools', pl: 'Dla szkół', lv: 'Skolām', ee: 'Koolidele', fr: 'Pour les écoles', es: 'Para escuelas', de: 'Für Schulen', se: 'För skolor', dk: 'Til skoler', fi: 'Kouluille', no: 'For skoler' })[locale]}</a>
   </div>
+  ${localeLinksHtml(urlFor, locale)}
   ${t(locale, 'common.allRightsReserved', { year: new Date().getFullYear() })}
 </footer>
 </body>
@@ -191,7 +238,7 @@ export function organizationJsonLd(): string {
     email: 'info@tutlio.lt',
     foundingDate: '2024',
     areaServed: 'Worldwide',
-    sameAs: ['https://www.tutlio.lt'],
+    sameAs: ['https://www.tutlio.lt', 'https://www.tutlio.pl'],
     contactPoint: {
       '@type': 'ContactPoint',
       email: 'info@tutlio.lt',
@@ -237,9 +284,9 @@ export function softwareAppJsonLd(locale: Locale): string {
     image: DEFAULT_OG_IMAGE,
     featureList: 'Smart Calendar, Student Waitlist, Stripe Payments, Automated Reminders, Cancellation Rules, Lesson Notes, Invoicing, Parent Portals, Real-time Messaging, Multi-language',
     offers: [
-      { '@type': 'Offer', name: 'Monthly', price: '19.99', priceCurrency: 'EUR', url: 'https://www.tutlio.com/pricing' },
-      { '@type': 'Offer', name: 'Yearly', price: '14.99', priceCurrency: 'EUR', url: 'https://www.tutlio.com/pricing' },
-      { '@type': 'Offer', name: 'Subscription Only', price: '9.99', priceCurrency: 'EUR', url: 'https://www.tutlio.com/pricing' },
+      { '@type': 'Offer', name: 'Monthly', price: TUTOR_PLANS.monthly.pricePerMonthEur.toFixed(2), priceCurrency: 'EUR', url: 'https://www.tutlio.com/pricing' },
+      { '@type': 'Offer', name: 'Yearly', price: TUTOR_PLANS.yearly.pricePerMonthEur.toFixed(2), priceCurrency: 'EUR', url: 'https://www.tutlio.com/pricing' },
+      { '@type': 'Offer', name: 'Subscription Only', price: TUTOR_PLANS.subscriptionOnly.pricePerMonthEur.toFixed(2), priceCurrency: 'EUR', url: 'https://www.tutlio.com/pricing' },
     ],
     publisher: {
       '@type': 'Organization',

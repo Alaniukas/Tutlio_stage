@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from './types';
+import { TUTOR_PLANS, eur } from '../src/lib/pricing.js';
 
 const LLMS_TXT = `# Tutlio
 
@@ -26,18 +27,21 @@ Tutlio replaces spreadsheets, notebooks, and scattered tools with a single platf
 
 All plans include every feature. Pricing is per-tutor, not per-student — unlimited students on all plans.
 
-- **Monthly**: €19.99/month
-- **Yearly**: €14.99/month (billed annually)
-- **Subscription Only**: €9.99/month (no payment collection features)
+- **Monthly**: ${eur(TUTOR_PLANS.monthly.pricePerMonthEur)}/month
+- **Yearly**: ${eur(TUTOR_PLANS.yearly.pricePerMonthEur)}/month (${eur(TUTOR_PLANS.yearly.pricePerYearEur)} billed annually)
+- **Subscription Only**: ${eur(TUTOR_PLANS.subscriptionOnly.pricePerMonthEur)}/month (manual payment tracking instead of Stripe collection — no commission on student payments)
 - All plans include a 7-day free trial (applied automatically at checkout)
 
 ## Links
 
 - Website: https://www.tutlio.com
 - Website (Lithuania): https://www.tutlio.lt
+- Website (Poland): https://www.tutlio.pl
+- For Schools: https://www.tutlio.com/schools
 - Blog: https://www.tutlio.com/blog
+- Blog RSS feed: https://www.tutlio.com/blog/rss.xml
 - Pricing: https://www.tutlio.com/pricing
-- About: https://www.tutlio.com/apie-mus
+- About: https://www.tutlio.com/about
 - Contact: info@tutlio.lt
 
 ## Target Users
@@ -113,7 +117,7 @@ The waitlist is Tutlio's signature feature. When a student cancels a lesson, the
 - **Type**: SaaS (Software as a Service)
 - **Founded**: Lithuania
 - **Contact**: info@tutlio.lt
-- **Domains**: tutlio.com (international), tutlio.lt (Lithuania)
+- **Domains**: tutlio.com (international), tutlio.lt (Lithuania), tutlio.pl (Poland)
 - **Languages**: Lithuanian, English, Polish, Latvian, Estonian, French, Spanish, German, Swedish, Danish, Finnish, Norwegian
 `;
 
