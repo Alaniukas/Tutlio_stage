@@ -18,7 +18,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
-import { TUTOR_PLANS, eur } from '@/lib/pricing';
+import { tutorPlanPriceLabels, showPerMonthSuffix } from '@/lib/pricingDisplay';
 import { usePlatform } from '@/contexts/PlatformContext';
 import LandingNavbar from '@/components/LandingNavbar';
 import LandingFooter from '@/components/LandingFooter';
@@ -131,7 +131,7 @@ export default function Pricing() {
         {/* Cards */}
         <section className="max-w-[1200px] mx-auto px-6 pb-20">
           <div className="grid md:grid-cols-2 gap-6 max-w-[760px] mx-auto items-stretch pt-5">
-            {/* Standard — monthly or yearly via toggle */}
+            {/* Standard ??? monthly or yearly via toggle */}
             <div className="relative bg-[#4f46e5] rounded-2xl p-7 shadow-lg shadow-indigo-200/40 ring-2 ring-[#4f46e5] flex flex-col">
               {isYearly && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-emerald-500 text-white text-[11px] font-bold px-4 py-1 rounded-full shadow-sm">
@@ -144,10 +144,10 @@ export default function Pricing() {
                 </h3>
                 <div className="flex items-baseline gap-1.5 mb-3">
                   <span className="text-4xl font-bold text-white">
-                    {isYearly ? eur(TUTOR_PLANS.yearly.pricePerMonthEur) : eur(TUTOR_PLANS.monthly.pricePerMonthEur)}
+                    {isYearly ? tutorPlanPriceLabels.yearlyPerMonth() : tutorPlanPriceLabels.monthly()}
                   </span>
                   <span className="text-indigo-200 text-sm inline-flex items-center gap-1.5">
-                    {t('common.perMonth')}
+                    {showPerMonthSuffix() ? t('common.perMonth') : null}
                     <span className="relative inline-flex items-center group">
                       <CircleHelp className="w-3.5 h-3.5 text-white/70 cursor-help" />
                       <span className="hidden group-hover:block pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-64 -translate-x-1/2 rounded-lg border border-white/15 bg-white p-2.5 text-xs font-medium text-gray-700 opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
@@ -185,8 +185,8 @@ export default function Pricing() {
               <div className="mb-6">
                 <h3 className="text-xl font-bold text-gray-900 mb-2">{t('pricing.subscriptionOnly')}</h3>
                 <div className="flex items-baseline gap-1.5 mb-3">
-                  <span className="text-4xl font-bold text-gray-900">{eur(TUTOR_PLANS.subscriptionOnly.pricePerMonthEur)}</span>
-                  <span className="text-gray-400 text-sm">{t('common.perMonth')}</span>
+                  <span className="text-4xl font-bold text-gray-900">{tutorPlanPriceLabels.subscriptionOnly()}</span>
+                  {showPerMonthSuffix() ? <span className="text-gray-400 text-sm">{t('common.perMonth')}</span> : null}
                 </div>
                 <p className="text-gray-500 text-[13px] leading-relaxed">{t('pricing.subscriptionOnlyDesc')}</p>
               </div>
@@ -209,7 +209,7 @@ export default function Pricing() {
 
           </div>
 
-          {/* Enterprise — full-width row with the license calculator */}
+          {/* Enterprise ??? full-width row with the license calculator */}
           <div className="max-w-[960px] mx-auto mt-6">
             <EnterprisePlanCard audience={checkoutAudience} onBookDemo={() => setEnterpriseOpen(true)} />
           </div>
