@@ -686,6 +686,11 @@
 .blog-content hr { border: none; border-top: 1px solid #e5e7eb; margin: 2rem 0; }
 .blog-content img.blog-img { border-radius: 0.75rem; max-width: 100%; height: auto; margin: 1.5rem 0; }
 
+@keyframes blog-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
 /* ==============================
    GLOBAL MOBILE UTILITIES
    ============================== */

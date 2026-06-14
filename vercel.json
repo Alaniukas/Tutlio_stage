@@ -24,6 +24,9 @@
         },
         "api/blog-feed.ts": {
             "maxDuration": 30
+        },
+        "api/blog-auto-generate.ts": {
+            "maxDuration": 60
         }
     },
     "headers": [
@@ -103,6 +106,10 @@
         {
             "path": "/api/indexnow-ping",
             "schedule": "40 */6 * * *"
+        },
+        {
+            "path": "/api/blog-auto-generate",
+            "schedule": "0 8 * * *"
         }
     ]
 }

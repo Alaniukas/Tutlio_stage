@@ -90,7 +90,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (studentId) {
         const { data: student } = await supabase
           .from('students')
-          .select('id, invite_code, full_name, email, payer_email')
+          .select('id, invite_code, full_name, email, payer_email, payer_name, parent_secondary_email, parent_secondary_name')
           .eq('id', studentId)
           .maybeSingle();
 
@@ -105,9 +105,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const { data: cRow } = await supabase.from('school_contracts').select('organization_id').eq('id', effectiveInstallment.contract_id).maybeSingle();
             schoolOrgId = (cRow as any)?.organization_id || null;
           }
-          // Child registration invite only — parent portal invite is sent separately by admin.
+          // Student registration invite — parent portal invite is sent separately by admin.
           const childEmail = String(student.email || '').trim();
+          type InviteRecipient = { email: string; recipientName: string };
+          const inviteRecipients: InviteRecipient[] = [];
           if (childEmail.includes('@')) {
+            inviteRecipients.push({
+              email: childEmail,
+              recipientName: String(student.full_name || '').trim() || childEmail,
+            });
+          } else {
+            const pushUnique = (email: string | null | undefined, name: string | null | undefined) => {
+              const em = String(email || '').trim();
+              if (!em.includes('@')) return;
+              if (inviteRecipients.some((r) => r.email.toLowerCase() === em.toLowerCase())) return;
+              inviteRecipients.push({
+                email: em,
+                recipientName: String(name || '').trim() || em,
+              });
+            };
+            pushUnique(student.payer_email, student.payer_name);
+            pushUnique(student.parent_secondary_email, student.parent_secondary_name);
+          }
+
+          if (inviteRecipients.length > 0) {
             const bookingUrl = `${APP_URL}/book/${inviteCode}`;
             let schoolName = 'Mokykla';
             if (schoolOrgId) {
@@ -118,22 +139,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 .maybeSingle();
               if (orgRow?.name) schoolName = String(orgRow.name);
             }
-            await fetch(`${APP_URL}/api/send-email`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'x-internal-key': serviceRoleKey },
-              body: JSON.stringify({
-                type: 'invite_email',
-                to: childEmail,
-                data: {
-                  context: 'school',
-                  studentName: student.full_name,
-                  tutorName: schoolName,
-                  inviteCode,
-                  bookingUrl,
-                  ...(schoolOrgId ? { organizationId: schoolOrgId } : {}),
-                },
-              }),
-            }).catch(() => {});
+            for (const recipient of inviteRecipients) {
+              await fetch(`${APP_URL}/api/send-email`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-internal-key': serviceRoleKey },
+                body: JSON.stringify({
+                  type: 'invite_email',
+                  to: recipient.email,
+                  data: {
+                    context: 'school',
+                    studentName: student.full_name,
+                    recipientName: recipient.recipientName,
+                    tutorName: schoolName,
+                    inviteCode,
+                    bookingUrl,
+                    ...(schoolOrgId ? { organizationId: schoolOrgId } : {}),
+                  },
+                }),
+              }).catch(() => {});
+            }
           }
         }
       }

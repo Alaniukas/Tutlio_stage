@@ -109,6 +109,13 @@ These are live once deployed — no setup needed, just verify:
   `ai: chatgpt`, `ai: perplexity`, `ai: copilot`, `ai: gemini`, `ai: claude`,
   social — instead of lumping everything without UTM into "direct". Apply with
   `npm run supabase:push`.
+- **Auto SEO blog** (`api/blog-auto-generate.ts`): cron every 2 days (08:00 UTC)
+  picks the next enabled keyword from Admin → Blog → **Auto SEO**, calls your
+  custom AI API (`BLOG_AI_API_URL` + `BLOG_AI_API_KEY`), saves a **draft**
+  (LT/EN/PL + cover image), emails admins with a one-click **Publish** link
+  (`/api/blog-quick-publish`). Configure keywords in Admin Panel; set env vars
+  in `.env.example` under “Auto SEO blog generation”. Migration:
+  `20260614100000_blog_auto_generation.sql`.
 
 ## 6. Post-deploy smoke check
 

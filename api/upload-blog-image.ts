@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
-import { timingSafeEqual, randomUUID } from 'crypto';
+import { timingSafeEqual } from 'crypto';
+import { uploadBlogImageFromBase64 } from './_lib/blogImageUpload.js';
 
 function getPlatformAdminSecret(): string {
   const s = process.env.ADMIN_SECRET || process.env.VITE_ADMIN_SECRET;
@@ -52,15 +53,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const buffer = Buffer.from(base64, 'base64');
   if (buffer.length > MAX_SIZE) return res.status(400).json({ error: 'File too large (max 5 MB)' });
 
-  const ext = ALLOWED_TYPES[contentType];
-  const safeName = (fileName || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40) || 'image';
-  const path = `${randomUUID()}-${safeName}${ext}`;
-
-  const { error } = await (supabase as any).storage
-    .from('blog-images')
-    .upload(path, buffer, { contentType, upsert: false });
-  if (error) return res.status(500).json({ error: error.message });
-
-  const { data } = (supabase as any).storage.from('blog-images').getPublicUrl(path);
-  return res.status(200).json({ url: data.publicUrl });
+  try {
+    const url = await uploadBlogImageFromBase64(supabase as any, base64, contentType, fileName);
+    return res.status(200).json({ url });
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message || 'Upload failed' });
+  }
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ATTENDANCE_GRACE_MS,
   deriveAttendance,
+  isAttendanceFlagged,
   isWithinJoinClickWindow,
 } from '@/lib/attendance';
 
@@ -106,5 +107,55 @@ describe('deriveAttendance', () => {
 
   it('uses the exported grace constant (10 min)', () => {
     expect(ATTENDANCE_GRACE_MS).toBe(10 * 60 * 1000);
+  });
+});
+
+describe('isAttendanceFlagged', () => {
+  it('is false without a meeting link or before grace', () => {
+    expect(
+      isAttendanceFlagged(
+        { start_time: START, end_time: END, tutor_joined_at: null, student_joined_at: null },
+        at(5),
+      ),
+    ).toBe(false);
+    expect(
+      isAttendanceFlagged(
+        {
+          start_time: START,
+          end_time: END,
+          meeting_link: 'https://meet.example.com/x',
+          tutor_joined_at: null,
+          student_joined_at: null,
+        },
+        at(5),
+      ),
+    ).toBe(false);
+  });
+
+  it('is true when grace passed and someone is missing', () => {
+    expect(
+      isAttendanceFlagged(
+        {
+          start_time: START,
+          end_time: END,
+          meeting_link: 'https://meet.example.com/x',
+          tutor_joined_at: iso(0),
+          student_joined_at: null,
+        },
+        at(30),
+      ),
+    ).toBe(true);
+  });
+
+  it('is false for cancelled or no_show lessons', () => {
+    const base = {
+      start_time: START,
+      end_time: END,
+      meeting_link: 'https://meet.example.com/x',
+      tutor_joined_at: null,
+      student_joined_at: null,
+    };
+    expect(isAttendanceFlagged({ ...base, status: 'cancelled' }, at(30))).toBe(false);
+    expect(isAttendanceFlagged({ ...base, status: 'no_show' }, at(30))).toBe(false);
   });
 });

@@ -4,10 +4,11 @@ import { Label } from '@/components/ui/label';
 import { ArrowLeft, Plus, Pencil, Trash2, Eye, Globe, Upload, X, Image as ImageIcon } from 'lucide-react';
 import { SUPPORTED_LOCALES, LOCALE_LABELS, type Locale } from '@/lib/i18n/core';
 import { blogPostPath } from '@/lib/blogLocale';
+import AdminBlogAutoPanel from '@/components/admin/AdminBlogAutoPanel';
 
 type BlogFormData = Record<string, string>;
 
-type BlogView = 'list' | 'edit';
+type BlogView = 'list' | 'edit' | 'auto';
 
 const LOCALE_FIELD_TYPES = ['title', 'excerpt', 'content'] as const;
 
@@ -254,12 +255,37 @@ export default function AdminBlogPanel({ adminSecret }: { adminSecret: string })
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex gap-1">
+          <button
+            type="button"
+            onClick={() => setView('list')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium ${view === 'list' ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+          >
+            Posts
+          </button>
+          <button
+            type="button"
+            onClick={() => setView('auto')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium ${view === 'auto' ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+          >
+            Auto SEO
+          </button>
+        </div>
+        {view === 'list' && (
+          <button type="button" onClick={openNew}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-xl text-sm font-medium">
+            <Plus className="w-4 h-4" /> New post
+          </button>
+        )}
+      </div>
+
+      {view === 'auto' && <AdminBlogAutoPanel adminSecret={adminSecret} />}
+
+      {view === 'list' && (
+        <>
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-300">Blog Posts ({posts.length})</h2>
-        <button type="button" onClick={openNew}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-xl text-sm font-medium">
-          <Plus className="w-4 h-4" /> New post
-        </button>
       </div>
 
       {(error || success) && (
@@ -283,6 +309,11 @@ export default function AdminBlogPanel({ adminSecret }: { adminSecret: string })
                     <span className={`flex-shrink-0 text-[10px] px-2 py-0.5 rounded-full font-semibold ${post.status === 'published' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}`}>
                       {String(post.status)}
                     </span>
+                    {(post as any).source === 'auto' && (
+                      <span className="flex-shrink-0 text-[10px] px-2 py-0.5 rounded-full font-semibold bg-violet-500/20 text-violet-300">
+                        auto
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-slate-500 truncate">
                     /{String(post.slug)}
@@ -310,6 +341,8 @@ export default function AdminBlogPanel({ adminSecret }: { adminSecret: string })
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 }

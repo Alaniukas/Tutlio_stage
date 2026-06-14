@@ -1070,6 +1070,7 @@ export default function CompanyContracts() {
         completionUrl: completionUrl || undefined,
         contractId: contract.id,
         childBirthDate: student?.child_birth_date || undefined,
+        address: [student?.student_address, student?.student_city].filter(Boolean).join(', ') || undefined,
         contractNumber: contract.contract_number || undefined,
         annualFee: contract.annual_fee,
         contractBody: contract.filled_body,

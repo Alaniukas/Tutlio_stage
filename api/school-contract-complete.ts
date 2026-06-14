@@ -314,8 +314,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  const parentName = String((st.payer_name || '')).trim();
-  const parentEmail = String((st.payer_email || '')).trim();
+  const emailContract = freshContract || contract;
+  const emailSt = (emailContract as any).student || st;
+  const parentName = String((emailSt.payer_name || '')).trim();
+  const parentEmail = String((emailSt.payer_email || '')).trim();
+  const parentPhone = String((emailSt.payer_phone || '')).trim();
+  const childBirthDateForEmail = String((emailSt.child_birth_date || '')).trim();
+  const addressForEmail = [emailSt.student_address, emailSt.student_city]
+    .map((x) => String(x || '').trim())
+    .filter(Boolean)
+    .join(', ');
   let emailSent = false;
   if (parentEmail && uploadedPath) {
     try {
@@ -329,9 +337,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           data: {
             schoolName: String((contract as any).organizations?.name || ''),
             schoolEmail: String((contract as any).organizations?.email || ''),
-            studentName: String(st.full_name || ''),
-            parentName: parentName || String(st.full_name || ''),
-            recipientName: parentName || String(st.full_name || ''),
+            studentName: String(emailSt.full_name || ''),
+            parentName: parentName || String(emailSt.full_name || ''),
+            recipientName: parentName || String(emailSt.full_name || ''),
+            parentPhone: parentPhone || undefined,
+            parentPersonalCode: String(emailSt.payer_personal_code || '').trim() || undefined,
+            childBirthDate: childBirthDateForEmail || undefined,
+            address: addressForEmail || undefined,
             missingFields: [],
             contractNumber: String((contract as any).contract_number || ''),
             annualFee: (contract as any).annual_fee || 0,

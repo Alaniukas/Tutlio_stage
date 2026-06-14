@@ -19,6 +19,7 @@ import { getResendApiKey, resendNotConfiguredMessage } from './_lib/resendConfig
 import { buildTrackedJoinUrl, type JoinRole } from './_lib/joinLink.js';
 import { isInternalRequest } from './_lib/auth.js';
 import { isCronAuthorized } from './_lib/cronAuth.js';
+import { markdownToEmailHtml } from './_lib/blogMarkdownEmail.js';
 
 
 function randomToken() {
@@ -602,7 +603,7 @@ function inviteEmail(d: any, locale: Locale) {
         <p>${inviteHeaderSub}</p>
       </div>
       <div class="body">
-        <p class="greeting">${t(locale, 'em.hiName', { name: d.studentName })}</p>
+        <p class="greeting">${t(locale, 'em.hiName', { name: d.recipientName || d.studentName })}</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">${inviteBody}</p>
         <div style="background:#f8f7ff; border: 1px dashed #c7d2fe; border-radius:12px; padding:24px; margin:24px 0; text-align: center;">
           <p style="${inviteCodeCaptionStyle}">${inviteCodeLabel}</p>
@@ -2110,6 +2111,90 @@ function productUpdateWhiteboardParent(d: any, _locale: Locale) {
 }
 
 /** Vidinis HTML (be išorinio wrap) – bodyHtml neescapinamas (tik serverio generuotas turinys). */
+function blogDraftReady(d: any, locale: Locale) {
+  const title = esc(d.title || '');
+  const excerpt = esc(d.excerpt || '');
+  const keyword = esc(d.keyword || '');
+  const publishUrl = typeof d.publishUrl === 'string' ? d.publishUrl : '';
+  const previewUrl = typeof d.previewUrl === 'string' ? d.previewUrl : '';
+  const adminUrl = typeof d.adminUrl === 'string' ? d.adminUrl : `${getAppUrl()}/admin`;
+  const coverImage = typeof d.coverImage === 'string' ? d.coverImage.trim() : '';
+  const contentLt = typeof d.contentLt === 'string' ? d.contentLt : '';
+  const contentEn = typeof d.contentEn === 'string' ? d.contentEn : '';
+  const contentPl = typeof d.contentPl === 'string' ? d.contentPl : '';
+  const titleEn = esc(d.titleEn || '');
+  const titlePl = esc(d.titlePl || '');
+
+  const previewBtn = previewUrl
+    ? `<a href="${previewUrl.replace(/"/g, '%22')}" style="display:inline-block; background:#4f46e5; color:#fff; font-weight:700; font-size:15px; padding:14px 28px; border-radius:12px; text-decoration:none; margin-right:8px;">
+            Peržiūrėti naršyklėje
+          </a>`
+    : '';
+
+  const publishBtnInner = publishUrl
+    ? `<a href="${publishUrl.replace(/"/g, '%22')}" style="display:inline-block; background:#059669; color:#fff; font-weight:700; font-size:15px; padding:14px 28px; border-radius:12px; text-decoration:none;">
+            Publikuoti dabar
+          </a>`
+    : '';
+
+  const actionRow =
+    previewBtn || publishBtnInner
+      ? `<p style="text-align:center; margin:24px 0;">${previewBtn}${publishBtnInner}</p>`
+      : '';
+
+  const coverBlock = coverImage
+    ? `<div style="margin:20px 0 24px; text-align:center;">
+          <img src="${esc(coverImage)}" alt="${title}" width="560" style="max-width:100%; height:auto; border-radius:12px; border:1px solid #e5e7eb;" />
+          <p style="color:#9ca3af; font-size:11px; margin-top:8px;">Cover nuotrauka (DI sugeneruota pagal temą)</p>
+        </div>`
+    : '';
+
+  const localeSection = (label: string, sectionTitle: string, content: string) => {
+    if (!content.trim()) return '';
+    return `
+        <div style="margin-top:28px; padding-top:20px; border-top:1px solid #e5e7eb;">
+          <p style="font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#6366f1; margin:0 0 8px;">${esc(label)}</p>
+          ${sectionTitle ? `<p style="font-size:18px; font-weight:700; color:#111827; margin:0 0 12px;">${sectionTitle}</p>` : ''}
+          <div style="background:#f9fafb; border:1px solid #e5e7eb; border-radius:12px; padding:16px 18px;">
+            ${markdownToEmailHtml(content)}
+          </div>
+        </div>`;
+  };
+
+  return {
+    subject: `Peržiūrai: ${d.title || 'Tutlio blogo draft'}`,
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#4f46e5', '#6366f1')}">
+        <h1>Automatinis blogo draft</h1>
+        <p>Peržiūrėkite pilną straipsnį ir nuspręskite ar publikuoti</p>
+      </div>
+      <div class="body">
+        <p class="greeting">Sveiki,</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          Sugeneruotas naujas SEO straipsnis (raktažodis: <strong>${keyword}</strong>).
+          Žemiau – pilnas turinys visomis kalbomis ir cover nuotrauka.
+        </p>
+        ${coverBlock}
+        <p style="font-size:16px; font-weight:700; color:#111827; margin:16px 0 8px;">${title}</p>
+        <p style="color:#6b7280; font-size:14px; line-height:1.5; margin-bottom:12px;">${excerpt}</p>
+        ${actionRow}
+        ${localeSection('Lietuvių kalba (tutlio.lt)', title, contentLt)}
+        ${localeSection('English (tutlio.com)', titleEn, contentEn)}
+        ${localeSection('Polski (tutlio.pl)', titlePl, contentPl)}
+        ${actionRow}
+        <p style="text-align:center; margin:0 0 16px;">
+          <a href="${adminUrl.replace(/"/g, '%22')}" style="color:#4f46e5; font-size:13px;">Redaguoti Admin Panel →</a>
+        </p>
+        <p style="color:#9ca3af; font-size:12px; line-height:1.5;">
+          Paspaudus „Publikuoti dabar“ straipsnis taps viešu visuose domenose (.lt / .com / .pl).
+          Jei norite pataisyti turinį, pirmiau atidarykite Admin Panel ir redaguokite draft.
+        </p>
+      </div>
+      ${footerFor(locale)}
+    `, locale),
+  };
+}
+
 function customHtmlAnnouncement(d: any, locale: Locale) {
   if (!d?.subject || typeof d.subject !== 'string') {
     throw new Error('custom_html_announcement: missing data.subject');
@@ -2474,6 +2559,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'school_installment_request': emailContent = schoolInstallmentRequest(data, locale); break;
       case 'tutor_student_assigned': emailContent = tutorStudentAssigned(data, locale); break;
       case 'parent_invite': emailContent = parentInvite(data, locale); break;
+      case 'blog_draft_ready': emailContent = blogDraftReady(data, locale); break;
       default: return res.status(400).json({ error: `Unknown email type: ${type}` });
     }
 

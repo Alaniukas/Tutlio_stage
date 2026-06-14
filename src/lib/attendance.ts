@@ -60,6 +60,21 @@ function sideStatus(
   return nowMs > startMs + ATTENDANCE_GRACE_MS ? 'missing' : 'pending';
 }
 
+export type AttendanceReviewSession = AttendanceSessionLike & {
+  meeting_link?: string | null;
+  status?: string | null;
+};
+
+/** Online lesson with a meeting link where the grace window passed and someone did not join on time. */
+export function isAttendanceFlagged(
+  session: AttendanceReviewSession,
+  now: Date = new Date(),
+): boolean {
+  if (!(session.meeting_link || '').trim()) return false;
+  if (session.status === 'cancelled' || session.status === 'no_show') return false;
+  return deriveAttendance(session, now).flagged;
+}
+
 export function deriveAttendance(
   session: AttendanceSessionLike,
   now: Date = new Date(),

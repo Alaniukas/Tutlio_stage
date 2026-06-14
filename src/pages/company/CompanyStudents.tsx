@@ -1135,35 +1135,6 @@ export default function CompanyStudents() {
     }
 
     let emailOk = true;
-    let schoolParentInvitesOk = true;
-    let parentInviteFailureDetail = '';
-    if (isSchoolView && inserted.length > 0) {
-      try {
-        const headers = await authHeaders();
-        for (const row of inserted) {
-          const invRes = await fetch('/api/parent-create-invites-for-student', {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({ studentId: row.id, locale }),
-          });
-          const invJson = (await invRes.json().catch(() => ({}))) as {
-            success?: boolean;
-            error?: string;
-            results?: Array<{ ok?: boolean; error?: string; email?: string }>;
-          };
-          if (!invRes.ok || invJson.success === false) {
-            schoolParentInvitesOk = false;
-            const fromResults = Array.isArray(invJson.results)
-              ? invJson.results.find((r) => r && r.ok === false)?.error
-              : undefined;
-            const hint = invJson.error || fromResults || `HTTP ${invRes.status}`;
-            if (!parentInviteFailureDetail) parentInviteFailureDetail = hint;
-          }
-        }
-      } catch {
-        schoolParentInvitesOk = false;
-      }
-    }
 
     const shouldSendInviteOnCreate = !isSchoolView;
     if (shouldSendInviteOnCreate && newStudent.email?.trim()) {
@@ -1208,17 +1179,11 @@ export default function CompanyStudents() {
     }
 
     const toastType: 'success' | 'error' =
-      shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk
-        ? 'error'
-        : isSchoolView && !schoolParentInvitesOk
-          ? 'error'
-          : 'success';
+      shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk ? 'error' : 'success';
     const toastMessage =
       shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk
         ? t('compStu.emailSendFailed')
-        : isSchoolView && !schoolParentInvitesOk
-          ? `${t('compStu.parentInviteEmailFailed')}${parentInviteFailureDetail ? ` (${parentInviteFailureDetail})` : ''}`
-          : t('compStu.studentAdded');
+        : t('compStu.studentAdded');
 
     setToastMessage({
       message: toastMessage,
@@ -1360,9 +1325,6 @@ export default function CompanyStudents() {
     setToastMessage({ message: t('compStu.commentSaved'), type: 'success' });
     invalidateCache('company_contracts');
     fetchData();
-    if (isSchoolView) {
-      void sendParentPortalInvites(selectedStudent.id, true);
-    }
   };
 
   const handleDetachStudent = async (id: string) => {

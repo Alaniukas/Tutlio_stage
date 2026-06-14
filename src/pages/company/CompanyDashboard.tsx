@@ -17,9 +17,13 @@ import {
 import { format, startOfMonth, endOfMonth, isAfter, isBefore, addDays, subDays } from 'date-fns';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import StatusBadge from '@/components/StatusBadge';
+import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
 import { useTranslation } from '@/lib/i18n';
 import { useDismissibleDashboardItemIds } from '@/hooks/useDismissibleDashboardItemIds';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
+import { authHeaders } from '@/lib/apiHelpers';
+import { deriveAttendance, isAttendanceFlagged } from '@/lib/attendance';
+import { buildNoShowSessionPatch, defaultNoShowWhenForNow } from '@/lib/noShowWhen';
 
 interface StatCard {
   label: string;
@@ -36,6 +40,8 @@ type TutorPay = {
   full_name: string;
 };
 
+type AttentionReason = 'payment' | 'attendance';
+
 interface OrgSessionRow {
   id: string;
   tutor_id: string;
@@ -47,7 +53,15 @@ interface OrgSessionRow {
   price: number | null;
   topic: string | null;
   payment_status?: string | null;
+  meeting_link?: string | null;
+  tutor_joined_at?: string | null;
+  student_joined_at?: string | null;
+  tutor_comment?: string | null;
   student?: { full_name: string } | null;
+}
+
+interface OrgAttentionRow extends OrgSessionRow {
+  reasons: AttentionReason[];
 }
 
 interface RecentOrgPayment {
@@ -60,6 +74,22 @@ interface RecentOrgPayment {
 }
 
 const DASH_CACHE_KEY = 'company_dashboard';
+
+function attendanceAttentionSummary(
+  session: Pick<OrgSessionRow, 'start_time' | 'end_time' | 'status' | 'tutor_joined_at' | 'student_joined_at' | 'meeting_link'>,
+  t: (key: string, params?: Record<string, string>) => string,
+): string {
+  const info = deriveAttendance(session);
+  const time = (iso: string | null | undefined) =>
+    iso ? new Date(iso).toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' }) : '';
+  const issues: string[] = [];
+  if (info.tutor === 'missing') issues.push(t('att.tutorMissing'));
+  else if (info.tutor === 'late') issues.push(t('att.tutorLate', { time: time(session.tutor_joined_at) }));
+  if (info.student === 'missing') issues.push(t('att.studentMissing'));
+  else if (info.student === 'late') issues.push(t('att.studentLate', { time: time(session.student_joined_at) }));
+  if (issues.length === 0) return t('companyDash.attendanceAttentionHint');
+  return issues.join(' · ');
+}
 
 export default function CompanyDashboard() {
   const { t, dateFnsLocale } = useTranslation();
@@ -101,7 +131,9 @@ export default function CompanyDashboard() {
   const [upcomingSessions, setUpcomingSessions] = useState(cached?.upcomingSessions ?? 0);
 
   const [upcomingList, setUpcomingList] = useState<OrgSessionRow[]>(cached?.upcomingList ?? []);
-  const [attentionList, setAttentionList] = useState<OrgSessionRow[]>(cached?.attentionList ?? []);
+  const [attentionList, setAttentionList] = useState<OrgAttentionRow[]>(cached?.attentionList ?? []);
+  const [noShowTarget, setNoShowTarget] = useState<OrgAttentionRow | null>(null);
+  const [markingNoShow, setMarkingNoShow] = useState(false);
   const [cancelledList, setCancelledList] = useState<OrgSessionRow[]>(cached?.cancelledList ?? []);
   const [recentPayments, setRecentPayments] = useState<RecentOrgPayment[]>(cached?.recentPayments ?? []);
   const [tutorPayMap, setTutorPayMap] = useState<Map<string, TutorPay>>(
@@ -234,7 +266,7 @@ export default function CompanyDashboard() {
 
       const { data: sessionsData } = await supabase
       .from('sessions')
-      .select('id, tutor_id, student_id, start_time, end_time, status, paid, price, topic, payment_status, student:students(full_name)')
+      .select('id, tutor_id, student_id, start_time, end_time, status, paid, price, topic, payment_status, meeting_link, tutor_joined_at, student_joined_at, tutor_comment, student:students(full_name)')
       .in('tutor_id', tutorIds)
       .order('start_time', { ascending: true })
       .limit(800);
@@ -259,31 +291,52 @@ export default function CompanyDashboard() {
       .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
       .slice(0, 5);
 
-      const attentionFiltered = rows
-      .filter((s) => {
-        if (s.paid || s.status === 'cancelled') return false;
-        const tp = tutorMap.get(s.tutor_id);
-        if (!tp) return false;
-        const start = new Date(s.start_time);
-        const end = new Date(s.end_time);
-        const deadlineBaseHours = tp.payment_deadline_hours ?? 24;
-        const deadline =
-          tp.payment_timing === 'before_lesson'
-            ? new Date(start.getTime() - deadlineBaseHours * 3600000)
-            : new Date(end.getTime() + deadlineBaseHours * 3600000);
-        const deadlineMs = deadline.getTime();
-        const isOverdue = deadlineMs <= nowMs;
-        const isSoon = deadlineMs > nowMs && deadlineMs - nowMs <= attentionWindowMs;
-        const isRecent = isAfter(start, past30);
-        const pendingConfirm = s.payment_status === 'paid_by_student';
-        return isRecent && (isOverdue || isSoon || pendingConfirm);
-      })
-      .sort((a, b) => {
-        if (a.payment_status === 'paid_by_student' && b.payment_status !== 'paid_by_student') return -1;
-        if (b.payment_status === 'paid_by_student' && a.payment_status !== 'paid_by_student') return 1;
-        return new Date(a.start_time).getTime() - new Date(b.start_time).getTime();
-      })
-      .slice(0, 8);
+      const attentionMap = new Map<string, OrgAttentionRow>();
+
+      const addAttentionReason = (session: OrgSessionRow, reason: AttentionReason) => {
+        const existing = attentionMap.get(session.id);
+        if (existing) {
+          if (!existing.reasons.includes(reason)) existing.reasons.push(reason);
+          return;
+        }
+        attentionMap.set(session.id, { ...session, reasons: [reason] });
+      };
+
+      rows
+        .filter((s) => {
+          if (s.paid || s.status === 'cancelled') return false;
+          const tp = tutorMap.get(s.tutor_id);
+          if (!tp) return false;
+          const start = new Date(s.start_time);
+          const end = new Date(s.end_time);
+          const deadlineBaseHours = tp.payment_deadline_hours ?? 24;
+          const deadline =
+            tp.payment_timing === 'before_lesson'
+              ? new Date(start.getTime() - deadlineBaseHours * 3600000)
+              : new Date(end.getTime() + deadlineBaseHours * 3600000);
+          const deadlineMs = deadline.getTime();
+          const isOverdue = deadlineMs <= nowMs;
+          const isSoon = deadlineMs > nowMs && deadlineMs - nowMs <= attentionWindowMs;
+          const isRecent = isAfter(start, past30);
+          const pendingConfirm = s.payment_status === 'paid_by_student';
+          return isRecent && (isOverdue || isSoon || pendingConfirm);
+        })
+        .forEach((s) => addAttentionReason(s, 'payment'));
+
+      rows
+        .filter((s) => isAttendanceFlagged(s, now) && isAfter(new Date(s.start_time), past30))
+        .forEach((s) => addAttentionReason(s, 'attendance'));
+
+      const attentionFiltered = Array.from(attentionMap.values())
+        .sort((a, b) => {
+          const aAttendance = a.reasons.includes('attendance') ? 0 : 1;
+          const bAttendance = b.reasons.includes('attendance') ? 0 : 1;
+          if (aAttendance !== bAttendance) return aAttendance - bAttendance;
+          if (a.payment_status === 'paid_by_student' && b.payment_status !== 'paid_by_student') return -1;
+          if (b.payment_status === 'paid_by_student' && a.payment_status !== 'paid_by_student') return 1;
+          return new Date(b.start_time).getTime() - new Date(a.start_time).getTime();
+        })
+        .slice(0, 10);
 
       const cancelledFiltered = rows
       .filter((s) => s.status === 'cancelled' && s.paid)
@@ -494,6 +547,30 @@ export default function CompanyDashboard() {
   const visibleCompanyAttention = attentionList.filter((s) => !dismissedCompanyAttentionIds.has(s.id));
   const visibleCompanyPayments = recentPayments.filter((p) => !dismissedCompanyPaymentIds.has(p.id));
 
+  const handleConfirmNoShow = async () => {
+    if (!noShowTarget) return;
+    const sessionId = noShowTarget.id;
+    setMarkingNoShow(true);
+    const when = defaultNoShowWhenForNow(
+      new Date(noShowTarget.start_time),
+      new Date(noShowTarget.end_time),
+    );
+    const patch = buildNoShowSessionPatch(when, noShowTarget.tutor_comment);
+    const { error } = await supabase.from('sessions').update(patch).eq('id', sessionId);
+    setMarkingNoShow(false);
+    if (!error) {
+      setNoShowTarget(null);
+      void loadData();
+      void (async () => {
+        await fetch('/api/notify-session-no-show', {
+          method: 'POST',
+          headers: await authHeaders(),
+          body: JSON.stringify({ sessionId }),
+        });
+      })().catch(() => {});
+    }
+  };
+
   if (loading) {
     return (
       <>
@@ -613,6 +690,8 @@ export default function CompanyDashboard() {
                     const tp = tutorPayMap.get(s.tutor_id);
                     const start = new Date(s.start_time);
                     const end = new Date(s.end_time);
+                    const hasPaymentReason = s.reasons.includes('payment');
+                    const hasAttendanceReason = s.reasons.includes('attendance');
                     const isPendingConfirm = s.payment_status === 'paid_by_student';
                     const deadlineBaseHours = tp?.payment_deadline_hours ?? 24;
                     const deadline =
@@ -625,8 +704,13 @@ export default function CompanyDashboard() {
                     return (
                       <div
                         key={s.id}
-                        className="flex items-center gap-1 p-3 rounded-xl border border-amber-100 bg-amber-50/50 hover:shadow-md hover:border-amber-200 transition-all group"
+                        className="flex items-center gap-2 p-2.5 rounded-xl border border-amber-100/80 bg-amber-50/40 hover:bg-amber-50/70 hover:border-amber-200/80 transition-colors group"
                       >
+                        <div
+                          className={`w-1 self-stretch min-h-[2.75rem] rounded-full flex-shrink-0 ${
+                            hasAttendanceReason ? 'bg-rose-400' : isPendingConfirm ? 'bg-amber-400' : 'bg-red-400'
+                          }`}
+                        />
                         <div
                           role="button"
                           tabIndex={0}
@@ -637,25 +721,14 @@ export default function CompanyDashboard() {
                               openCompanyLessonModal(s.id);
                             }
                           }}
-                          className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
+                          className="flex-1 min-w-0 cursor-pointer"
                         >
-                          <div
-                            className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
-                              isPendingConfirm ? 'bg-amber-100 group-hover:bg-amber-200' : 'bg-red-50 group-hover:bg-red-100'
-                            }`}
-                          >
-                            {isPendingConfirm ? (
-                              <CreditCard className="w-5 h-5 text-amber-600" />
-                            ) : (
-                              <AlertCircle className="w-5 h-5 text-red-500" />
-                            )}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="text-sm font-semibold text-gray-900 truncate">
-                                {s.student?.full_name || t('common.student')}
-                              </p>
-                              <div className="scale-90 origin-right">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <p className="text-sm font-semibold text-gray-900 truncate">
+                              {s.student?.full_name || t('common.student')}
+                            </p>
+                            {hasPaymentReason && !hasAttendanceReason && (
+                              <div className="scale-[0.85] origin-left shrink-0">
                                 <StatusBadge
                                   status={s.status}
                                   paymentStatus={s.payment_status}
@@ -663,24 +736,50 @@ export default function CompanyDashboard() {
                                   endTime={s.end_time}
                                 />
                               </div>
-                            </div>
-                            <p className="text-xs text-gray-500 mt-0.5">
-                              {format(start, 'd MMM yyyy, HH:mm', { locale: dateFnsLocale })}
-                              {s.topic ? ` · ${s.topic}` : ''}
-                            </p>
-                            <p className="text-[11px] mt-1 font-medium px-1.5 py-0.5 rounded-md inline-block">
-                              {isPendingConfirm ? (
-                                <span className="text-amber-700 bg-amber-50">{t('dash.reasonPendingConfirm')}</span>
-                              ) : diffMs <= 0 ? (
-                                <span className="text-red-600 bg-red-50">{t('dash.deadlinePassed')}</span>
-                              ) : (
-                                <span className="text-orange-600 bg-orange-50">
-                                  {t('dash.hoursLeft').replace('{n}', String(remainingHours))}
-                                </span>
-                              )}
-                            </p>
+                            )}
                           </div>
+                          <p className="text-xs text-gray-500 truncate mt-0.5">
+                            {format(start, 'd MMM, HH:mm', { locale: dateFnsLocale })}
+                            {' · '}
+                            {s.tutor_name || '—'}
+                            {hasAttendanceReason && (
+                              <>
+                                {' · '}
+                                <span className="text-rose-600 font-medium">
+                                  {attendanceAttentionSummary(s, t)}
+                                </span>
+                              </>
+                            )}
+                            {hasPaymentReason && (
+                              <>
+                                {' · '}
+                                <span className="font-medium">
+                                  {isPendingConfirm ? (
+                                    <span className="text-amber-700">{t('dash.reasonPendingConfirm')}</span>
+                                  ) : diffMs <= 0 ? (
+                                    <span className="text-red-600">{t('dash.deadlinePassed')}</span>
+                                  ) : (
+                                    <span className="text-orange-600">
+                                      {t('dash.hoursLeft').replace('{n}', String(remainingHours))}
+                                    </span>
+                                  )}
+                                </span>
+                              </>
+                            )}
+                          </p>
                         </div>
+                        {hasAttendanceReason && s.status !== 'no_show' && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setNoShowTarget(s);
+                            }}
+                            className="shrink-0 text-[11px] font-semibold text-rose-700 hover:text-rose-800 px-2 py-1 rounded-lg hover:bg-rose-50 transition-colors"
+                          >
+                            {t('companyDash.confirmNoShowShort')}
+                          </button>
+                        )}
                         {companyAttentionRowsKey && (
                           <button
                             type="button"
@@ -688,7 +787,7 @@ export default function CompanyDashboard() {
                               e.stopPropagation();
                               dismissCompanyAttentionRow(s.id);
                             }}
-                            className="p-1.5 h-fit rounded-lg text-gray-400 hover:text-gray-700 hover:bg-white/80 flex-shrink-0 self-center"
+                            className="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-white/70 flex-shrink-0"
                             aria-label={t('dash.dismissRow')}
                           >
                             <X className="w-4 h-4" />
@@ -890,6 +989,17 @@ export default function CompanyDashboard() {
           </Link>
         </div>
       </div>
+
+      <MarkStudentNoShowDialog
+        open={!!noShowTarget}
+        onOpenChange={(open) => {
+          if (!open) setNoShowTarget(null);
+        }}
+        sessionStart={noShowTarget ? new Date(noShowTarget.start_time) : new Date()}
+        sessionEnd={noShowTarget ? new Date(noShowTarget.end_time) : new Date()}
+        saving={markingNoShow}
+        onConfirm={handleConfirmNoShow}
+      />
     </>
   );
 }

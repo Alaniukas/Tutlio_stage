@@ -30,8 +30,10 @@ import {
 } from '@/components/ui/dialog';
 import StatusBadge from '@/components/StatusBadge';
 import AttendanceBadge from '@/components/AttendanceBadge';
+import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
 import { cn } from '@/lib/utils';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
+import { isAttendanceFlagged } from '@/lib/attendance';
 import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
 import { DateRangeFilter } from '@/components/DateRangeFilter';
 import { DateTimeSpinner } from '@/components/TimeSpinner';
@@ -132,6 +134,7 @@ export default function CompanySessions() {
   const [isFilterActive, setIsFilterActive] = useState(false);
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [markingNoShow, setMarkingNoShow] = useState(false);
+  const [noShowDialogOpen, setNoShowDialogOpen] = useState(false);
   const [cancelMode, setCancelMode] = useState(false);
   const [cancellationReason, setCancellationReason] = useState('');
   const [leaveFreeTimeOnCancel, setLeaveFreeTimeOnCancel] = useState(false);
@@ -221,10 +224,11 @@ export default function CompanySessions() {
     const sessionId = selectedSession.id;
     setMarkingNoShow(true);
     const when = defaultNoShowWhenForNow(new Date(selectedSession.start_time), new Date(selectedSession.end_time));
-    const patch = buildNoShowSessionPatch(when, (selectedSession as any).tutor_comment);
+    const patch = buildNoShowSessionPatch(when, selectedSession.tutor_comment);
     const { error } = await supabase.from('sessions').update(patch).eq('id', sessionId);
     setMarkingNoShow(false);
     if (!error) {
+      setNoShowDialogOpen(false);
       setSelectedSession(null);
       loadData();
       void (async () => {
@@ -236,6 +240,9 @@ export default function CompanySessions() {
       })().catch(() => {});
     }
   };
+
+  const selectedSessionAttendanceFlagged =
+    !!selectedSession && isAttendanceFlagged(selectedSession);
 
   const handleCancelSession = async () => {
     if (!selectedSession || cancellationReason.trim().length < 5) return;
@@ -1087,15 +1094,19 @@ export default function CompanySessions() {
                         </>
                       )}
 
-                      {selectedSession.status === 'active' && (
+                      {selectedSessionAttendanceFlagged &&
+                        (selectedSession.status === 'active' || selectedSession.status === 'completed') && (
                         <Button
                           variant="outline"
                           className="w-full border-rose-200 text-rose-800 hover:bg-rose-50 rounded-xl"
                           disabled={markingNoShow}
-                          onClick={(e) => { e.stopPropagation(); void handleMarkStudentNoShow(); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setNoShowDialogOpen(true);
+                          }}
                         >
                           <UserX className="w-4 h-4 mr-2" />
-                          {markingNoShow ? t('compSess.markNoShowSaving') : t('compSess.markNoShow')}
+                          {t('compSess.markNoShow')}
                         </Button>
                       )}
 
@@ -1119,6 +1130,15 @@ export default function CompanySessions() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <MarkStudentNoShowDialog
+        open={noShowDialogOpen && !!selectedSession}
+        onOpenChange={setNoShowDialogOpen}
+        sessionStart={selectedSession ? new Date(selectedSession.start_time) : new Date()}
+        sessionEnd={selectedSession ? new Date(selectedSession.end_time) : new Date()}
+        saving={markingNoShow}
+        onConfirm={handleMarkStudentNoShow}
+      />
 
       <Dialog open={deleteRecurringOpen} onOpenChange={setDeleteRecurringOpen}>
         <DialogContent className="w-[95vw] sm:max-w-[440px]">
