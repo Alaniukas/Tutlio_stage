@@ -20,7 +20,7 @@ import { cn, normalizeUrl } from '@/lib/utils';
 import { recordJoinClick } from '@/lib/joinTracking';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
-import { formatLessonStripeChargeEur } from '@/lib/stripeLessonPricing';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
 import { useUser } from '@/contexts/UserContext';
 import { fetchStudentActiveLessonPackagesDeduped, fetchSubjectNamesByIds } from '@/lib/studentLessonPackagesLight';
@@ -87,6 +87,7 @@ type ModalStep = 'cancel-confirm' | 'cancel-reason' | 'penalty-choice' | 'pickin
 
 export default function StudentSessions() {
     const { t, tHtml, dateFnsLocale } = useTranslation();
+    const { fmt, formatLessonCharge, isPl } = useMarketMoney();
     const { user: ctxUser } = useUser();
     const location = useLocation();
     const navigate = useNavigate();
@@ -1609,9 +1610,9 @@ export default function StudentSessions() {
                                                     </div>
                                                 ) : s.price ? (
                                                     isMonthlyBillingOnly ? (
-                                                        <span className="text-sm font-black text-blue-600">€{s.price} <span className="text-xs text-blue-500/80 font-semibold">{t('stuSess.invoiceShort')}</span></span>
+                                                        <span className="text-sm font-black text-blue-600">{fmt(s.price)} <span className="text-xs text-blue-500/80 font-semibold">{t('stuSess.invoiceShort')}</span></span>
                                                     ) : (
-                                                        <span className="text-sm font-black text-amber-600 whitespace-nowrap">€{s.price} <span className="text-xs text-amber-500/80 font-semibold">({t('stuSess.paymentPendingShort')})</span></span>
+                                                        <span className="text-sm font-black text-amber-600 whitespace-nowrap">{fmt(s.price)} <span className="text-xs text-amber-500/80 font-semibold">({t('stuSess.paymentPendingShort')})</span></span>
                                                     )
                                                 ) : null}
                                             </div>
@@ -1670,10 +1671,10 @@ export default function StudentSessions() {
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                                 <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
                                     <p className="text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">{t('stuSess.price')}</p>
-                                    <p className="font-bold text-gray-900">€{selectedSession?.price ?? '–'}</p>
+                                    <p className="font-bold text-gray-900">{fmt(selectedSession?.price)}</p>
                                     {selectedSession?.status === 'active' && !selectedSession.paid && selectedSession.price != null && showPerLessonStripeButton && !manualPaymentsOnly && (
                                         <p className="text-[11px] text-gray-500 mt-1 leading-snug">
-                                            {t('stuSess.stripeChargeNote', { amount: formatLessonStripeChargeEur(selectedSession.price, tutorOrgIsSchool) })}
+                                            {t('stuSess.stripeChargeNote', { amount: formatLessonCharge(selectedSession.price, tutorOrgIsSchool) })}
                                         </p>
                                     )}
                                 </div>
@@ -1759,7 +1760,7 @@ export default function StudentSessions() {
                                         {creditBalance > 0 && (
                                             <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-green-50 border border-green-200 text-sm">
                                                 <span className="text-green-700 font-medium">{t('stuSess.creditAvailable')}</span>
-                                                <span className="text-green-800 font-bold">€{creditBalance.toFixed(2)}</span>
+                                                <span className="text-green-800 font-bold">{fmt(creditBalance)}</span>
                                             </div>
                                         )}
                                         <button
@@ -1771,12 +1772,12 @@ export default function StudentSessions() {
                                                 ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
                                                 : creditBalance >= (selectedSession.price || 0) && (selectedSession.price || 0) > 0
                                                     ? <><CreditCard className="w-4 h-4" /> {t('stuSess.payWithCredit')}</>
-                                                    : <><CreditCard className="w-4 h-4" /> {t('stuSess.payStripe', { amount: formatLessonStripeChargeEur(Math.max(0, (selectedSession.price || 0) - creditBalance), tutorOrgIsSchool) })}</>
+                                                    : <><CreditCard className="w-4 h-4" /> {t('stuSess.payStripe', { amount: formatLessonCharge(Math.max(0, (selectedSession.price || 0) - creditBalance), tutorOrgIsSchool) })}</>
                                             }
                                         </button>
                                     </>
                                 )}
-                                {tutorPerlasEnabled && (() => {
+                                {tutorPerlasEnabled && !isPl && (() => {
                                     const sp = Number(selectedSession.price || 0);
                                     const pf = Math.round(sp * 2) / 100;
                                     const bf = 0.18;
@@ -1790,7 +1791,7 @@ export default function StudentSessions() {
                                             >
                                                 {perlasLoading
                                                     ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
-                                                    : <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank', { amount: tot.toFixed(2) })}</>
+                                                    : <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank', { amount: fmt(tot) })}</>
                                                 }
                                             </button>
                                         </>
@@ -1881,7 +1882,7 @@ export default function StudentSessions() {
                                             <p className="text-sm font-semibold text-red-800 mb-1">{t('stuSess.lateCancelWarning')}</p>
                                             <p className="text-sm text-red-700">
                                                 <span dangerouslySetInnerHTML={{ __html: tHtml('stuSess.lateCancelDesc', { hours: String(cancellationHours), percent: String(cancellationFeePercent) }) }} />
-                                                <span className="block text-lg font-bold mt-1">€{penalty.toFixed(2)}</span>
+                                                <span className="block text-lg font-bold mt-1">{fmt(penalty)}</span>
                                             </p>
                                         </div>
                                         {paymentType === 'package' && (
@@ -1891,17 +1892,17 @@ export default function StudentSessions() {
                                         )}
                                         {paymentType === 'monthly' && (
                                             <p className="text-xs font-medium text-red-800 bg-red-100/80 border border-red-200 rounded-lg px-3 py-2">
-                                                {t('stuSess.penaltyInvoiceNote', { amount: penalty.toFixed(2) })}
+                                                {t('stuSess.penaltyInvoiceNote', { amount: fmt(penalty) })}
                                             </p>
                                         )}
                                         {paymentType === 'per_lesson' && !selectedSession.paid && (
                                             <p className="text-xs font-medium text-red-800 bg-red-100/80 border border-red-200 rounded-lg px-3 py-2">
-                                                {t('stuSess.penaltyPayNote', { amount: penalty.toFixed(2) })}
+                                                {t('stuSess.penaltyPayNote', { amount: fmt(penalty) })}
                                             </p>
                                         )}
                                         {paymentType === 'per_lesson' && selectedSession.paid && (
                                             <p className="text-xs font-medium text-red-800 bg-red-100/80 border border-red-200 rounded-lg px-3 py-2">
-                                                {t('stuSess.penaltyPaidNote', { penalty: penalty.toFixed(2), refundable: ((selectedSession.price || 0) - penalty).toFixed(2) })}
+                                                {t('stuSess.penaltyPaidNote', { penalty: fmt(penalty), refundable: fmt((selectedSession.price || 0) - penalty) })}
                                             </p>
                                         )}
                                     </div>
@@ -1940,7 +1941,7 @@ export default function StudentSessions() {
                                             ) : (
                                                 <>
                                                     <CreditCard className="w-4 h-4 mr-2" />
-                                                    {t('stuSess.payFine')} €{penalty.toFixed(2)}
+                                                    {t('stuSess.payFine')} {fmt(penalty)}
                                                 </>
                                             )}
                                         </Button>
@@ -1972,7 +1973,7 @@ export default function StudentSessions() {
                                             <p className="text-sm font-semibold text-red-800 mb-1">{t('stuSess.lateCancelTitle')}</p>
                                             <p className="text-sm text-red-700">
                                                 <span dangerouslySetInnerHTML={{ __html: tHtml('stuSess.lateCancelPaidDesc', { hours: String(cancellationHours), percent: String(cancellationFeePercent) }) }} />
-                                                <span className="block text-lg font-bold mt-1">€{penalty.toFixed(2)}</span>
+                                                <span className="block text-lg font-bold mt-1">{fmt(penalty)}</span>
                                             </p>
                                         </div>
                                     </div>
@@ -2016,8 +2017,8 @@ export default function StudentSessions() {
                                     <p className="text-sm font-semibold text-amber-800 mb-1">{noPenalty ? t('stuSess.penaltyChoiceTitleEarly') : t('stuSess.penaltyChoiceTitle')}</p>
                                     <p className="text-sm text-amber-700">
                                         {noPenalty
-                                            ? t('stuSess.penaltyChoiceDescEarly', { refundable: refundable.toFixed(2) })
-                                            : t('stuSess.penaltyChoiceDesc', { penalty: penalty.toFixed(2), refundable: refundable.toFixed(2) })}
+                                            ? t('stuSess.penaltyChoiceDescEarly', { refundable: fmt(refundable) })
+                                            : t('stuSess.penaltyChoiceDesc', { penalty: fmt(penalty), refundable: fmt(refundable) })}
                                     </p>
                                 </div>
                                 <div className="space-y-3">
@@ -2028,7 +2029,7 @@ export default function StudentSessions() {
                                     >
                                         <p className="font-bold text-gray-900 text-sm">{t('stuSess.penaltyChoiceCredit')}</p>
                                         <p className="text-xs text-gray-500 mt-1">
-                                            {t('stuSess.penaltyChoiceCreditDesc', { amount: refundable.toFixed(2) })}
+                                            {t('stuSess.penaltyChoiceCreditDesc', { amount: fmt(refundable) })}
                                         </p>
                                     </button>
                                     <button
@@ -2038,7 +2039,7 @@ export default function StudentSessions() {
                                     >
                                         <p className="font-bold text-gray-900 text-sm">{t('stuSess.penaltyChoiceRefund')}</p>
                                         <p className="text-xs text-gray-500 mt-1">
-                                            {t('stuSess.penaltyChoiceRefundDesc', { amount: refundable.toFixed(2) })}
+                                            {t('stuSess.penaltyChoiceRefundDesc', { amount: fmt(refundable) })}
                                         </p>
                                     </button>
                                 </div>
@@ -2162,7 +2163,7 @@ export default function StudentSessions() {
                                 <p className="text-sm text-gray-500 mt-1">{t('stuSess.cancelledSuccessDesc')}</p>
                                 {lastPenaltyChoice === 'credit' && (
                                     <p className="text-sm text-green-700 font-medium mt-3 px-3 py-2 bg-green-50 border border-green-200 rounded-xl">
-                                        {t('stuSess.creditAppliedSuccess', { amount: ((selectedSession?.price || 0) - getPenaltyAmount(selectedSession!)).toFixed(2) })}
+                                        {t('stuSess.creditAppliedSuccess', { amount: fmt((selectedSession?.price || 0) - getPenaltyAmount(selectedSession!)) })}
                                     </p>
                                 )}
                                 {lastPenaltyChoice === 'refund' && refundFollowUp?.kind === 'stripe' && (

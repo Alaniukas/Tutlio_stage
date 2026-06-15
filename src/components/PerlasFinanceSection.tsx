@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Landmark, Loader2, CheckCircle2, XCircle, Clock, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/lib/i18n';
+import { isPlMarket } from '@/lib/market';
 
 interface LedgerRow {
   id: string;
@@ -22,6 +23,7 @@ interface Props {
 }
 
 export default function PerlasFinanceSection({ entityType, entityId }: Props) {
+  if (isPlMarket()) return null;
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [iban, setIban] = useState('');

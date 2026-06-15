@@ -28,6 +28,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useTranslation, buildLocalizedPath } from '@/lib/i18n';
+import { tutorPlanPriceLabels } from '@/lib/pricingDisplay';
+import { isPlMarket } from '@/lib/market';
+import { SUBSCRIPTION_PLN } from '@/lib/subscriptionPricing';
 import { TUTOR_PLANS, eur } from '@/lib/pricing';
 
 // Legacy trial codes — recognized so they aren't sent to Stripe as discount
@@ -225,6 +228,22 @@ export default function TutorSubscribe() {
     }
   };
 
+  const monthlyPriceLabel = tutorPlanPriceLabels.monthly();
+  const yearlyPerMonthLabel = tutorPlanPriceLabels.yearlyPerMonth();
+  const subscriptionOnlyPriceLabel = tutorPlanPriceLabels.subscriptionOnly();
+  const selectedPlanPriceHint =
+    selectedPlan === 'yearly'
+      ? isPlMarket()
+        ? `${SUBSCRIPTION_PLN.yearlyTotal.toLocaleString('pl-PL')} zł/rok`
+        : `${eur(TUTOR_PLANS.yearly.pricePerYearEur)}/year`
+      : selectedPlan === 'subscription_only'
+        ? isPlMarket()
+          ? `${subscriptionOnlyPriceLabel}/mies.`
+          : `${eur(TUTOR_PLANS.subscriptionOnly.pricePerMonthEur)}/mo`
+        : isPlMarket()
+          ? `${monthlyPriceLabel}/mies.`
+          : `${eur(TUTOR_PLANS.monthly.pricePerMonthEur)}/mo`;
+
   const primaryButtonLabel = (() => {
     if (loading) return t('subscribe.preparing');
     if (trialAvailable) return t('subscribe.tryFreeBtn');
@@ -328,7 +347,7 @@ export default function TutorSubscribe() {
             <div className="mb-6 mt-2">
               <h3 className="text-2xl font-bold text-gray-900 mb-2">{t('subscribe.monthlyTitle')}</h3>
               <div className="flex items-baseline gap-2">
-                <span className="text-5xl font-bold text-indigo-600">{eur(TUTOR_PLANS.monthly.pricePerMonthEur)}</span>
+                <span className="text-5xl font-bold text-indigo-600">{monthlyPriceLabel}</span>
                 <span className="text-gray-500 inline-flex items-center gap-1.5">
                   {t('subscribe.perMonth')}
                   <span className="relative inline-flex items-center group">
@@ -376,7 +395,7 @@ export default function TutorSubscribe() {
             <div className="mb-6 mt-2">
               <h3 className="text-2xl font-bold text-gray-900 mb-2">{t('subscribe.yearlyTitle')}</h3>
               <div className="flex items-baseline gap-2">
-                <span className="text-5xl font-bold text-indigo-600">{eur(TUTOR_PLANS.yearly.pricePerMonthEur)}</span>
+                <span className="text-5xl font-bold text-indigo-600">{yearlyPerMonthLabel}</span>
                 <span className="text-gray-500 inline-flex items-center gap-1.5">
                   {t('subscribe.perMonth')}
                   <span className="relative inline-flex items-center group">
@@ -422,7 +441,7 @@ export default function TutorSubscribe() {
             <div className="mb-6">
               <h3 className="text-2xl font-bold text-gray-900 mb-2">{t('subscribe.subscriptionOnlyTitle')}</h3>
               <div className="flex items-baseline gap-2">
-                <span className="text-5xl font-bold text-amber-600">{eur(TUTOR_PLANS.subscriptionOnly.pricePerMonthEur)}</span>
+                <span className="text-5xl font-bold text-amber-600">{subscriptionOnlyPriceLabel}</span>
                 <span className="text-gray-500">{t('subscribe.perMonth')}</span>
               </div>
               <p className="text-sm text-gray-500 mt-2">{t('subscribe.subscriptionOnlyDesc')}</p>
@@ -491,7 +510,7 @@ export default function TutorSubscribe() {
                 <p className="text-white font-semibold mb-1">{t('subscribe.cancelInfo')}</p>
                 <p className="text-indigo-200 text-sm">
                   {trialAvailable
-                    ? t('subscribe.trialPaymentInfo', { price: selectedPlan === 'yearly' ? `${eur(TUTOR_PLANS.yearly.pricePerYearEur)}/year` : selectedPlan === 'subscription_only' ? `${eur(TUTOR_PLANS.subscriptionOnly.pricePerMonthEur)}/mo` : `${eur(TUTOR_PLANS.monthly.pricePerMonthEur)}/mo` })
+                    ? t('subscribe.trialPaymentInfo', { price: selectedPlanPriceHint })
                     : t('subscribe.safePaymentInfo')}
                 </p>
               </div>

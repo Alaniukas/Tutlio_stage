@@ -4,8 +4,9 @@ import { useTranslation } from '@/lib/i18n';
 import { SUPPORTED_LOCALES, LOCALE_LABELS, LOCALE_NAMES, type Locale } from '@/lib/i18n';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { buildLocalizedPath } from '@/lib/i18n';
+import { isPlMarket } from '@/lib/market';
 
-export default function LanguageSelector() {
+function LanguageSelectorInner() {
   const { locale, setLocale } = useTranslation();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -63,4 +64,10 @@ export default function LanguageSelector() {
       )}
     </div>
   );
+}
+
+/** Hidden on tutlio.pl — Polish-only market. */
+export default function LanguageSelector() {
+  if (isPlMarket()) return null;
+  return <LanguageSelectorInner />;
 }

@@ -23,6 +23,8 @@
     "test:watch": "vitest",
     "seo:smoke": "node scripts/seo-smoke.mjs",
     "stripe:setup-pln": "tsx scripts/setup-stripe-pln-products.ts",
+    "stripe:setup-enterprise": "tsx scripts/setup-stripe-enterprise.ts",
+    "stripe:setup-pln-enterprise": "tsx scripts/setup-stripe-pln-enterprise.ts",
     "supabase:login": "npx supabase login",
     "supabase:link": "npx supabase link",
     "supabase:push": "npx supabase db push",

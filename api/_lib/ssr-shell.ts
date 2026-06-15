@@ -39,6 +39,7 @@ import {
 } from './seo-routing.js';
 import { t } from './ssr-i18n.js';
 import { TUTOR_PLANS } from '../../src/lib/pricing.js';
+import { SUBSCRIPTION_PLN } from '../../src/lib/subscriptionPricing.js';
 
 const OG_LOCALE_MAP: Record<Locale, string> = {
   lt: 'lt_LT',
@@ -90,7 +91,8 @@ export interface ShellOptions {
   urlFor?: (locale: Locale) => string;
 }
 
-function localeLinksHtml(urlFor: (locale: Locale) => string, current: Locale): string {
+function localeLinksHtml(urlFor: (locale: Locale) => string, current: Locale, domain: DomainKey): string {
+  if (domain === 'pl') return '';
   const links = LOCALES.map((l) =>
     l === current
       ? `<span lang="${hreflangCode(l)}">${LOCALE_NATIVE_NAMES[l]}</span>`
@@ -213,7 +215,7 @@ ${body}
     <a href="${buildPath(localizedPagePath('contacts', locale), locale, domain)}">${t(locale, 'contact.title')}</a>
     <a href="${buildPlatformPath('/schools', '/', locale, domain)}">${({ lt: 'Mokykloms', en: 'For Schools', pl: 'Dla szkół', lv: 'Skolām', ee: 'Koolidele', fr: 'Pour les écoles', es: 'Para escuelas', de: 'Für Schulen', se: 'För skolor', dk: 'Til skoler', fi: 'Kouluille', no: 'For skoler' })[locale]}</a>
   </div>
-  ${localeLinksHtml(urlFor, locale)}
+  ${localeLinksHtml(urlFor, locale, domain)}
   ${t(locale, 'common.allRightsReserved', { year: new Date().getFullYear() })}
 </footer>
 </body>
@@ -272,6 +274,19 @@ export function faqJsonLd(items: { question: string; answer: string }[]): string
 }
 
 export function softwareAppJsonLd(locale: Locale): string {
+  const isPl = locale === 'pl';
+  const pricingUrl = isPl ? 'https://www.tutlio.pl/pricing' : 'https://www.tutlio.com/pricing';
+  const offers = isPl
+    ? [
+        { '@type': 'Offer', name: 'Monthly', price: SUBSCRIPTION_PLN.monthly.toFixed(2), priceCurrency: 'PLN', url: pricingUrl },
+        { '@type': 'Offer', name: 'Yearly', price: SUBSCRIPTION_PLN.yearlyPerMonth.toFixed(2), priceCurrency: 'PLN', url: pricingUrl },
+        { '@type': 'Offer', name: 'Subscription Only', price: SUBSCRIPTION_PLN.subscriptionOnly.toFixed(2), priceCurrency: 'PLN', url: pricingUrl },
+      ]
+    : [
+        { '@type': 'Offer', name: 'Monthly', price: TUTOR_PLANS.monthly.pricePerMonthEur.toFixed(2), priceCurrency: 'EUR', url: pricingUrl },
+        { '@type': 'Offer', name: 'Yearly', price: TUTOR_PLANS.yearly.pricePerMonthEur.toFixed(2), priceCurrency: 'EUR', url: pricingUrl },
+        { '@type': 'Offer', name: 'Subscription Only', price: TUTOR_PLANS.subscriptionOnly.pricePerMonthEur.toFixed(2), priceCurrency: 'EUR', url: pricingUrl },
+      ];
   return JSON.stringify({
     '@context': 'https://schema.org',
     '@type': 'SoftwareApplication',
@@ -280,18 +295,14 @@ export function softwareAppJsonLd(locale: Locale): string {
     applicationSubCategory: 'EducationApplication',
     operatingSystem: 'Web',
     description: t(locale, 'landing.heroBadge'),
-    url: 'https://www.tutlio.com',
+    url: isPl ? 'https://www.tutlio.pl' : 'https://www.tutlio.com',
     image: DEFAULT_OG_IMAGE,
     featureList: 'Smart Calendar, Student Waitlist, Stripe Payments, Automated Reminders, Cancellation Rules, Lesson Notes, Invoicing, Parent Portals, Real-time Messaging, Multi-language',
-    offers: [
-      { '@type': 'Offer', name: 'Monthly', price: TUTOR_PLANS.monthly.pricePerMonthEur.toFixed(2), priceCurrency: 'EUR', url: 'https://www.tutlio.com/pricing' },
-      { '@type': 'Offer', name: 'Yearly', price: TUTOR_PLANS.yearly.pricePerMonthEur.toFixed(2), priceCurrency: 'EUR', url: 'https://www.tutlio.com/pricing' },
-      { '@type': 'Offer', name: 'Subscription Only', price: TUTOR_PLANS.subscriptionOnly.pricePerMonthEur.toFixed(2), priceCurrency: 'EUR', url: 'https://www.tutlio.com/pricing' },
-    ],
+    offers,
     publisher: {
       '@type': 'Organization',
       name: 'Tutlio',
-      url: 'https://www.tutlio.com',
+      url: isPl ? 'https://www.tutlio.pl' : 'https://www.tutlio.com',
     },
   });
 }

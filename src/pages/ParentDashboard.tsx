@@ -25,6 +25,7 @@ import {
 } from '@/components/parent/ParentLessonDetailModal';
 import StatusBadge from '@/components/StatusBadge';
 import ParentLayout from '@/components/ParentLayout';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { format, isAfter } from 'date-fns';
 import { cn, normalizeUrl } from '@/lib/utils';
 import { recordJoinClick } from '@/lib/joinTracking';
@@ -549,6 +550,7 @@ function ChildBlock({
   navigate: ReturnType<typeof useNavigate>;
   formatCountdown: (dateStr: string) => string;
 }) {
+  const { fmt } = useMarketMoney();
   const next = child.nextSession;
   const installments = child.installments ?? [];
   const schedulePath = `/parent/calendar?studentId=${child.studentId}`;
@@ -789,7 +791,7 @@ function ChildBlock({
               >
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-gray-900">
-                    #{i.installment_number} · €{i.amount.toFixed(2)}
+                    #{i.installment_number} · {fmt(i.amount)}
                   </p>
                   <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
                     <Clock className="w-3 h-3" />

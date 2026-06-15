@@ -35,6 +35,8 @@ import { useTranslation } from '@/lib/i18n';
 import { cn, formatLithuanianPhone, normalizeUrl, validateLithuanianPhone } from '@/lib/utils';
 import { recordJoinClick } from '@/lib/joinTracking';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
+import { isPlMarket } from '@/lib/market';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import {
   isPerStudentPaymentOverrideEnabled,
@@ -124,6 +126,7 @@ async function buildLatestInvoiceByStudentIdForTutor(tutorId: string): Promise<M
 
 export default function StudentsPage() {
   const { t, locale, dateFnsLocale } = useTranslation();
+  const { fmt } = useMarketMoney();
   const location = useLocation();
   const { user, profile } = useUser();
   const orgPolicy = useOrgTutorPolicy();
@@ -1832,7 +1835,7 @@ export default function StudentsPage() {
                               </div>
                             </div>
                             {!orgPolicy.hideMoney && session.price && (
-                              <span className="font-bold text-gray-700">€{session.price}</span>
+                              <span className="font-bold text-gray-700">{fmt(session.price)}</span>
                             )}
                           </div>
                           <p className="text-sm text-gray-500 flex items-center gap-2">
@@ -1998,7 +2001,7 @@ export default function StudentsPage() {
                     <div className="bg-amber-50 p-4 rounded-xl border border-amber-100 text-center">
                       <p className="text-amber-700 mb-1 font-medium text-xs uppercase tracking-wider">{t('stu.unpaidAmount')}</p>
                       <p className="font-black text-2xl text-amber-600">
-                        €{studentSessions.filter(s => !s.paid && new Date(s.end_time) < new Date() && s.status !== 'cancelled').reduce((sum, s) => sum + (s.price || 0), 0).toFixed(2)}
+                        {fmt(studentSessions.filter(s => !s.paid && new Date(s.end_time) < new Date() && s.status !== 'cancelled').reduce((sum, s) => sum + (s.price || 0), 0))}
                       </p>
                     </div>
                     )}
@@ -2177,7 +2180,7 @@ export default function StudentsPage() {
                               </p>
                               {!orgPolicy.hideMoney && (
                               <p className="text-xs text-gray-600">
-                                {t('stu.invoiceAmount')} €{Number(selectedStudent.latest_invoice.total_amount || 0).toFixed(2)}
+                                {t('stu.invoiceAmount')} {fmt(Number(selectedStudent.latest_invoice.total_amount || 0))}
                               </p>
                               )}
                               {selectedStudent.latest_invoice.is_shared_batch && !orgPolicy.hideMoney && (
@@ -2377,7 +2380,7 @@ export default function StudentsPage() {
                                   <span className="font-bold text-gray-700 block">{s.topic || t('stu.selfStudy')}</span>
                                   {!orgPolicy.hideMoney && s.price != null && (
                                     <span className={cn('block text-xs font-semibold', s.paid ? 'text-emerald-600' : 'text-amber-600')}>
-                                      €{s.price.toFixed(2)}
+                                      {fmt(s.price)}
                                     </span>
                                   )}
                                 </div>
@@ -2438,8 +2441,8 @@ export default function StudentsPage() {
                                   </div>
                                   <div className="text-xs text-gray-600 space-y-0.5">
                                     <p>
-                                      <Euro className="w-3 h-3 inline mr-1" />
-                                      <strong>€{pricing.price}</strong> / {pricing.duration_minutes} min
+                                      {!isPlMarket() && <Euro className="w-3 h-3 inline mr-1" />}
+                                      <strong>{fmt(pricing.price)}</strong> / {pricing.duration_minutes} min
                                     </p>
                                     <p>
                                       <Clock className="w-3 h-3 inline mr-1" />
@@ -2827,7 +2830,7 @@ export default function StudentsPage() {
               {!orgPolicy.hideMoney && (
               <div className="bg-gray-50 rounded-xl p-3 text-center">
                 <p className="text-xs text-gray-400 mb-1">{t('dash.priceLabel')}</p>
-                <p className="font-bold text-gray-900">€{selectedSessionForModal?.price || '–'}</p>
+                <p className="font-bold text-gray-900">{selectedSessionForModal?.price != null ? fmt(selectedSessionForModal.price) : '–'}</p>
               </div>
               )}
               <div className="bg-gray-50 rounded-xl p-3 text-center flex flex-col items-center justify-center">
@@ -2923,7 +2926,7 @@ export default function StudentsPage() {
                 </span>
                 {selectedSessionForModal.cancellation_penalty_amount != null && Number(selectedSessionForModal.cancellation_penalty_amount) > 0 && (
                   <span className="text-xs font-semibold text-red-600">
-                    €{Number(selectedSessionForModal.cancellation_penalty_amount).toFixed(2)}
+                    {fmt(Number(selectedSessionForModal.cancellation_penalty_amount))}
                   </span>
                 )}
                 {selectedSessionForModal.penalty_resolution && (

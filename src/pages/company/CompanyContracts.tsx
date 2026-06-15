@@ -31,6 +31,7 @@ import { useLocation } from 'react-router-dom';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { schoolContractPdfStoragePath } from '@/lib/schoolContractPdfPath';
 import { openContractFileInNewTab } from '@/lib/contractStorage';
+import { fmtMoney } from '@/lib/marketMoney';
 
 interface Student {
   id: string;
@@ -1431,7 +1432,7 @@ export default function CompanyContracts() {
                   <div>
                     <p className="font-semibold text-gray-900">{tpl.name}</p>
                     <p className="text-sm text-gray-500 mt-0.5">
-                      {tr('school.defaultFee')} {tpl.annual_fee_default ? `€${tpl.annual_fee_default}` : tr('school.defaultFeeNotSet')}
+                      {tr('school.defaultFee')} {tpl.annual_fee_default ? fmtMoney(tpl.annual_fee_default) : tr('school.defaultFeeNotSet')}
                     </p>
                     {tpl.pdf_url && (
                       <button type="button" className="text-xs text-emerald-700 hover:underline" onClick={() => openContractFile(tpl.pdf_url)}>

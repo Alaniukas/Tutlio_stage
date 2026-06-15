@@ -19,6 +19,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import BuyLicensesDialog from '@/components/company/BuyLicensesDialog';
+import { fmtMoney } from '@/lib/marketMoney';
+import { isPlMarket } from '@/lib/market';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -160,7 +162,7 @@ function SubjectPresetList({
         <div key={idx} className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2">
           <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
           <span className="flex-1 text-sm font-medium text-gray-800 truncate">{s.name}</span>
-          <span className="text-xs text-gray-500">{s.price} € · {s.duration_minutes} min</span>
+          <span className="text-xs text-gray-500">{fmtMoney(s.price)} · {s.duration_minutes} min</span>
           <button onClick={() => onRemove(idx)} className="text-gray-400 hover:text-red-500 transition-colors">
             <X className="w-3.5 h-3.5" />
           </button>
@@ -182,7 +184,7 @@ function SubjectPresetList({
                     <SelectItem value="__none__">{t('compTut.selectDefault')}</SelectItem>
                     {catalogAvailable.map((o) => (
                       <SelectItem key={o.key} value={o.key}>
-                        {o.preset.name} · {o.preset.price} € · {o.preset.duration_minutes} min
+                        {o.preset.name} · {fmtMoney(o.preset.price)} · {o.preset.duration_minutes} min
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -256,7 +258,7 @@ function SubjectRow({ subject, onSave, onDelete }: {
         <>
           <div className="flex items-center gap-1">
             <Input type="number" value={price} onChange={e => setPrice(Number(e.target.value) || 0)} className="w-16 h-7 text-xs rounded-lg px-2" />
-            <span className="text-xs text-gray-400">€</span>
+            <span className="text-xs text-gray-400">{isPlMarket() ? 'zł' : '€'}</span>
           </div>
           <div className="flex items-center gap-1">
             <Input type="number" value={duration} onChange={e => setDuration(Number(e.target.value) || 0)} className="w-16 h-7 text-xs rounded-lg px-2" />
@@ -267,7 +269,7 @@ function SubjectRow({ subject, onSave, onDelete }: {
         </>
       ) : (
         <>
-          <span className="text-xs text-gray-500">{subject.price} € · {subject.duration_minutes} min</span>
+          <span className="text-xs text-gray-500">{fmtMoney(subject.price)} · {subject.duration_minutes} min</span>
           <button onClick={() => setEditing(true)} className="text-gray-400 hover:text-indigo-600 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
           <button onClick={() => onDelete(subject.id)} className="text-gray-400 hover:text-red-500 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
         </>
@@ -307,7 +309,7 @@ function TutorSubjectPriceRow({ template, existing, onSave, onDelete }: {
         <>
           <div className="flex items-center gap-1">
             <Input type="number" value={price} onChange={e => setPrice(Number(e.target.value) || 0)} className="w-16 h-7 text-xs rounded-lg px-2" />
-            <span className="text-xs text-gray-400">€</span>
+            <span className="text-xs text-gray-400">{isPlMarket() ? 'zł' : '€'}</span>
           </div>
           <div className="flex items-center gap-1">
             <Input type="number" value={duration} onChange={e => setDuration(Number(e.target.value) || 0)} className="w-16 h-7 text-xs rounded-lg px-2" />
@@ -319,7 +321,7 @@ function TutorSubjectPriceRow({ template, existing, onSave, onDelete }: {
       ) : (
         <>
           <span className={cn("text-xs", hasOverride ? "text-indigo-600 font-medium" : "text-gray-400")}>
-            {hasOverride ? `${existing.price} € · ${existing.duration_minutes} min` : `${template.price} € · ${template.duration_minutes} min`}
+            {hasOverride ? `${fmtMoney(existing.price)} · ${existing.duration_minutes} min` : `${fmtMoney(template.price)} · ${template.duration_minutes} min`}
           </span>
           {hasOverride && <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full font-medium">{t('compTut.customBadge')}</span>}
           <button onClick={() => setEditing(true)} className="text-gray-400 hover:text-indigo-600 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
@@ -1345,7 +1347,7 @@ export default function CompanyTutors() {
                   <p className="text-xs text-gray-500">{t('compTut.lessonsTaught')}</p>
                 </div>
                 <div className="bg-gray-50 rounded-xl p-3 text-center">
-                  <p className="text-xl font-bold text-gray-900">{selectedTutor.earnings.toFixed(2)} €</p>
+                  <p className="text-xl font-bold text-gray-900">{fmtMoney(selectedTutor.earnings)}</p>
                   <p className="text-xs text-gray-500">{t('compTut.totalEarned')}</p>
                 </div>
               </div>
@@ -1477,7 +1479,7 @@ export default function CompanyTutors() {
                             <SelectItem value="__none__">{t('compTut.selectDefault')}</SelectItem>
                             {catalogForAddSubject.map((o) => (
                               <SelectItem key={o.key} value={o.key}>
-                                {o.preset.name} · {o.preset.price} € · {o.preset.duration_minutes} min
+                                {o.preset.name} · {fmtMoney(o.preset.price)} · {o.preset.duration_minutes} min
                               </SelectItem>
                             ))}
                           </SelectContent>

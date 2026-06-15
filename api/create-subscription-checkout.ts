@@ -2,6 +2,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { buildPublicPath, publicOriginFromRequest, type CheckoutAudience } from './_lib/public-origin.js';
+import { marketFromRequest } from './_lib/market.js';
+import { stripeSubscriptionEnv } from './_lib/stripe-subscription-env.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 const DEFAULT_SUBSCRIPTION_ONLY_PRODUCT_ID = 'prod_UOWf5Nqxf1wPIg';
@@ -12,19 +14,22 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-async function resolveYearlyPriceId(stripeClient: Stripe): Promise<string | undefined> {
-  if (process.env.STRIPE_YEARLY_PRICE_ID) {
-    return process.env.STRIPE_YEARLY_PRICE_ID;
+async function resolveYearlyPriceId(
+  stripeClient: Stripe,
+  env: ReturnType<typeof stripeSubscriptionEnv>,
+): Promise<string | undefined> {
+  if (env.yearlyPriceId) {
+    return env.yearlyPriceId;
   }
 
   const productIds = [
-    process.env.STRIPE_YEARLY_PRODUCT_ID,
+    env.yearlyProductId,
     DEFAULT_YEARLY_PRODUCT_ID,
-    process.env.STRIPE_MONTHLY_PRODUCT_ID,
+    env.monthlyProductId,
   ].filter(Boolean) as string[];
   const uniqueProductIds = [...new Set(productIds)];
 
-  const monthlyPriceId = process.env.STRIPE_MONTHLY_PRICE_ID;
+  const monthlyPriceId = env.monthlyPriceId;
   if (monthlyPriceId) {
     try {
       const monthly = await stripeClient.prices.retrieve(monthlyPriceId);
@@ -137,14 +142,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    const market = marketFromRequest(req);
+    const stripeEnv = stripeSubscriptionEnv(market);
+
     let priceId = plan === 'subscription_only'
-      ? process.env.STRIPE_SUBSCRIPTION_ONLY_PRICE_ID
+      ? stripeEnv.subscriptionOnlyPriceId
       : plan === 'monthly'
-        ? process.env.STRIPE_MONTHLY_PRICE_ID
-        : process.env.STRIPE_YEARLY_PRICE_ID;
+        ? stripeEnv.monthlyPriceId
+        : stripeEnv.yearlyPriceId;
 
     if (!priceId && plan === 'subscription_only') {
-      const productId = process.env.STRIPE_SUBSCRIPTION_ONLY_PRODUCT_ID || DEFAULT_SUBSCRIPTION_ONLY_PRODUCT_ID;
+      const productId = stripeEnv.subscriptionOnlyProductId || DEFAULT_SUBSCRIPTION_ONLY_PRODUCT_ID;
       const prices = await stripe.prices.list({
         product: productId,
         active: true,
@@ -157,14 +165,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (!priceId && plan === 'yearly') {
-      priceId = await resolveYearlyPriceId(stripe);
+      priceId = await resolveYearlyPriceId(stripe, stripeEnv);
     }
 
     if (!priceId) {
-      console.error(`Missing price ID for plan: ${plan}`);
+      console.error(`Missing price ID for plan: ${plan} (market: ${market})`);
+      const priceEnv =
+        market === 'pl'
+          ? plan === 'yearly'
+            ? 'STRIPE_YEARLY_PRICE_ID_PLN'
+            : plan === 'monthly'
+              ? 'STRIPE_MONTHLY_PRICE_ID_PLN'
+              : 'STRIPE_SUBSCRIPTION_ONLY_PRICE_ID_PLN'
+          : plan === 'yearly'
+            ? 'STRIPE_YEARLY_PRICE_ID'
+            : plan === 'monthly'
+              ? 'STRIPE_MONTHLY_PRICE_ID'
+              : 'STRIPE_SUBSCRIPTION_ONLY_PRICE_ID';
       const message =
         plan === 'yearly'
-          ? 'Metinis planas Stripe nėra sukonfigūruotas. Nustatykite STRIPE_YEARLY_PRICE_ID.'
+          ? `Metinis planas Stripe nėra sukonfigūruotas. Nustatykite ${priceEnv}.`
           : 'Configuration error - contact support';
       return res.status(500).json({ error: message });
     }

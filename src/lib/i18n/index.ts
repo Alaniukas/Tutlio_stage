@@ -41,6 +41,10 @@ export function storeLocale(locale: Locale): void {
 export function detectLocale(): Locale {
   if (typeof window === 'undefined') return 'lt';
 
+  const host = window.location.hostname;
+  // tutlio.pl is Polish-only — ignore path, query, and stored prefs.
+  if (host === 'tutlio.pl' || host.endsWith('.tutlio.pl')) return 'pl';
+
   const stripped = stripPlatformPrefix(window.location.pathname);
   const pathLocale = getLocaleFromPathname(stripped);
   if (pathLocale) return pathLocale;
@@ -49,9 +53,7 @@ export function detectLocale(): Locale {
   const langOverride = params.get('lang');
   if (langOverride && isValidLocale(langOverride)) return langOverride;
 
-  const host = window.location.hostname;
-  // On tutlio.com / tutlio.pl, default to the domain locale unless the URL
-  // explicitly sets one. Stored preference only applies on the .lt domain.
+  // On tutlio.com, default to English. Stored preference only applies on .lt.
   const domainDefault = defaultLocaleForHost(host);
   if (domainDefault !== 'lt') return domainDefault;
 

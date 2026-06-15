@@ -24,6 +24,7 @@ import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { authHeaders } from '@/lib/apiHelpers';
 import { deriveAttendance, isAttendanceFlagged } from '@/lib/attendance';
 import { buildNoShowSessionPatch, defaultNoShowWhenForNow } from '@/lib/noShowWhen';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
 
 interface StatCard {
   label: string;
@@ -93,6 +94,7 @@ function attendanceAttentionSummary(
 
 export default function CompanyDashboard() {
   const { t, dateFnsLocale } = useTranslation();
+  const { fmt } = useMarketMoney();
   const location = useLocation();
   const navigate = useNavigate();
   const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
@@ -528,7 +530,7 @@ export default function CompanyDashboard() {
     },
     {
       label: t('companyDash.earningsThisMonth'),
-      value: `${earningsThisMonth.toFixed(2)} €`,
+      value: fmt(earningsThisMonth),
       sub: format(new Date(), 'MMMM yyyy', { locale: dateFnsLocale }),
       icon: <Wallet className="w-5 h-5" />,
       iconBg: 'bg-green-100',
@@ -536,7 +538,7 @@ export default function CompanyDashboard() {
     },
     {
       label: t('companyDash.totalEarnings'),
-      value: `${earningsTotal.toFixed(2)} €`,
+      value: fmt(earningsTotal),
       sub: t('companyDash.sinceStart'),
       icon: <TrendingUp className="w-5 h-5" />,
       iconBg: 'bg-violet-100',
@@ -648,7 +650,7 @@ export default function CompanyDashboard() {
                         </p>
                       </div>
                       {s.price != null && (
-                        <span className="text-sm font-semibold text-gray-700 flex-shrink-0">€{s.price}</span>
+                        <span className="text-sm font-semibold text-gray-700 flex-shrink-0">{fmt(s.price)}</span>
                       )}
                     </div>
                   ))}
@@ -854,7 +856,7 @@ export default function CompanyDashboard() {
                           <p className="text-xs text-gray-500 mt-0.5">{p.subtitle}</p>
                         </div>
                         <div className="text-right flex-shrink-0">
-                          <p className="text-sm font-semibold text-gray-900">€{p.amount.toFixed(2)}</p>
+                          <p className="text-sm font-semibold text-gray-900">{fmt(p.amount)}</p>
                           <p className="text-xs text-gray-400">
                             {format(new Date(p.paidAt), 'd MMM', { locale: dateFnsLocale })}
                           </p>

@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { supabase } from '@/lib/supabase';
 import { Loader2, Search, CalendarDays } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
+import { fmtMoney } from '@/lib/marketMoney';
 import { cn } from '@/lib/utils';
 import { format, addDays, startOfDay, endOfDay } from 'date-fns';
 
@@ -263,7 +264,7 @@ export default function FindTutorModal({ isOpen, onClose, orgId, onPickSlot }: F
                   <div>
                     <p className="text-sm font-medium text-gray-900">{slot.tutorName}</p>
                     <p className="text-xs text-gray-500">
-                      {slot.subjectName} &middot; {format(slot.start, 'MMM d, HH:mm')}–{format(slot.end, 'HH:mm')} &middot; €{slot.price}
+                      {slot.subjectName} &middot; {format(slot.start, 'MMM d, HH:mm')}–{format(slot.end, 'HH:mm')} &middot; {fmtMoney(slot.price)}
                     </p>
                   </div>
                 </button>

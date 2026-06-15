@@ -1,7 +1,22 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { TUTOR_PLANS, eur } from '../src/lib/pricing.js';
+import { SUBSCRIPTION_PLN } from '../src/lib/subscriptionPricing.js';
+import { formatPln } from '../src/lib/formatPln.js';
+import { detectDomain } from './_lib/seo-routing.js';
 
-const LLMS_TXT = `# Tutlio
+function pricingBlock(isPl: boolean): string {
+  if (isPl) {
+    return `- **Monthly**: ${formatPln(SUBSCRIPTION_PLN.monthly)}/month
+- **Yearly**: ${formatPln(SUBSCRIPTION_PLN.yearlyPerMonth)}/month (${formatPln(SUBSCRIPTION_PLN.yearlyTotal)} billed annually)
+- **Subscription Only**: ${formatPln(SUBSCRIPTION_PLN.subscriptionOnly)}/month (manual payment tracking instead of Stripe collection — no commission on student payments)`;
+  }
+  return `- **Monthly**: ${eur(TUTOR_PLANS.monthly.pricePerMonthEur)}/month
+- **Yearly**: ${eur(TUTOR_PLANS.yearly.pricePerMonthEur)}/month (${eur(TUTOR_PLANS.yearly.pricePerYearEur)} billed annually)
+- **Subscription Only**: ${eur(TUTOR_PLANS.subscriptionOnly.pricePerMonthEur)}/month (manual payment tracking instead of Stripe collection — no commission on student payments)`;
+}
+
+function buildLlmsTxt(isPl: boolean): string {
+  return `# Tutlio
 
 > Tutlio is a tutoring management platform for private tutors and tutoring schools. It automates scheduling, payments, student management, and communication so tutors can focus on teaching.
 
@@ -27,9 +42,7 @@ Tutlio replaces spreadsheets, notebooks, and scattered tools with a single platf
 
 All plans include every feature. Pricing is per-tutor, not per-student — unlimited students on all plans.
 
-- **Monthly**: ${eur(TUTOR_PLANS.monthly.pricePerMonthEur)}/month
-- **Yearly**: ${eur(TUTOR_PLANS.yearly.pricePerMonthEur)}/month (${eur(TUTOR_PLANS.yearly.pricePerYearEur)} billed annually)
-- **Subscription Only**: ${eur(TUTOR_PLANS.subscriptionOnly.pricePerMonthEur)}/month (manual payment tracking instead of Stripe collection — no commission on student payments)
+${pricingBlock(isPl)}
 - All plans include a 7-day free trial (applied automatically at checkout)
 
 ## Links
@@ -40,7 +53,7 @@ All plans include every feature. Pricing is per-tutor, not per-student — unlim
 - For Schools: https://www.tutlio.com/schools
 - Blog: https://www.tutlio.com/blog
 - Blog RSS feed: https://www.tutlio.com/blog/rss.xml
-- Pricing: https://www.tutlio.com/pricing
+- Pricing: ${isPl ? 'https://www.tutlio.pl/pricing' : 'https://www.tutlio.com/pricing'}
 - About: https://www.tutlio.com/about
 - Contact: info@tutlio.lt
 
@@ -61,8 +74,9 @@ All plans include every feature. Pricing is per-tutor, not per-student — unlim
 - Stripe integration for payments
 - GDPR compliant, data stored in EU
 `;
+}
 
-const LLMS_FULL_TXT = `${LLMS_TXT}
+const LLMS_FULL_SUFFIX = `
 ## Detailed Feature Breakdown
 
 ### Smart Calendar
@@ -122,8 +136,9 @@ The waitlist is Tutlio's signature feature. When a student cancels a lesson, the
 `;
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
+  const isPl = detectDomain(req) === 'pl';
   const isFull = (req.url || '').includes('llms-full');
-  const body = isFull ? LLMS_FULL_TXT : LLMS_TXT;
+  const body = buildLlmsTxt(isPl) + (isFull ? LLMS_FULL_SUFFIX : '');
 
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Cache-Control', 'public, s-maxage=86400, stale-while-revalidate=86400');

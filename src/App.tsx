@@ -80,6 +80,7 @@ import ThemeColorManager from '@/hooks/useThemeColor';
 import { useTranslation, getLocaleFromPathname } from '@/lib/i18n';
 import { stripPlatformPrefix } from '@/lib/platform';
 import { initAnalytics, trackPageview } from '@/lib/analytics';
+import { isPlMarket } from '@/lib/market';
 
 /** Keep i18n locale aligned with `/:locale/...` URLs when users navigate or land from links. */
 function LocaleFromRouteSync() {
@@ -89,9 +90,11 @@ function LocaleFromRouteSync() {
   useEffect(() => { initAnalytics(); }, []);
 
   useEffect(() => {
-    const stripped = stripPlatformPrefix(location.pathname);
-    const pathLocale = getLocaleFromPathname(stripped);
-    if (pathLocale && pathLocale !== locale) setLocale(pathLocale);
+    if (!isPlMarket()) {
+      const stripped = stripPlatformPrefix(location.pathname);
+      const pathLocale = getLocaleFromPathname(stripped);
+      if (pathLocale && pathLocale !== locale) setLocale(pathLocale);
+    }
     trackPageview(location.pathname);
   }, [location.pathname, locale, setLocale]);
 

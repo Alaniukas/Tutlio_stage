@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
+import { isSubscriptionOnlyPriceId } from './_lib/stripe-subscription-env.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 const supabase = createClient(
@@ -143,10 +144,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       sub.status === 'canceled' || (sub as any).cancel_at_period_end ? 'canceled' : sub.status;
 
     if (active) {
-      const subOnlyPriceId = process.env.STRIPE_SUBSCRIPTION_ONLY_PRICE_ID;
       const firstPriceId = active.items.data[0]?.price?.id;
       const plan =
-        firstPriceId && subOnlyPriceId && firstPriceId === subOnlyPriceId
+        isSubscriptionOnlyPriceId(firstPriceId)
           ? 'subscription_only'
           : active.items.data[0]?.price.recurring?.interval === 'year'
             ? 'yearly'
@@ -178,10 +178,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Cancelled or other status – update profile so Settings shows 'Cancelled' and expiry date
     const latest = subscriptions.data[0];
     if (latest) {
-      const subOnlyPriceId = process.env.STRIPE_SUBSCRIPTION_ONLY_PRICE_ID;
       const firstPriceId = latest.items.data[0]?.price?.id;
       const plan =
-        firstPriceId && subOnlyPriceId && firstPriceId === subOnlyPriceId
+        isSubscriptionOnlyPriceId(firstPriceId)
           ? 'subscription_only'
           : latest.items.data[0]?.price.recurring?.interval === 'year'
             ? 'yearly'

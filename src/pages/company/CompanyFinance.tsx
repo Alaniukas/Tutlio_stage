@@ -15,6 +15,7 @@ import { useTranslation } from '@/lib/i18n';
 import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import PerlasFinanceSection from '@/components/PerlasFinanceSection';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
 
 type CompanyFinanceCache = {
   orgId: string;
@@ -30,6 +31,7 @@ type CompanyFinanceCache = {
 
 export default function CompanyFinance() {
   const { t } = useTranslation();
+  const { fmt } = useMarketMoney();
   const fc = getCached<CompanyFinanceCache>('company_finance');
   const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
   const perlasFeatureOn = hasFeature('perlas_finance');
@@ -702,7 +704,7 @@ export default function CompanyFinance() {
                               </div>
                             </div>
                             <div className="flex items-center gap-2 flex-shrink-0">
-                              <span className="text-sm font-bold text-gray-900">{`€${totalPrice.toFixed(2)}`}</span>
+                              <span className="text-sm font-bold text-gray-900">{fmt(totalPrice)}</span>
                               {isExpanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
                             </div>
                           </button>
@@ -718,7 +720,7 @@ export default function CompanyFinance() {
                                         : s.subjects?.name || '–'}
                                     </span>
                                   </div>
-                                  <span className="font-medium text-gray-700 shrink-0">{s.price != null ? `€${Number(s.price).toFixed(2)}` : '–'}</span>
+                                  <span className="font-medium text-gray-700 shrink-0">{s.price != null ? fmt(Number(s.price)) : '–'}</span>
                                 </div>
                               ))}
                             </div>

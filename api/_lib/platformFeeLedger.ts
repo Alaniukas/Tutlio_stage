@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { metadataBaseAmount, metadataCurrency, type ChargeCurrency } from './marketMoney.js';
 
 export type PlatformFeeSourceType = 'session' | 'package' | 'billing_batch' | 'penalty';
 
@@ -13,23 +14,24 @@ export async function recordStripePlatformFee(
   params: {
     sourceType: PlatformFeeSourceType;
     sourceId: string;
-    /** Amount that belongs to the tutor/org (after credits) in EUR. */
+    /** Amount that belongs to the tutor/org (after credits) in charge currency. */
     baseAmountEur: number | null | undefined;
-    /** Total the payer was charged (Stripe amount_total / 100) in EUR. */
+    /** Total the payer was charged (Stripe amount_total / 100) in charge currency. */
     grossAmountEur: number | null | undefined;
+    currency?: ChargeCurrency;
     organizationId?: string | null;
     tutorId?: string | null;
     stripeCheckoutSessionId?: string | null;
   },
 ): Promise<void> {
   try {
-    // Unknown base would inflate the fee to the full gross — skip instead.
     if (params.baseAmountEur == null || params.grossAmountEur == null) return;
     const base = Math.round(Number(params.baseAmountEur) * 100) / 100;
     const gross = Math.round(Number(params.grossAmountEur) * 100) / 100;
     if (!Number.isFinite(base) || !Number.isFinite(gross) || gross <= 0) return;
     const fee = Math.round((gross - base) * 100) / 100;
     if (fee <= 0) return;
+    const currency = (params.currency ?? 'eur').toUpperCase();
 
     const { error } = await supabase.from('platform_fee_ledger').upsert(
       {
@@ -41,6 +43,7 @@ export async function recordStripePlatformFee(
         base_amount: base,
         platform_fee: fee,
         gross_amount: gross,
+        currency,
         stripe_checkout_session_id: params.stripeCheckoutSessionId ?? null,
         paid_at: new Date().toISOString(),
       },
@@ -54,15 +57,11 @@ export async function recordStripePlatformFee(
   }
 }
 
-/**
- * Base amount written into checkout metadata by the checkout creators
- * (`tutlio_base_eur`) — the exact payer base after credits.
- */
+/** @deprecated Use metadataBaseAmount from marketMoney.js */
 export function metadataBaseEur(
   metadata: Record<string, string> | null | undefined,
 ): number | null {
-  const raw = metadata?.tutlio_base_eur;
-  if (raw == null || raw === '') return null;
-  const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? n : null;
+  return metadataBaseAmount(metadata);
 }
+
+export { metadataBaseAmount, metadataCurrency };

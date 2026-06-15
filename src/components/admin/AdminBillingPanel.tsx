@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Download, Loader2, Mail, RefreshCw, Send } from 'lucide-react';
+import { fmtMoney } from '@/lib/marketMoney';
 import AdminB2cInvoicesSection from './AdminB2cInvoicesSection';
 import { downloadBlob } from './adminDownload';
 
@@ -150,7 +151,7 @@ export default function AdminBillingPanel({ adminSecret }: Props) {
             {genResult.message && <p className="text-slate-400">{genResult.message}</p>}
             {genResult.generated.map((g) => (
               <p key={g.organizationId} className="text-emerald-400">
-                ✓ {g.organizationName} — {g.invoiceNumber}, mokėtina €{g.amountDue.toFixed(2)}{g.emailed ? ', išsiųsta' : ' (el. laiškas neišsiųstas)'}
+                ✓ {g.organizationName} — {g.invoiceNumber}, mokėtina {fmtMoney(g.amountDue)}{g.emailed ? ', išsiųsta' : ' (el. laiškas neišsiųstas)'}
               </p>
             ))}
             {genResult.skipped.map((s) => (
@@ -193,8 +194,8 @@ export default function AdminBillingPanel({ adminSecret }: Props) {
                     <tr key={inv.id} className="border-t border-white/5 text-slate-300">
                       <td className="py-2 pr-3 whitespace-nowrap">{inv.invoice_number}</td>
                       <td className="py-2 pr-3">{inv.organization_name || inv.organization_id}</td>
-                      <td className="py-2 pr-3 text-right whitespace-nowrap">€{inv.total_amount.toFixed(2)}</td>
-                      <td className="py-2 pr-3 text-right whitespace-nowrap font-medium text-white">€{inv.amount_due.toFixed(2)}</td>
+                      <td className="py-2 pr-3 text-right whitespace-nowrap">{fmtMoney(inv.total_amount)}</td>
+                      <td className="py-2 pr-3 text-right whitespace-nowrap font-medium text-white">{fmtMoney(inv.amount_due)}</td>
                       <td className="py-2 pr-3 whitespace-nowrap">
                         {inv.sent_at ? (
                           <span className="inline-flex items-center gap-1 text-emerald-400"><Mail className="w-3.5 h-3.5" /> išsiųsta</span>

@@ -9,6 +9,7 @@ import type { VercelRequest, VercelResponse } from './types.js';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { buildPublicPath, publicOriginFromRequest, type CheckoutAudience } from './_lib/public-origin.js';
+import { marketFromRequest } from './_lib/market.js';
 import { getEnterpriseLicenseBounds, getEnterprisePriceId } from './_lib/enterprise-license.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
@@ -79,9 +80,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    const priceId = getEnterprisePriceId();
+    const market = marketFromRequest(req);
+    const priceId = getEnterprisePriceId(market);
     if (!priceId) {
-      console.error('[create-enterprise-checkout] STRIPE_ENTERPRISE_PRICE_ID is not set');
+      const envKey = market === 'pl' ? 'STRIPE_ENTERPRISE_PRICE_ID_PLN' : 'STRIPE_ENTERPRISE_PRICE_ID';
+      console.error(`[create-enterprise-checkout] ${envKey} is not set`);
       return res.status(500).json({ error: 'Enterprise checkout is not configured - contact support' });
     }
 

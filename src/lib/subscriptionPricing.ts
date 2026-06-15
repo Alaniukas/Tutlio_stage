@@ -2,7 +2,7 @@ import { formatPln } from './formatPln';
 
 /**
  * tutlio.pl subscription list prices in PLN.
- * Stripe charges use STRIPE_*_PRICE_ID from env (PLN products on .pl deploy).
+ * Stripe charges use STRIPE_*_PRICE_ID_PLN on tutlio.pl, EUR envs elsewhere.
  */
 export const SUBSCRIPTION_PLN = {
   monthly: 85.99,

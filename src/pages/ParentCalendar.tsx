@@ -29,6 +29,7 @@ import { cn } from '@/lib/utils';
 import { useTranslation } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import ParentLayout from '@/components/ParentLayout';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
 import {
   Dialog,
   DialogContent,
@@ -149,6 +150,7 @@ const CHILD_STORAGE_KEY = 'tutlio_parent_calendar_child_id';
 
 export default function ParentCalendar() {
   const { t, tHtml, locale, dateFnsLocale } = useTranslation();
+  const { fmt } = useMarketMoney();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
@@ -1057,7 +1059,7 @@ export default function ParentCalendar() {
                           bookingSubjectId === s.id ? 'text-violet-700' : 'text-gray-900',
                         )}
                       >
-                        {s.price != null ? `${Number(s.price).toFixed(2)} €` : ''}
+                        {s.price != null ? fmt(s.price) : ''}
                       </span>
                     </button>
                   ))}
@@ -1100,7 +1102,7 @@ export default function ParentCalendar() {
               <div className="mb-4 rounded-2xl bg-gray-50 p-3 flex items-center justify-between">
                 <span className="text-xs text-gray-600">{t('parent.bookingPrice')}</span>
                 <span className="text-sm font-bold text-gray-900">
-                  {Number(selectedSubject.price).toFixed(2)} €
+                  {fmt(selectedSubject.price)}
                 </span>
               </div>
             )}

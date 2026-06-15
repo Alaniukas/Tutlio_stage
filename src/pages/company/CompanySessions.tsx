@@ -9,6 +9,7 @@ import { cancelSessionAndFillWaitlist } from '@/lib/lesson-actions';
 import { Checkbox } from '@/components/ui/checkbox';
 import { format } from 'date-fns';
 import { useTranslation } from '@/lib/i18n';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { CalendarDays, Search, ChevronDown, ListOrdered, UserX, XCircle, CheckCircle, Pencil, Ban, Loader2, MessageSquare, Trash2 } from 'lucide-react';
 import { defaultNoShowWhenForNow, buildNoShowSessionPatch } from '@/lib/noShowWhen';
 import { Input } from '@/components/ui/input';
@@ -106,6 +107,7 @@ function mapOrgSessionRow(row: any, tutorList: { id: string; full_name: string }
 
 export default function CompanySessions() {
   const { t, locale, dateFnsLocale } = useTranslation();
+  const { fmt } = useMarketMoney();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
@@ -706,7 +708,7 @@ export default function CompanySessions() {
                         {paid ? t('compSess.paidShort') : t('compSess.pendingShort')}
                       </span>
                       <span className="text-sm font-semibold text-gray-900">
-                        {session.price != null ? `${session.price.toFixed(2)} €` : '–'}
+                        {session.price != null ? fmt(session.price) : '–'}
                       </span>
                     </div>
                   </div>
@@ -775,7 +777,7 @@ export default function CompanySessions() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-right font-semibold text-gray-800">
-                      {session.price != null ? `${session.price.toFixed(2)} €` : '–'}
+                      {session.price != null ? fmt(session.price) : '–'}
                     </td>
                   </tr>
                 ))}
@@ -971,7 +973,7 @@ export default function CompanySessions() {
                     <div>
                       <Label className="text-xs text-gray-500">{t('compSess.labelPrice')}</Label>
                       <p className="font-semibold text-sm mt-1">
-                        {selectedSession.price != null ? `${selectedSession.price.toFixed(2)} €` : '–'}
+                        {selectedSession.price != null ? fmt(selectedSession.price) : '–'}
                       </p>
                     </div>
                   </div>

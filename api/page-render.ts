@@ -20,8 +20,27 @@ import {
   hreflangCode,
 } from './_lib/ssr-shell.js';
 import { TUTOR_PLANS, eur } from '../src/lib/pricing.js';
+import { SUBSCRIPTION_PLN } from '../src/lib/subscriptionPricing.js';
+import { formatPln } from '../src/lib/formatPln.js';
 
 type PageId = 'landing' | 'pricing' | 'about' | 'contacts';
+
+function ssrPlanPrice(locale: Locale, plan: 'monthly' | 'yearly' | 'subscriptionOnly'): string {
+  if (locale === 'pl') {
+    const amounts = {
+      monthly: SUBSCRIPTION_PLN.monthly,
+      yearly: SUBSCRIPTION_PLN.yearlyPerMonth,
+      subscriptionOnly: SUBSCRIPTION_PLN.subscriptionOnly,
+    };
+    return formatPln(amounts[plan]);
+  }
+  const eurAmounts = {
+    monthly: TUTOR_PLANS.monthly.pricePerMonthEur,
+    yearly: TUTOR_PLANS.yearly.pricePerMonthEur,
+    subscriptionOnly: TUTOR_PLANS.subscriptionOnly.pricePerMonthEur,
+  };
+  return eur(eurAmounts[plan]);
+}
 
 function renderLanding(locale: Locale, domain: DomainKey): string {
   const features = [
@@ -126,19 +145,19 @@ function renderPricing(locale: Locale, domain: DomainKey): string {
   <div class="grid">
     <div class="card">
       <h3>${esc(t(locale, 'pricing.monthly'))}</h3>
-      <p style="font-size:2rem;font-weight:700;margin:12px 0">${eur(TUTOR_PLANS.monthly.pricePerMonthEur)}<span style="font-size:.9rem;font-weight:400;color:#666">/mo</span></p>
+      <p style="font-size:2rem;font-weight:700;margin:12px 0">${ssrPlanPrice(locale, 'monthly')}<span style="font-size:.9rem;font-weight:400;color:#666">/mo</span></p>
       <p>${esc(t(locale, 'pricing.monthlyDesc'))}</p>
       <a href="${registerPath}" class="btn" style="margin-top:16px">${esc(t(locale, 'pricing.start7DayTrial'))}</a>
     </div>
     <div class="card">
       <h3>${esc(t(locale, 'pricing.yearly'))}</h3>
-      <p style="font-size:2rem;font-weight:700;margin:12px 0">${eur(TUTOR_PLANS.yearly.pricePerMonthEur)}<span style="font-size:.9rem;font-weight:400;color:#666">/mo</span></p>
+      <p style="font-size:2rem;font-weight:700;margin:12px 0">${ssrPlanPrice(locale, 'yearly')}<span style="font-size:.9rem;font-weight:400;color:#666">/mo</span></p>
       <p>${esc(t(locale, 'pricing.yearlyDesc'))}</p>
       <a href="${registerPath}" class="btn" style="margin-top:16px">${esc(t(locale, 'pricing.start7DayTrial'))}</a>
     </div>
     <div class="card">
       <h3>${esc(t(locale, 'pricing.subscriptionOnly'))}</h3>
-      <p style="font-size:2rem;font-weight:700;margin:12px 0">${eur(TUTOR_PLANS.subscriptionOnly.pricePerMonthEur)}<span style="font-size:.9rem;font-weight:400;color:#666">/mo</span></p>
+      <p style="font-size:2rem;font-weight:700;margin:12px 0">${ssrPlanPrice(locale, 'subscriptionOnly')}<span style="font-size:.9rem;font-weight:400;color:#666">/mo</span></p>
       <p>${esc(t(locale, 'pricing.subscriptionOnlyDesc'))}</p>
       <a href="${registerPath}" class="btn" style="margin-top:16px">${esc(t(locale, 'pricing.start7DayTrial'))}</a>
     </div>

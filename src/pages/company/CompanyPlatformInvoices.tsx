@@ -3,6 +3,7 @@ import { Download, FileText, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { authHeaders } from '@/lib/apiHelpers';
 import { useTranslation } from '@/lib/i18n';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
 
 interface PlatformInvoice {
   id: string;
@@ -20,6 +21,7 @@ interface PlatformInvoice {
 /** Invoices issued by MB Tutlio to this agency (RLS limits rows to the admin's org). */
 export default function CompanyPlatformInvoices() {
   const { t } = useTranslation();
+  const { fmt } = useMarketMoney();
   const [invoices, setInvoices] = useState<PlatformInvoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -100,12 +102,12 @@ export default function CompanyPlatformInvoices() {
                 <tr key={inv.id} className="border-b border-gray-100 text-gray-700">
                   <td className="py-3 pr-3 whitespace-nowrap font-medium text-gray-900">{inv.invoice_number}</td>
                   <td className="py-3 pr-3 whitespace-nowrap">{periodLabel(inv)}</td>
-                  <td className="py-3 pr-3 text-right whitespace-nowrap">€{Number(inv.total_amount).toFixed(2)}</td>
+                  <td className="py-3 pr-3 text-right whitespace-nowrap">{fmt(Number(inv.total_amount))}</td>
                   <td className="py-3 pr-3 text-right whitespace-nowrap text-gray-500">
-                    {Number(inv.deducted_amount) > 0 ? `-€${Number(inv.deducted_amount).toFixed(2)}` : '—'}
+                    {Number(inv.deducted_amount) > 0 ? `-${fmt(Number(inv.deducted_amount))}` : '—'}
                   </td>
                   <td className="py-3 pr-3 text-right whitespace-nowrap font-semibold text-gray-900">
-                    €{Number(inv.amount_due).toFixed(2)}
+                    {fmt(Number(inv.amount_due))}
                   </td>
                   <td className="py-3 text-right">
                     <button

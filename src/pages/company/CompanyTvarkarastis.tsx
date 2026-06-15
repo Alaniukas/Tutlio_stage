@@ -40,6 +40,7 @@ import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring'
 import { authHeaders } from '@/lib/apiHelpers';
 import { cancelSessionAndFillWaitlist, releaseSessionSlotViaApi } from '@/lib/lesson-actions';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -282,6 +283,7 @@ function resolveOrgMeetingLink(
 
 export default function CompanyTvarkarastis() {
   const { t, locale, dateFnsLocale } = useTranslation();
+  const { fmt } = useMarketMoney();
   const { loading: featuresLoading, hasFeature, organizationId } = useOrgFeatures();
 
   // Feature flags
@@ -2304,7 +2306,7 @@ export default function CompanyTvarkarastis() {
                                   {t('compSch.groupMax', { max: String(subj.max_students) })}
                                 </span>
                               )}
-                              · {subj.duration_minutes} min · €{subj.price}
+                              · {subj.duration_minutes} min · {fmt(subj.price)}
                             </div>
                           </SelectItem>
                         ))}
@@ -2753,7 +2755,7 @@ export default function CompanyTvarkarastis() {
                 <div>
                   <Label className="text-xs text-gray-500">{t('compSess.labelPrice')}</Label>
                   <p className="font-semibold text-sm mt-1">
-                    {selectedEvent.price != null ? `${Number(selectedEvent.price).toFixed(2)} €` : '–'}
+                    {selectedEvent.price != null ? fmt(Number(selectedEvent.price)) : '–'}
                   </p>
                 </div>
               </div>
@@ -2836,7 +2838,7 @@ export default function CompanyTvarkarastis() {
                     </span>
                     {(selectedEvent as any).cancellation_penalty_amount != null && Number((selectedEvent as any).cancellation_penalty_amount) > 0 && (
                       <span className="text-xs font-semibold text-red-600">
-                        €{Number((selectedEvent as any).cancellation_penalty_amount).toFixed(2)}
+                        {fmt(Number((selectedEvent as any).cancellation_penalty_amount))}
                       </span>
                     )}
                     {(selectedEvent as any).penalty_resolution && (

@@ -174,17 +174,17 @@ export default function EnterprisePlanCard({ audience, onBookDemo }: Props) {
                 ) : (
                   <>
                     <div className="flex items-baseline gap-1.5">
-                      <span className="text-3xl font-bold text-white">{formatMoney(unitCents, pricing.currency)}</span>
+                      <span className="text-3xl font-bold text-white">{formatMoney(unitCents, pricing.currency, locale)}</span>
                       <span className="text-gray-400 text-sm">{t('pricing.perLicensePerMonth')}</span>
                     </div>
                     {flatCents > 0 && (
                       <p className="text-gray-400 text-[13px] mt-1">
-                        {t('pricing.enterpriseAdminFee', { fee: formatMoney(flatCents, pricing.currency) })}
+                        {t('pricing.enterpriseAdminFee', { fee: formatMoney(flatCents, pricing.currency, locale) })}
                       </p>
                     )}
                     <p className="text-gray-300 text-[13px] mt-1 font-medium">
                       {t('pricing.enterpriseTotalPerMonth', {
-                        total: formatMoney(totalCents, pricing.currency),
+                        total: formatMoney(totalCents, pricing.currency, locale),
                         count,
                       })}
                     </p>

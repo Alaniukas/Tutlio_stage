@@ -39,6 +39,7 @@ export interface RunBlogAutoGenerateResult {
   postId?: string;
   keyword?: string;
   publishUrl?: string;
+  previewUrl?: string;
 }
 
 function blogNotifyEmails(): string[] {

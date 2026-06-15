@@ -43,6 +43,7 @@ import AttendanceBadge from '@/components/AttendanceBadge';
 import { DateTimeSpinner } from '@/components/TimeSpinner';
 import { Edit2 } from 'lucide-react';
 import { cancelSessionAndFillWaitlist, releaseSessionSlotViaApi } from '@/lib/lesson-actions';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
     tutorCalendarFallbackProfileDeduped,
@@ -134,6 +135,7 @@ function nextYmdForDow(dow: number): string {
 
 export default function DashboardPage() {
     const { t, dateFnsLocale, locale } = useTranslation();
+    const { fmt } = useMarketMoney();
     const navigate = useNavigate();
     const location = useLocation();
     const { user: ctxUser, profile: ctxProfile } = useUser();
@@ -1099,7 +1101,7 @@ export default function DashboardPage() {
                                 </div>
                                 <span className="text-xs text-gray-400 font-medium">30 d.</span>
                             </div>
-                            <p className="text-2xl font-bold text-gray-900">€{thisMonthRevenue.toFixed(0)}</p>
+                            <p className="text-2xl font-bold text-gray-900">{fmt(thisMonthRevenue, { decimals: 0 })}</p>
                             <p className="text-xs text-gray-500 mt-1">{t('dash.revenue')}</p>
                         </div>
 
@@ -1110,7 +1112,7 @@ export default function DashboardPage() {
                                 </div>
                                 <span className="text-xs text-gray-400 font-medium">{t('dash.pending')}</span>
                             </div>
-                            <p className="text-2xl font-bold text-gray-900">€{pendingRevenue.toFixed(0)}</p>
+                            <p className="text-2xl font-bold text-gray-900">{fmt(pendingRevenue, { decimals: 0 })}</p>
                             <p className="text-xs text-gray-500 mt-1">{t('dash.unpaid')}</p>
                         </div>
                       </>
@@ -1178,7 +1180,7 @@ export default function DashboardPage() {
                                         <div className="scale-90 origin-left flex items-center gap-1 flex-wrap"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} isTrial={s.subjects?.is_trial === true} orgTutorCopy={isOrgTutor === true} hidePaymentStatus={isOrgTutor === true} endTime={s.end_time} /><AttendanceBadge session={s} /></div>
                                       </div>
                                     </div>
-                                    {isOrgTutor !== true && s.price && <span className="text-sm font-semibold text-gray-700 flex-shrink-0">€{s.price}</span>}
+                                    {isOrgTutor !== true && s.price && <span className="text-sm font-semibold text-gray-700 flex-shrink-0">{fmt(s.price)}</span>}
                                   </div>
                                 );
                               })}
@@ -1401,7 +1403,7 @@ export default function DashboardPage() {
                                                             <div className="scale-90 origin-left flex items-center gap-1 flex-wrap"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} endTime={s.end_time} /><AttendanceBadge session={s} /></div>
                                                         </div>
                                                     </div>
-                                                    {s.price && <span className="text-sm font-semibold text-gray-700 flex-shrink-0">€{s.price}</span>}
+                                                    {s.price && <span className="text-sm font-semibold text-gray-700 flex-shrink-0">{fmt(s.price)}</span>}
                                                 </div>
                                             );
                                         })}
@@ -1605,7 +1607,7 @@ export default function DashboardPage() {
                                                     <p className="text-sm font-semibold text-gray-900 truncate">
                                                         {s.student?.full_name}
                                                     </p>
-                                                    <span className="text-sm font-bold text-gray-900">€{s.price}</span>
+                                                    <span className="text-sm font-bold text-gray-900">{fmt(s.price)}</span>
                                                 </div>
                                                 <div className="text-xs text-gray-500 flex items-center gap-1.5 mt-0.5">
                                                     <span>{format(start, "d MMM", { locale: dateFnsLocale })}</span>
@@ -1723,7 +1725,7 @@ export default function DashboardPage() {
                                                     </p>
                                                 </div>
                                             </div>
-                                            <span className="text-sm font-bold text-green-700 flex-shrink-0">+€{p.amount.toFixed(2)}</span>
+                                            <span className="text-sm font-bold text-green-700 flex-shrink-0">+{fmt(p.amount)}</span>
                                         </div>
                                         {recentPaymentRowsKey && (
                                             <button
@@ -1769,15 +1771,15 @@ export default function DashboardPage() {
                         <div className="space-y-3">
                             <div className="flex justify-between items-center">
                                 <span className="text-indigo-200 text-sm">{t('dash.totalRevenue')}</span>
-                                <span className="font-bold">€{totalRevenue.toFixed(0)}</span>
+                                <span className="font-bold">{fmt(totalRevenue, { decimals: 0 })}</span>
                             </div>
                             <div className="flex justify-between items-center">
                                 <span className="text-indigo-200 text-sm">{t('dash.pendingPayments')}</span>
-                                <span className="font-bold text-amber-300">€{pendingRevenue.toFixed(0)}</span>
+                                <span className="font-bold text-amber-300">{fmt(pendingRevenue, { decimals: 0 })}</span>
                             </div>
                             <div className="border-t border-indigo-500 pt-2 flex justify-between items-center">
                                 <span className="text-indigo-200 text-sm">{t('dash.thisMonth')}</span>
-                                <span className="font-bold text-green-300">€{thisMonthRevenue.toFixed(0)}</span>
+                                <span className="font-bold text-green-300">{fmt(thisMonthRevenue, { decimals: 0 })}</span>
                             </div>
                         </div>
                         <Link
@@ -1974,7 +1976,7 @@ export default function DashboardPage() {
                             <div className="grid gap-3 text-sm grid-cols-3">
                                 <div className="bg-gray-50 rounded-xl p-3 text-center">
                                     <p className="text-xs text-gray-400 mb-1">{t('dash.priceLabel')}</p>
-                                    <p className="font-bold text-gray-900">€{selectedSession?.price || '–'}</p>
+                                    <p className="font-bold text-gray-900">{selectedSession?.price != null ? fmt(selectedSession.price) : '–'}</p>
                                     {selectedSession?.credit_applied_amount != null && selectedSession.credit_applied_amount > 0 && (
                                         <p className="text-[11px] text-green-600 mt-1">{t('dash.creditApplied', { amount: selectedSession.credit_applied_amount.toFixed(2) })}</p>
                                     )}

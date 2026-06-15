@@ -190,4 +190,24 @@ describe('POST /api/create-subscription-checkout (default 7-day trial)', () => {
     expect(params.discounts).toEqual([{ promotion_code: 'promo_1' }]);
     expect(params.allow_promotion_codes).toBeUndefined();
   });
+
+  it('uses PLN price IDs when checkout is on tutlio.pl', async () => {
+    process.env.STRIPE_MONTHLY_PRICE_ID_PLN = 'price_monthly_pln';
+    stripePriceRetrieve.mockResolvedValue({
+      id: 'price_monthly_pln',
+      type: 'recurring',
+      recurring: { interval: 'month' },
+    });
+
+    const handler = await loadHandler();
+    const res = mockRes();
+    await handler(
+      mockReq('POST', { plan: 'monthly' }, { host: 'www.tutlio.pl', 'x-forwarded-host': 'www.tutlio.pl' }) as any,
+      res as any,
+    );
+
+    expect((res as any).getResult().statusCode).toBe(200);
+    expect(stripePriceRetrieve).toHaveBeenCalledWith('price_monthly_pln');
+    expect(stripeSessionCreate.mock.calls[0][0].line_items[0].price).toBe('price_monthly_pln');
+  });
 });

@@ -10,6 +10,8 @@ import AdminPerlasPayoutsPanel from '@/components/admin/AdminPerlasPayoutsPanel'
 import AdminEnterpriseContactsPanel from '@/components/admin/AdminEnterpriseContactsPanel';
 import AdminBillingPanel from '@/components/admin/AdminBillingPanel';
 import AdminAttendancePanel from '@/components/admin/AdminAttendancePanel';
+import { fmtMoney } from '@/lib/marketMoney';
+import { isPlMarket } from '@/lib/market';
 type Step = 'lock' | 'panel';
 
 interface FormState {
@@ -867,7 +869,7 @@ export default function AdminPanel() {
                                 {t('admin.students')}: {o.student_count}
                               </span>
                               <span className="rounded-lg bg-white/5 border border-white/10 px-2 py-1 text-slate-300 tabular-nums">
-                                {t('admin.revenue')}: {(o.paid_revenue_eur ?? 0).toLocaleString('lt-LT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                                {t('admin.revenue')}: {fmtMoney(o.paid_revenue_eur ?? 0)}
                               </span>
                             </div>
                             <p className="text-[11px] text-slate-500 mt-2">
@@ -914,10 +916,10 @@ export default function AdminPanel() {
                           <td className="px-4 py-3 text-slate-300">{o.student_count}</td>
                           <td className="px-4 py-3 text-slate-300 tabular-nums">{o.lessons_occurred ?? '—'}</td>
                           <td className="px-4 py-3 text-slate-300 tabular-nums">
-                            {(o.paid_revenue_eur ?? 0).toLocaleString('lt-LT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {fmtMoney(o.paid_revenue_eur ?? 0)}
                           </td>
                           <td className="px-4 py-3 text-slate-300 tabular-nums">
-                            {(o.platform_fee_2pct_eur ?? 0).toLocaleString('lt-LT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {fmtMoney(o.platform_fee_2pct_eur ?? 0)}
                           </td>
                           <td className="px-4 py-3 text-slate-300">
                             {enabledFeatures > 0 ? (
@@ -970,13 +972,13 @@ export default function AdminPanel() {
                 <div className="flex items-center justify-between text-slate-200">
                   <span>Pajamos</span>
                   <span className="tabular-nums font-bold">
-                    {totals.revenue.toLocaleString('lt-LT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                    {fmtMoney(totals.revenue)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-slate-200">
                   <span>Platformos mokestis (2%)</span>
                   <span className="tabular-nums font-bold">
-                    {totals.fee.toLocaleString('lt-LT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                    {fmtMoney(totals.fee)}
                   </span>
                 </div>
               </div>
@@ -1020,14 +1022,14 @@ export default function AdminPanel() {
                       <div className="rounded-xl bg-white/5 border border-white/10 px-3 py-2.5">
                         <p className="text-[10px] uppercase tracking-wide text-slate-500">{t('admin.paidRevenue')}</p>
                         <p className="text-lg font-semibold text-emerald-300 tabular-nums">
-                          {detailStats.paid_revenue_eur.toLocaleString('lt-LT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                          {fmtMoney(detailStats.paid_revenue_eur)}
                         </p>
                         <p className="text-[10px] text-slate-500 mt-0.5">{t('admin.paidRevenueDesc')}</p>
                       </div>
                       <div className="rounded-xl bg-amber-500/10 border border-amber-500/25 px-3 py-2.5">
                         <p className="text-[10px] uppercase tracking-wide text-amber-200/90">{t('admin.platformFee')}</p>
                         <p className="text-lg font-semibold text-amber-200 tabular-nums">
-                          {detailStats.platform_fee_2pct_eur.toLocaleString('lt-LT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                          {fmtMoney(detailStats.platform_fee_2pct_eur)}
                         </p>
                       </div>
                     </div>
@@ -1058,7 +1060,7 @@ export default function AdminPanel() {
                         </select>
                       </div>
                       <div className="space-y-1.5">
-                        <Label className="text-slate-300">Mėnesio platformos mokestis (€)</Label>
+                        <Label className="text-slate-300">Mėnesio platformos mokestis ({isPlMarket() ? 'zł' : '€'})</Label>
                         <Input
                           type="number"
                           min={0}

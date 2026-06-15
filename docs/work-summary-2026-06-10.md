@@ -116,7 +116,7 @@ New test files: `tests/api/` create-enterprise-checkout, create-subscription-che
 1. Apply migrations: `npm run supabase:push` (adds the three `202606100000…/11/12` migrations).
 2. Env vars (see `.env.example`):
    - `STRIPE_ENTERPRISE_PRICE_ID` — **required** for enterprise (test-mode graduated price mirroring prod).
-   - `CRON_SECRET` — **now mandatory on Vercel** (auto-set in prod; verify it exists in preview env too, otherwise crons return 500).
+   - `CRON_SECRET` — **privaloma Vercel projekte „tutlio“** (Production + Preview). Be jos cron endpointai grąžina 500. Po pridėjimo reikia naujo deploy.
    - `JOIN_LINK_SECRET` — optional (falls back to service-role key).
    - Optional B2B PDF seller fields: `TUTLIO_COMPANY_CODE`, `TUTLIO_VAT_CODE`, `TUTLIO_COMPANY_ADDRESS`, `TUTLIO_COMPANY_EMAIL`.
 3. Stripe test webhook → `/api/stripe-webhook` with `checkout.session.completed`, `customer.subscription.created/updated/deleted`.

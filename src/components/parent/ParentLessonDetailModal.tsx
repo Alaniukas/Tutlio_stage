@@ -28,10 +28,7 @@ import StatusBadge from '@/components/StatusBadge';
 import WhiteboardButton from '@/components/WhiteboardButton';
 import { normalizeUrl } from '@/lib/utils';
 import { recordJoinClick } from '@/lib/joinTracking';
-import {
-  formatLessonStripeChargeEur,
-  lessonStripeBreakdownEur,
-} from '@/lib/stripeLessonPricing';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
 /** Tutor contact + payment / cancellation rules (from profiles). */
 export type ParentTutorContactPolicy = {
   tutorId: string;
@@ -104,6 +101,7 @@ export function ParentLessonDetailModal({
   const providerName =
     tutorPolicy?.providerName || tutorPolicy?.tutorName || t('studentDash.tutorLabel');
 
+  const { fmt, formatLessonCharge, lessonBreakdown, isPl } = useMarketMoney();
   const [stripeLoading, setStripeLoading] = useState(false);
   const [perlasLoading, setPerlasLoading] = useState(false);
 
@@ -252,7 +250,7 @@ export function ParentLessonDetailModal({
                 {t('studentDash.priceLabel')}
               </p>
               <p className="font-bold text-gray-900">
-                {session.price != null ? `€${session.price}` : '–'}
+                {session.price != null ? fmt(session.price) : '–'}
               </p>
             </div>
             <div className="bg-gray-50 rounded-xl p-4 text-center border border-gray-100 flex flex-col items-center justify-center">
@@ -357,20 +355,20 @@ export function ParentLessonDetailModal({
             isAfter(new Date(session.end_time), now) && (
               <div className="space-y-2">
                 {session.price != null && !orgIsSchool && (() => {
-                  const b = lessonStripeBreakdownEur(Number(session.price));
+                  const b = lessonBreakdown(Number(session.price));
                   return (
                     <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-sm space-y-1.5">
                       <div className="flex items-start justify-between gap-3 text-gray-700">
                         <span>{t('parent.feeBreakdownTeaching', { provider: providerName })}</span>
-                        <span className="font-semibold whitespace-nowrap">€{b.base.toFixed(2)}</span>
+                        <span className="font-semibold whitespace-nowrap">{fmt(b.base)}</span>
                       </div>
                       <div className="flex items-start justify-between gap-3 text-gray-700">
                         <span>{t('parent.feeBreakdownPlatform')}</span>
-                        <span className="font-semibold whitespace-nowrap">€{b.fee.toFixed(2)}</span>
+                        <span className="font-semibold whitespace-nowrap">{fmt(b.fee)}</span>
                       </div>
                       <div className="flex items-start justify-between gap-3 pt-1.5 border-t border-gray-200 font-bold text-gray-900">
                         <span>{t('parent.feeBreakdownTotal')}</span>
-                        <span className="whitespace-nowrap">€{b.total.toFixed(2)}</span>
+                        <span className="whitespace-nowrap">{fmt(b.total)}</span>
                       </div>
                     </div>
                   );
@@ -388,10 +386,10 @@ export function ParentLessonDetailModal({
                   )}
                   {t('studentDash.pay')}
                   {session.price != null
-                    ? ` · €${formatLessonStripeChargeEur(Number(session.price), orgIsSchool)}`
+                    ? ` · ${formatLessonCharge(Number(session.price), orgIsSchool)}`
                     : ''}
                 </button>
-                {(perlasEnabled ?? tutorPolicy?.perlasEnabled) && session.price != null && (() => {
+                {(perlasEnabled ?? tutorPolicy?.perlasEnabled) && !isPl && session.price != null && (() => {
                   const sp = Number(session.price || 0);
                   const pf = Math.round(sp * 2) / 100;
                   const bf = 0.18;
@@ -407,7 +405,7 @@ export function ParentLessonDetailModal({
                         {perlasLoading ? (
                           <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
                         ) : (
-                          <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank', { amount: tot.toFixed(2) })}</>
+                          <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank', { amount: fmt(tot) })}</>
                         )}
                       </button>
                     </>

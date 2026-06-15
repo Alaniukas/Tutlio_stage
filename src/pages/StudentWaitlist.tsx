@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useTranslation } from '@/lib/i18n';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
 
 interface ParsedNotes {
     start_time?: string;
@@ -33,7 +34,8 @@ function parseNotes(notes: string | null): ParsedNotes | null {
 }
 
 export default function StudentWaitlist() {
-    const { t, dateFnsLocale } = useTranslation();
+  const { t, dateFnsLocale } = useTranslation();
+  const { fmt } = useMarketMoney();
     const { user: ctxUser } = useUser();
     const navigate = useNavigate();
     const parentWaitlistStudentId = useMatch('/parent/child/:studentId/waitlist')?.params.studentId ?? '';
@@ -273,7 +275,7 @@ export default function StudentWaitlist() {
                                             </div>
                                             <div className="flex justify-between">
                                                 <span>{t('studentWait.priceLabel')}</span>
-                                                <span className="font-medium text-gray-900">€{ds.price || '–'}</span>
+                                                <span className="font-medium text-gray-900">{fmt(ds.price) || '–'}</span>
                                             </div>
                                             {queuePos && (
                                                 <div className="flex justify-between">

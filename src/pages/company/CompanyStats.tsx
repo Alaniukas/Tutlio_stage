@@ -5,6 +5,7 @@ import { TrendingUp, Award, AlertTriangle, Wallet, BookOpen } from 'lucide-react
 import { DateRangeFilter } from '@/components/DateRangeFilter';
 import { useTranslation } from '@/lib/i18n';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
 
 interface TutorStat {
   id: string;
@@ -22,6 +23,7 @@ const STATS_CACHE_KEY = 'company_stats';
 
 export default function CompanyStats() {
   const { t } = useTranslation();
+  const { fmt } = useMarketMoney();
   const stCache = getCached<any>(STATS_CACHE_KEY);
   const [loading, setLoading] = useState(!stCache);
   const [tutorStats, setTutorStats] = useState<TutorStat[]>(stCache?.tutorStats ?? []);
@@ -184,7 +186,7 @@ export default function CompanyStats() {
               <Wallet className="w-5 h-5 text-green-600" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-gray-900">{totalEarnings.toFixed(2)} €</p>
+              <p className="text-2xl font-bold text-gray-900">{fmt(totalEarnings)}</p>
               <p className="text-xs text-gray-500">{t('compStats.totalRevenue')}</p>
             </div>
           </div>
@@ -193,7 +195,7 @@ export default function CompanyStats() {
               <TrendingUp className="w-5 h-5 text-amber-600" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-amber-900">{totalCompanyCommission.toFixed(2)} €</p>
+              <p className="text-2xl font-bold text-amber-900">{fmt(totalCompanyCommission)}</p>
               <p className="text-xs text-gray-500">{t('compStats.companyShare')}</p>
             </div>
           </div>
@@ -202,7 +204,7 @@ export default function CompanyStats() {
               <Wallet className="w-5 h-5 text-blue-600" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-blue-900">{totalNetEarnings.toFixed(2)} €</p>
+              <p className="text-2xl font-bold text-blue-900">{fmt(totalNetEarnings)}</p>
               <p className="text-xs text-gray-500">{t('compStats.tutorShare')}</p>
             </div>
           </div>
@@ -228,7 +230,7 @@ export default function CompanyStats() {
                 <div>
                   <p className="text-xs text-amber-700 font-semibold uppercase tracking-wider">{t('compStats.topEarner')}</p>
                   <p className="font-bold text-gray-900 mt-0.5">{topEarner.full_name}</p>
-                  <p className="text-sm text-amber-700">{topEarner.earnings.toFixed(2)} €</p>
+                  <p className="text-sm text-amber-700">{fmt(topEarner.earnings)}</p>
                 </div>
               </div>
             )}
@@ -282,7 +284,7 @@ export default function CompanyStats() {
                         </p>
                       </div>
                       <div className="text-right flex-shrink-0">
-                        <p className="text-sm font-semibold text-gray-900">{stat.earnings.toFixed(2)} €</p>
+                        <p className="text-sm font-semibold text-gray-900">{fmt(stat.earnings)}</p>
                         <p className="text-[11px] text-amber-700">
                           {t('compStats.companyAmount', { amount: stat.companyCommission.toFixed(2) })}
                         </p>
@@ -325,11 +327,11 @@ export default function CompanyStats() {
                         </div>
                       </td>
                       <td className="px-5 py-3 text-right font-semibold text-gray-900">{stat.completedSessions}</td>
-                      <td className="px-5 py-3 text-right font-semibold text-gray-700">{stat.earnings.toFixed(2)} €</td>
+                      <td className="px-5 py-3 text-right font-semibold text-gray-700">{fmt(stat.earnings)}</td>
                       <td className="px-5 py-3 text-right font-semibold text-amber-700">
-                        {stat.companyCommission.toFixed(2)} €
+                        {fmt(stat.companyCommission)}
                       </td>
-                      <td className="px-5 py-3 text-right font-semibold text-green-700">{stat.netEarnings.toFixed(2)} €</td>
+                      <td className="px-5 py-3 text-right font-semibold text-green-700">{fmt(stat.netEarnings)}</td>
                       <td className="px-5 py-3 text-right text-sm text-gray-500">
                         {stat.totalCancelled > 0 ? `${stat.totalCancelled} (K:${stat.cancelledByTutor} M:${stat.cancelledByStudent})` : '—'}
                       </td>

@@ -16,7 +16,7 @@ export async function getOrgVisibleTutorProfileIds(supabase: any, orgId: string)
       supabase.from('profiles').select('id, email').eq('organization_id', orgId),
     ]);
 
-  const adminIds = new Set((adminUsers || []).map((a: { user_id: string }) => a.user_id));
+  const adminIds = new Set<string>((adminUsers || []).map((a: { user_id: string }) => a.user_id));
   const tutorIdSet = buildOrgTutorIdSet(linkedStudents, inviteData);
   return filterConfirmedOrgTutors(
     (profileRows || []) as Array<{ id: string; email?: string | null }>,

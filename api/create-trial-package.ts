@@ -5,24 +5,9 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
-
-// Stripe/platform fee helpers (inlined to avoid _lib import issues on Vercel)
-const STRIPE_FEE_PERCENT = 0.015;
-const STRIPE_FEE_FIXED_EUR = 0.25;
-const PLATFORM_FEE_PERCENT = 0.02;
-
-function customerTotalEur(basePriceEur: number): number {
-  const platformFeeEur = basePriceEur * PLATFORM_FEE_PERCENT;
-  return (basePriceEur + platformFeeEur + STRIPE_FEE_FIXED_EUR) / (1 - STRIPE_FEE_PERCENT);
-}
-
-function lessonCheckoutBreakdownCents(basePriceEur: number): { baseCents: number; feesCents: number } {
-  const totalEur = customerTotalEur(basePriceEur);
-  const totalCents = Math.round(totalEur * 100);
-  const baseCents = Math.round(basePriceEur * 100);
-  const feesCents = totalCents - baseCents;
-  return { baseCents, feesCents };
-}
+import { marketFromRequest } from './_lib/market.js';
+import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata } from './_lib/marketMoney.js';
+import { publicOriginFromRequest } from './_lib/public-origin.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -34,10 +19,12 @@ function getEnv(name: string): string | null {
   return v && String(v).trim().length > 0 ? String(v) : null;
 }
 
-const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
-
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
+
+  const market = marketFromRequest(req);
+  const currency = chargeCurrency(market);
+  const appOrigin = publicOriginFromRequest(req);
 
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) {
@@ -189,7 +176,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const basePriceEur = trialPriceEur;
     const payerChargedTotalEur = useSchoolOrgAbsorbedFees ? basePriceEur : customerTotalEur(basePriceEur);
-    const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur);
+    const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market);
     const tutorTransferCents = baseCents;
 
     const { data: lessonPackage, error: packageErr } = await supabase
@@ -242,7 +229,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let checkoutSession;
     try {
       if (useSchoolOrgAbsorbedFees) {
-        const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(basePriceEur);
+        const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(basePriceEur, market);
         const applicationFeeCents = chargeCents - transferToSchoolCents;
         if (chargeCents < 50 || applicationFeeCents < 1 || applicationFeeCents >= chargeCents) {
           return json(res, 400, { error: 'Netinkama bandomosios pamokos suma' });
@@ -254,7 +241,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           line_items: [
             {
               price_data: {
-                currency: 'eur',
+                currency,
                 product_data: {
                   name: `Bandomoji pamoka – ${trialTopic}`,
                   description: `Mokymo paslaugos. Paslaugos teikėjas: ${tutor.full_name || 'Korepetitorius'}`,
@@ -286,8 +273,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             is_trial: 'true',
             tutlio_school_org_absorbed: 'true',
           },
-          success_url: `${APP_URL}/package-success?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${APP_URL}/package-cancelled`,
+          success_url: `${appOrigin}/package-success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${appOrigin}/package-cancelled`,
         });
       } else {
         checkoutSession = await stripe.checkout.sessions.create({
@@ -297,7 +284,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           line_items: [
             {
               price_data: {
-                currency: 'eur',
+                currency,
                 product_data: {
                   name: `Bandomoji pamoka – ${trialTopic}`,
                   description: `Mokymo paslaugos. Paslaugos teikėjas: ${tutor.full_name || 'Korepetitorius'}`,
@@ -308,7 +295,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             },
             {
               price_data: {
-                currency: 'eur',
+                currency,
                 product_data: {
                   name: 'Platformos administravimo mokestis',
                   description: 'Paslaugos teikėjas: MB „Tutlio“',
@@ -337,10 +324,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             student_id: studentId,
             subject_id: subjectId,
             is_trial: 'true',
-            tutlio_base_eur: basePriceEur.toFixed(2),
+            ...checkoutBaseMetadata(basePriceEur, market),
           },
-          success_url: `${APP_URL}/package-success?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${APP_URL}/package-cancelled`,
+          success_url: `${appOrigin}/package-success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${appOrigin}/package-cancelled`,
         });
       }
     } catch (e: any) {
@@ -359,7 +346,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         line_items: [
           {
             price_data: {
-              currency: 'eur',
+              currency,
               product_data: {
                 name: `Bandomoji pamoka – ${trialTopic}`,
                 description: `Mokymo paslaugos. Paslaugos teikėjas: ${tutor.full_name || 'Korepetitorius'}`,
@@ -370,7 +357,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           },
           {
             price_data: {
-              currency: 'eur',
+              currency,
               product_data: {
                 name: 'Platformos administravimo mokestis',
                 description: 'Paslaugos teikėjas: MB „Tutlio“',
@@ -388,8 +375,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           is_trial: 'true',
           tutlio_base_eur: basePriceEur.toFixed(2),
         },
-        success_url: `${APP_URL}/package-success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${APP_URL}/package-cancelled`,
+        success_url: `${appOrigin}/package-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${appOrigin}/package-cancelled`,
       });
     }
 
@@ -400,11 +387,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Send email to payer with trial payment link.
     // Use stable /api/pay-package redirect so the link never expires.
-    const stableTrialPaymentLink = `${APP_URL}/api/pay-package?package=${lessonPackage.id}`;
+    const stableTrialPaymentLink = `${appOrigin}/api/pay-package?package=${lessonPackage.id}`;
     const toEmail = (customerEmail || '').trim();
     if (toEmail && (checkoutSession.url || checkoutSession.id)) {
       const requestOrigin = req.headers.origin ? String(req.headers.origin) : null;
-      const sendEmailUrl = `${requestOrigin || APP_URL}/api/send-email`;
+      const sendEmailUrl = `${requestOrigin || appOrigin}/api/send-email`;
       void fetch(sendEmailUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },

@@ -11,6 +11,9 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
+import { marketFromRequest } from './_lib/market.js';
+import { chargeCurrency } from './_lib/marketMoney.js';
+import { publicOriginFromRequest } from './_lib/public-origin.js';
 
 /** Connect accounts need this API version (matches api/stripe-connect.ts) — mixed versions caused opaque failures. */
 const STRIPE_API_VERSION = '2026-02-25.clover' as any;
@@ -20,10 +23,13 @@ const supabase = createClient(
     process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
-const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+
+    const market = marketFromRequest(req);
+    const currency = chargeCurrency(market);
+    const appOrigin = publicOriginFromRequest(req);
 
     const installmentId = typeof req.query.installment === 'string' ? req.query.installment.trim() : '';
     if (!installmentId) return res.status(400).send(errorPage('Klaida', 'Trūksta įmokos identifikatoriaus.'));
@@ -80,7 +86,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const extraEurRaw = Number(contract?.additional_fee_amount || 0);
         const extraEur = installment.installment_number === 1 && extraEurRaw > 0 ? extraEurRaw : 0;
         const fixedEur = Math.max(0, baseEur - extraEur);
-        const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(baseEur);
+        const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(baseEur, market);
 
         if (chargeCents < 50 || transferToSchoolCents < 1) {
             return res.status(400).send(errorPage('Klaida', 'Įmokos suma per maža operacijai su kortele.'));
@@ -117,7 +123,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (fixedEur > 0) {
             lineItems.push({
                 price_data: {
-                    currency: 'eur',
+                    currency,
                     unit_amount: Math.round(fixedEur * 100),
                     product_data: {
                         name: `${org?.name || 'Mokykla'} — Fiksuotas mokestis`,
@@ -131,7 +137,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const purpose = String(contract?.additional_fee_purpose || '').trim() || 'Papildomas mokestis';
             lineItems.push({
                 price_data: {
-                    currency: 'eur',
+                    currency,
                     unit_amount: Math.round(extraEur * 100),
                     product_data: {
                         name: `${org?.name || 'Mokykla'} — Papildomas mokestis`,
@@ -144,7 +150,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (lineItems.length === 0) {
             lineItems.push({
                 price_data: {
-                    currency: 'eur',
+                    currency,
                     unit_amount: chargeCents,
                     product_data: {
                         name: `${org?.name || 'Mokykla'} — Įmoka #${installment.installment_number}`,
@@ -173,8 +179,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 metadata,
             },
             metadata,
-            success_url: `${APP_URL}/school-payment-success?success=1&installment=${installment.id}&session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${APP_URL}/school-payment-success?cancelled=1&installment=${installment.id}`,
+            success_url: `${appOrigin}/school-payment-success?success=1&installment=${installment.id}&session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: `${appOrigin}/school-payment-success?cancelled=1&installment=${installment.id}`,
         });
 
         await supabase

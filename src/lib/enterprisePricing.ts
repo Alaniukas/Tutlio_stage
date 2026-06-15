@@ -96,14 +96,19 @@ export function displayPricingForQuantity(
 
 export function formatMoney(cents: number, currency: string, locale?: string): string {
   const amount = cents / 100;
+  const intlLocale =
+    locale === 'pl' ? 'pl-PL'
+      : locale === 'lt' ? 'lt-LT'
+        : locale === 'en' ? 'en-GB'
+          : locale;
   try {
-    return new Intl.NumberFormat(locale, {
+    return new Intl.NumberFormat(intlLocale, {
       style: 'currency',
       currency: currency.toUpperCase(),
       minimumFractionDigits: amount % 1 === 0 ? 0 : 2,
       maximumFractionDigits: 2,
     }).format(amount);
   } catch {
-    return `€${amount.toFixed(2)}`;
+    return currency.toLowerCase() === 'pln' ? `${amount.toFixed(2)} zł` : `€${amount.toFixed(2)}`;
   }
 }

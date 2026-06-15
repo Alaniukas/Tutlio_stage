@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
+import { fmtMoney } from '@/lib/marketMoney';
 import InvoiceSettingsForm from '@/components/InvoiceSettingsForm';
 import CreateInvoiceModal from '@/components/CreateInvoiceModal';
 import {
@@ -325,7 +326,7 @@ export default function OrgTutorFinanceSummary() {
               <Euro className="w-5 h-5 text-emerald-600" />
               <div>
                 <p className="text-xs text-gray-500 uppercase tracking-wide">{t('orgFinance.approxInvoiceAmount')}</p>
-                <p className="text-xl font-bold text-emerald-700">{gross.toFixed(2)} €</p>
+                <p className="text-xl font-bold text-emerald-700">{fmtMoney(gross)}</p>
               </div>
             </div>
             <p className="text-xs text-gray-400 mt-3">

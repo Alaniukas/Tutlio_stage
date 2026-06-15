@@ -17,6 +17,7 @@ import { supabase } from '@/lib/supabase';
 import { usePlatform } from '@/contexts/PlatformContext';
 import { stripPlatformPrefix } from '@/lib/platform';
 import { applyDefaultDocumentMeta } from '@/lib/documentMeta';
+import { isPlMarket } from '@/lib/market';
 
 export function LocaleProvider({ children }: { children: ReactNode }) {
   const { platform } = usePlatform();
@@ -42,6 +43,7 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   }, [locale, platform, dictVersion]);
 
   const setLocale = useCallback((next: Locale) => {
+    if (isPlMarket()) return;
     storeLocale(next);
     setLocaleState(next);
     // Best-effort DB sync without blocking UI/auth flows.

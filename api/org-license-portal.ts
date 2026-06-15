@@ -6,6 +6,7 @@ import type { VercelRequest, VercelResponse } from './types.js';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
+import { marketFromRequest } from './_lib/market.js';
 import { getEnterprisePriceId } from './_lib/enterprise-license.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
@@ -15,18 +16,16 @@ const supabase = createClient(
 );
 
 const PORTAL_CONFIG_METADATA_KEY = 'tutlio_enterprise_portal';
-let cachedPortalConfigId: string | null = null;
+const portalConfigCache = new Map<string, string>();
 
 /**
  * Dedicated Billing Portal configuration with license quantity updates enabled
  * for the enterprise price (the account default config is used by tutor
- * subscriptions and has no quantity updates). Found by metadata marker and
- * auto-created when missing, so no manual Dashboard setup is needed.
+ * subscriptions and has no quantity updates). One config per Stripe price id.
  */
-async function getEnterprisePortalConfigId(): Promise<string | undefined> {
-  if (cachedPortalConfigId) return cachedPortalConfigId;
-  const priceId = getEnterprisePriceId();
-  if (!priceId) return undefined;
+async function getEnterprisePortalConfigId(priceId: string): Promise<string | undefined> {
+  const cached = portalConfigCache.get(priceId);
+  if (cached) return cached;
 
   const price = await stripe.prices.retrieve(priceId);
   const productId = typeof price.product === 'string' ? price.product : price.product.id;
@@ -43,25 +42,25 @@ async function getEnterprisePortalConfigId(): Promise<string | undefined> {
   };
 
   const { data: configs } = await stripe.billingPortal.configurations.list({ active: true, limit: 100 });
-  const existing = configs.find((c) => c.metadata?.[PORTAL_CONFIG_METADATA_KEY] === '1');
+  const existing = configs.find(
+    (c) => c.metadata?.[PORTAL_CONFIG_METADATA_KEY] === priceId,
+  );
   if (existing) {
-    // Quantity updates are governed by default_allowed_updates; `products` is
-    // ignored on current Stripe API versions, so don't condition on it.
     const update = existing.features?.subscription_update;
     const quantityEnabled =
       Boolean(update?.enabled) && (update?.default_allowed_updates ?? []).includes('quantity');
     if (!quantityEnabled) {
       await stripe.billingPortal.configurations.update(existing.id, { features });
     }
-    cachedPortalConfigId = existing.id;
+    portalConfigCache.set(priceId, existing.id);
     return existing.id;
   }
 
   const created = await stripe.billingPortal.configurations.create({
     features,
-    metadata: { [PORTAL_CONFIG_METADATA_KEY]: '1' },
+    metadata: { [PORTAL_CONFIG_METADATA_KEY]: priceId },
   });
-  cachedPortalConfigId = created.id;
+  portalConfigCache.set(priceId, created.id);
   return created.id;
 }
 
@@ -93,10 +92,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: org } = await supabase
       .from('organizations')
-      .select('id, stripe_customer_id')
+      .select('id, stripe_customer_id, license_subscription_id')
       .eq('id', adminRow.organization_id)
       .maybeSingle();
     const customerId = (org as any)?.stripe_customer_id as string | undefined;
+    const licenseSubscriptionId = (org as any)?.license_subscription_id as string | undefined;
     if (!customerId) {
       return res.status(400).json({
         error: 'Organization has no license subscription yet',
@@ -104,12 +104,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // Fall back to the default portal config if provisioning fails (portal
-    // still opens, just without the quantity update feature).
-    const configurationId = await getEnterprisePortalConfigId().catch((e) => {
-      console.error('[org-license-portal] Portal config provisioning failed:', e?.message || e);
-      return undefined;
-    });
+    let enterprisePriceId = getEnterprisePriceId(marketFromRequest(req));
+    if (licenseSubscriptionId) {
+      try {
+        const sub = await stripe.subscriptions.retrieve(licenseSubscriptionId);
+        const subPriceId = sub.items.data[0]?.price?.id;
+        if (subPriceId) enterprisePriceId = subPriceId;
+      } catch (e: any) {
+        console.warn('[org-license-portal] Could not read subscription price:', e?.message || e);
+      }
+    }
+
+    const configurationId = enterprisePriceId
+      ? await getEnterprisePortalConfigId(enterprisePriceId).catch((e) => {
+          console.error('[org-license-portal] Portal config provisioning failed:', e?.message || e);
+          return undefined;
+        })
+      : undefined;
 
     const appOrigin = publicOriginFromRequest(req);
     const session = await stripe.billingPortal.sessions.create({

@@ -1,10 +1,13 @@
 // GET /api/enterprise-license-pricing
-// Public endpoint returning the enterprise license price tiers straight from
-// Stripe so the pricing page slider always matches what checkout charges.
+// Public endpoint returning enterprise license tiers (volume bands) so the
+// pricing slider matches checkout. Stripe price must use tiers_mode=volume.
 
 import type { VercelRequest, VercelResponse } from './types.js';
 import Stripe from 'stripe';
+import { marketFromRequest, type TutlioMarket } from './_lib/market.js';
 import { getEnterpriseLicenseBounds, getEnterprisePriceId } from './_lib/enterprise-license.js';
+import { enterprisePlnTierDefs, ENTERPRISE_PLN } from '../src/lib/enterprisePricingPln.js';
+import { enterpriseEurTierDefs, ENTERPRISE_EUR } from '../src/lib/enterprisePricingEur.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 
@@ -25,12 +28,28 @@ interface PricingPayload {
 }
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
-let cache: { payload: PricingPayload; expiresAt: number } | null = null;
+const cacheByMarket = new Map<string, { payload: PricingPayload; expiresAt: number }>();
 
-function tierAmountCents(amount: number | null, decimal: string | null | undefined): number {
-  if (typeof amount === 'number') return amount;
-  const parsed = Number(decimal);
-  return Number.isFinite(parsed) ? Math.round(parsed) : 0;
+function canonicalPayload(market: TutlioMarket): PricingPayload {
+  const { minLicenses, maxSelfServe } = getEnterpriseLicenseBounds();
+  if (market === 'pl') {
+    return {
+      currency: 'pln',
+      interval: 'month',
+      tiersMode: ENTERPRISE_PLN.tiersMode,
+      tiers: enterprisePlnTierDefs(),
+      minLicenses,
+      maxSelfServe,
+    };
+  }
+  return {
+    currency: 'eur',
+    interval: 'month',
+    tiersMode: ENTERPRISE_EUR.tiersMode,
+    tiers: enterpriseEurTierDefs(),
+    minLicenses,
+    maxSelfServe,
+  };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -39,50 +58,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    if (cache && cache.expiresAt > Date.now()) {
-      return res.status(200).json(cache.payload);
+    const market = marketFromRequest(req);
+    const cached = cacheByMarket.get(market);
+    if (cached && cached.expiresAt > Date.now()) {
+      return res.status(200).json(cached.payload);
     }
 
-    const priceId = getEnterprisePriceId();
+    const priceId = getEnterprisePriceId(market);
     if (!priceId) {
-      return res.status(500).json({ error: 'Enterprise pricing is not configured. Set STRIPE_ENTERPRISE_PRICE_ID.' });
+      const payload = canonicalPayload(market);
+      cacheByMarket.set(market, { payload, expiresAt: Date.now() + CACHE_TTL_MS });
+      return res.status(200).json(payload);
     }
 
-    const price = await stripe.prices.retrieve(priceId, { expand: ['tiers'] });
+    const price = await stripe.prices.retrieve(priceId);
     if (price.type !== 'recurring' || !price.recurring) {
       return res.status(500).json({ error: 'Enterprise license price must be a recurring Stripe price.' });
     }
-
-    let tiers: LicenseTier[];
-    if (price.billing_scheme === 'tiered' && price.tiers?.length) {
-      tiers = price.tiers.map((t) => ({
-        upTo: t.up_to ?? null,
-        unitAmountCents: tierAmountCents(t.unit_amount, t.unit_amount_decimal),
-        flatAmountCents: tierAmountCents(t.flat_amount, t.flat_amount_decimal),
-      }));
-      // Stripe returns tiers ordered, but enforce it: finite bounds ascending, infinite last.
-      tiers.sort((a, b) => (a.upTo ?? Infinity) - (b.upTo ?? Infinity));
-    } else if (typeof price.unit_amount === 'number') {
-      // Per-unit price: expose as a single infinite tier so the UI works either way.
-      tiers = [{ upTo: null, unitAmountCents: price.unit_amount, flatAmountCents: 0 }];
-    } else {
-      return res.status(500).json({ error: 'Enterprise license price has no usable amount configuration.' });
+    if (price.billing_scheme !== 'tiered' || price.tiers_mode !== 'volume') {
+      console.warn(
+        `[enterprise-license-pricing] ${priceId} should be tiered volume; got ${price.billing_scheme}/${price.tiers_mode}`,
+      );
     }
 
-    const { minLicenses, maxSelfServe } = getEnterpriseLicenseBounds();
-    const payload: PricingPayload = {
-      currency: price.currency,
-      interval: price.recurring.interval === 'year' ? 'year' : 'month',
-      tiersMode: price.tiers_mode === 'graduated' ? 'graduated' : 'volume',
-      tiers,
-      minLicenses,
-      maxSelfServe,
-    };
+    const payload = canonicalPayload(market);
+    payload.currency = price.currency;
+    payload.interval = price.recurring.interval === 'year' ? 'year' : 'month';
 
-    cache = { payload, expiresAt: Date.now() + CACHE_TTL_MS };
+    cacheByMarket.set(market, { payload, expiresAt: Date.now() + CACHE_TTL_MS });
     return res.status(200).json(payload);
   } catch (error: any) {
     console.error('[enterprise-license-pricing] Error:', error?.message || error);
-    return res.status(500).json({ error: 'Failed to load enterprise pricing' });
+    const market = marketFromRequest(req);
+    const payload = canonicalPayload(market);
+    cacheByMarket.set(market, { payload, expiresAt: Date.now() + CACHE_TTL_MS });
+    return res.status(200).json(payload);
   }
 }

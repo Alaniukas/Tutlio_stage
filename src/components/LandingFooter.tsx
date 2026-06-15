@@ -2,6 +2,7 @@
 
 import { Link } from 'react-router-dom';
 import { useTranslation, buildLocalizedPath, localizedPagePath } from '@/lib/i18n';
+import { isPlMarket } from '@/lib/market';
 import { FEATURE_PAGE_IDS, FEATURE_PAGES } from '@/lib/featurePages';
 
 export default function LandingFooter() {
@@ -31,7 +32,7 @@ export default function LandingFooter() {
                 </li>
               ))}
               <li><Link to={buildLocalizedPath('/pricing', locale)} className="hover:text-white transition-colors">{t('common.prices')}</Link></li>
-              <li><Link to="/schools" className="hover:text-white transition-colors">{locale === 'lt' ? 'Mokykloms' : 'For Schools'}</Link></li>
+              <li><Link to="/schools" className="hover:text-white transition-colors">{isPlMarket() ? 'Dla szkół' : locale === 'lt' ? 'Mokykloms' : 'For Schools'}</Link></li>
             </ul>
           </div>
 

@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useTranslation } from '@/lib/i18n';
+import { fmtMoney } from '@/lib/marketMoney';
 import { Plus, X } from 'lucide-react';
 
 export type PackageEditorSubject = {
@@ -190,8 +191,8 @@ export default function PackageItemsEditor({
               </div>
             </div>
             <div className={compact ? 'mt-1 text-[11px] text-violet-600' : 'mt-2 text-xs text-gray-500'}>
-              {item.totalLessons} × {item.pricePerLesson.toFixed(2)} € ={' '}
-              <span className="font-semibold text-gray-700">{itemTotal.toFixed(2)} €</span>
+              {item.totalLessons} × {fmtMoney(item.pricePerLesson)} ={' '}
+              <span className="font-semibold text-gray-700">{fmtMoney(itemTotal)}</span>
             </div>
           </div>
         );

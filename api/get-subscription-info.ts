@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
+import { isSubscriptionOnlyPriceId } from './_lib/stripe-subscription-env.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 
@@ -36,10 +37,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const subscription = await stripe.subscriptions.retrieve(session.subscription as string);
-    const subOnlyPriceId = process.env.STRIPE_SUBSCRIPTION_ONLY_PRICE_ID;
     const firstPriceId = subscription.items.data[0]?.price?.id;
     const plan =
-      firstPriceId && subOnlyPriceId && firstPriceId === subOnlyPriceId
+      isSubscriptionOnlyPriceId(firstPriceId)
         ? 'subscription_only'
         : subscription.items.data[0]?.price.recurring?.interval === 'year'
           ? 'yearly'

@@ -104,6 +104,7 @@ import {
 import { resolveLessonMeetingLink } from '@/lib/meetingLink';
 import { recordJoinClick } from '@/lib/joinTracking';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { formatContactForTutorView } from '@/lib/orgContactVisibility';
 import Toast from '@/components/Toast';
@@ -226,6 +227,7 @@ function uniqueSubjectIds(ids: string[] | null | undefined): string[] {
 
 export default function CalendarPage() {
   const { t, locale, dateFnsLocale } = useTranslation();
+  const { fmt } = useMarketMoney();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const orgPolicy = useOrgTutorPolicy();
@@ -3996,7 +3998,7 @@ export default function CalendarPage() {
                             </span>
                           )}
                           · {subj.duration_minutes}min
-                          {!orgPolicy.hideMoney && <> · €{subj.price}</>}
+                          {!orgPolicy.hideMoney && <> · {fmt(subj.price)}</>}
                         </div>
                       </SelectItem>
                     ))}
@@ -4623,7 +4625,7 @@ export default function CalendarPage() {
                 {!orgPolicy.hideMoney && (
                 <div className="bg-gray-50 rounded-xl p-2 sm:p-3 text-center">
                   <p className="text-xs text-gray-400 mb-1">{t('dash.priceLabel')}</p>
-                  <p className="font-bold text-gray-900">€{selectedEvent?.price || '–'}</p>
+                  <p className="font-bold text-gray-900">{selectedEvent?.price != null ? fmt(selectedEvent.price) : '–'}</p>
                 </div>
                 )}
                 <div className="bg-gray-50 rounded-xl p-2 sm:p-3 text-center flex flex-col items-center justify-center">
@@ -5631,7 +5633,7 @@ export default function CalendarPage() {
                           </span>
                         )}
                         <span className="text-xs text-gray-500 ml-2">
-                          ({s.duration_minutes} min{!orgPolicy.hideMoney && <>, €{s.price}</>})
+                          ({s.duration_minutes} min{!orgPolicy.hideMoney && <>, {fmt(s.price)}</>})
                         </span>
                       </SelectItem>
                     ))
@@ -5969,7 +5971,7 @@ export default function CalendarPage() {
                             )}
                           </div>
                           {session.price && !orgPolicy.hideMoney && (
-                            <p className="text-sm font-semibold text-gray-700">€{session.price.toFixed(2)}</p>
+                            <p className="text-sm font-semibold text-gray-700">{fmt(session.price)}</p>
                           )}
                         </div>
                       </div>

@@ -233,4 +233,17 @@ describe('POST /api/create-enterprise-checkout', () => {
     expect(result.statusCode).toBe(400);
     expect(result.body?.code).toBe('COMPANY_NAME_REQUIRED');
   });
+
+  it('uses PLN enterprise price on tutlio.pl', async () => {
+    process.env.STRIPE_ENTERPRISE_PRICE_ID_PLN = 'price_enterprise_pln';
+    const handler = await loadHandler();
+    const res = mockRes();
+    await handler(
+      mockReq('POST', { licenseCount: 10, companyName: 'Szkoła PL' }, { host: 'www.tutlio.pl', 'x-forwarded-host': 'www.tutlio.pl' }) as any,
+      res as any,
+    );
+
+    expect((res as any).getResult().statusCode).toBe(200);
+    expect(stripeCreate.mock.calls[0][0].line_items[0].price).toBe('price_enterprise_pln');
+  });
 });

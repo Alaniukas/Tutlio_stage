@@ -11,6 +11,10 @@ import { formatLithuanianPhone, validateLithuanianPhone } from '@/lib/utils';
 import { hasActiveSubscription } from '@/lib/subscription';
 import { useTranslation } from '@/lib/i18n';
 import { TUTOR_PLANS, eur } from '@/lib/pricing';
+import { isPlMarket } from '@/lib/market';
+import { formatPln } from '@/lib/formatPln';
+import { tutorPlanPriceLabels } from '@/lib/pricingDisplay';
+import { subscriptionPriceLabels } from '@/lib/subscriptionPricing';
 import PwaInstallGuide from '@/components/PwaInstallGuide';
 import OrgTutorPolicyModal from '@/components/OrgTutorPolicyModal';
 
@@ -290,6 +294,7 @@ export default function SettingsPage() {
 
   const formatPrice = (amount: number | null | undefined, currency: string | null | undefined) => {
     if (typeof amount !== 'number') return null;
+    if (isPlMarket()) return formatPln(amount);
     try {
       return new Intl.NumberFormat('lt-LT', {
         style: 'currency',
@@ -315,15 +320,17 @@ export default function SettingsPage() {
           ? t('subscribe.subscriptionOnlyTitle')
           : t('settings.monthlyPlan');
     if (price) return `${title} (${price}${suffix})`;
-    if (profile.subscription_plan === 'yearly') return `${t('settings.yearlyPlan')} (${eur(TUTOR_PLANS.yearly.pricePerMonthEur)}${t('subscribe.perMonth')})`;
-    if (profile.subscription_plan === 'subscription_only') return `${t('subscribe.subscriptionOnlyTitle')} (${eur(TUTOR_PLANS.subscriptionOnly.pricePerMonthEur)}${t('subscribe.perMonth')})`;
-    return `${t('settings.monthlyPlan')} (${eur(TUTOR_PLANS.monthly.pricePerMonthEur)}${t('subscribe.perMonth')})`;
+    if (profile.subscription_plan === 'yearly') return `${t('settings.yearlyPlan')} (${tutorPlanPriceLabels.yearlyPerMonth()}${t('subscribe.perMonth')})`;
+    if (profile.subscription_plan === 'subscription_only') return `${t('subscribe.subscriptionOnlyTitle')} (${tutorPlanPriceLabels.subscriptionOnly()}${t('subscribe.perMonth')})`;
+    return `${t('settings.monthlyPlan')} (${tutorPlanPriceLabels.monthly()}${t('subscribe.perMonth')})`;
   };
 
   const getTrialChargeText = () => {
     const price = formatPrice(profile.subscription_price_amount, profile.subscription_price_currency);
     if (price) return price;
-    return profile.subscription_plan === 'yearly' ? eur(TUTOR_PLANS.yearly.pricePerYearEur) : eur(TUTOR_PLANS.monthly.pricePerMonthEur);
+    return profile.subscription_plan === 'yearly'
+      ? (isPlMarket() ? subscriptionPriceLabels.yearlyTotal() : eur(TUTOR_PLANS.yearly.pricePerYearEur))
+      : (isPlMarket() ? subscriptionPriceLabels.monthly() : eur(TUTOR_PLANS.monthly.pricePerMonthEur));
   };
 
   return (

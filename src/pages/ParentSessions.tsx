@@ -7,6 +7,7 @@ import { format } from 'date-fns';
 import { ArrowLeft, CalendarDays, ListOrdered, MessageCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import StatusBadge from '@/components/StatusBadge';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
 
 interface Session {
   id: string;
@@ -29,6 +30,7 @@ export default function ParentSessions() {
   const { studentId } = useParams<{ studentId: string }>();
   const { t, dateFnsLocale } = useTranslation();
   const navigate = useNavigate();
+  const { fmt } = useMarketMoney();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [studentName, setStudentName] = useState('');
   const [loading, setLoading] = useState(true);
@@ -164,7 +166,7 @@ export default function ParentSessions() {
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   {s.price != null && (
-                    <span className="text-sm font-medium text-gray-700">{Number(s.price).toFixed(2)} €</span>
+                    <span className="text-sm font-medium text-gray-700">{fmt(s.price)}</span>
                   )}
                   <StatusBadge
                     status={s.status}

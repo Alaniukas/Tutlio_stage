@@ -19,7 +19,8 @@ import { cn, normalizeUrl } from '@/lib/utils';
 import { recordJoinClick } from '@/lib/joinTracking';
 import { useStudentPaymentBlock } from '@/hooks/useStudentPaymentBlock';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
-import { formatLessonStripeChargeEur } from '@/lib/stripeLessonPricing';
+import { formatLessonStripeChargeEur, formatMarketAmount } from '@/lib/stripeLessonPricing';
+import { currentMarket } from '@/lib/market';
 import { tutorUsesManualStudentPayments } from '@/lib/subscription';
 import {
     isMonthlyBillingOnlyStudent,
@@ -64,6 +65,8 @@ interface InstallmentPayment {
 export default function StudentDashboard() {
     const navigate = useNavigate();
     const { t, dateFnsLocale } = useTranslation();
+    const market = currentMarket();
+    const fmt = (amount: number | null | undefined) => formatMarketAmount(amount, market);
     const { user: ctxUser } = useUser();
     const sdc = getCached<any>('student_dashboard');
     const [student, setStudent] = useState<StudentInfo | null>(sdc?.student ?? null);
@@ -549,7 +552,7 @@ export default function StudentDashboard() {
                                 {installments.map((i) => (
                                     <div key={i.id} className="rounded-xl border border-gray-100 p-3 flex items-center justify-between gap-3">
                                         <div>
-                                            <p className="text-sm font-semibold text-gray-900">Imoka #{i.installment_number} · €{i.amount.toFixed(2)}</p>
+                                            <p className="text-sm font-semibold text-gray-900">Imoka #{i.installment_number} · {fmt(i.amount)}</p>
                                             <p className="text-xs text-gray-500">
                                                 Terminas: {new Date(i.due_date).toLocaleDateString('lt-LT')}
                                                 {i.paid_at ? ` · Apmoketa: ${new Date(i.paid_at).toLocaleDateString('lt-LT')}` : ''}
@@ -741,7 +744,7 @@ export default function StudentDashboard() {
                             <div className="grid grid-cols-2 gap-3 text-sm">
                                 <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
                                     <p className="text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">{t('studentDash.priceLabel')}</p>
-                                    <p className="font-bold text-gray-900">€{selectedSession?.price ?? '–'}</p>
+                                    <p className="font-bold text-gray-900">{fmt(selectedSession?.price)}</p>
                                     {selectedSession?.status === 'active' && !selectedSession.paid && selectedSession.price != null && showPerLessonPayment && !manualPaymentsOnly && (
                                         <p className="text-[11px] text-gray-500 mt-1">{t('studentDash.cardTotal', { amount: formatLessonStripeChargeEur(selectedSession.price, tutorOrgIsSchool) })}</p>
                                     )}

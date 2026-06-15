@@ -12,23 +12,9 @@ import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
 import { tutorUsesManualStudentPayments } from './_lib/soloManualStudentPayments.js';
-
-const STRIPE_FEE_PERCENT = 0.015;
-const STRIPE_FEE_FIXED_EUR = 0.25;
-const PLATFORM_FEE_PERCENT = 0.02;
-
-function customerTotalEur(basePriceEur: number): number {
-    const platformFeeEur = basePriceEur * PLATFORM_FEE_PERCENT;
-    return (basePriceEur + platformFeeEur + STRIPE_FEE_FIXED_EUR) / (1 - STRIPE_FEE_PERCENT);
-}
-
-function lessonCheckoutBreakdownCents(basePriceEur: number): { baseCents: number; feesCents: number } {
-    const totalEur = customerTotalEur(basePriceEur);
-    const totalCents = Math.round(totalEur * 100);
-    const baseCents = Math.round(basePriceEur * 100);
-    const feesCents = totalCents - baseCents;
-    return { baseCents, feesCents };
-}
+import { marketFromRequest } from './_lib/market.js';
+import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata } from './_lib/marketMoney.js';
+import { publicOriginFromRequest } from './_lib/public-origin.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 const supabase = createClient(
@@ -36,10 +22,12 @@ const supabase = createClient(
     process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
-
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+
+    const market = marketFromRequest(req);
+    const currency = chargeCurrency(market);
+    const appOrigin = publicOriginFromRequest(req);
 
     const batchId = typeof req.query.batch === 'string' ? req.query.batch.trim() : '';
     if (!batchId) {
@@ -76,7 +64,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         // 4. Manual payment tutors — redirect to student sessions page
         if (tutorUsesManualStudentPayments(tutor)) {
-            return res.redirect(302, `${APP_URL}/student/sessions`);
+            return res.redirect(302, `${appOrigin}/student/sessions`);
         }
 
         // 5. Determine Stripe account
@@ -133,7 +121,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let checkoutSession: Stripe.Checkout.Session;
 
         if (useSchoolOrgAbsorbedFees) {
-            const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(totalLessonPrice);
+            const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(totalLessonPrice, market);
             const applicationFeeCents = chargeCents - transferToSchoolCents;
 
             checkoutSession = await stripe.checkout.sessions.create({
@@ -142,7 +130,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 payment_method_types: ['card'],
                 line_items: [{
                     price_data: {
-                        currency: 'eur',
+                        currency,
                         product_data: {
                             name: `Pamokos (${sessionCount}) – ${periodText}`,
                             description: `Mokymo paslaugos. Paslaugos teikėjas: ${ownerName}`,
@@ -157,14 +145,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     metadata: { tutlio_billing_batch_id: batchId, tutor_id: batch.tutor_id, tutlio_school_org_absorbed: 'true' },
                 },
                 metadata: { tutlio_billing_batch_id: batchId, tutor_id: batch.tutor_id, tutlio_school_org_absorbed: 'true' },
-                success_url: `${APP_URL}/student/sessions?invoice_paid=true&billing_batch_id=${batchId}&session_id={CHECKOUT_SESSION_ID}`,
-                cancel_url: `${APP_URL}/student/sessions`,
+                success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${batchId}&session_id={CHECKOUT_SESSION_ID}`,
+                cancel_url: `${appOrigin}/student/sessions`,
             });
         } else {
             let baseCents = 0;
             let feesCents = 0;
             for (const s of (batchSessions || [])) {
-                const b = lessonCheckoutBreakdownCents(Number(s.session_price) || 0);
+                const b = lessonCheckoutBreakdownCents(Number(s.session_price) || 0, market);
                 baseCents += b.baseCents;
                 feesCents += b.feesCents;
             }
@@ -176,7 +164,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 line_items: [
                     {
                         price_data: {
-                            currency: 'eur',
+                            currency,
                             product_data: {
                                 name: `Pamokos (${sessionCount}) – ${periodText}`,
                                 description: `Mokymo paslaugos. Paslaugos teikėjas: ${ownerName}`,
@@ -187,7 +175,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     },
                     {
                         price_data: {
-                            currency: 'eur',
+                            currency,
                             product_data: {
                                 name: 'Platformos administravimo mokestis',
                                 description: 'Paslaugos teikėjas: MB „Tutlio“',
@@ -201,9 +189,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     transfer_data: { destination: stripeAccountId!, amount: baseCents },
                     metadata: { tutlio_billing_batch_id: batchId, tutor_id: batch.tutor_id },
                 },
-                metadata: { tutlio_billing_batch_id: batchId, tutor_id: batch.tutor_id, tutlio_base_eur: (baseCents / 100).toFixed(2) },
-                success_url: `${APP_URL}/student/sessions?invoice_paid=true&billing_batch_id=${batchId}&session_id={CHECKOUT_SESSION_ID}`,
-                cancel_url: `${APP_URL}/student/sessions`,
+                metadata: { tutlio_billing_batch_id: batchId, tutor_id: batch.tutor_id, ...checkoutBaseMetadata(baseCents / 100, market) },
+                success_url: `${appOrigin}/student/sessions?invoice_paid=true&billing_batch_id=${batchId}&session_id={CHECKOUT_SESSION_ID}`,
+                cancel_url: `${appOrigin}/student/sessions`,
             });
         }
 

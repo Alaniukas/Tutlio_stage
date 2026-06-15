@@ -278,8 +278,8 @@ function packageItemsBreakdownRows(
   const rows = items.map((it, idx) => {
     const qty = Number(it.totalLessons) || 0;
     const label = qty === 1 ? t(locale, 'em.lessonSingular') : qty < 10 ? t(locale, 'em.lessonFew') : t(locale, 'em.lessonMany');
-    const perLesson = formatMoney(it.pricePerLesson ?? 0, 'EUR', locale);
-    const lineTotal = formatMoney(Number(it.pricePerLesson ?? 0) * qty, 'EUR', locale);
+    const perLesson = formatMoney(it.pricePerLesson ?? 0, undefined, locale);
+    const lineTotal = formatMoney(Number(it.pricePerLesson ?? 0) * qty, undefined, locale);
     const isLast = idx === items.length - 1;
     const border = isLast ? '' : ' border-bottom:1px solid #f0eeff;';
     return `<tr>
@@ -294,15 +294,23 @@ function packageItemsBreakdownRows(
 }
 const footerFor = (locale: Locale) => `<div class="footer"><p>${t(locale, 'em.teamSignature')}</p><p style="margin:8px 0 0; font-size:11px; color:#9ca3af;">${t(locale, 'em.unsubscribe')}</p></div>`;
 
-const formatMoney = (value: string | number, currency = 'EUR', loc: Locale = 'lt') => {
+const formatMoney = (value: string | number, currency?: string, loc: Locale = 'lt') => {
   const num = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(num)) return String(value);
-  return new Intl.NumberFormat(loc === 'en' ? 'en-US' : 'lt-LT', {
+  const resolvedCurrency = currency ?? (loc === 'pl' ? 'PLN' : 'EUR');
+  const intlLocale = loc === 'en' ? 'en-US' : loc === 'pl' ? 'pl-PL' : 'lt-LT';
+  return new Intl.NumberFormat(intlLocale, {
     style: 'currency',
-    currency,
+    currency: resolvedCurrency,
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(num);
+};
+
+/** Locale-aware money for email HTML (PLN on pl, EUR elsewhere). */
+const emailMoney = (value: string | number | null | undefined, loc: Locale = 'lt'): string => {
+  if (value == null || value === '') return '—';
+  return formatMoney(value, undefined, loc);
 };
 
 function bankTransferEmailButton(d: any, locale: Locale): string {
@@ -347,7 +355,7 @@ function bookingConfirmation(d: any, locale: Locale) {
     : '';
 
   const paymentRows = hidePayment ? '' : (
-    (d.price ? td(t(locale, 'em.labelPrice'), `€${d.price}`) : '') +
+    (d.price ? td(t(locale, 'em.labelPrice'), emailMoney(d.price, locale)) : '') +
     (d.cancellationHours ? td(t(locale, 'em.labelCancellation'), cancelText) : '') +
     td(t(locale, 'em.labelStatus'), localizedPaymentStatus, false)
   );
@@ -494,7 +502,7 @@ function sessionReminder(d: any, locale: Locale) {
         ${td(t(locale, 'em.labelDate'), d.date)}
         ${td(t(locale, 'em.labelTime'), d.time)}
         ${td(t(locale, 'em.labelDuration'), d.duration ? d.duration + ' ' + t(locale, 'em.min') : '60 ' + t(locale, 'em.min'))}
-        ${!d.isTutor ? td(t(locale, 'em.labelPriceAlt'), d.price ? '€' + d.price : '–', !d.meetingLink && !d.tutorComment) : ''}
+        ${!d.isTutor ? td(t(locale, 'em.labelPriceAlt'), d.price ? emailMoney(d.price, locale) : '–', !d.meetingLink && !d.tutorComment) : ''}
         ${d.meetingLink ? `<tr><td style="padding:10px 0;${!d.whiteboardLink && !d.tutorComment ? ' border-bottom:1px solid #f0eeff;' : ''} color:#6b7280; font-size:14px;">${t(locale, 'em.labelLink')}</td><td style="padding:10px 0;${!d.whiteboardLink && !d.tutorComment ? ' border-bottom:1px solid #f0eeff;' : ''} text-align:right;"><a href="${d.meetingLink}" style="color:#6366f1; font-weight:600; font-size:14px; text-decoration:none;">${t(locale, 'em.btnJoinNow')}</a></td></tr>` : ''}
         ${d.whiteboardLink ? `<tr><td style="padding:10px 0;${!d.tutorComment ? ' border-bottom:1px solid #f0eeff;' : ''} color:#6b7280; font-size:14px;">${t(locale, 'em.labelWhiteboard')}</td><td style="padding:10px 0;${!d.tutorComment ? ' border-bottom:1px solid #f0eeff;' : ''} text-align:right;"><a href="${d.whiteboardLink}" style="color:#7c3aed; font-weight:600; font-size:14px; text-decoration:none;">${t(locale, 'em.btnOpenWhiteboard')}</a></td></tr>` : ''}
         ${d.tutorComment ? `<tr><td colspan="2" style="padding:16px 0 0 0;"><div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:16px;"><p style="color:#1e3a8a; font-size:13px; font-weight:700; margin:0 0 6px 0;">${t(locale, 'em.tutorComment')}</p><div style="color:#1e40af; font-size:14px; line-height:1.5; white-space:pre-wrap;">${d.tutorComment}</div></div></td></tr>` : ''}
@@ -520,7 +528,7 @@ function sessionReminderPayer(d: any, locale: Locale) {
         ${td(t(locale, 'em.labelDate'), d.date)}
         ${td(t(locale, 'em.labelTime'), d.time)}
         ${td(t(locale, 'em.labelDuration'), d.duration ? d.duration + ' ' + t(locale, 'em.min') : '60 ' + t(locale, 'em.min'))}
-        ${td(t(locale, 'em.labelPriceAlt'), d.price ? '€' + d.price : '–', !d.meetingLink)}
+        ${td(t(locale, 'em.labelPriceAlt'), d.price ? emailMoney(d.price, locale) : '–', !d.meetingLink)}
         ${d.meetingLink ? td(t(locale, 'em.labelLink'), `<a href="${d.meetingLink}" style="color:#6366f1; font-weight:600; text-decoration:none;">${t(locale, 'em.btnJoin')}</a>`, false) : ''}
         ${d.whiteboardLink ? td(t(locale, 'em.labelWhiteboard'), `<a href="${d.whiteboardLink}" style="color:#7c3aed; font-weight:600; text-decoration:none;">${t(locale, 'em.btnOpenWhiteboard')}</a>`, false) : ''}
         </table></div>
@@ -846,7 +854,7 @@ function waitlistMatchedStudent(d: any, locale: Locale) {
       <div class="body">
         <p class="greeting">${t(locale, 'em.hiName', { name: d.studentName })}</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.waitlistMatchStudentBody', { tutor: d.tutorName })}</p>
-        ${table(td(t(locale, 'em.labelDate'), d.date) + td(t(locale, 'em.labelTime'), d.time) + td(t(locale, 'em.labelPriceAlt'), '€' + d.price, false))}
+        ${table(td(t(locale, 'em.labelDate'), d.date) + td(t(locale, 'em.labelTime'), d.time) + td(t(locale, 'em.labelPriceAlt'), emailMoney(d.price, locale), false))}
         ${d.bankAccountName ? `
         <div class="info-card" style="background:#f0fdf4; border-color:#bbf7d0; margin-top:16px;">
           <h3 style="color:#166534; font-size:14px; margin:0 0 12px 0; font-weight:700;">${t(locale, 'em.bankDetailsTitle')}</h3>
@@ -854,7 +862,7 @@ function waitlistMatchedStudent(d: any, locale: Locale) {
             ${td(t(locale, 'em.labelRecipient'), d.bankAccountName)}
             ${td(t(locale, 'em.labelAccountNo'), d.bankAccountNumber)}
             ${d.paymentPurpose ? td(t(locale, 'em.labelPurpose'), d.paymentPurpose) : ''}
-            ${td(t(locale, 'em.labelAmount'), '€' + d.price, false)}
+            ${td(t(locale, 'em.labelAmount'), emailMoney(d.price, locale), false)}
           </table>
         </div>
         ${confirmationLink ? `
@@ -944,7 +952,7 @@ function paymentReviewNeeded(d: any, locale: Locale) {
       <div class="body">
         <p class="greeting">${t(locale, 'em.hiName', { name: d.tutorName })}</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.payReviewBody', { student: d.studentName })}</p>
-        ${table(td(t(locale, 'em.labelDate'), d.date) + td(t(locale, 'em.labelTime'), d.time) + (d.price ? td(t(locale, 'em.labelAmount'), '€' + d.price, false) : ''))}
+        ${table(td(t(locale, 'em.labelDate'), d.date) + td(t(locale, 'em.labelTime'), d.time) + (d.price ? td(t(locale, 'em.labelAmount'), emailMoney(d.price, locale), false) : ''))}
         ${confirmLink && rejectLink ? `
         <div style="text-align:center; margin-top:30px;">
           <p style="color:#4b5563; font-size:14px; margin-bottom:16px;">${t(locale, 'em.receivedTransfer')}</p>
@@ -969,7 +977,7 @@ function stripePaymentForwarding(d: any, locale: Locale) {
   const tableBlock = table(
     td(t(locale, 'em.labelDate'), d.date) +
       td(t(locale, 'em.labelTime'), d.time) +
-      td(t(locale, 'em.labelPriceAlt'), `€${d.amount}`, false),
+      td(t(locale, 'em.labelPriceAlt'), emailMoney(d.amount, locale), false),
   );
   const payBlock = prefersManualInstructions(d)
     ? manualOffPlatformPaymentHtml(d, locale)
@@ -1024,7 +1032,7 @@ function paymentAfterLessonReminder(d: any, locale: Locale) {
         ${table(
       td(t(locale, 'em.labelDate'), d.date) +
       td(t(locale, 'em.labelTime'), d.time) +
-      td(t(locale, 'em.labelPriceAlt'), `€${d.amount}`, false) +
+      td(t(locale, 'em.labelPriceAlt'), emailMoney(d.amount, locale), false) +
       td(t(locale, 'em.labelPayBy'), d.payByTime, false)
     )}
         ${payBlock}
@@ -1037,7 +1045,7 @@ function penaltyPaymentSuccess(d: any, locale: Locale) {
   const fmt = (x: unknown) => (typeof x === 'number' ? x.toFixed(2) : String(x ?? ''));
   const charged =
     d.totalChargedEur != null && Number(d.totalChargedEur) > 0
-      ? td(t(locale, 'em.labelTotalCharged'), `€${fmt(Number(d.totalChargedEur))} ${t(locale, 'em.includingFees')}`, false)
+      ? td(t(locale, 'em.labelTotalCharged'), `${emailMoney(Number(d.totalChargedEur), locale)} ${t(locale, 'em.includingFees')}`, false)
       : '';
   return {
     subject: t(locale, 'em.penaltyPaySuccessSub', { date: d.date, time: d.time }),
@@ -1066,7 +1074,7 @@ function penaltyPaymentTutor(d: any, locale: Locale) {
   const fmt = (x: unknown) => (typeof x === 'number' ? x.toFixed(2) : String(x ?? ''));
   const charged =
     d.totalChargedEur != null && Number(d.totalChargedEur) > 0
-      ? td(t(locale, 'em.labelTotalCharged'), `€${fmt(Number(d.totalChargedEur))} ${t(locale, 'em.includingFees')}`, false)
+      ? td(t(locale, 'em.labelTotalCharged'), `${emailMoney(Number(d.totalChargedEur), locale)} ${t(locale, 'em.includingFees')}`, false)
       : '';
   return {
     subject: t(locale, 'em.penaltyPayTutorSub', { student: d.studentName, date: d.date }),
@@ -1104,25 +1112,25 @@ function paymentSuccess(d: any, locale: Locale) {
 
   let moneyRows = '';
   if (lessonNum != null && chargedNum != null && amountsCloseEuro(lessonNum, chargedNum)) {
-    moneyRows = td(t(locale, 'em.labelTotalPaid'), `€${fmt(lessonNum)}`, false);
+    moneyRows = td(t(locale, 'em.labelTotalPaid'), emailMoney(lessonNum, locale), false);
   } else if (lessonNum != null && chargedNum != null && chargedNum > lessonNum + 0.02) {
     // Receipt breakdown: teaching service (tutor/agency) + platform fee (MB Tutlio) + total.
     const providerName = String(d.providerName || d.tutorName || '').trim();
     const platformFeeNum = Math.round((chargedNum - lessonNum) * 100) / 100;
     moneyRows =
-      td(t(locale, 'em.feeRowTeaching', { provider: providerName }), `€${fmt(lessonNum)}`) +
-      td(t(locale, 'em.feeRowPlatform'), `€${fmt(platformFeeNum)}`) +
-      td(t(locale, 'em.labelTotalCharged'), `€${fmt(chargedNum)}`, false);
+      td(t(locale, 'em.feeRowTeaching', { provider: providerName }), emailMoney(lessonNum, locale)) +
+      td(t(locale, 'em.feeRowPlatform'), emailMoney(platformFeeNum, locale)) +
+      td(t(locale, 'em.labelTotalCharged'), emailMoney(chargedNum, locale), false);
   } else if (lessonNum != null && chargedNum != null && chargedNum < lessonNum - 0.02) {
     moneyRows =
-      td(t(locale, 'em.labelLessonPrice'), `€${fmt(lessonNum)}`) +
-      td(t(locale, 'em.labelTotalPaid'), `€${fmt(chargedNum)}`, false);
+      td(t(locale, 'em.labelLessonPrice'), emailMoney(lessonNum, locale)) +
+      td(t(locale, 'em.labelTotalPaid'), emailMoney(chargedNum, locale), false);
   } else if (lessonNum != null) {
-    moneyRows = td(t(locale, 'em.labelLessonPrice'), `€${fmt(lessonNum)}`);
+    moneyRows = td(t(locale, 'em.labelLessonPrice'), emailMoney(lessonNum, locale));
   } else if (chargedNum != null) {
-    moneyRows = td(t(locale, 'em.labelTotalCharged'), `€${fmt(chargedNum)} ${t(locale, 'em.includingFees')}`, false);
+    moneyRows = td(t(locale, 'em.labelTotalCharged'), `${emailMoney(chargedNum, locale)} ${t(locale, 'em.includingFees')}`, false);
   } else if (d.price) {
-    moneyRows = td(t(locale, 'em.labelPrice'), `€${d.price}`);
+    moneyRows = td(t(locale, 'em.labelPrice'), emailMoney(d.price, locale));
   }
 
   const headerSub = t(locale, 'em.paySuccessHeaderSub');
@@ -1200,7 +1208,7 @@ function paymentReceivedTutor(d: any, locale: Locale) {
           td(t(locale, 'em.labelDate'), d.date) +
           td(t(locale, 'em.labelTime'), d.time) +
           (d.subject ? td(t(locale, 'em.labelSubject'), d.subject) : '') +
-          (d.price != null ? td(t(locale, 'em.labelSum'), `€${d.price}`) : '')
+          (d.price != null ? td(t(locale, 'em.labelSum'), emailMoney(d.price, locale)) : '')
         )}
         <div style="text-align:center; margin-top: 24px;">
           ${outlookEmailButton(`${appUrl}/calendar`, t(locale, 'em.btnOpenCalendar'), '#059669', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
@@ -1281,7 +1289,7 @@ function paymentReminderEmail(d: any, locale: Locale) {
         ${table(
       td(t(locale, 'em.thDate'), d.date) +
       td(t(locale, 'em.thTime'), d.time) +
-      td(t(locale, 'em.thPrice'), `€${d.price}`) +
+      td(t(locale, 'em.thPrice'), emailMoney(d.price, locale)) +
       td(t(locale, 'em.payReminderDeadline'), t(locale, 'em.payReminderTiming', { hours: String(d.deadlineHours), timing: timingLt }), false)
     )}
         <p style="color:#ef4444; font-size:14px; font-weight:600;">
@@ -1312,7 +1320,7 @@ function paymentDeadlineWarningTutor(d: any, locale: Locale) {
         ${table(
       td(t(locale, 'em.labelLessonDate'), d.sessionDate) +
       td(t(locale, 'em.labelLessonTime'), d.sessionTime) +
-      td(t(locale, 'em.labelAmountAlt'), `${d.price} €`) +
+      td(t(locale, 'em.labelAmountAlt'), emailMoney(d.price, locale)) +
       (d.paymentContext ? td(t(locale, 'em.labelContext'), d.paymentContext, false) : td(t(locale, 'em.labelPaymentDeadline'), d.deadlineTime, false))
     )}
         <p style="color:#374151; font-size:14px; font-weight:600; margin-top:16px;">${t(locale, 'em.studentContacts')}</p>
@@ -1352,7 +1360,7 @@ function paymentDeadlineWarningOrgAdmin(d: any, locale: Locale) {
         ${table(
       td(t(locale, 'em.labelLessonDate'), d.sessionDate) +
       td(t(locale, 'em.labelLessonTime'), d.sessionTime) +
-      td(t(locale, 'em.labelAmountAlt'), `${d.price} €`, false)
+      td(t(locale, 'em.labelAmountAlt'), emailMoney(d.price, locale), false)
     )}
         <p style="color:#374151; font-size:14px; font-weight:600; margin-top:16px;">${t(locale, 'em.studentContacts')}</p>
         <div style="background:#fff7ed; border:1px solid #fed7aa; border-radius:10px; padding:16px; margin:8px 0 20px;">
@@ -1375,8 +1383,8 @@ function paymentDeadlineWarningOrgAdmin(d: any, locale: Locale) {
 
 function prepaidPackageRequest(d: any, locale: Locale) {
   const totalLessonsLabel = d.totalLessons === 1 ? t(locale, 'em.lessonSingular') : d.totalLessons < 10 ? t(locale, 'em.lessonFew') : t(locale, 'em.lessonMany');
-  const pricePerLesson = formatMoney(d.pricePerLesson, 'EUR', locale);
-  const totalPrice = formatMoney(d.totalPrice, 'EUR', locale);
+  const pricePerLesson = formatMoney(d.pricePerLesson, undefined, locale);
+  const totalPrice = formatMoney(d.totalPrice, undefined, locale);
   const items: PackageEmailItem[] = Array.isArray(d.items) ? d.items : [];
   const isMulti = items.length > 1;
   const itemsBreakdown = packageItemsBreakdownRows(items, locale);
@@ -1447,11 +1455,11 @@ function prepaidPackageSuccess(d: any, locale: Locale) {
     const providerName = String(d.providerName || d.tutorName || '').trim();
     const feeNum = Math.round((pkgChargedNum - pkgBaseNum) * 100) / 100;
     moneyRows =
-      td(t(locale, 'em.feeRowTeaching', { provider: providerName }), `€${pkgBaseNum.toFixed(2)}`) +
-      td(t(locale, 'em.feeRowPlatform'), `€${feeNum.toFixed(2)}`) +
-      td(t(locale, 'em.labelTotalCharged'), `€${pkgChargedNum.toFixed(2)}`, false);
+      td(t(locale, 'em.feeRowTeaching', { provider: providerName }), emailMoney(pkgBaseNum, locale)) +
+      td(t(locale, 'em.feeRowPlatform'), emailMoney(feeNum, locale)) +
+      td(t(locale, 'em.labelTotalCharged'), emailMoney(pkgChargedNum, locale), false);
   } else {
-    moneyRows = td(t(locale, 'em.labelTotalPaid'), `€${d.totalPrice}`, false);
+    moneyRows = td(t(locale, 'em.labelTotalPaid'), emailMoney(d.totalPrice, locale), false);
   }
   return {
     subject: t(locale, 'em.packageSuccessSub', { count: String(total), label: totalLabel, subject: subj }),
@@ -1540,7 +1548,7 @@ function monthlyInvoice(d: any, locale: Locale) {
           <td style="padding:12px 8px; color:#374151; font-size:14px;">${s.date}</td>
           <td style="padding:12px 8px; color:#374151; font-size:14px;">${s.time}</td>
           <td style="padding:12px 8px; color:#374151; font-size:14px;">${s.subject || '–'}</td>
-          <td style="padding:12px 8px; color:#1f2937; font-size:14px; font-weight:600; text-align:right;">€${s.price}</td>
+          <td style="padding:12px 8px; color:#1f2937; font-size:14px; font-weight:600; text-align:right;">${emailMoney(s.price, locale)}</td>
         </tr>
       `).join('')
     : '';
@@ -1574,16 +1582,16 @@ function monthlyInvoice(d: any, locale: Locale) {
               ${d.platformFees ? `
               <tr style="background:#f0f9ff;">
                 <td colspan="3" style="padding:10px 8px; color:#374151; font-size:14px; text-align:right;">${t(locale, 'em.lessonsSubtotal')}</td>
-                <td style="padding:10px 8px; color:#374151; font-size:14px; font-weight:600; text-align:right;">€${d.lessonsTotal}</td>
+                <td style="padding:10px 8px; color:#374151; font-size:14px; font-weight:600; text-align:right;">${emailMoney(d.lessonsTotal, locale)}</td>
               </tr>
               <tr style="background:#f0f9ff;">
                 <td colspan="3" style="padding:10px 8px; color:#6b7280; font-size:13px; text-align:right;">${t(locale, 'em.platformFees')}</td>
-                <td style="padding:10px 8px; color:#6b7280; font-size:13px; font-weight:600; text-align:right;">€${d.platformFees}</td>
+                <td style="padding:10px 8px; color:#6b7280; font-size:13px; font-weight:600; text-align:right;">${emailMoney(d.platformFees, locale)}</td>
               </tr>
               ` : ''}
               <tr style="background:#f0f9ff; border-top:2px solid #bfdbfe;">
                 <td colspan="3" style="padding:14px 8px; color:#1e40af; font-size:15px; font-weight:700; text-align:right;">${t(locale, 'em.totalLabel')}</td>
-                <td style="padding:14px 8px; color:#1e40af; font-size:16px; font-weight:800; text-align:right;">€${d.totalAmount}</td>
+                <td style="padding:14px 8px; color:#1e40af; font-size:16px; font-weight:800; text-align:right;">${emailMoney(d.totalAmount, locale)}</td>
               </tr>
             </tfoot>
           </table>
@@ -1615,8 +1623,8 @@ function monthlyInvoice(d: any, locale: Locale) {
 
 function manualPackageRequest(d: any, locale: Locale) {
   const totalLessonsLabel = d.totalLessons === 1 ? t(locale, 'em.lessonSingular') : d.totalLessons < 10 ? t(locale, 'em.lessonFew') : t(locale, 'em.lessonMany');
-  const pricePerLesson = formatMoney(d.pricePerLesson, 'EUR', locale);
-  const totalPrice = formatMoney(d.totalPrice, 'EUR', locale);
+  const pricePerLesson = formatMoney(d.pricePerLesson, undefined, locale);
+  const totalPrice = formatMoney(d.totalPrice, undefined, locale);
   const paymentUrl = typeof d.paymentUrl === 'string' && d.paymentUrl.trim().length > 0 ? String(d.paymentUrl).trim() : '';
   const items: PackageEmailItem[] = Array.isArray(d.items) ? d.items : [];
   const isMulti = items.length > 1;
@@ -1696,12 +1704,12 @@ function manualPackageConfirmed(d: any, locale: Locale) {
         ${isMulti
           ? itemsBreakdown + table(
               td(t(locale, 'em.labelRemaining'), `${availableLessons}/${totalLessons}`) +
-              td(t(locale, 'em.labelTotalPaid'), `€${d.totalPrice}`, false)
+              td(t(locale, 'em.labelTotalPaid'), emailMoney(d.totalPrice, locale), false)
             )
           : table(
               td(t(locale, 'em.labelSubject'), d.subjectName || '–') +
               td(t(locale, 'em.labelRemaining'), `${availableLessons}/${totalLessons}`) +
-              td(t(locale, 'em.labelTotalPaid'), `€${d.totalPrice}`, false)
+              td(t(locale, 'em.labelTotalPaid'), emailMoney(d.totalPrice, locale), false)
             )}
         <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:12px; padding:16px; margin:20px 0;">
           <p style="color:#1e40af; font-size:14px; margin:0; line-height:1.6;">
@@ -1731,11 +1739,11 @@ function monthlyInvoicePaid(d: any, locale: Locale) {
     const providerName = String(d.providerName || d.tutorName || '').trim();
     const feeNum = Math.round((batchChargedNum - batchBaseNum) * 100) / 100;
     moneyRows =
-      td(t(locale, 'em.feeRowTeaching', { provider: providerName }), `€${batchBaseNum.toFixed(2)}`) +
-      td(t(locale, 'em.feeRowPlatform'), `€${feeNum.toFixed(2)}`) +
-      td(t(locale, 'em.labelTotalCharged'), `€${batchChargedNum.toFixed(2)}`, false);
+      td(t(locale, 'em.feeRowTeaching', { provider: providerName }), emailMoney(batchBaseNum, locale)) +
+      td(t(locale, 'em.feeRowPlatform'), emailMoney(feeNum, locale)) +
+      td(t(locale, 'em.labelTotalCharged'), emailMoney(batchChargedNum, locale), false);
   } else {
-    moneyRows = td(t(locale, 'em.labelSum'), `€${d.totalAmount}`, false);
+    moneyRows = td(t(locale, 'em.labelSum'), emailMoney(d.totalAmount, locale), false);
   }
   return {
     subject: t(locale, 'em.invoicePaidSub', { period: d.periodText, amount: d.totalAmount }),
@@ -1770,7 +1778,7 @@ function platformInvoice(d: any, locale: Locale) {
   };
   const deductedRow =
     d.deductedAmount != null && Number(d.deductedAmount) > 0
-      ? td(t(locale, 'em.platformInvoiceDeducted'), `-€${fmt(d.deductedAmount)}`)
+      ? td(t(locale, 'em.platformInvoiceDeducted'), `-${emailMoney(d.deductedAmount, locale)}`)
       : '';
   return {
     subject: t(locale, 'em.platformInvoiceSub', { number: d.invoiceNumber, period: d.periodLabel }),
@@ -1787,9 +1795,9 @@ function platformInvoice(d: any, locale: Locale) {
         ${table(
           td(t(locale, 'em.platformInvoiceNumberLabel'), d.invoiceNumber) +
           td(t(locale, 'em.labelPeriod'), d.periodLabel) +
-          td(t(locale, 'em.labelSum'), `€${fmt(d.totalAmount)}`) +
+          td(t(locale, 'em.labelSum'), emailMoney(d.totalAmount, locale)) +
           deductedRow +
-          td(t(locale, 'em.platformInvoiceDue'), `€${fmt(d.amountDue)}`, false)
+          td(t(locale, 'em.platformInvoiceDue'), emailMoney(d.amountDue, locale), false)
         )}
         <p style="color:#6b7280; font-size:13px; line-height:1.5; margin-top:16px;">
           ${t(locale, 'em.platformInvoiceFooter')}
@@ -1892,7 +1900,7 @@ function schoolContract(d: any, locale: Locale) {
           <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
             ${td('Sutarties Nr.', esc(d.contractNumber || '—'))}
             ${td('Mokinys', esc(d.studentName))}
-            ${td('Metinis mokestis', d.annualFee ? `€${d.annualFee}` : '—')}
+            ${td('Metinis mokestis', d.annualFee ? emailMoney(d.annualFee, locale) : '—')}
             ${td('Tėvų telefonas', esc(d.parentPhone || '—'))}
             ${td('Vaiko gimimo data', esc(d.childBirthDate || '—'))}
             ${td('Adresas', esc(d.address || '—'))}
@@ -1935,10 +1943,10 @@ function schoolInstallmentRequest(d: any, locale: Locale) {
           <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
             ${td('Mokinys', esc(d.studentName))}
             ${td('Įmoka', `#${d.installmentNumber || '—'} iš ${d.totalInstallments || '—'}`)}
-            ${td('Suma', d.amount ? `€${d.amount}` : '—')}
-            ${hasBreakdown ? td('Fiksuotas mokestis', annualFee > 0 ? `€${annualFee.toFixed(2)}` : '—') : ''}
-            ${hasBreakdown ? td('Papildomas mokestis', additionalFee > 0 ? `€${additionalFee.toFixed(2)}${d.additionalFeePurpose ? ` (${esc(d.additionalFeePurpose)})` : ''}` : '—') : ''}
-            ${hasBreakdown ? td('Iš viso', totalAmount > 0 ? `€${totalAmount.toFixed(2)}` : '—') : ''}
+            ${td('Suma', d.amount ? emailMoney(d.amount, locale) : '—')}
+            ${hasBreakdown ? td('Fiksuotas mokestis', annualFee > 0 ? emailMoney(annualFee, locale) : '—') : ''}
+            ${hasBreakdown ? td('Papildomas mokestis', additionalFee > 0 ? `${emailMoney(additionalFee, locale)}${d.additionalFeePurpose ? ` (${esc(d.additionalFeePurpose)})` : ''}` : '—') : ''}
+            ${hasBreakdown ? td('Iš viso', totalAmount > 0 ? emailMoney(totalAmount, locale) : '—') : ''}
             ${td('Terminas', d.dueDate || '—', false)}
           </table>
         </div>

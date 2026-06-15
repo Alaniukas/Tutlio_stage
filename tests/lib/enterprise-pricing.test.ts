@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { enterprisePlnTierDefs } from '@/lib/enterprisePricingPln';
+import { enterpriseEurTierDefs } from '@/lib/enterprisePricingEur';
 import {
   displayPricingForQuantity,
   formatMoney,
@@ -86,46 +88,24 @@ describe('totalCentsForQuantity — graduated mode', () => {
   });
 });
 
-describe('production tiers (graduated: €49/mo admin fee + progressive rates)', () => {
-  // Mirrors the live Stripe price: price_1Tgky49Ugxc4GQKmQtniND85
-  // (graduated so adding licenses never lowers the total; the admin fee is
-  // the first tier's flat_amount since graduated flats apply per used band)
+describe('production tiers (volume: €49/mo admin fee + band rate for quantity)', () => {
   const production = {
-    tiersMode: 'graduated' as const,
-    tiers: [
-      { upTo: 10, unitAmountCents: 1000, flatAmountCents: 4900 },
-      { upTo: 20, unitAmountCents: 900, flatAmountCents: 0 },
-      { upTo: 30, unitAmountCents: 800, flatAmountCents: 0 },
-      { upTo: 40, unitAmountCents: 700, flatAmountCents: 0 },
-      { upTo: 50, unitAmountCents: 600, flatAmountCents: 0 },
-      { upTo: null, unitAmountCents: 500, flatAmountCents: 0 },
-    ],
+    tiersMode: 'volume' as const,
+    tiers: enterpriseEurTierDefs(),
   };
 
-  it('charges the admin fee once plus progressive band pricing', () => {
+  it('charges the matched band rate for all licenses plus admin fee', () => {
     expect(totalCentsForQuantity(production, 1)).toBe(4900 + 1000); // €59
     expect(totalCentsForQuantity(production, 10)).toBe(4900 + 10_000); // €149
-    expect(totalCentsForQuantity(production, 11)).toBe(4900 + 10_000 + 900); // €158
-    expect(totalCentsForQuantity(production, 20)).toBe(4900 + 10_000 + 9_000); // €239
-    expect(totalCentsForQuantity(production, 30)).toBe(4900 + 10_000 + 9_000 + 8_000); // €319
-    expect(totalCentsForQuantity(production, 50)).toBe(4900 + 10_000 + 9_000 + 8_000 + 7_000 + 6_000); // €449
-    expect(totalCentsForQuantity(production, 60)).toBe(44_900 + 10 * 500); // €499
+    expect(totalCentsForQuantity(production, 11)).toBe(4900 + 11 * 900); // €148
+    expect(totalCentsForQuantity(production, 25)).toBe(4900 + 25 * 800); // €249
+    expect(totalCentsForQuantity(production, 50)).toBe(4900 + 50 * 700); // €399
+    expect(totalCentsForQuantity(production, 60)).toBe(4900 + 60 * 600); // €409
   });
 
-  it('never gets cheaper when adding licenses', () => {
-    let prev = 0;
-    for (let quantity = 1; quantity <= 220; quantity++) {
-      const total = totalCentsForQuantity(production, quantity);
-      expect(total).toBeGreaterThan(prev);
-      prev = total;
-    }
-  });
-
-  it('separates the averaged license rate from the admin fee for display', () => {
+  it('shows the band unit rate and admin fee separately', () => {
     expect(displayPricingForQuantity(production, 5)).toEqual({ unitCents: 1000, flatCents: 4900 });
-    const at15 = displayPricingForQuantity(production, 15);
-    expect(at15.flatCents).toBe(4900);
-    expect(at15.unitCents).toBeCloseTo((10 * 1000 + 5 * 900) / 15);
+    expect(displayPricingForQuantity(production, 50)).toEqual({ unitCents: 700, flatCents: 4900 });
     expect(displayPricingForQuantity(production, 0)).toEqual({ unitCents: 0, flatCents: 0 });
   });
 });
@@ -164,6 +144,23 @@ describe('unitCentsForQuantity', () => {
   });
 });
 
+describe('production PLN tiers (volume — tutlio.pl)', () => {
+  const productionPln = {
+    tiersMode: 'volume' as const,
+    tiers: enterprisePlnTierDefs().map((t) => ({
+      upTo: t.upTo,
+      unitAmountCents: t.unitAmountCents,
+      flatAmountCents: t.flatAmountCents,
+    })),
+  };
+
+  it('charges the matched band rate for all licenses plus admin fee in PLN', () => {
+    expect(totalCentsForQuantity(productionPln, 1)).toBe(21_000 + 4_300); // 253 zł
+    expect(totalCentsForQuantity(productionPln, 10)).toBe(21_000 + 43_000); // 640 zł
+    expect(totalCentsForQuantity(productionPln, 11)).toBe(21_000 + 11 * 3_900); // 639 zł
+    expect(totalCentsForQuantity(productionPln, 50)).toBe(21_000 + 50 * 3_000); // 1710 zł
+  });
+});
 describe('formatMoney', () => {
   it('formats euro cents with decimals only when needed', () => {
     expect(formatMoney(280, 'eur')).toContain('2.80');
@@ -173,5 +170,6 @@ describe('formatMoney', () => {
 
   it('includes the currency symbol', () => {
     expect(formatMoney(100, 'eur')).toContain('€');
+    expect(formatMoney(4300, 'pln', 'pl')).toContain('43');
   });
 });

@@ -142,6 +142,7 @@ export function tHtml(
 }
 
 export function detectLocaleFromHost(host: string): Locale {
+  if (host.includes('tutlio.pl')) return 'pl';
   if (host.includes('tutlio.com')) return 'en';
   return 'lt';
 }

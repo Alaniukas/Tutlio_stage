@@ -24,6 +24,8 @@ import { cn } from '@/lib/utils';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useTranslation } from '@/lib/i18n';
 import { tutorSubjectsContainLessonDuplicate } from '@/lib/subjectPresetDedupe';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
+import { isPlMarket } from '@/lib/market';
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 
@@ -189,6 +191,7 @@ function DropdownWithCustom({
 
 export default function LessonSettingsPage() {
   const { t, tHtml } = useTranslation();
+  const { fmt } = useMarketMoney();
   const { user: ctxUser } = useUser();
   const orgPolicy = useOrgTutorPolicy();
   const [orgName, setOrgName] = useState<string | null>(null);
@@ -599,7 +602,8 @@ export default function LessonSettingsPage() {
                           </span>
                           {showSubjectPrices && (
                           <span className="flex items-center gap-1 text-indigo-600 text-xs font-semibold">
-                            <Euro className="w-3 h-3" />{subject.price}
+                            {!isPlMarket() && <Euro className="w-3 h-3" />}
+                            {fmt(subject.price)}
                           </span>
                           )}
                           {subject.grade_min !== null && subject.grade_max !== null && (
@@ -677,7 +681,7 @@ export default function LessonSettingsPage() {
                   min={0}
                   max={100}
                   hint={t('lessonSet.cancelFeeHint')}
-                  icon={<Euro className="w-4 h-4 text-gray-400" />}
+                  icon={isPlMarket() ? <span className="text-xs text-gray-400 font-medium">zł</span> : <Euro className="w-4 h-4 text-gray-400" />}
                   disabled={!!(orgName && !canEditCancellation)}
                   customLabel={t('lessonSet.customInput')} changeLabel={t('lessonSet.change')} listLabel={t('lessonSet.listView')}
                 />
@@ -685,12 +689,16 @@ export default function LessonSettingsPage() {
               </div>
               {settings.cancellation_fee_percent > 0 && (
                 <div className="mt-3 p-3 bg-amber-50 border border-amber-100 rounded-xl text-sm text-amber-700">
-                  <span dangerouslySetInnerHTML={{ __html: tHtml('lessonSet.cancelExample', {
-                    hours: String(settings.cancellation_hours),
-                    price: String(subjects[0]?.price ?? 25),
-                    fee: ((subjects[0]?.price ?? 25) * settings.cancellation_fee_percent / 100).toFixed(2),
-                    percent: String(settings.cancellation_fee_percent),
-                  }) }} />
+                  <span dangerouslySetInnerHTML={{ __html: tHtml('lessonSet.cancelExample', (() => {
+                    const exampleBase = subjects[0]?.price ?? 25;
+                    const exampleFee = exampleBase * settings.cancellation_fee_percent / 100;
+                    return {
+                      hours: String(settings.cancellation_hours),
+                      price: isPlMarket() ? fmt(exampleBase) : String(exampleBase),
+                      fee: isPlMarket() ? fmt(exampleFee) : exampleFee.toFixed(2),
+                      percent: String(settings.cancellation_fee_percent),
+                    };
+                  })()) }} />
                 </div>
               )}
             </div>
@@ -858,7 +866,12 @@ export default function LessonSettingsPage() {
               {showSubjectPrices && (
               <div className="space-y-2">
                 <Label className="flex items-center gap-2">
-                  <Euro className="w-4 h-4 text-gray-400" /> {t('lessonSet.priceLabel')}
+                  {isPlMarket() ? (
+                    <span className="text-xs text-gray-400 font-medium">zł</span>
+                  ) : (
+                    <Euro className="w-4 h-4 text-gray-400" />
+                  )}{' '}
+                  {t('lessonSet.priceLabel')}
                 </Label>
                 <Input
                   type="number"

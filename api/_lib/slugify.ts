@@ -3,8 +3,8 @@ const DIACRITICS: Record<string, string> = {
   ą: 'a', č: 'c', ę: 'e', ė: 'e', į: 'i', š: 's', ų: 'u', ū: 'u', ž: 'z',
   // Polish
   ć: 'c', ł: 'l', ń: 'n', ó: 'o', ś: 's', ź: 'z', ż: 'z',
-  // Latvian
-  ā: 'a', ē: 'e', ģ: 'g', ī: 'i', ķ: 'k', ļ: 'l', ņ: 'n', ŗ: 'r', ū: 'u',
+  // Latvian (ū shared with Lithuanian above)
+  ā: 'a', ē: 'e', ģ: 'g', ī: 'i', ķ: 'k', ļ: 'l', ņ: 'n', ŗ: 'r',
   // Estonian
   õ: 'o', ä: 'a', ö: 'o', ü: 'u',
   // French / Spanish

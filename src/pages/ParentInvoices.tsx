@@ -8,6 +8,7 @@ import { Download, FileText, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import ParentLayout from '@/components/ParentLayout';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { authHeaders } from '@/lib/apiHelpers';
 import { computeInvoiceDisplayForChild } from '@/lib/billingBatchStudentSlice';
 
@@ -27,6 +28,7 @@ interface Invoice {
 export default function ParentInvoices() {
   const { user } = useUser();
   const { t } = useTranslation();
+  const { fmt } = useMarketMoney();
   const [searchParams] = useSearchParams();
   const filterStudentId = searchParams.get('studentId')?.trim() || null;
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -274,7 +276,7 @@ export default function ParentInvoices() {
                   )}
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
-                  <span className="font-medium text-gray-800">{amount.toFixed(2)} €</span>
+                  <span className="font-medium text-gray-800">{fmt(amount)}</span>
                   <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium', statusColor[inv.status] || statusColor.issued)}>
                     {invoiceStatusLabel(inv.status)}
                   </span>

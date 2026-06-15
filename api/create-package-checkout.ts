@@ -11,30 +11,15 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { tutorUsesManualStudentPayments } from './_lib/soloManualStudentPayments.js';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
+import { marketFromRequest } from './_lib/market.js';
+import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata } from './_lib/marketMoney.js';
+import { publicOriginFromRequest } from './_lib/public-origin.js';
 import {
   normalizePackageItemsInput,
   resolvePackageItems,
   aggregatePackageTotals,
   itemsForEmailPayload,
 } from './_lib/packageItems.js';
-
-// Stripe/platform fee helpers (inlined to avoid _lib import issues on Vercel)
-const STRIPE_FEE_PERCENT = 0.015;
-const STRIPE_FEE_FIXED_EUR = 0.25;
-const PLATFORM_FEE_PERCENT = 0.02;
-
-function customerTotalEur(basePriceEur: number): number {
-    const platformFeeEur = basePriceEur * PLATFORM_FEE_PERCENT;
-    return (basePriceEur + platformFeeEur + STRIPE_FEE_FIXED_EUR) / (1 - STRIPE_FEE_PERCENT);
-}
-
-function lessonCheckoutBreakdownCents(basePriceEur: number): { baseCents: number; feesCents: number } {
-    const totalEur = customerTotalEur(basePriceEur);
-    const totalCents = Math.round(totalEur * 100);
-    const baseCents = Math.round(basePriceEur * 100);
-    const feesCents = totalCents - baseCents;
-    return { baseCents, feesCents };
-}
 
 function json(res: VercelResponse, status: number, body: unknown) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -81,6 +66,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const auth = await verifyRequestAuth(req);
     if (!auth?.userId) return json(res, 401, { error: 'Unauthorized' });
+
+    const market = marketFromRequest(req);
+    const currency = chargeCurrency(market);
+    const appOrigin = publicOriginFromRequest(req);
 
     const body = req.body as {
         tutorId?: string;
@@ -265,7 +254,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // 7. Create Stripe Checkout session — one line per subject (multi-subject support)
         const itemLineItems = resolvedItems.map((it) => ({
             price_data: {
-                currency: 'eur' as const,
+                currency: currency as const,
                 product_data: {
                     name: `${it.totalLessons} × ${it.subjectName}`,
                     description: `Mokymo paslaugos. Paslaugos teikėjas: ${ownerName}`,
@@ -286,7 +275,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         let checkoutSession: Stripe.Response<Stripe.Checkout.Session>;
         if (useSchoolOrgAbsorbedFees) {
-            const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(basePriceEur);
+            const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(basePriceEur, market);
             const applicationFeeCents = chargeCents - transferToSchoolCents;
             if (chargeCents < 50 || applicationFeeCents < 1 || applicationFeeCents >= chargeCents) {
                 await supabase.from('lesson_packages').delete().eq('id', lessonPackage.id);
@@ -311,7 +300,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 cancel_url: `${APP_URL}/package-cancelled`,
             });
         } else {
-            const { baseCents, feesCents: feeCents } = lessonCheckoutBreakdownCents(basePriceEur);
+            const { baseCents, feesCents: feeCents } = lessonCheckoutBreakdownCents(basePriceEur, market);
             const tutorTransferCents = baseCents;
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
@@ -321,7 +310,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     ...itemLineItems,
                     {
                         price_data: {
-                            currency: 'eur',
+                            currency,
                             product_data: {
                                 name: 'Platformos administravimo mokestis',
                                 description: 'Paslaugos teikėjas: MB „Tutlio“',
@@ -338,7 +327,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     },
                     metadata: metadataBase,
                 },
-                metadata: { ...metadataBase, tutlio_base_eur: basePriceEur.toFixed(2) },
+                metadata: { ...metadataBase, ...checkoutBaseMetadata(basePriceEur, market) },
                 success_url: `${APP_URL}/package-success?session_id={CHECKOUT_SESSION_ID}`,
                 cancel_url: `${APP_URL}/package-cancelled`,
             });

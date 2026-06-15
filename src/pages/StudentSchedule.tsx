@@ -26,7 +26,8 @@ import {
     shouldUsePackageForBooking,
 } from '@/lib/studentPaymentModel';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
-import { formatLessonStripeChargeEur } from '@/lib/stripeLessonPricing';
+import { formatLessonStripeChargeEur, formatMarketAmount } from '@/lib/stripeLessonPricing';
+import { currentMarket } from '@/lib/market';
 import { ParentLessonDetailModal } from '@/components/parent/ParentLessonDetailModal';
 import { fetchStudentActiveLessonPackagesDeduped } from '@/lib/studentLessonPackagesLight';
 import { rpcGetStudentProfilesDeduped } from '@/lib/preload';
@@ -154,6 +155,9 @@ interface SlotEvent {
 
 export default function StudentSchedule() {
     const { t, tHtml, dateFnsLocale } = useTranslation();
+    const market = currentMarket();
+    const isPl = market === 'pl';
+    const fmt = (amount: number | null | undefined) => formatMarketAmount(amount, market);
     const { user: ctxUser } = useUser();
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
@@ -1707,7 +1711,7 @@ export default function StudentSchedule() {
                         <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 flex items-start gap-3">
                             <Wallet className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
                             <p className="text-sm text-emerald-900 font-medium">
-                                {t('stuSched.creditBalanceBanner', { balance: creditBalance.toFixed(2) })}
+                                {t('stuSched.creditBalanceBanner', { balance: fmt(creditBalance) })}
                             </p>
                         </div>
                     )}
@@ -1880,12 +1884,12 @@ export default function StudentSchedule() {
                                                         if (creditBalance > 0 && creditApplied > 0 && price > 0) {
                                                             return (
                                                                 <span className="flex flex-col items-end leading-tight">
-                                                                    <span className="text-[11px] font-semibold text-gray-400 line-through">{price.toFixed(2)} €</span>
-                                                                    <span>{t('stuSched.subjectPriceWithCredit', { amount: remaining.toFixed(2) })}</span>
+                                                                    <span className="text-[11px] font-semibold text-gray-400 line-through">{fmt(price)}</span>
+                                                                    <span>{t('stuSched.subjectPriceWithCredit', { amount: fmt(remaining) })}</span>
                                                                 </span>
                                                             );
                                                         }
-                                                        return <span>{s.price} €</span>;
+                                                        return <span>{fmt(s.price)}</span>;
                                                     })()}
                                                 </span>
                                             </button>
@@ -1989,7 +1993,7 @@ export default function StudentSchedule() {
                                                             </span>
                                                         </div>
                                                     </div>
-                                                    <span className={cn('text-sm font-black', selectedWaitlistSubjectId === s.id ? 'text-amber-600' : 'text-gray-900')}>{s.price} €</span>
+                                                    <span className={cn('text-sm font-black', selectedWaitlistSubjectId === s.id ? 'text-amber-600' : 'text-gray-900')}>{fmt(s.price)}</span>
                                                 </button>
                                             );
                                         })}
@@ -2032,7 +2036,7 @@ export default function StudentSchedule() {
                                         <Wallet className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
                                         <div className="text-sm text-green-700">
                                             <p className="font-semibold text-green-800 mb-0.5">{t('stuSched.creditAvailable')}</p>
-                                            <p>{t('stuSched.creditWillApply', { credit: creditToApply.toFixed(2), remaining: remaining.toFixed(2) })}</p>
+                                            <p>{t('stuSched.creditWillApply', { credit: fmt(creditToApply), remaining: fmt(remaining) })}</p>
                                         </div>
                                     </div>
                                 );
@@ -2189,14 +2193,14 @@ export default function StudentSchedule() {
                                 <div className="grid grid-cols-2 gap-3 text-sm">
                                     <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
                                         <p className="text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">{t('studentDash.priceLabel')}</p>
-                                        <p className="font-bold text-gray-900">€{mySessionData?.price ?? '–'}</p>
+                                        <p className="font-bold text-gray-900">{fmt(mySessionData?.price)}</p>
                                         {mySessionData?.status === 'active' && !mySessionData.paid && mySessionData.price != null && (() => {
                                             const { creditApplied, remaining } = lessonCreditBreakdown(mySessionData.price);
                                             return (
                                                 <div className="text-[11px] text-gray-500 mt-1 leading-snug space-y-0.5">
                                                     {creditApplied > 0 && (
                                                         <p className="text-emerald-700 font-medium">
-                                                            {t('stuSched.creditRowApplied')}: €{creditApplied.toFixed(2)}
+                                                            {t('stuSched.creditRowApplied')}: {fmt(creditApplied)}
                                                         </p>
                                                     )}
                                                     <p>
@@ -2273,14 +2277,14 @@ export default function StudentSchedule() {
                                                     <>
                                                         <CreditCard className="w-4 h-4" />
                                                         {remaining > 0
-                                                            ? `${t('stuSched.payStripe')} — €${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}`
+                                                            ? `${t('stuSched.payStripe')} — ${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}`
                                                             : `${t('stuSched.payStripe')} — ${t('stuSess.payWithCredit')}`}
                                                     </>
                                                 )}
                                             </button>
                                         );
                                     })()}
-                                    {tutorPerlasEnabled && (() => {
+                                    {tutorPerlasEnabled && !isPl && (() => {
                                         const sp = Number(mySessionData.price || 0);
                                         const pf = Math.round(sp * 2) / 100;
                                         const bf = 0.18;
@@ -2293,7 +2297,7 @@ export default function StudentSchedule() {
                                             >
                                                 {perlasLoading
                                                     ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
-                                                    : <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank', { amount: tot.toFixed(2) })}</>
+                                                    : <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank', { amount: fmt(tot) })}</>
                                                 }
                                             </button>
                                         );
@@ -2372,16 +2376,16 @@ export default function StudentSchedule() {
                                     const { creditApplied, remaining } = lessonCreditBreakdown(pendingPaymentSession.price);
                                     return (
                                         <>
-                                            <p><span className="font-medium">Pamokos kaina:</span> €{pendingPaymentSession.price}</p>
+                                            <p><span className="font-medium">Pamokos kaina:</span> {fmt(pendingPaymentSession.price)}</p>
                                             {creditApplied > 0 && (
                                                 <p className="text-emerald-700 font-medium">
-                                                    {t('stuSched.creditRowApplied')}: €{creditApplied.toFixed(2)}
+                                                    {t('stuSched.creditRowApplied')}: {fmt(creditApplied)}
                                                 </p>
                                             )}
                                             {remaining > 0 && !manualPaymentInBookingModal && (
                                                 <p>
                                                     <span className="font-medium">{t('stuSched.cardPayTotal')}</span>{' '}
-                                                    €{formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}
+                                                    {formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}
                                                 </p>
                                             )}
                                             {remaining > 0 && manualPaymentInBookingModal && (
@@ -2454,14 +2458,14 @@ export default function StudentSchedule() {
                                                         ? (() => {
                                                             const { remaining } = lessonCreditBreakdown(pendingPaymentSession.price);
                                                             return remaining > 0
-                                                                ? `${t('stuSched.payStripe')} — €${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}`
+                                                                ? `${t('stuSched.payStripe')} — ${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}`
                                                                 : `${t('stuSched.payStripe')} — ${t('stuSess.payWithCredit')}`;
                                                         })()
                                                         : t('stuSched.payStripe')}
                                                 </>
                                             )}
                                         </button>
-                                        {tutorPerlasEnabled && pendingPaymentSession && (() => {
+                                        {tutorPerlasEnabled && !isPl && pendingPaymentSession && (() => {
                                             const sp = Number(pendingPaymentSession.price || 0);
                                             const pf = Math.round(sp * 2) / 100;
                                             const bf = 0.18;
@@ -2475,7 +2479,7 @@ export default function StudentSchedule() {
                                                 >
                                                     {perlasLoading
                                                         ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
-                                                        : <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank', { amount: tot.toFixed(2) })}</>
+                                                        : <><Landmark className="w-4 h-4" /> {t('perlasFinance.payViaBank', { amount: fmt(tot) })}</>
                                                     }
                                                 </button>
                                             );

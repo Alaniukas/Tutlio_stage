@@ -12,6 +12,7 @@ import {
     handleEnterpriseLicenseSubscriptionDeleted,
     syncEnterpriseLicenseSubscription,
 } from './_lib/enterpriseLicenseWebhook.js';
+import { isSubscriptionOnlyPriceId } from './_lib/stripe-subscription-env.js';
 
 const getStripe = () => {
     const key = process.env.STRIPE_SECRET_KEY;
@@ -149,9 +150,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         console.log(`[stripe-webhook] Ignoring canceled sub ${subscription.id}, using active sub ${otherActive.id} for profile ${profile.id}`);
                     }
                 }
-                const subOnlyPriceId = process.env.STRIPE_SUBSCRIPTION_ONLY_PRICE_ID;
                 const priceItem = subToUse.items.data[0];
-                const plan = priceItem?.price.id === subOnlyPriceId
+                const plan = isSubscriptionOnlyPriceId(priceItem?.price.id)
                     ? 'subscription_only'
                     : priceItem?.price.recurring?.interval === 'year' ? 'yearly' : 'monthly';
                 const periodEnd = new Date((subToUse as Stripe.Subscription & { current_period_end: number }).current_period_end * 1000).toISOString();
@@ -194,9 +194,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 const all = await stripe.subscriptions.list({ customer: customerId, status: 'all', limit: 10 });
                 const otherActive = all.data.find(s => s.id !== subscription.id && (s.status === 'active' || s.status === 'trialing'));
                 if (otherActive) {
-                    const subOnlyPriceId = process.env.STRIPE_SUBSCRIPTION_ONLY_PRICE_ID;
                     const otherPriceId = otherActive.items.data[0]?.price?.id;
-                    const plan = otherPriceId === subOnlyPriceId
+                    const plan = isSubscriptionOnlyPriceId(otherPriceId)
                         ? 'subscription_only'
                         : otherActive.items.data[0]?.price.recurring?.interval === 'year'
                             ? 'yearly'
@@ -323,9 +322,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         .maybeSingle();
 
                     if (profile) {
-                        const subOnlyPriceId = process.env.STRIPE_SUBSCRIPTION_ONLY_PRICE_ID;
                         const currentPriceId = subscription.items.data[0]?.price?.id;
-                        const plan = currentPriceId === subOnlyPriceId
+                        const plan = isSubscriptionOnlyPriceId(currentPriceId)
                             ? 'subscription_only'
                             : subscription.items.data[0]?.price.recurring?.interval === 'year'
                                 ? 'yearly'

@@ -1,5 +1,6 @@
 ﻿/**
  * Creates tutlio.pl subscription products + PLN prices in Stripe (test or live per STRIPE_SECRET_KEY).
+ * Writes STRIPE_*_PLN env keys — EUR keys in .env are left unchanged.
  * Run: npm run stripe:setup-pln
  */
 process.env.NODE_TLS_REJECT_UNAUTHORIZED ??= '0';
@@ -40,38 +41,38 @@ const plnUnit = (amount: number) => Math.round(amount * 100);
 async function main() {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key?.startsWith('sk_')) {
-    console.error('STRIPE_SECRET_KEY missing in .env');
+    console.error('STRIPE_SECRET_KEY missing in .env — add your live or test key and re-run.');
     process.exit(1);
   }
 
   const stripe = new Stripe(key, { apiVersion: '2023-10-16' as Stripe.LatestApiVersion });
   const mode = key.includes('_test_') ? 'test' : 'live';
-  console.log(`Stripe mode: ${mode}`);
+  console.log(`Stripe mode: ${mode}\n`);
 
   const defs = [
     {
-      envProduct: 'STRIPE_MONTHLY_PRODUCT_ID',
-      envPrice: 'STRIPE_MONTHLY_PRICE_ID',
-      name: 'Tutlio ΓÇô plan miesi─Öczny (PL)',
-      description: 'Prenumerata miesi─Öczna tutlio.pl ΓÇô pe┼ény dost─Öp dla korepetytora.',
+      envProduct: 'STRIPE_MONTHLY_PRODUCT_ID_PLN',
+      envPrice: 'STRIPE_MONTHLY_PRICE_ID_PLN',
+      name: 'Tutlio – plan miesięczny (PL)',
+      description: 'Prenumerata miesięczna tutlio.pl – pełny dostęp dla korepetytora.',
       amount: SUBSCRIPTION_PLN.monthly,
       interval: 'month' as const,
       metadata: { plan: 'monthly', market: 'pl' },
     },
     {
-      envProduct: 'STRIPE_YEARLY_PRODUCT_ID',
-      envPrice: 'STRIPE_YEARLY_PRICE_ID',
-      name: 'Tutlio ΓÇô plan roczny (PL)',
-      description: `Prenumerata roczna tutlio.pl ΓÇô ${SUBSCRIPTION_PLN.yearlyTotal} PLN/rok.`,
+      envProduct: 'STRIPE_YEARLY_PRODUCT_ID_PLN',
+      envPrice: 'STRIPE_YEARLY_PRICE_ID_PLN',
+      name: 'Tutlio – plan roczny (PL)',
+      description: `Prenumerata roczna tutlio.pl – ${SUBSCRIPTION_PLN.yearlyTotal} PLN/rok.`,
       amount: SUBSCRIPTION_PLN.yearlyTotal,
       interval: 'year' as const,
       metadata: { plan: 'yearly', market: 'pl' },
     },
     {
-      envProduct: 'STRIPE_SUBSCRIPTION_ONLY_PRODUCT_ID',
-      envPrice: 'STRIPE_SUBSCRIPTION_ONLY_PRICE_ID',
-      name: 'Tutlio ΓÇô tylko subskrypcja (PL)',
-      description: 'Prenumerata bez prowizji od lekcji ΓÇô p┼éatno┼¢ci r─Öczne.',
+      envProduct: 'STRIPE_SUBSCRIPTION_ONLY_PRODUCT_ID_PLN',
+      envPrice: 'STRIPE_SUBSCRIPTION_ONLY_PRICE_ID_PLN',
+      name: 'Tutlio – tylko subskrypcja (PL)',
+      description: 'Prenumerata bez prowizji od lekcji – płatności ręczne.',
       amount: SUBSCRIPTION_PLN.subscriptionOnly,
       interval: 'month' as const,
       metadata: { plan: 'subscription_only', market: 'pl' },
@@ -99,7 +100,7 @@ async function main() {
     created[def.envPrice] = price.id;
 
     console.log(
-      `\n${def.name}\n  product: ${product.id}\n  price:   ${price.id} (${def.amount} PLN / ${def.interval})`,
+      `${def.name}\n  product: ${product.id}\n  price:   ${price.id} (${def.amount} PLN / ${def.interval})\n`,
     );
   }
 
@@ -115,11 +116,14 @@ async function main() {
       }
     }
     writeFileSync(envPath, envText);
-    console.log('\nUpdated .env with product and price IDs.');
+    console.log('Updated .env with PLN product and price IDs (EUR keys unchanged).\n');
   }
 
-  console.log('\nAdd the same IDs to Vercel (Production) when deploying tutlio.pl.');
-  console.log('Restart dev API after changing .env: npm run dev');
+  console.log('Add these to Vercel → Project → Settings → Environment Variables (Production):\n');
+  for (const [k, v] of Object.entries(created)) {
+    console.log(`${k}=${v}`);
+  }
+  console.log('\nDeploy after saving. tutlio.pl checkout uses these automatically.');
 }
 
 main().catch((err) => {

@@ -9,6 +9,7 @@ import { authHeaders } from '@/lib/apiHelpers';
 import { Loader2, FileText, Calendar, ChevronDown } from 'lucide-react';
 import { format, subDays } from 'date-fns';
 import { useTranslation } from '@/lib/i18n';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { cn } from '@/lib/utils';
 
 interface SendInvoiceModalProps {
@@ -29,6 +30,7 @@ export default function SendInvoiceModal({
   onSuccess,
 }: SendInvoiceModalProps) {
   const { t } = useTranslation();
+  const { fmt } = useMarketMoney();
   const [periodStartDate, setPeriodStartDate] = useState('');
   const [periodEndDate, setPeriodEndDate] = useState('');
   const [paymentDeadlineDays, setPaymentDeadlineDays] = useState(7);
@@ -280,7 +282,7 @@ export default function SendInvoiceModal({
                         ·
                       </span>
                       <span>
-                        {t('common.total')}: €{totalAmount.toFixed(2)}
+                        {t('common.total')}: {fmt(totalAmount)}
                       </span>
                     </p>
                   </div>
@@ -314,7 +316,7 @@ export default function SendInvoiceModal({
                           <p className="font-semibold text-gray-900">{payer}</p>
                           <p className="text-xs text-gray-500">{payerEmail}</p>
                         </div>
-                        <p className="text-lg font-bold text-indigo-600">€{payerTotal.toFixed(2)}</p>
+                        <p className="text-lg font-bold text-indigo-600">{fmt(payerTotal)}</p>
                       </div>
                       <div className="mt-2 space-y-2">
                         <p className="text-xs font-medium text-gray-700">{t('invoice.payerLessonsCount', { count: sessions.length })}</p>
@@ -348,7 +350,7 @@ export default function SendInvoiceModal({
                                     {format(sessionDate, 'yyyy-MM-dd')}
                                     {!isPkg ? ` ${format(sessionDate, 'HH:mm')}` : ''} — {lineLabel}
                                   </span>
-                                  <span className="shrink-0 font-semibold tabular-nums">€{Number(session.price ?? 0).toFixed(2)}</span>
+                                  <span className="shrink-0 font-semibold tabular-nums">{fmt(Number(session.price ?? 0))}</span>
                                 </div>
                               );
                             })}

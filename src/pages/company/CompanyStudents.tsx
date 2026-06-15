@@ -47,6 +47,7 @@ import { pickStudentContactsForTutorEmail, shouldShowPayerContactSection } from 
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { findOrgTutorEmailConflict } from '@/lib/orgStudentTutorGuards';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
+import { useMarketMoney } from '@/hooks/useMarketMoney';
 
 interface Student {
   id: string;
@@ -219,6 +220,7 @@ export default function CompanyStudents() {
   const orgEntityType = useOrgEntityType();
   const isSchoolView = orgEntityType === 'school';
   const { t, locale } = useTranslation();
+  const { fmt } = useMarketMoney();
   const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
   const orgUsesManualPackages = !orgFeaturesLoading && hasFeature('manual_payments');
   const stc = getCached<any>('company_students');
@@ -2871,7 +2873,7 @@ export default function CompanyStudents() {
                                       <div className="text-xs text-gray-600 space-y-0.5">
                                         <p>
                                           <Euro className="w-3 h-3 inline mr-1" />
-                                          <strong>€{pricing.price}</strong> / {pricing.duration_minutes} min
+                                          <strong>{fmt(pricing.price)}</strong> / {pricing.duration_minutes} min
                                         </p>
                                         <p>
                                           <Clock className="w-3 h-3 inline mr-1" />
@@ -3167,7 +3169,7 @@ export default function CompanyStudents() {
                         <p className="text-xs font-medium text-violet-800">
                           {t('package.totalAcrossSubjects')}: {pkgItems.reduce((acc, it) => acc + (Number(it.totalLessons) || 0), 0)}
                           {' · '}
-                          {t('package.totalToPay')}: {pkgItems.reduce((acc, it) => acc + (Number(it.totalLessons) || 0) * (Number(it.pricePerLesson) || 0), 0).toFixed(2)} €
+                          {t('package.totalToPay')}: {fmt(pkgItems.reduce((acc, it) => acc + (Number(it.totalLessons) || 0) * (Number(it.pricePerLesson) || 0), 0))}
                           {!orgUsesManualPackages && (
                             <span className="text-violet-500 font-normal"> {t('package.includingFeesNote')}</span>
                           )}

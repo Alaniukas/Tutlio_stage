@@ -123,16 +123,16 @@ export default function BuyLicensesDialog({ open, onOpenChange, currentLicenseCo
             <div className="bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 flex items-baseline justify-between">
               <div>
                 <span className="text-sm text-gray-600">
-                  {formatMoney(unitCents, pricing.currency)} {t('pricing.perLicensePerMonth')}
+                  {formatMoney(unitCents, pricing.currency, locale)} {t('pricing.perLicensePerMonth')}
                 </span>
                 {flatCents > 0 && (
                   <p className="text-xs text-gray-400 mt-0.5">
-                    {t('pricing.enterpriseAdminFee', { fee: formatMoney(flatCents, pricing.currency) })}
+                    {t('pricing.enterpriseAdminFee', { fee: formatMoney(flatCents, pricing.currency, locale) })}
                   </p>
                 )}
               </div>
               <span className="text-lg font-bold text-gray-900">
-                {formatMoney(totalCents, pricing.currency)}
+                {formatMoney(totalCents, pricing.currency, locale)}
                 <span className="text-xs font-medium text-gray-400 ml-1">{t('common.perMonth')}</span>
               </span>
             </div>

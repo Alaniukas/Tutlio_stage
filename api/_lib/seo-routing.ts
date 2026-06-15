@@ -54,9 +54,11 @@ export function getDefaultLocale(domain: DomainKey): Locale {
 }
 
 export function detectLocale(req: VercelRequest): Locale {
+  const domain = detectDomain(req);
+  if (domain === 'pl') return 'pl';
   const q = typeof req.query.locale === 'string' ? req.query.locale : '';
   if (LOCALES.includes(q as Locale)) return q as Locale;
-  return getDefaultLocale(detectDomain(req));
+  return getDefaultLocale(domain);
 }
 
 export function buildPath(path: string, locale: Locale, domain: DomainKey): string {

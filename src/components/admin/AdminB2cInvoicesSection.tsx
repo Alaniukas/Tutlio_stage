@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Download, FileSpreadsheet, Loader2, RefreshCw, Send } from 'lucide-react';
+import { fmtMoney } from '@/lib/marketMoney';
 import { downloadBlob } from './adminDownload';
 
 interface Props {
@@ -160,7 +161,7 @@ export default function AdminB2cInvoicesSection({ adminSecret, month }: Props) {
           {genResult.message && <p className="text-slate-400">{genResult.message}</p>}
           {genResult.generated.map((g) => (
             <p key={g.invoiceNumber} className="text-emerald-400">
-              ✓ {g.counterparty} — {g.invoiceNumber}, €{g.totalAmount.toFixed(2)} (apmokėta)
+              ✓ {g.counterparty} — {g.invoiceNumber}, {fmtMoney(g.totalAmount)} (apmokėta)
             </p>
           ))}
           {genResult.skipped.map((s, i) => (
@@ -211,7 +212,7 @@ export default function AdminB2cInvoicesSection({ adminSecret, month }: Props) {
                       {inv.counterparty_type === 'org' ? 'Agentūra' : 'Korepetitorius'}
                     </td>
                     <td className="py-2 pr-3 text-right whitespace-nowrap font-medium text-white">
-                      €{inv.total_amount.toFixed(2)}
+                      {fmtMoney(inv.total_amount)}
                     </td>
                     <td className="py-2 text-right">
                       {inv.has_pdf && (
