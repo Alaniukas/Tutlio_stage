@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { supabase } from '@/lib/supabase';
+import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
 import { authHeaders } from '@/lib/apiHelpers';
 import { CreditCard, CheckCircle2, ExternalLink, Loader2, Clock, Euro, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -143,7 +144,7 @@ export default function FinancePage() {
 
     setIsSoloTutor(!tutorData?.organization_id);
     setSoloManualStudentPayments(tutorUsesManualStudentPayments(tutorData));
-    setPerlasFinanceEnabled(!!(tutorData as any)?.perlas_finance_enabled);
+    setPerlasFinanceEnabled(PERLAS_FINANCE_ENABLED && !!(tutorData as any)?.perlas_finance_enabled);
 
     setManualPaymentBankDetails(typeof tutorData?.manual_payment_bank_details === 'string' ? tutorData.manual_payment_bank_details : '');
 

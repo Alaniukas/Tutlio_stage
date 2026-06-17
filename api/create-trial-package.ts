@@ -6,7 +6,8 @@ import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
 import { marketFromRequest } from './_lib/market.js';
-import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata } from './_lib/marketMoney.js';
+import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile } from './_lib/marketMoney.js';
+import { customerTotalEur } from './_lib/stripeLessonPricing.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
@@ -164,7 +165,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: orgStripe } = await supabase
       .from('organizations')
-      .select('stripe_account_id, stripe_onboarding_complete, entity_type')
+      .select('stripe_account_id, stripe_onboarding_complete, entity_type, slug')
       .eq('id', adminRow.organization_id)
       .single();
 
@@ -172,11 +173,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return json(res, 400, { error: 'Organization Stripe account is not connected' });
     }
 
-    const useSchoolOrgAbsorbedFees = orgStripe.entity_type === 'school';
+    const feeProfile = orgFeeProfile((orgStripe as { slug?: string | null }).slug) ?? orgFeeProfile(adminRow.organization_id);
+    // A custom org fee profile is always charged on top (payer pays the fee), even for schools.
+    const useSchoolOrgAbsorbedFees = orgStripe.entity_type === 'school' && !feeProfile;
 
     const basePriceEur = trialPriceEur;
-    const payerChargedTotalEur = useSchoolOrgAbsorbedFees ? basePriceEur : customerTotalEur(basePriceEur);
-    const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market);
+    const payerChargedTotalEur = useSchoolOrgAbsorbedFees ? basePriceEur : customerTotalEur(basePriceEur, feeProfile);
+    const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile);
     const tutorTransferCents = baseCents;
 
     const { data: lessonPackage, error: packageErr } = await supabase

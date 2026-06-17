@@ -15,6 +15,7 @@ import { useTranslation } from '@/lib/i18n';
 import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import PerlasFinanceSection from '@/components/PerlasFinanceSection';
+import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 
 type CompanyFinanceCache = {
@@ -34,7 +35,7 @@ export default function CompanyFinance() {
   const { fmt } = useMarketMoney();
   const fc = getCached<CompanyFinanceCache>('company_finance');
   const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
-  const perlasFeatureOn = hasFeature('perlas_finance');
+  const perlasFeatureOn = PERLAS_FINANCE_ENABLED && hasFeature('perlas_finance');
   const location = useLocation();
   const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
   const [loading, setLoading] = useState(!fc);

@@ -5,6 +5,7 @@ import {
   formatLessonStripeCharge,
   lessonStripeBreakdown,
   customerTotal,
+  type OrgFeeProfile,
 } from '@/lib/marketMoney';
 
 /** Market-aware money formatting for tutlio.pl (PLN) vs .lt/.com (EUR). */
@@ -15,10 +16,15 @@ export function useMarketMoney() {
       market,
       fmt: (amount: number | null | undefined, opts?: { decimals?: number }) =>
         formatMarketAmount(amount, market, opts),
-      formatLessonCharge: (base: number | null | undefined, tutorOrganizationIsSchool: boolean) =>
-        formatLessonStripeCharge(base, tutorOrganizationIsSchool, market),
-      lessonBreakdown: (base: number) => lessonStripeBreakdown(base, market),
-      customerTotal: (base: number) => customerTotal(base, market),
+      formatLessonCharge: (
+        base: number | null | undefined,
+        tutorOrganizationIsSchool: boolean,
+        feeProfile?: OrgFeeProfile | null,
+      ) => formatLessonStripeCharge(base, tutorOrganizationIsSchool, market, feeProfile),
+      lessonBreakdown: (base: number, feeProfile?: OrgFeeProfile | null) =>
+        lessonStripeBreakdown(base, market, feeProfile),
+      customerTotal: (base: number, feeProfile?: OrgFeeProfile | null) =>
+        customerTotal(base, market, feeProfile),
       isPl: market === 'pl',
     }),
     [market],

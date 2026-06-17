@@ -16,6 +16,8 @@ import {
   lessonCheckoutBreakdownCents,
   checkoutBaseMetadata,
   creditNote,
+  orgFeeProfile,
+  type OrgFeeProfile,
 } from './_lib/marketMoney.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 
@@ -80,18 +82,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         if (tutorUsesManualStudentPayments(tutor)) {
-            return res.redirect(302, `${APP_URL}/student/sessions`);
+            return res.redirect(302, `${appOrigin}/student/sessions`);
         }
 
         // 2. Determine Stripe account
         let stripeAccountId: string | null = null;
         let ownerName = tutor?.full_name || 'Korepetitorius';
         let useSchoolOrgAbsorbedFees = false;
+        let feeProfile: OrgFeeProfile | null = null;
 
         if (tutor?.organization_id) {
             const { data: org } = await supabase
                 .from('organizations')
-                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type')
+                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type, slug')
                 .eq('id', tutor.organization_id)
                 .single();
             if (!org?.stripe_onboarding_complete || !org.stripe_account_id) {
@@ -99,7 +102,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
             stripeAccountId = org.stripe_account_id;
             ownerName = org.name || ownerName;
-            useSchoolOrgAbsorbedFees = (org as { entity_type?: string }).entity_type === 'school';
+            feeProfile = orgFeeProfile((org as { slug?: string | null }).slug) ?? orgFeeProfile(tutor.organization_id);
+            // A custom org fee profile is always charged on top (payer pays the fee), even for schools.
+            useSchoolOrgAbsorbedFees = (org as { entity_type?: string }).entity_type === 'school' && !feeProfile;
         } else {
             if (!tutor?.stripe_onboarding_complete || !tutor?.stripe_account_id) {
                 return res.status(500).send(errorPage('Klaida', 'Korepetitoriaus mokėjimo paskyra nėra prijungta.'));
@@ -124,7 +129,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (useSchoolOrgAbsorbedFees) {
             expectedTotalCents = schoolInstallmentCheckoutCents(basePriceEur, market).chargeCents;
         } else {
-            const breakdown = lessonCheckoutBreakdownCents(basePriceEur, market);
+            const breakdown = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile);
             expectedTotalCents = breakdown.baseCents + breakdown.feesCents;
         }
 
@@ -177,7 +182,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 cancel_url: `${appOrigin}/student/sessions`,
             });
         } else {
-            const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market);
+            const { baseCents, feesCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile);
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',
                 customer_email: customerEmail,

@@ -3,6 +3,7 @@ import StudentLayout from '@/components/StudentLayout';
 import ParentLayout from '@/components/ParentLayout';
 import StatusBadge from '@/components/StatusBadge';
 import { supabase } from '@/lib/supabase';
+import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
 import { dedupeAsync } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
 import { format, addDays, getDay, startOfWeek, parse, addHours, isBefore, isAfter, parseISO, differenceInHours, startOfMonth, endOfMonth, startOfDay, endOfDay } from 'date-fns';
@@ -26,7 +27,7 @@ import {
     shouldUsePackageForBooking,
 } from '@/lib/studentPaymentModel';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
-import { formatLessonStripeChargeEur, formatMarketAmount } from '@/lib/stripeLessonPricing';
+import { formatLessonStripeChargeEur, formatMarketAmount, orgFeeProfile, type OrgFeeProfile } from '@/lib/stripeLessonPricing';
 import { currentMarket } from '@/lib/market';
 import { ParentLessonDetailModal } from '@/components/parent/ParentLessonDetailModal';
 import { fetchStudentActiveLessonPackagesDeduped } from '@/lib/studentLessonPackagesLight';
@@ -244,6 +245,7 @@ export default function StudentSchedule() {
     const [creditBalance, setCreditBalance] = useState(0);
     const [activePackages, setActivePackages] = useState<LessonPackageSummary[]>([]);
     const [tutorOrgIsSchool, setTutorOrgIsSchool] = useState(false);
+    const [tutorOrgFeeProfile, setTutorOrgFeeProfile] = useState<OrgFeeProfile | null>(null);
     const [tutorSoloManualPayments, setTutorSoloManualPayments] = useState(false);
     const [tutorPerlasEnabled, setTutorPerlasEnabled] = useState(false);
     const [perlasLoading, setPerlasLoading] = useState(false);
@@ -262,8 +264,9 @@ export default function StudentSchedule() {
             paymentDeadlineHours,
             perlasEnabled: tutorPerlasEnabled,
             orgIsSchool: tutorOrgIsSchool,
+            orgFeeProfile: tutorOrgFeeProfile,
         };
-    }, [isParentRoute, tutorId, tutorModalContact, cancellationHours, cancellationFeePercent, paymentTiming, paymentDeadlineHours, tutorPerlasEnabled, tutorOrgIsSchool]);
+    }, [isParentRoute, tutorId, tutorModalContact, cancellationHours, cancellationFeePercent, paymentTiming, paymentDeadlineHours, tutorPerlasEnabled, tutorOrgIsSchool, tutorOrgFeeProfile]);
 
     const manualPaymentInBookingModal =
         tutorSoloManualPayments || pendingPaymentSession?.tutorSoloManual === true;
@@ -498,6 +501,7 @@ export default function StudentSchedule() {
 
         await dedupeAsync(dedupeKey, async () => {
         setTutorOrgIsSchool(false);
+        setTutorOrgFeeProfile(null);
         setTutorSoloManualPayments(false);
         let st: any = null;
 
@@ -672,7 +676,7 @@ export default function StudentSchedule() {
                     .maybeSingle();
                 perlasFlag = !!(orgP as any)?.perlas_finance_enabled;
             }
-            setTutorPerlasEnabled(perlasFlag);
+            setTutorPerlasEnabled(PERLAS_FINANCE_ENABLED && perlasFlag);
             setTutorSoloManualPayments(
                 tutorUsesManualStudentPayments(td as Parameters<typeof tutorUsesManualStudentPayments>[0]),
             );
@@ -682,17 +686,20 @@ export default function StudentSchedule() {
             let tutorOrgSchoolResolved =
                 String((st as { tutor_organization_entity_type?: string }).tutor_organization_entity_type ?? '')
                     .trim() === 'school';
+            let resolvedFeeProfile: OrgFeeProfile | null = null;
             const orgId =
                 tutorProfile.data && (tutorProfile.data as { organization_id?: string | null }).organization_id;
-            if (!tutorOrgSchoolResolved && orgId) {
+            if (orgId) {
                 const { data: oe } = await supabase
                     .from('organizations')
-                    .select('entity_type')
+                    .select('entity_type, slug')
                     .eq('id', orgId)
                     .maybeSingle();
                 tutorOrgSchoolResolved = oe?.entity_type === 'school';
+                resolvedFeeProfile = orgFeeProfile((oe as { slug?: string | null })?.slug) ?? orgFeeProfile(orgId);
             }
             setTutorOrgIsSchool(tutorOrgSchoolResolved);
+            setTutorOrgFeeProfile(resolvedFeeProfile);
         }
 
         // Filter subjects by student grade
@@ -2209,7 +2216,7 @@ export default function StudentSchedule() {
                                                                 t('stuSched.manualPayNoStripeNote')
                                                             ) : (
                                                                 t('stuSched.cardTotal', {
-                                                                    amount: formatLessonStripeChargeEur(remaining, tutorOrgIsSchool),
+                                                                    amount: formatLessonStripeChargeEur(remaining, tutorOrgIsSchool, tutorOrgFeeProfile),
                                                                 })
                                                             )
                                                         ) : (
@@ -2277,7 +2284,7 @@ export default function StudentSchedule() {
                                                     <>
                                                         <CreditCard className="w-4 h-4" />
                                                         {remaining > 0
-                                                            ? `${t('stuSched.payStripe')} — ${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}`
+                                                            ? `${t('stuSched.payStripe')} — ${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool, tutorOrgFeeProfile)}`
                                                             : `${t('stuSched.payStripe')} — ${t('stuSess.payWithCredit')}`}
                                                     </>
                                                 )}
@@ -2385,7 +2392,7 @@ export default function StudentSchedule() {
                                             {remaining > 0 && !manualPaymentInBookingModal && (
                                                 <p>
                                                     <span className="font-medium">{t('stuSched.cardPayTotal')}</span>{' '}
-                                                    {formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}
+                                                    {formatLessonStripeChargeEur(remaining, tutorOrgIsSchool, tutorOrgFeeProfile)}
                                                 </p>
                                             )}
                                             {remaining > 0 && manualPaymentInBookingModal && (
@@ -2458,7 +2465,7 @@ export default function StudentSchedule() {
                                                         ? (() => {
                                                             const { remaining } = lessonCreditBreakdown(pendingPaymentSession.price);
                                                             return remaining > 0
-                                                                ? `${t('stuSched.payStripe')} — ${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool)}`
+                                                                ? `${t('stuSched.payStripe')} — ${formatLessonStripeChargeEur(remaining, tutorOrgIsSchool, tutorOrgFeeProfile)}`
                                                                 : `${t('stuSched.payStripe')} — ${t('stuSess.payWithCredit')}`;
                                                         })()
                                                         : t('stuSched.payStripe')}

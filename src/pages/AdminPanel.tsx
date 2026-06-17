@@ -31,6 +31,7 @@ interface SchoolFormState {
 
 interface OrgAdminStats {
   lessons_occurred: number;
+  active_license_count: number;
   paid_revenue_eur: number;
   platform_fee_2pct_eur: number;
 }
@@ -43,6 +44,7 @@ interface OrgListRow {
   status: string;
   features: Record<string, unknown>;
   tutor_count: number;
+  active_license_count: number;
   student_count: number;
   lessons_occurred: number;
   paid_revenue_eur: number;
@@ -195,6 +197,7 @@ export default function AdminPanel() {
           const s = r.data?.stats || {};
           next.set(r.id, {
             tutor_count: Number(s.tutor_count) || 0,
+            active_license_count: Number(s.active_license_count) || 0,
             student_count: Number(s.student_count) || 0,
             lessons_occurred: Number(s.lessons_occurred) || 0,
             paid_revenue_eur: Number(s.paid_revenue_eur) || 0,
@@ -328,6 +331,7 @@ export default function AdminPanel() {
         data.stats && typeof data.stats === 'object'
           ? {
               lessons_occurred: Number(data.stats.lessons_occurred) || 0,
+              active_license_count: Number(data.stats.active_license_count) || 0,
               paid_revenue_eur: Number(data.stats.paid_revenue_eur) || 0,
               platform_fee_2pct_eur: Number(data.stats.platform_fee_2pct_eur) || 0,
             }
@@ -862,8 +866,8 @@ export default function AdminPanel() {
                             <p className="font-semibold text-white truncate">{o.name}</p>
                             <p className="text-xs text-slate-400 truncate">{o.email || '—'}</p>
                             <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                              <span className="rounded-lg bg-white/5 border border-white/10 px-2 py-1 text-slate-300">
-                                {t('admin.tutorLicenseCount')}: {o.tutor_license_count ?? 0}
+                              <span className="rounded-lg bg-white/5 border border-white/10 px-2 py-1 text-slate-300" title="Naudojama / iš viso licencijų">
+                                {t('admin.tutorLicenseCount')}: {o.active_license_count ?? 0} / {o.tutor_license_count ?? 0}
                               </span>
                               <span className="rounded-lg bg-white/5 border border-white/10 px-2 py-1 text-slate-300">
                                 {t('admin.students')}: {o.student_count}
@@ -912,7 +916,7 @@ export default function AdminPanel() {
                         <tr key={o.id} className="border-b border-white/5 hover:bg-white/5">
                           <td className="px-4 py-3 font-medium">{o.name}</td>
                           <td className="px-4 py-3 text-slate-300 tabular-nums">{o.tutor_count ?? 0}</td>
-                          <td className="px-4 py-3 text-slate-300 tabular-nums">{o.tutor_license_count ?? 0}</td>
+                          <td className="px-4 py-3 text-slate-300 tabular-nums" title="Naudojama / iš viso licencijų">{o.active_license_count ?? 0} / {o.tutor_license_count ?? 0}</td>
                           <td className="px-4 py-3 text-slate-300">{o.student_count}</td>
                           <td className="px-4 py-3 text-slate-300 tabular-nums">{o.lessons_occurred ?? '—'}</td>
                           <td className="px-4 py-3 text-slate-300 tabular-nums">
@@ -1047,6 +1051,15 @@ export default function AdminPanel() {
                           className="bg-white/10 border-white/20 text-white rounded-xl"
                         />
                         <p className="text-[11px] text-slate-400">{t('admin.tutorLicenseCountHint')}</p>
+                        {detailStats && (
+                          <p className="text-[11px] text-slate-300">
+                            Šiuo metu naudojama (priskirta korepetitoriams):{' '}
+                            <span className="font-semibold tabular-nums text-white">{detailStats.active_license_count}</span>
+                            {editTutorLicenseCount > 0 && (
+                              <span className="text-slate-400"> / {editTutorLicenseCount}</span>
+                            )}
+                          </p>
+                        )}
                       </div>
                       <div className="space-y-1.5">
                         <Label className="text-slate-300">{t('admin.status')}</Label>

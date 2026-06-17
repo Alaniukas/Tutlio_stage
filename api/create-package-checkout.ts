@@ -12,7 +12,8 @@ import { verifyRequestAuth } from './_lib/auth.js';
 import { tutorUsesManualStudentPayments } from './_lib/soloManualStudentPayments.js';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
 import { marketFromRequest } from './_lib/market.js';
-import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata } from './_lib/marketMoney.js';
+import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile, type OrgFeeProfile } from './_lib/marketMoney.js';
+import { customerTotalEur } from './_lib/stripeLessonPricing.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import {
   normalizePackageItemsInput,
@@ -161,11 +162,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let stripeAccountId: string | null = null;
         let ownerName = tutor.full_name || 'Korepetitorius';
         let useSchoolOrgAbsorbedFees = false;
+        let feeProfile: OrgFeeProfile | null = null;
 
         if (tutor.organization_id) {
             const { data: org } = await supabase
                 .from('organizations')
-                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type')
+                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type, slug')
                 .eq('id', tutor.organization_id)
                 .single();
 
@@ -174,7 +176,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
             stripeAccountId = org.stripe_account_id;
             ownerName = org.name || ownerName;
-            useSchoolOrgAbsorbedFees = org.entity_type === 'school';
+            feeProfile = orgFeeProfile((org as { slug?: string | null }).slug) ?? orgFeeProfile(tutor.organization_id);
+            // A custom org fee profile is always charged on top (payer pays the fee), even for schools.
+            useSchoolOrgAbsorbedFees = org.entity_type === 'school' && !feeProfile;
         } else {
             if (!tutor.stripe_onboarding_complete) {
                 return json(res, 400, { error: 'Tutor Stripe account is not connected' });
@@ -187,7 +191,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         // 4. Totals — school org Connect: payer pays package list price only; fees absorbed via application_fee
-        const payerChargedTotalEur = useSchoolOrgAbsorbedFees ? basePriceEur : customerTotalEur(basePriceEur);
+        const payerChargedTotalEur = useSchoolOrgAbsorbedFees ? basePriceEur : customerTotalEur(basePriceEur, feeProfile);
         // Single-subject packages keep `subject_id` populated for legacy reads;
         // multi-subject packages leave it NULL (items table is the source of truth).
         const primarySubjectId = resolvedItems.length === 1 ? resolvedItems[0]!.subjectId : null;
@@ -300,7 +304,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 cancel_url: `${APP_URL}/package-cancelled`,
             });
         } else {
-            const { baseCents, feesCents: feeCents } = lessonCheckoutBreakdownCents(basePriceEur, market);
+            const { baseCents, feesCents: feeCents } = lessonCheckoutBreakdownCents(basePriceEur, market, feeProfile);
             const tutorTransferCents = baseCents;
             checkoutSession = await stripe.checkout.sessions.create({
                 mode: 'payment',

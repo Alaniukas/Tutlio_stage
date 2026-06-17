@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
 import { getCached, setCache } from '@/lib/dataCache';
 import { parentFullNameForUserDeduped, parentStudentLinksDeduped } from '@/lib/preload';
 import { useUser } from '@/contexts/UserContext';
@@ -26,6 +27,7 @@ import {
 import StatusBadge from '@/components/StatusBadge';
 import ParentLayout from '@/components/ParentLayout';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
+import { orgFeeProfile } from '@/lib/marketMoney';
 import { format, isAfter } from 'date-fns';
 import { cn, normalizeUrl } from '@/lib/utils';
 import { recordJoinClick } from '@/lib/joinTracking';
@@ -202,7 +204,7 @@ export default function ParentDashboard() {
             | 'before_lesson'
             | 'after_lesson',
           paymentDeadlineHours: tp.payment_deadline_hours ?? 24,
-          perlasEnabled: !!tp.perlas_finance_enabled,
+          perlasEnabled: PERLAS_FINANCE_ENABLED && !!tp.perlas_finance_enabled,
         });
         if (tp.organization_id) {
           orgIdsToCheck.push(tp.organization_id);
@@ -211,7 +213,7 @@ export default function ParentDashboard() {
       if (orgIdsToCheck.length > 0) {
         const { data: orgs } = await supabase
           .from('organizations')
-          .select('id, perlas_finance_enabled, entity_type, name')
+          .select('id, perlas_finance_enabled, entity_type, name, slug')
           .in('id', [...new Set(orgIdsToCheck)]);
         const orgById = new Map((orgs ?? []).map((o: any) => [o.id, o]));
         for (const tp of tutorProfilesList) {
@@ -220,10 +222,11 @@ export default function ParentDashboard() {
           if (!org) continue;
           const existing = tutorById.get(tp.id);
           if (!existing) continue;
-          if (!tp.perlas_finance_enabled && org.perlas_finance_enabled) {
+          if (PERLAS_FINANCE_ENABLED && !tp.perlas_finance_enabled && org.perlas_finance_enabled) {
             existing.perlasEnabled = true;
           }
           existing.orgIsSchool = org.entity_type === 'school';
+          existing.orgFeeProfile = orgFeeProfile(org.slug) ?? orgFeeProfile(tp.organization_id);
           // Stripe Checkout charges in the org's name — show the same provider here.
           if (org.name) existing.providerName = org.name;
         }

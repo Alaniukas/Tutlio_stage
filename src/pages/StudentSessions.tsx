@@ -3,6 +3,7 @@ import StudentLayout from '@/components/StudentLayout';
 import ParentLayout from '@/components/ParentLayout';
 import StatusBadge from '@/components/StatusBadge';
 import { supabase } from '@/lib/supabase';
+import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
 import { getCached, setCache, dedupeAsync } from '@/lib/dataCache';
 import { sendEmail } from '@/lib/email';
 import { authHeaders } from '@/lib/apiHelpers';
@@ -21,6 +22,7 @@ import { recordJoinClick } from '@/lib/joinTracking';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
+import { orgFeeProfile, type OrgFeeProfile } from '@/lib/marketMoney';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
 import { useUser } from '@/contexts/UserContext';
 import { fetchStudentActiveLessonPackagesDeduped, fetchSubjectNamesByIds } from '@/lib/studentLessonPackagesLight';
@@ -160,6 +162,7 @@ export default function StudentSessions() {
     const [manualPaymentsOnly, setManualPaymentsOnly] = useState(false);
     const [creditBalance, setCreditBalance] = useState(0);
     const [tutorOrgIsSchool, setTutorOrgIsSchool] = useState(false);
+    const [tutorOrgFeeProfile, setTutorOrgFeeProfile] = useState<OrgFeeProfile | null>(null);
     const [tutorPerlasEnabled, setTutorPerlasEnabled] = useState(false);
     const [perlasLoading, setPerlasLoading] = useState(false);
     const [activePackages, setActivePackages] = useState<PackageSummary[]>([]);
@@ -511,6 +514,7 @@ export default function StudentSessions() {
 
         await dedupeAsync(dedupeKey, async () => {
         setTutorOrgIsSchool(false);
+        setTutorOrgFeeProfile(null);
         setSessionsFetchError(null);
         /** When fixing URL (?studentId=) we still fetch using this id in-flight; defer navigation until success. */
         let parentUrlSyncStudentId: string | null = null;
@@ -606,6 +610,7 @@ export default function StudentSessions() {
 
         if (!st) {
             setTutorOrgIsSchool(false);
+            setTutorOrgFeeProfile(null);
             setLoading(false);
             return;
         }
@@ -641,6 +646,7 @@ export default function StudentSessions() {
         setStudentPaymentOverrideActive(!!(st as { payment_override_active?: boolean }).payment_override_active);
         setCreditBalance(Number(st.credit_balance || 0));
         setTutorOrgIsSchool(String((st as { tutor_organization_entity_type?: string }).tutor_organization_entity_type ?? '').trim() === 'school');
+        setTutorOrgFeeProfile(orgFeeProfile((st as { tutor_organization_slug?: string | null }).tutor_organization_slug));
         // OPTIMIZED: Limit sessions to recent past + future (6 months range)
         const sixMonthsAgo = new Date();
         sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
@@ -711,7 +717,7 @@ export default function StudentSessions() {
                 .maybeSingle();
             perlasFlag = !!(orgP as any)?.perlas_finance_enabled;
         }
-        setTutorPerlasEnabled(perlasFlag);
+        setTutorPerlasEnabled(PERLAS_FINANCE_ENABLED && perlasFlag);
 
         if (sessionsRes.error) {
             console.warn('[StudentSessions] sessions load:', sessionsRes.error.code, sessionsRes.error.message);
@@ -1674,7 +1680,7 @@ export default function StudentSessions() {
                                     <p className="font-bold text-gray-900">{fmt(selectedSession?.price)}</p>
                                     {selectedSession?.status === 'active' && !selectedSession.paid && selectedSession.price != null && showPerLessonStripeButton && !manualPaymentsOnly && (
                                         <p className="text-[11px] text-gray-500 mt-1 leading-snug">
-                                            {t('stuSess.stripeChargeNote', { amount: formatLessonCharge(selectedSession.price, tutorOrgIsSchool) })}
+                                            {t('stuSess.stripeChargeNote', { amount: formatLessonCharge(selectedSession.price, tutorOrgIsSchool, tutorOrgFeeProfile) })}
                                         </p>
                                     )}
                                 </div>
@@ -1772,7 +1778,7 @@ export default function StudentSessions() {
                                                 ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('stuSess.processing')}</>
                                                 : creditBalance >= (selectedSession.price || 0) && (selectedSession.price || 0) > 0
                                                     ? <><CreditCard className="w-4 h-4" /> {t('stuSess.payWithCredit')}</>
-                                                    : <><CreditCard className="w-4 h-4" /> {t('stuSess.payStripe', { amount: formatLessonCharge(Math.max(0, (selectedSession.price || 0) - creditBalance), tutorOrgIsSchool) })}</>
+                                                    : <><CreditCard className="w-4 h-4" /> {t('stuSess.payStripe', { amount: formatLessonCharge(Math.max(0, (selectedSession.price || 0) - creditBalance), tutorOrgIsSchool, tutorOrgFeeProfile) })}</>
                                             }
                                         </button>
                                     </>

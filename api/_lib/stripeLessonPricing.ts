@@ -8,6 +8,7 @@ import {
   lessonCheckoutBreakdownCents,
   MARKET_FEES,
   stripeFixedFee,
+  type OrgFeeProfile,
 } from './marketMoney.js';
 
 export const STRIPE_FEE_PERCENT = MARKET_FEES.stripePercent;
@@ -15,8 +16,8 @@ export const PLATFORM_FEE_PERCENT = MARKET_FEES.platformPercent;
 export const STRIPE_FEE_FIXED_EUR = MARKET_FEES.stripeFixed.eur;
 
 /** @deprecated Use customerTotal(amount, market) */
-export function customerTotalEur(lessonPriceEur: number): number {
-  return customerTotal(lessonPriceEur, 'default');
+export function customerTotalEur(lessonPriceEur: number, feeProfile?: OrgFeeProfile | null): number {
+  return customerTotal(lessonPriceEur, 'default', feeProfile);
 }
 
 export { customerTotal, lessonCheckoutBreakdownCents };

@@ -29,6 +29,7 @@ import WhiteboardButton from '@/components/WhiteboardButton';
 import { normalizeUrl } from '@/lib/utils';
 import { recordJoinClick } from '@/lib/joinTracking';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
+import type { OrgFeeProfile } from '@/lib/marketMoney';
 /** Tutor contact + payment / cancellation rules (from profiles). */
 export type ParentTutorContactPolicy = {
   tutorId: string;
@@ -42,6 +43,8 @@ export type ParentTutorContactPolicy = {
   perlasEnabled?: boolean;
   /** School orgs absorb fees — parent pays the list price, no breakdown shown. */
   orgIsSchool?: boolean;
+  /** Custom per-org fee deal (e.g. Proklasė); charged on top even for school orgs. */
+  orgFeeProfile?: OrgFeeProfile | null;
   /** Service provider shown in the fee breakdown (org name when tutor belongs to one). */
   providerName?: string | null;
 };
@@ -98,6 +101,7 @@ export function ParentLessonDetailModal({
     (session ? t('common.lesson') : '');
 
   const orgIsSchool = !!tutorPolicy?.orgIsSchool;
+  const orgFee = tutorPolicy?.orgFeeProfile ?? null;
   const providerName =
     tutorPolicy?.providerName || tutorPolicy?.tutorName || t('studentDash.tutorLabel');
 
@@ -354,8 +358,8 @@ export function ParentLessonDetailModal({
             !session.paid &&
             isAfter(new Date(session.end_time), now) && (
               <div className="space-y-2">
-                {session.price != null && !orgIsSchool && (() => {
-                  const b = lessonBreakdown(Number(session.price));
+                {session.price != null && (!orgIsSchool || orgFee) && (() => {
+                  const b = lessonBreakdown(Number(session.price), orgFee);
                   return (
                     <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-sm space-y-1.5">
                       <div className="flex items-start justify-between gap-3 text-gray-700">
@@ -386,7 +390,7 @@ export function ParentLessonDetailModal({
                   )}
                   {t('studentDash.pay')}
                   {session.price != null
-                    ? ` · ${formatLessonCharge(Number(session.price), orgIsSchool)}`
+                    ? ` · ${formatLessonCharge(Number(session.price), orgIsSchool, orgFee)}`
                     : ''}
                 </button>
                 {(perlasEnabled ?? tutorPolicy?.perlasEnabled) && !isPl && session.price != null && (() => {

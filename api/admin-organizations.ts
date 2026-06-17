@@ -138,18 +138,24 @@ async function computeOrgStats(
     allProfileIds,
     { data: rpcStudentCount, error: rpcStudentErr },
   ] = await Promise.all([
-    supabase.from('profiles').select('id, email').eq('organization_id', organizationId),
+    supabase.from('profiles').select('id, email, has_active_license').eq('organization_id', organizationId),
     getOrgStudentProfileExclusions(supabase, organizationId),
     getOrgTutorProfileIdsForData(supabase, organizationId),
     supabase.rpc('admin_org_student_count' as any, { p_org_id: organizationId }),
   ]);
 
   const { ids: studentProfileIds, emails: studentEmails } = studentExclusions;
-  const tutorCount = (tutorRows || [])
+  const realTutorRows = (tutorRows || [])
     .filter((r: { id: string; email?: string | null }) => {
       const email = String(r.email || '').trim().toLowerCase();
       return !adminIds.has(r.id) && !studentProfileIds.has(r.id) && !studentEmails.has(email);
-    }).length;
+    });
+  const tutorCount = realTutorRows.length;
+  // Licenses "in use" = org tutors holding an active license. Matches the cap
+  // enforcement in org-set-tutor-license.ts and the company portal counter.
+  const activeLicenseCount = realTutorRows.filter(
+    (r: { has_active_license?: boolean | null }) => r.has_active_license !== false,
+  ).length;
 
   let studentCount = 0;
   if (!rpcStudentErr && rpcStudentCount != null) {
@@ -188,6 +194,7 @@ async function computeOrgStats(
 
   return {
     tutor_count: tutorCount,
+    active_license_count: activeLicenseCount,
     student_count: studentCount,
     lessons_occurred: lessonsOccurred,
     paid_revenue_eur: paidRevenue,
@@ -228,6 +235,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const out = (orgs || []).map((org) => ({
           ...org,
           tutor_count: 0,
+          active_license_count: 0,
           student_count: 0,
           lessons_occurred: null,
           paid_revenue_eur: 0,
