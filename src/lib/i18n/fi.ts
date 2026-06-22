@@ -17,7 +17,7 @@ export const fi: Record<string, string> = {
   "compTut.buyLicensesTitle": "Osta tutoreiden lisenssejä",
   "compTut.buyLicensesDesc": "Valitse, kuinka monta tutorin lisenssiä organisaatiosi tarvitsee. Laskutus tapahtuu kuukausittain Stripen kautta, ja voit muuttaa määrää tai peruuttaa milloin tahansa.",
   "compTut.buyLicensesUnavailable": "Lisenssien ostaminen ei ole tällä hetkellä mahdollista. Ota meihin yhteyttä.",
-  "compTut.buyLicensesReplaceNote": "Nykyiset {current} lisenssiäsi määritettiin manuaalisesti. Oston jälkeen lisenssien määrän määrää tilauksen määrä.",
+  "compTut.buyLicensesReplaceNote": "Nykyiset {current} lisenssiäsi on määritetty manuaalisesti. Oston jälkeen lisenssien määrä määräytyy tilauksesi mukaan.",
   "compTut.licenseSubscriptionExists": "Organisaatiollasi on jo aktiivinen lisenssitilaus — käytä sen sijaan ”Hallitse lisenssejä”.",
   "compTut.licenseSubscriptionInactive": "Lisenssitilauksesi on epäaktiivinen. Aktivoi se uudelleen, jotta tutorit saavat jälleen pääsyn.",
   "compTut.archive": "Arkistoi",
