@@ -453,12 +453,14 @@ export default function CalendarPage() {
     };
   }, [selectedEvent?.id]);
 
-  const fetchData = async () => {
+  const fetchData = async (opts?: { silent?: boolean }) => {
     if (!ctxUser) { setLoading(false); return; }
     const user = ctxUser;
 
     await dedupeAsync(`cal:${user.id}`, async () => {
-    setLoading(true);
+    // Silent refresh (after an action with an optimistic local update) keeps the
+    // current grid on screen instead of flashing the full-screen loading spinner.
+    if (!opts?.silent) setLoading(true);
     setCurrentUserId(user.id);
 
     let profileData: {
@@ -2408,20 +2410,25 @@ export default function CalendarPage() {
     if (!orgPolicy.canToggleSessionPaid) return;
     setSaving(true);
 
+    const targetId = selectedEvent.id;
     const newPaid = !selectedEvent.paid;
     const newStatus = newPaid ? 'confirmed' : 'pending';
 
     const { error } = await supabase
       .from('sessions')
       .update({ paid: newPaid, payment_status: newStatus })
-      .eq('id', selectedEvent.id);
+      .eq('id', targetId);
 
     if (!error) {
+      // Optimistic update so the paid/confirmed state shows immediately.
+      setSessions((prev) =>
+        prev.map((s) => (s.id === targetId ? { ...s, paid: newPaid, payment_status: newStatus } : s))
+      );
       if (newPaid) {
-        autoCloseBillingBatchIfAllPaid(selectedEvent.id);
+        autoCloseBillingBatchIfAllPaid(targetId);
       }
       setIsEventModalOpen(false);
-      fetchData();
+      fetchData({ silent: true });
     }
     setSaving(false);
   };
@@ -3067,12 +3074,22 @@ export default function CalendarPage() {
     if (!selectedEvent) return;
     setSaving(true);
 
+    const targetId = selectedEvent.id;
     const { error } = await supabase
       .from('sessions')
       .update({ status: 'completed', no_show_when: null })
-      .eq('id', selectedEvent.id);
+      .eq('id', targetId);
 
     if (!error) {
+      // Optimistic update: reflect the confirmed lesson right away (event turns green and
+      // the "Patvirtintos" counter increments) instead of waiting for a full refetch.
+      setSessions((prev) =>
+        prev.map((s) => (s.id === targetId ? { ...s, status: 'completed', no_show_when: null } : s))
+      );
+      setSelectedEvent((prev) =>
+        prev && prev.id === targetId ? { ...prev, status: 'completed', no_show_when: null } : prev
+      );
+
       if (orgPolicy.isOrgTutor && selectedEvent.subjects?.is_trial) {
         const { data: { user } } = await supabase.auth.getUser();
         const orgId = user ? (await supabase.from('profiles').select('organization_id').eq('id', user.id).maybeSingle()).data?.organization_id : null;
@@ -3083,13 +3100,13 @@ export default function CalendarPage() {
           if (featObj['trial_comment_required'] === true && !viewCommentText.trim()) {
             setToastMessage({ message: t('cal.trialCommentReminder'), type: 'warning' });
             setSaving(false);
-            fetchData();
+            fetchData({ silent: true });
             return;
           }
         }
       }
       setIsEventModalOpen(false);
-      fetchData();
+      fetchData({ silent: true });
     }
     setSaving(false);
   };
@@ -3529,7 +3546,11 @@ export default function CalendarPage() {
 
   // Stats
   const activeSessions = sessions.filter((s) => s.status === 'active').length;
-  const paidSessions = sessions.filter((s) => s.paid).length;
+  // Org tutors don't toggle payment — a lesson is "confirmed" (Patvirtinta) once it's
+  // marked occurred (status=completed). Solo tutors still count paid lessons here.
+  const paidSessions = orgPolicy.isOrgTutor
+    ? sessions.filter((s) => s.status === 'completed').length
+    : sessions.filter((s) => s.paid).length;
   const cancelledSessions = sessions.filter((s) => s.status === 'cancelled').length;
 
   // Calendar label
@@ -3827,7 +3848,8 @@ export default function CalendarPage() {
         <div
           className={cn(
             'p-1.5 sm:p-3',
-            !calendarExpanded && 'max-h-[50vh] overflow-y-auto',
+            // No outer scroll: the calendar scrolls internally (rbc-time-content) so the
+            // sticky weekday header stays visible instead of scrolling away.
             (isAvailabilityModalOpen || isEventModalOpen || isCreateModalOpen || isSlotEditOpen) && 'pointer-events-none',
           )}
         >

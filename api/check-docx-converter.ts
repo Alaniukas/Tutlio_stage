@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { promises as fs } from 'fs';
-import { hasDocxConverterEnv } from './_lib/docxConverter';
+import { hasDocxConverterEnv } from './_lib/docxConverter.js';
 
 const execFileAsync = promisify(execFile);
 

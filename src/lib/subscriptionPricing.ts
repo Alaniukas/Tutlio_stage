@@ -1,4 +1,4 @@
-import { formatPln } from './formatPln';
+import { formatPln } from './formatPln.js';
 
 /**
  * tutlio.pl subscription list prices in PLN.

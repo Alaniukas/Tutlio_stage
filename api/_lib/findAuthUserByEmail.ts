@@ -9,12 +9,13 @@ export async function findAuthUserByEmail(
 
   for (let page = 1; page <= 50; page++) {
     const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 100 });
-    if (error || !data.users?.length) break;
-    const match = data.users.find((u) => (u.email || '').trim().toLowerCase() === normalized);
+    const users = (data?.users ?? []) as Array<{ id: string; email?: string | null; user_metadata?: Record<string, unknown> }>;
+    if (error || !users.length) break;
+    const match = users.find((u) => (u.email || '').trim().toLowerCase() === normalized);
     if (match?.id) {
       return { id: match.id, user_metadata: match.user_metadata as Record<string, unknown> | undefined };
     }
-    if (data.users.length < 100) break;
+    if (users.length < 100) break;
   }
   return null;
 }

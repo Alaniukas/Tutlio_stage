@@ -76,8 +76,14 @@ async function signSchoolContractPdfUrl(urlOrPath: unknown): Promise<string | nu
 }
 
 function escapeHtml(unsafe: unknown): string {
+  // Idempotent: only encode an `&` that is NOT already the start of a valid HTML
+  // entity. Values pass through two escape layers — sanitizeEmailData() at the
+  // request boundary and esc() again inside templates — so a naive `&` → `&amp;`
+  // double-encodes (e.g. a school name `… vaikai"` becomes `&amp;quot;`, which
+  // renders as the literal text `&quot;`). The `<`, `>`, `"`, `'` rules below have
+  // no such exemption, so dangerous characters are still always escaped.
   return String(unsafe ?? '')
-    .replace(/&/g, '&amp;')
+    .replace(/&(?!(?:[a-zA-Z][a-zA-Z0-9]*|#\d+|#x[0-9a-fA-F]+);)/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
@@ -1884,6 +1890,16 @@ function schoolContract(d: any, locale: Locale) {
         </p>
       </div>`
     : '';
+  // Final signable contract → tell the parent how to sign and where to return it.
+  // Only when the PDF is attached and nothing is still missing (they cannot sign a draft).
+  const schoolEmailEsc = esc(d.schoolEmail || '');
+  const signingInstructionsHtml = d.pdfUrl && missingFields.length === 0
+    ? `<div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:12px; padding:14px; margin:16px 0;">
+        <p style="color:#065f46; font-size:13px; font-weight:700; margin:0 0 8px;">Svarbu: tai galutinė sutarties PDF versija. Pasirašytą sutartį prašome atsiųsti mokyklai el. paštu ${schoolEmailEsc}.</p>
+        <p style="color:#065f46; font-size:13px; font-weight:700; margin:10px 0 4px;">Kaip pasirašyti?</p>
+        <p style="color:#047857; font-size:13px; line-height:1.55; margin:0;">PDF dokumentą galite pasirašyti elektroniniu parašu (Smart-ID, Mobilusis parašas ar kt.) arba atsispausdinti, pasirašyti ranka, nuskenuoti / nufotografuoti ir atsiųsti mokyklai el. paštu ${schoolEmailEsc}.</p>
+      </div>`
+    : '';
   return {
     subject: `Ugdymo šeimoje sutartis${d.contractNumber ? ` Nr. ${d.contractNumber}` : ''} — ${d.studentName || 'Mokinys'}`,
     html: wrap(`
@@ -1910,8 +1926,9 @@ function schoolContract(d: any, locale: Locale) {
         ${d.contractBody ? '' : ''}
         ${missingFieldsHtml}
         ${d.pdfUrl ? `<div style="margin:16px 0 10px;">${outlookEmailButton(d.pdfUrl, 'Atidaryti PDF sutartį', '#059669', { fontWeight: '600', fontSize: '14px', padding: '12px 24px' })}</div>` : ''}
+        ${signingInstructionsHtml}
         ${missingFields.length > 0 && completionLink ? `<div style="margin:0 0 20px;">${outlookEmailButton(completionLink, 'Papildyti trūkstamus duomenis', '#2563eb', { fontWeight: '600', fontSize: '14px', padding: '12px 24px' })}</div>` : ''}
-        <p style="color:#6b7280; font-size:13px;">Jei turite klausimų, susisiekite su mokykla: ${esc(d.schoolEmail || '')}.</p>
+        <p style="color:#6b7280; font-size:13px;">Jei turite klausimų, susisiekite su mokykla: ${esc(d.contactEmail || d.schoolEmail || '')}.</p>
       </div>${footerFor(locale)}`, locale),
   };
 }
@@ -1951,7 +1968,7 @@ function schoolInstallmentRequest(d: any, locale: Locale) {
           </table>
         </div>
         ${payUrl ? `<div style="text-align:center; margin:24px 0;">${outlookEmailButton(payUrl, 'Apmokėti dabar', '#059669', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}</div>` : ''}
-        <p style="color:#6b7280; font-size:13px;">Jei turite klausimų, susisiekite su mokykla: ${esc(d.schoolEmail || '')}.</p>
+        <p style="color:#6b7280; font-size:13px;">Jei turite klausimų, susisiekite su mokykla: ${esc(d.contactEmail || d.schoolEmail || '')}.</p>
       </div>${footerFor(locale)}`, locale),
   };
 }
@@ -2465,6 +2482,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (org) {
             isSchoolOrg = String((org as { entity_type?: string }).entity_type || '').trim().toLowerCase() === 'school';
             const features = (org.features && typeof org.features === 'object' ? org.features : {}) as Record<string, unknown>;
+            // Optional per-org "questions" contact address (e.g. irminta@) shown in
+            // school emails. Signed contracts still go to the org email (schoolEmail).
+            const orgContactEmail = String((features.contact_email as string) || '').trim();
+            if (orgContactEmail) (data as any).contactEmail = orgContactEmail;
             if (features.custom_branding) {
               orgBranding = {
                 name: org.name,

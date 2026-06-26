@@ -124,7 +124,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // 5. Build per-subject Stripe line items
         const itemLineItems = items.map((it) => ({
             price_data: {
-                currency: currency as const,
+                currency,
                 product_data: {
                     name: `${it.totalLessons} × ${it.subjectName}`,
                     description: `Mokymo paslaugos. Paslaugos teikėjas: ${ownerName}`,

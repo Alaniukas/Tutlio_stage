@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach } from 'vitest';
-import { parseBlogAiResponse, BLOG_AUTO_LOCALES, resolveBlogAiProvider } from '../../api/_lib/blogAiProvider.js';
+import { parseBlogAiResponse, BLOG_AUTO_LOCALES, resolveBlogAiProvider, coerceJsonObject } from '../../api/_lib/blogAiProvider.js';
 
 const prev = {
   BLOG_AI_PROVIDER: process.env.BLOG_AI_PROVIDER,
@@ -83,5 +83,26 @@ describe('parseBlogAiResponse', () => {
         pl: { title: 'C', content: 'x' },
       }),
     ).toThrow(/cover/);
+  });
+});
+
+describe('coerceJsonObject', () => {
+  it('parses plain JSON', () => {
+    expect(coerceJsonObject('{"tag":"Tips","n":1}')).toEqual({ tag: 'Tips', n: 1 });
+  });
+
+  it('parses JSON wrapped in ```json fences', () => {
+    const text = '```json\n{"tag":"Tips"}\n```';
+    expect(coerceJsonObject(text)).toEqual({ tag: 'Tips' });
+  });
+
+  it('parses JSON with stray prose around the object', () => {
+    const text = 'Here is your article:\n{"tag":"Tips","ok":true}\nHope that helps!';
+    expect(coerceJsonObject(text)).toEqual({ tag: 'Tips', ok: true });
+  });
+
+  it('throws on content with no JSON object', () => {
+    expect(() => coerceJsonObject('totally not json')).toThrow(/not valid JSON/);
+    expect(() => coerceJsonObject('')).toThrow(/not valid JSON/);
   });
 });

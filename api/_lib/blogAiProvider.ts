@@ -68,10 +68,14 @@ export interface BlogAiGenerateOptions {
 /** Shared SEO writing rules — educational first, brand mentioned sparingly. */
 export const BLOG_SEO_WRITING_RULES =
   'Write an informational SEO article (like nomora.io or hubspot blog), NOT a sales page.\n' +
+  '- The keyword sets the angle: it may be about studying, learning techniques, motivation, exam prep, a specific\n' +
+  '  school subject, helping children learn (for parents), or the craft of tutoring — write a genuinely helpful\n' +
+  '  article on THAT topic. The article is about education, NOT about software.\n' +
   '- Title: keyword-first, natural, helpful (guide/checklist/tips). Do NOT put "Tutlio" in the title.\n' +
-  '- Avoid titles like "Kaip [Brand] padeda…" or "…su Tutlio". Prefer "…: praktinis gidas", "…: patarimai korepetitoriams".\n' +
-  '- 90%+ pure educational value: practical steps, checklists, mistakes to avoid, examples for tutors/parents.\n' +
-  '- Mention Tutlio at most 1–2 times in the entire article, only in the last section or one soft contextual sentence.\n' +
+  '- Avoid titles like "Kaip [Brand] padeda…" or "…su Tutlio". Prefer "…: praktinis gidas", "…: patarimai".\n' +
+  '- 90%+ pure educational value: practical steps, checklists, mistakes to avoid, real examples for students, parents or tutors.\n' +
+  '- Mention Tutlio at most once, only where it truly fits, as a soft contextual aside (e.g. when scheduling, tracking\n' +
+  '  progress or organising online lessons naturally comes up). If it does not fit the topic, do NOT mention it at all.\n' +
   '- Never use hard-sell phrases: "mūsų platforma", "registruokitės dabar", "geriausia platforma", "tik su Tutlio".\n' +
   '- No product feature dumps. If mentioning software, keep it generic ("specializuota platforma", "tvarkaraščio įrankis").\n' +
   '- Include 5–7 ## H2 sections + ### H3 where useful; lists, numbered steps, optional > Pro tip: blockquote.\n' +
@@ -198,27 +202,41 @@ function extractGeminiText(json: unknown): string {
   return text;
 }
 
-async function generateBlogWithGemini(options: BlogAiGenerateOptions): Promise<BlogAiGenerateResult> {
-  const apiKey = (process.env.GEMINI_API_KEY || '').trim();
-  if (!apiKey) throw new Error('GEMINI_API_KEY must be configured for Gemini blog generation');
+/** How many times to ask Gemini for the article before giving up (it occasionally truncates JSON). */
+const GEMINI_BLOG_MAX_ATTEMPTS = 3;
 
-  const model = (process.env.GEMINI_MODEL || 'gemini-2.5-flash').trim();
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+/**
+ * Tolerantly turn model text into a JSON object. Handles the common ways a model
+ * wraps JSON: as-is, inside ```json fences, or with stray prose around the object.
+ */
+export function coerceJsonObject(text: string): Record<string, unknown> {
+  const trimmed = (text || '').trim();
+  const candidates = [trimmed];
 
-  const prompt =
-    `You are an expert SEO editor for a tutoring-industry blog (informational content, not ads).\n` +
-    `Target keyword: "${options.keyword}"` +
-    (options.tag ? ` (category: ${options.tag})` : '') +
-    `\nBrand context (mention sparingly): Tutlio online tutoring platform.\n\n` +
-    `Return ONLY valid JSON (no markdown fences):\n` +
-    `{\n` +
-    `  "tag": "short category",\n` +
-    `  "lt": { "title": "...", "excerpt": "...", "content": "markdown body" },\n` +
-    `  "en": { "title": "...", "excerpt": "...", "content": "markdown body" },\n` +
-    `  "pl": { "title": "...", "excerpt": "...", "content": "markdown body" }\n` +
-    `}\n\n` +
-    BLOG_SEO_WRITING_RULES;
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fenced?.[1]) candidates.push(fenced[1].trim());
 
+  const first = trimmed.indexOf('{');
+  const last = trimmed.lastIndexOf('}');
+  if (first !== -1 && last > first) candidates.push(trimmed.slice(first, last + 1));
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>;
+    } catch {
+      // try the next shape
+    }
+  }
+  throw new Error(`content was not valid JSON: ${trimmed.slice(0, 200)}`);
+}
+
+/** One Gemini text request → parsed multi-locale blog body (no cover image yet). */
+async function requestGeminiBlogLocales(
+  url: string,
+  prompt: string,
+  keyword: string,
+): Promise<BlogAiGenerateResult> {
   const resp = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -227,7 +245,10 @@ async function generateBlogWithGemini(options: BlogAiGenerateOptions): Promise<B
       generationConfig: {
         responseMimeType: 'application/json',
         temperature: 0.7,
-        maxOutputTokens: 16384,
+        // With responseMimeType=json Gemini emits valid JSON unless it runs out of
+        // output budget mid-article (the cause of the intermittent "not valid JSON"
+        // failures). A generous cap fits thinking tokens + 3 locales of markdown.
+        maxOutputTokens: 32768,
       },
     }),
   });
@@ -249,17 +270,52 @@ async function generateBlogWithGemini(options: BlogAiGenerateOptions): Promise<B
   }
 
   const contentText = extractGeminiText(json);
-  let parsedBodyRaw: unknown;
-  try {
-    parsedBodyRaw = JSON.parse(contentText);
-  } catch {
-    throw new Error(`Gemini content was not valid JSON: ${contentText.slice(0, 200)}`);
-  }
+  const parsedBodyRaw = coerceJsonObject(contentText);
 
-  const parsedLocales = parseBlogAiResponse({
-    ...(parsedBodyRaw as Record<string, unknown>),
-    cover_image_url: geminiCoverPlaceholder(options.keyword),
+  return parseBlogAiResponse({
+    ...parsedBodyRaw,
+    cover_image_url: geminiCoverPlaceholder(keyword),
   });
+}
+
+async function generateBlogWithGemini(options: BlogAiGenerateOptions): Promise<BlogAiGenerateResult> {
+  const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+  if (!apiKey) throw new Error('GEMINI_API_KEY must be configured for Gemini blog generation');
+
+  const model = (process.env.GEMINI_MODEL || 'gemini-2.5-flash').trim();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  const prompt =
+    `You are an expert SEO editor for an education & tutoring blog (informational content, not ads).\n` +
+    `Topics span learning, studying, exams, school subjects, parenting around education, and the tutoring craft.\n` +
+    `Target keyword: "${options.keyword}"` +
+    (options.tag ? ` (category: ${options.tag})` : '') +
+    `\nBrand context (optional, mention at most once and only if it fits): Tutlio online tutoring platform.\n\n` +
+    `Return ONLY valid JSON (no markdown fences):\n` +
+    `{\n` +
+    `  "tag": "short category",\n` +
+    `  "lt": { "title": "...", "excerpt": "...", "content": "markdown body" },\n` +
+    `  "en": { "title": "...", "excerpt": "...", "content": "markdown body" },\n` +
+    `  "pl": { "title": "...", "excerpt": "...", "content": "markdown body" }\n` +
+    `}\n\n` +
+    BLOG_SEO_WRITING_RULES;
+
+  // Gemini occasionally returns truncated / non-JSON content; retry so a single bad
+  // generation never fails the daily cron.
+  let parsedLocales: BlogAiGenerateResult | null = null;
+  let lastError = 'unknown error';
+  for (let attempt = 1; attempt <= GEMINI_BLOG_MAX_ATTEMPTS; attempt++) {
+    try {
+      parsedLocales = await requestGeminiBlogLocales(url, prompt, options.keyword);
+      break;
+    } catch (e) {
+      lastError = e instanceof Error ? e.message : String(e);
+      console.warn(`[blog-ai] Gemini attempt ${attempt}/${GEMINI_BLOG_MAX_ATTEMPTS} failed: ${lastError}`);
+    }
+  }
+  if (!parsedLocales) {
+    throw new Error(`Gemini blog generation failed after ${GEMINI_BLOG_MAX_ATTEMPTS} attempts: ${lastError}`);
+  }
 
   const cover = await generateGeminiCoverImage({
     keyword: options.keyword,

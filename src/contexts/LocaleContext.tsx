@@ -68,3 +68,25 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
+
+/**
+ * Forces a fixed UI locale for a subtree, ignoring the domain's market locale.
+ * Used for the platform `/admin` area, which must always render in Lithuanian so
+ * the (Lithuanian) team can read it even on tutlio.pl (Polish) / tutlio.com (English).
+ * Side-effect free (no document.lang / SEO meta writes, no persistence) so it nests
+ * safely inside the top-level LocaleProvider. Relies on lt/en/pl being bundled, so
+ * no async dictionary load is needed for those.
+ */
+export function StaticLocaleProvider({ locale, children }: { locale: Locale; children: ReactNode }) {
+  const { platform } = usePlatform();
+
+  const value = useMemo(() => ({
+    locale,
+    setLocale: () => {},
+    t: (key: string, params?: Record<string, string | number>) => translate(locale, key, params, platform),
+    tHtml: (key: string, params?: Record<string, string | number>) => translateHtml(locale, key, params, platform),
+    dateFnsLocale: getDateFnsLocale(locale),
+  }), [locale, platform]);
+
+  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+}

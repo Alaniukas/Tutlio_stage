@@ -1,6 +1,6 @@
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
-import { convertDocxBufferToPdfWithFallbacks } from './docxConverter';
+import { convertDocxBufferToPdfWithFallbacks } from './docxConverter.js';
 
 /** Download DOCX from URL, fill {{placeholders}}, return PDF bytes (server-side). */
 export async function renderDocxTemplateUrlToPdfBuffer(params: {

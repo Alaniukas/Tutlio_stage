@@ -313,7 +313,18 @@
   overflow-y: auto !important;
 }
 .calendar-collapsed .rbc-time-view {
-  overflow: hidden !important;
+  /* visible (not hidden) so the sticky weekday header can pin to the page scroll container */
+  overflow: visible !important;
+}
+
+/* Keep the weekday header row (which day it is) visible while scrolling the time grid. */
+.calendar-expanded .rbc-time-header,
+.calendar-collapsed .rbc-time-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: #fff;
+  box-shadow: 0 1px 0 #e5e7eb;
 }
 
 .rbc-calendar {

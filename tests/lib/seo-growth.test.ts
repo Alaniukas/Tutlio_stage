@@ -165,11 +165,11 @@ describe('IndexNow', () => {
 });
 
 describe('Auto SEO blog cron', () => {
-  it('is scheduled every two days with a 60s function budget', () => {
+  it('runs daily with enough function budget for AI retries + cover image', () => {
     const vercel = JSON.parse(readFileSync(path.join(ROOT, 'vercel.json'), 'utf8'));
     const cron = vercel.crons.find((c: { path: string }) => c.path === '/api/blog-auto-generate');
-    expect(cron?.schedule).toBe('0 8 * * *');
-    expect(vercel.functions['api/blog-auto-generate.ts']?.maxDuration).toBe(60);
+    expect(cron?.schedule).toBe('0 5 * * *');
+    expect(vercel.functions['api/blog-auto-generate.ts']?.maxDuration).toBe(120);
   });
 });
 

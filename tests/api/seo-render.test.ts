@@ -85,15 +85,13 @@ describe('page-render about/contact canonical slugs', () => {
     expect(res.body).toContain('<link rel="canonical" href="https://www.tutlio.lt/apie-mus" />');
   });
 
-  it('serves the Polish landing canonical on tutlio.pl with locale links footer', async () => {
+  it('serves the Polish landing canonical on tutlio.pl without cross-domain locale footer', async () => {
     const res = mockRes();
     await pageRender(mockReq({ page: 'landing', locale: 'pl' }, 'www.tutlio.pl'), res);
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('<link rel="canonical" href="https://www.tutlio.pl/" />');
-    expect(res.body).toContain('class="footer-langs"');
-    expect(res.body).toContain('href="https://www.tutlio.lt/"');
-    expect(res.body).toContain('href="https://www.tutlio.com/"');
+    expect(res.body).not.toContain('class="footer-langs"');
   });
 });
 

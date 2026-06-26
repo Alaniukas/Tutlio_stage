@@ -258,7 +258,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // 7. Create Stripe Checkout session — one line per subject (multi-subject support)
         const itemLineItems = resolvedItems.map((it) => ({
             price_data: {
-                currency: currency as const,
+                currency,
                 product_data: {
                     name: `${it.totalLessons} × ${it.subjectName}`,
                     description: `Mokymo paslaugos. Paslaugos teikėjas: ${ownerName}`,

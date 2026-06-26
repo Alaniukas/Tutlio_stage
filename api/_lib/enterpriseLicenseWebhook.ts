@@ -247,7 +247,7 @@ export async function handleEnterpriseCheckoutCompleted(params: EnterpriseChecko
     welcomeError = `recovery link generation failed: ${linkError?.message || 'no action link'}`;
   } else {
     const sent = await sendEnterpriseWelcomeEmail(email, { companyName, licenseCount, setupLink, locale: uiLocale });
-    if (!sent.ok) welcomeError = `welcome email failed: ${sent.error}`;
+    if (!sent.ok) welcomeError = `welcome email failed: ${'error' in sent ? sent.error : 'unknown error'}`;
   }
   if (welcomeError) console.error(`[enterprise-license] ${welcomeError} (org ${org.id})`);
 

@@ -2,6 +2,9 @@
 // appear when fee data is present and fall back gracefully when it is missing.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const eur = (n: number) =>
+  new Intl.NumberFormat('lt-LT', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+
 const { sendMock, pushMock } = vi.hoisted(() => ({
   sendMock: vi.fn(),
   pushMock: vi.fn().mockResolvedValue(undefined),
@@ -74,9 +77,9 @@ describe('payment_success receipt rows', () => {
     expect(html).toContain('Mokymo paslaugos');
     expect(html).toContain('UAB Mokslo centras');
     expect(html).toContain('Platformos administravimo mokestis');
-    expect(html).toContain('€20.00');
-    expect(html).toContain('€0.96'); // fee = charged − lesson
-    expect(html).toContain('€20.96');
+    expect(html).toContain(eur(20));
+    expect(html).toContain(eur(0.96)); // fee = charged − lesson
+    expect(html).toContain(eur(20.96));
   });
 
   it('falls back to the tutor name when no provider organization is set', async () => {
@@ -89,7 +92,7 @@ describe('payment_success receipt rows', () => {
     });
     expect(html).toContain('Mokymo paslaugos');
     expect(html).toContain('Jonas Jonaitis');
-    expect(html).toContain('€0.74');
+    expect(html).toContain(eur(0.74));
   });
 
   it('shows no breakdown when amounts match (fees absorbed, e.g. school org)', async () => {
@@ -101,7 +104,7 @@ describe('payment_success receipt rows', () => {
       totalChargedEur: '20.00',
     });
     expect(html).not.toContain('Platformos administravimo mokestis');
-    expect(html).toContain('€20.00');
+    expect(html).toContain(eur(20));
   });
 
   it('shows no breakdown when fee data is missing', async () => {
@@ -112,7 +115,7 @@ describe('payment_success receipt rows', () => {
       lessonPriceEur: '20.00',
     });
     expect(html).not.toContain('Platformos administravimo mokestis');
-    expect(html).toContain('€20.00');
+    expect(html).toContain(eur(20));
   });
 });
 
@@ -129,8 +132,8 @@ describe('monthly_invoice_paid receipt rows', () => {
     });
     expect(html).toContain('Mokymo paslaugos');
     expect(html).toContain('Platformos administravimo mokestis');
-    expect(html).toContain('€2.55');
-    expect(html).toContain('€102.55');
+    expect(html).toContain(eur(2.55));
+    expect(html).toContain(eur(102.55));
   });
 
   it('keeps the single sum row when no fee data is present', async () => {
@@ -141,7 +144,7 @@ describe('monthly_invoice_paid receipt rows', () => {
       totalAmount: '100.00',
     });
     expect(html).not.toContain('Platformos administravimo mokestis');
-    expect(html).toContain('€100.00');
+    expect(html).toContain(eur(100));
   });
 });
 
@@ -159,8 +162,8 @@ describe('prepaid_package_success receipt rows', () => {
     });
     expect(html).toContain('Mokymo paslaugos');
     expect(html).toContain('Platformos administravimo mokestis');
-    expect(html).toContain('€6.04');
-    expect(html).toContain('€166.04');
+    expect(html).toContain(eur(6.04));
+    expect(html).toContain(eur(166.04));
   });
 });
 
@@ -176,8 +179,8 @@ describe('platform_invoice (B2B) email', () => {
     });
     expect(subject).toContain('TUT-00001');
     expect(html).toContain('UAB Agentūra');
-    expect(html).toContain('-€4.50');
-    expect(html).toContain('€49.00');
+    expect(html).toContain(`-${eur(4.5)}`);
+    expect(html).toContain(eur(49));
     expect(html).toContain('Mokėtina suma');
   });
 
@@ -190,6 +193,6 @@ describe('platform_invoice (B2B) email', () => {
       amountDue: '49.00',
     });
     expect(html).not.toContain('išskaityta iš jūsų lėšų');
-    expect(html).toContain('€49.00');
+    expect(html).toContain(eur(49));
   });
 });

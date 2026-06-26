@@ -1,11 +1,11 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
-import { renderDocxTemplateUrlToPdfBuffer } from './_lib/renderSchoolContractDocxToPdf';
+import { renderDocxTemplateUrlToPdfBuffer } from './_lib/renderSchoolContractDocxToPdf.js';
 import {
   schoolContractPdfStoragePath,
   SCHOOL_CONTRACTS_BUCKET,
   extractSchoolContractStoragePath,
-} from './_lib/schoolContractPdfPath';
+} from './_lib/schoolContractPdfPath.js';
 
 function json(res: VercelResponse, status: number, body: Record<string, unknown>) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');

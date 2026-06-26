@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { authHeaders } from '@/lib/apiHelpers';
@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { DateInput } from '@/components/ui/date-input';
 import { Label } from '@/components/ui/label';
-import { CreditCard, CheckCircle2, ExternalLink, Loader2, Wallet, Layers, FileText, Package, Info, ChevronDown, ChevronUp } from 'lucide-react';
+import { CreditCard, CheckCircle2, ExternalLink, Loader2, Wallet, Layers, FileText, Package, Info, ChevronDown, ChevronUp, RefreshCw, Clock, AlertCircle } from 'lucide-react';
 import Toast from '@/components/Toast';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -21,6 +21,7 @@ import { useMarketMoney } from '@/hooks/useMarketMoney';
 type CompanyFinanceCache = {
   orgId: string;
   stripeComplete: boolean; // true only when stripe_account_id + onboarding complete (same as Checkout API)
+  stripeAccountId: string | null; // account exists but may still be pending verification
   paymentTiming: 'before_lesson' | 'after_lesson';
   paymentDeadlineHours: number;
   enablePerLesson: boolean;
@@ -43,6 +44,10 @@ export default function CompanyFinance() {
   const manualPaymentsOn = hasFeature('manual_payments');
 
   const [stripeComplete, setStripeComplete] = useState(fc?.stripeComplete ?? false);
+  const [stripeAccountId, setStripeAccountId] = useState<string | null>(fc?.stripeAccountId ?? null);
+  const [stripeStatus, setStripeStatus] = useState<'pending' | 'incomplete' | null>(null);
+  const [stripeChecking, setStripeChecking] = useState(false);
+  const stripeAutoCheckedRef = useRef(false);
   const [stripeLoading, setStripeLoading] = useState(false);
   const [stripeError, setStripeError] = useState<string | null>(null);
 
@@ -54,7 +59,7 @@ export default function CompanyFinance() {
   const [enablePrepaidPackages, setEnablePrepaidPackages] = useState(fc?.enablePrepaidPackages ?? false);
   const [restrictBookingOnOverdue, setRestrictBookingOnOverdue] = useState(fc?.restrictBookingOnOverdue ?? false);
 
-  const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
 
   const [isSendInvoiceOpen, setIsSendInvoiceOpen] = useState(false);
   const [invoiceScope, setInvoiceScope] = useState<'all_tutors' | 'selected_tutors'>('all_tutors');
@@ -87,8 +92,19 @@ export default function CompanyFinance() {
   useEffect(() => {
     if (!orgId || orgFeaturesLoading) return;
     const params = new URLSearchParams(location.search);
-    if (params.get('stripe') === 'success') verifyStripe();
+    if (params.get('stripe') === 'success') void checkStripeStatus();
   }, [orgId, location.search, orgFeaturesLoading]);
+
+  // Account connected but not complete → silently re-check live Stripe status once on load,
+  // so the page reflects "verifying" / "needs info" instead of a stale "not connected".
+  useEffect(() => {
+    if (loading || orgFeaturesLoading || !orgId) return;
+    if (stripeComplete || !stripeAccountId) return;
+    if (stripeAutoCheckedRef.current) return;
+    if (new URLSearchParams(location.search).get('stripe') === 'success') return;
+    stripeAutoCheckedRef.current = true;
+    void checkStripeStatus({ silent: true });
+  }, [loading, orgFeaturesLoading, orgId, stripeComplete, stripeAccountId, location.search]);
 
   const fetchFinanceSettings = async (options?: { background?: boolean }) => {
     const background = options?.background === true;
@@ -118,6 +134,7 @@ export default function CompanyFinance() {
       .single();
 
     let stripeCompleteLocal = false;
+    let stripeAccountIdLocal: string | null = null;
     let paymentTimingLocal: 'before_lesson' | 'after_lesson' = 'before_lesson';
     let paymentDeadlineHoursLocal = 24;
     let enablePerLessonLocal = true;
@@ -128,7 +145,8 @@ export default function CompanyFinance() {
     if (orgError) {
       setToastMessage({ message: t('companyFinance.fetchFailed', { msg: orgError.message }), type: 'error' });
     } else if (orgData) {
-      stripeCompleteLocal = !!(orgData.stripe_onboarding_complete && orgData.stripe_account_id?.trim());
+      stripeAccountIdLocal = orgData.stripe_account_id?.trim() || null;
+      stripeCompleteLocal = !!(orgData.stripe_onboarding_complete && stripeAccountIdLocal);
       paymentTimingLocal = (orgData.payment_timing as 'before_lesson' | 'after_lesson') || 'before_lesson';
       paymentDeadlineHoursLocal = orgData.payment_deadline_hours || 24;
       enablePerLessonLocal = orgData.enable_per_lesson ?? true;
@@ -145,6 +163,8 @@ export default function CompanyFinance() {
 
     setOrgId(organizationId);
     setStripeComplete(stripeCompleteLocal);
+    setStripeAccountId(stripeAccountIdLocal);
+    if (stripeCompleteLocal) setStripeStatus(null);
     setPaymentTiming(paymentTimingLocal);
     setPaymentDeadlineHours(paymentDeadlineHoursLocal);
     setEnablePerLesson(enablePerLessonLocal);
@@ -156,6 +176,7 @@ export default function CompanyFinance() {
     setCache('company_finance', {
       orgId: organizationId,
       stripeComplete: stripeCompleteLocal,
+      stripeAccountId: stripeAccountIdLocal,
       paymentTiming: paymentTimingLocal,
       paymentDeadlineHours: paymentDeadlineHoursLocal,
       enablePerLesson: enablePerLessonLocal,
@@ -297,9 +318,11 @@ export default function CompanyFinance() {
     setStripeLoading(false);
   };
 
-  const verifyStripe = async () => {
+  /** Re-check the live Stripe status. silent=true skips toasts (used for the on-load auto-check). */
+  const checkStripeStatus = async (opts?: { silent?: boolean }) => {
     if (!orgId) return;
-    setStripeLoading(true);
+    const silent = opts?.silent ?? false;
+    setStripeChecking(true);
     try {
       const res = await fetch('/api/stripe-connect', {
         method: 'POST', headers: await authHeaders(),
@@ -307,16 +330,21 @@ export default function CompanyFinance() {
       });
       const json = await res.json();
       if (json.complete) {
+        setStripeStatus(null);
         invalidateCache('company_finance');
         await fetchFinanceSettings({ background: true });
-        setToastMessage({ message: t('companyFinance.stripeConnected'), type: 'success' });
+        if (!silent) setToastMessage({ message: t('companyFinance.stripeConnected'), type: 'success' });
+      } else if (json.pendingVerification) {
+        setStripeStatus('pending');
+        if (!silent) setToastMessage({ message: t('companyFinance.stripePendingVerification'), type: 'warning' });
       } else {
-        setToastMessage({ message: t('companyFinance.stripeIncomplete'), type: 'error' });
+        setStripeStatus('incomplete');
+        if (!silent) setToastMessage({ message: t('companyFinance.stripeIncomplete'), type: 'error' });
       }
     } catch {
-      setToastMessage({ message: 'Nepavyko patikrinti Stripe statuso.', type: 'error' });
+      if (!silent) setToastMessage({ message: t('companyFinance.stripeCheckFailed'), type: 'error' });
     }
-    setStripeLoading(false);
+    setStripeChecking(false);
   };
 
   if (loading || orgFeaturesLoading) {
@@ -393,6 +421,46 @@ export default function CompanyFinance() {
                 {stripeLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ExternalLink className="w-4 h-4" />}
                 {t('companyFinance.manageStripe')}
               </Button>
+            </div>
+          ) : stripeAccountId ? (
+            <div className="space-y-3">
+              {stripeStatus === 'pending' ? (
+                <div className="flex items-start gap-3 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+                  <Clock className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-blue-900">{t('companyFinance.stripePendingTitle')}</p>
+                    <p className="text-xs text-blue-800 mt-1">{t('companyFinance.stripePendingBody')}</p>
+                  </div>
+                </div>
+              ) : stripeChecking && stripeStatus === null ? (
+                <div className="flex items-center gap-3 p-4 bg-gray-50 border border-gray-200 rounded-xl">
+                  <Loader2 className="w-5 h-5 text-gray-500 flex-shrink-0 animate-spin" />
+                  <p className="text-sm text-gray-700">{t('companyFinance.stripeCheckingStatus')}</p>
+                </div>
+              ) : (
+                <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                  <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-amber-800">{t('companyFinance.stripeIncompleteTitle')}</p>
+                    <p className="text-xs text-amber-700 mt-1">{t('companyFinance.stripeIncompleteBody')}</p>
+                  </div>
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" className="rounded-xl gap-2"
+                  onClick={() => void checkStripeStatus()} disabled={stripeChecking}>
+                  {stripeChecking ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                  {t('companyFinance.checkStripeStatus')}
+                </Button>
+                {stripeStatus !== 'pending' && (
+                  <Button size="sm" className="rounded-xl gap-2 bg-violet-600 hover:bg-violet-700"
+                    onClick={() => handleStripeAction('onboard')} disabled={stripeLoading}>
+                    {stripeLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ExternalLink className="w-4 h-4" />}
+                    {t('companyFinance.continueStripeSetup')}
+                  </Button>
+                )}
+              </div>
+              {stripeError && <p className="text-sm text-red-600">{stripeError}</p>}
             </div>
           ) : (
             <div className="space-y-3">

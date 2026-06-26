@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Settings, Save, Trash2, Plus, BookOpen, Clock, Euro, Pencil, Users, Eye, AlertTriangle } from 'lucide-react';
+import { Settings, Save, Trash2, Plus, BookOpen, Clock, Euro, Pencil, Users, Eye, AlertTriangle, Mail } from 'lucide-react';
 import Toast from '@/components/Toast';
 import { useTranslation } from '@/lib/i18n';
 import {
@@ -126,6 +126,8 @@ export default function CompanySettings() {
   const [trialCommentRequired, setTrialCommentRequired] = useState(sc?.trialCommentRequired ?? false);
   const [notifyTutorsOnAssign, setNotifyTutorsOnAssign] = useState(sc?.notifyTutorsOnAssign ?? false);
   const [enableManualStudentPayments, setEnableManualStudentPayments] = useState(sc?.enableManualStudentPayments ?? false);
+  // Optional address shown to parents (e.g. contract emails) for questions; empty falls back to the org email.
+  const [contactEmail, setContactEmail] = useState<string>(sc?.contactEmail ?? '');
 
   useEffect(() => { if (!getCached('company_settings')) fetchSettings(); }, []);
 
@@ -169,6 +171,7 @@ export default function CompanySettings() {
     let nextTrialPriceEur = 0;
     let nextTrialCommentMode: TrialCommentMode = 'internal_only';
     let nextTrialCommentRequired = false;
+    let nextContactEmail = '';
 
     if (orgData) {
       const rawFeat = (orgData as { features?: unknown }).features;
@@ -189,6 +192,8 @@ export default function CompanySettings() {
       if (fcm === 'student_and_parent' || fcm === 'internal_only') nextTrialCommentMode = fcm;
       const fcr = featObj['trial_comment_required'];
       nextTrialCommentRequired = fcr === true;
+      const fce = featObj['contact_email'];
+      if (typeof fce === 'string') nextContactEmail = fce.trim();
       setEnableManualStudentPayments(
         featObj['manual_payments'] === true || featObj['enable_manual_student_payments'] === true,
       );
@@ -216,6 +221,7 @@ export default function CompanySettings() {
       setTrialCommentMode(nextTrialCommentMode);
       setTrialCommentRequired(nextTrialCommentRequired);
       setNotifyTutorsOnAssign(featObj['notify_tutors_on_student_assign'] === true);
+      setContactEmail(nextContactEmail);
       setSettings(nextSettings);
       setLessonEditScope(nextLessonEditScope);
     }
@@ -308,6 +314,7 @@ export default function CompanySettings() {
         trialPriceEur: nextTrialPriceEur,
         trialCommentMode: nextTrialCommentMode,
         trialCommentRequired: nextTrialCommentRequired,
+        contactEmail: nextContactEmail,
         orgTutors: tutorList,
         subjects: merged,
       });
@@ -553,6 +560,7 @@ export default function CompanySettings() {
       trial_comment_required: trialCommentRequired,
       notify_tutors_on_student_assign: notifyTutorsOnAssign,
       enable_manual_student_payments: enableManualStudentPayments,
+      contact_email: contactEmail.trim(),
     };
 
     const { error } = await supabase
@@ -644,6 +652,7 @@ export default function CompanySettings() {
       trialCommentRequired,
       notifyTutorsOnAssign,
       enableManualStudentPayments,
+      contactEmail,
       orgTutors,
       subjects,
     });
@@ -707,6 +716,25 @@ export default function CompanySettings() {
               <span className="text-sm text-gray-700">{t('compSet.notifyTutorsOnAssign')}</span>
             </label>
             <p className="text-xs text-gray-400 ml-8">{t('compSet.notifyTutorsOnAssignDesc')}</p>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center flex-shrink-0">
+                <Mail className="w-5 h-5 text-emerald-600" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-lg font-semibold text-gray-900">{t('compSet.parentContactEmailTitle')}</h2>
+                <p className="text-xs text-gray-500 mt-0.5">{t('compSet.parentContactEmailDesc')}</p>
+              </div>
+            </div>
+            <Input
+              type="email"
+              value={contactEmail}
+              onChange={(e) => setContactEmail(e.target.value)}
+              placeholder={t('compSet.parentContactEmailPlaceholder')}
+              className="rounded-xl"
+            />
           </div>
 
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">

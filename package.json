@@ -19,6 +19,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
+    "lint:api": "tsc -p tsconfig.api.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "seo:smoke": "node scripts/seo-smoke.mjs",

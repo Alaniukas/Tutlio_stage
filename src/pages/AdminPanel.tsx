@@ -701,7 +701,7 @@ export default function AdminPanel() {
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${panelView === 'statistics' ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
           >
             <BarChart3 className="w-4 h-4" />
-            Statistics
+            Statistika
           </button>
           <button
             type="button"

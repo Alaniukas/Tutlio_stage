@@ -5,12 +5,12 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
-import { renderDocxTemplateUrlToPdfBuffer } from './renderSchoolContractDocxToPdf';
+import { renderDocxTemplateUrlToPdfBuffer } from './renderSchoolContractDocxToPdf.js';
 import {
   schoolContractPdfStoragePath,
   SCHOOL_CONTRACTS_BUCKET,
   extractSchoolContractStoragePath,
-} from './schoolContractPdfPath';
+} from './schoolContractPdfPath.js';
 
 export const BUCKET = SCHOOL_CONTRACTS_BUCKET;
 

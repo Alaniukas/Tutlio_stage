@@ -206,7 +206,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Best-effort: delete from Google Calendar BEFORE DB delete
     try {
-      const { deleteSessionFromGoogle } = await import('./_lib/google-calendar');
+      const { deleteSessionFromGoogle } = await import('./_lib/google-calendar.js');
       for (const s of sessionsToDelete.slice(0, 60)) {
         try {
           await deleteSessionFromGoogle(s.id, tutorId);

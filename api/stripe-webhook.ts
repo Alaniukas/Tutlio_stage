@@ -13,6 +13,7 @@ import {
     syncEnterpriseLicenseSubscription,
 } from './_lib/enterpriseLicenseWebhook.js';
 import { isSubscriptionOnlyPriceId } from './_lib/stripe-subscription-env.js';
+import { summarizeStripeOnboarding } from './_lib/stripeAccountOnboarding.js';
 
 const getStripe = () => {
     const key = process.env.STRIPE_SECRET_KEY;
@@ -96,25 +97,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     
     const sigHeader = req.headers['stripe-signature'];
     const sig = Array.isArray(sigHeader) ? sigHeader[0] : (sigHeader as string | undefined);
-    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    // Platform events use STRIPE_WEBHOOK_SECRET. Connected-account events (e.g. account.updated)
+    // arrive from a separate Connect webhook endpoint with its own secret, when configured.
+    const webhookSecrets = [
+        process.env.STRIPE_WEBHOOK_SECRET,
+        process.env.STRIPE_CONNECT_WEBHOOK_SECRET,
+    ].filter((s): s is string => Boolean(s));
 
-    let event: Stripe.Event;
+    if (webhookSecrets.length === 0) {
+        console.error('[stripe-webhook] No webhook secret set — refusing to process unverified event');
+        return res.status(500).send('Server misconfigured: STRIPE_WEBHOOK_SECRET missing');
+    }
 
-    try {
-        if (!webhookSecret) {
-            console.error('[stripe-webhook] STRIPE_WEBHOOK_SECRET is not set — refusing to process unverified event');
-            return res.status(500).send('Server misconfigured: STRIPE_WEBHOOK_SECRET missing');
+    let event: Stripe.Event | null = null;
+    let verifyErr: any = null;
+    for (const secret of webhookSecrets) {
+        try {
+            event = stripe.webhooks.constructEvent(buf, sig ?? '', secret);
+            verifyErr = null;
+            break;
+        } catch (err: any) {
+            verifyErr = err;
         }
-        event = stripe.webhooks.constructEvent(buf, sig ?? '', webhookSecret);
-    } catch (err: any) {
-        console.error(`[stripe-webhook] Webhook signature verification failed: ${err.message}`);
+    }
+
+    if (!event) {
+        console.error(`[stripe-webhook] Webhook signature verification failed: ${verifyErr?.message}`);
         console.error('[stripe-webhook] Raw body diagnostics:', {
             bufLen: buf?.length ?? null,
             bodyType: typeof (req as any).body,
             hasSig: Boolean(sig && String(sig).length > 0),
             contentType: req.headers['content-type'],
+            secretsTried: webhookSecrets.length,
         });
-        return res.status(400).send(`Webhook Error: ${err.message}`);
+        return res.status(400).send(`Webhook Error: ${verifyErr?.message}`);
     }
 
     try {
@@ -276,6 +292,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
                     // TODO: Send email notification about failed payment
                 }
+            }
+        }
+
+        // ─── Connect Account Events ──────────────────────────────────────────────────
+        // When a connected account finishes Stripe's review (e.g. document verification),
+        // flip stripe_onboarding_complete so schools/tutors don't have to manually re-verify.
+        else if (event.type === 'account.updated') {
+            const account = event.data.object as Stripe.Account;
+            const { complete } = summarizeStripeOnboarding(account);
+            if (complete && account.id) {
+                // stripe_account_id is unique across both tables, so only one of these matches.
+                // Write idempotently (no "!= true" filter, which would skip NULL flags).
+                for (const table of ['organizations', 'profiles'] as const) {
+                    const { error: flagErr } = await supabase
+                        .from(table)
+                        .update({ stripe_onboarding_complete: true })
+                        .eq('stripe_account_id', account.id);
+                    if (flagErr) console.error(`[stripe-webhook] account.updated ${table} flag error:`, flagErr);
+                }
+                console.log(`[stripe-webhook] account.updated: onboarding marked complete for ${account.id}`);
             }
         }
 

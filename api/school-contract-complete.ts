@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
-import { renderAndStoreSchoolContractPdf } from './_lib/schoolContractPdf';
+import { renderAndStoreSchoolContractPdf } from './_lib/schoolContractPdf.js';
 
 const CONTRACT_SELECT =
   'id, student_id, organization_id, template_id, contract_number, annual_fee, filled_body, media_publicity_consent, template:school_contract_templates(pdf_url), organizations(name, email, entity_type), student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent)';

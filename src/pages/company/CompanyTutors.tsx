@@ -855,9 +855,7 @@ export default function CompanyTutors() {
 
   const handleArchiveTutor = async () => {
     if (!selectedTutor) return;
-    const confirmed = window.confirm(
-      'Ar tikrai archyvuoti šį korepetitorių? Paskyra nebus ištrinta, bet dings iš organizacijos sąrašų, o mokiniai bus atkabinti nuo šio korepetitoriaus.'
-    );
+    const confirmed = window.confirm(t('compTut.archiveConfirm'));
     if (!confirmed) return;
 
     setArchivingTutor(true);
@@ -873,13 +871,13 @@ export default function CompanyTutors() {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body?.error || 'Failed to archive tutor');
+        throw new Error(body?.error || t('compTut.archiveFailed'));
       }
       await loadData();
       setTutorModalOpen(false);
       setSelectedTutor(null);
     } catch (e: any) {
-      alert(e?.message || 'Nepavyko archyvuoti korepetitoriaus');
+      alert(e?.message || t('compTut.archiveFailed'));
     } finally {
       setArchivingTutor(false);
     }
@@ -1571,7 +1569,7 @@ export default function CompanyTutors() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setTutorModalOpen(false)}>{t('compTut.cancelBtn')}</Button>
             <Button variant="destructive" onClick={handleArchiveTutor} disabled={archivingTutor || savingTutor}>
-              {archivingTutor ? 'Archyvuojama...' : 'Archyvuoti'}
+              {archivingTutor ? t('compTut.archiving') : t('compTut.archive')}
             </Button>
             <Button onClick={handleSaveTutor} disabled={savingTutor}>{savingTutor ? t('compTut.saving') : t('compTut.save')}</Button>
           </DialogFooter>

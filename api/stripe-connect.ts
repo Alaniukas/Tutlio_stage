@@ -6,6 +6,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
+import { summarizeStripeOnboarding } from './_lib/stripeAccountOnboarding.js';
 
 function getStripe() {
     return new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-02-25.clover' as any });
@@ -92,28 +93,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
 
             const account = await stripe.accounts.retrieve(row.stripe_account_id);
-            const currentlyDue = account.requirements?.currently_due ?? [];
-            const pastDue = account.requirements?.past_due ?? [];
-            const requirementsClear = currentlyDue.length === 0 && pastDue.length === 0;
-            const transfersCap = account.capabilities?.transfers;
-
-            // Express: details_submitted alone is not enough — need charges/payouts or active transfers (destination charge).
-            let complete =
-                account.details_submitted === true &&
-                requirementsClear &&
-                account.charges_enabled === true &&
-                account.payouts_enabled === true;
-
-            // Sometimes payouts_enabled is still false while Stripe finishes review; if transfers are active and nothing is due — consider ready.
-            if (
-                !complete &&
-                account.details_submitted === true &&
-                requirementsClear &&
-                account.charges_enabled === true &&
-                transfersCap === 'active'
-            ) {
-                complete = true;
-            }
+            const summary = summarizeStripeOnboarding(account);
+            const complete = summary.complete;
 
             if (complete) {
                 const { error: flagErr } = await supabase
@@ -125,14 +106,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
             return res.status(200).json({
                 complete,
+                pendingVerification: summary.pendingVerification,
                 accountId: row.stripe_account_id,
                 stripe: {
-                    details_submitted: account.details_submitted,
-                    charges_enabled: account.charges_enabled,
-                    payouts_enabled: account.payouts_enabled,
-                    currently_due: currentlyDue,
-                    past_due: pastDue,
-                    transfers: transfersCap ?? null,
+                    details_submitted: summary.detailsSubmitted,
+                    charges_enabled: summary.chargesEnabled,
+                    payouts_enabled: summary.payoutsEnabled,
+                    currently_due: summary.currentlyDue,
+                    past_due: summary.pastDue,
+                    transfers: summary.transfers,
+                    pending_verification: summary.pendingVerification,
                 },
             });
         }

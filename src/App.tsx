@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useParams, useLocation } from 'react-router-dom';
 import { UserProvider } from '@/contexts/UserContext';
 import { OrgBrandingProvider } from '@/contexts/OrgBrandingContext';
+import { StaticLocaleProvider } from '@/contexts/LocaleContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import StudentProtectedRoute from '@/components/StudentProtectedRoute';
 import CompanyProtectedRoute from '@/components/CompanyProtectedRoute';
@@ -280,8 +281,15 @@ export default function App({ basename }: { basename: string }) {
           <Route path="/parent/*" element={<Navigate to="/parent" replace />} />
         </Route>
 
-        {/* Platform owner admin */}
-        <Route path="/admin" element={<AdminPanel />} />
+        {/* Platform owner admin — always Lithuanian, regardless of domain market locale. */}
+        <Route
+          path="/admin"
+          element={
+            <StaticLocaleProvider locale="lt">
+              <AdminPanel />
+            </StaticLocaleProvider>
+          }
+        />
 
         {/* Organization admin routes (company + school) - WITH UserProvider for caching */}
         <Route path="/company/login" element={<CompanyLogin />} />
