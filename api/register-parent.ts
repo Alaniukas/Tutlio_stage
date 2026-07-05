@@ -19,12 +19,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       email?: string;
       fullName: string;
       password: string;
+      childBirthDate?: string;
+      childGrade?: string;
     };
 
-    const { token, code, email, fullName, password } = body;
+    const { token, code, email, fullName, password, childBirthDate, childGrade } = body;
 
     if (!fullName?.trim() || !password || password.length < 6) {
       return res.status(400).json({ error: 'Missing or invalid fields', code: 'invalid_fields' });
+    }
+
+    // Parent-oriented registration (req 7): optional child details the parent
+    // confirms during sign-up; written to the linked student row.
+    const childInfo: { child_birth_date?: string; grade?: string } = {};
+    if (typeof childBirthDate === 'string' && childBirthDate.trim()) {
+      childInfo.child_birth_date = childBirthDate.trim();
+    }
+    if (typeof childGrade === 'string' && childGrade.trim()) {
+      childInfo.grade = childGrade.trim();
     }
 
     let invite:
@@ -97,7 +109,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (pwErr) {
             console.warn('[register-parent] could not update password for existing user:', pwErr.message);
           }
-          await linkParent(supabase, existing.id, fullName.trim(), invite.student_id, invite.id, normalizedEmail);
+          await linkParent(supabase, existing.id, fullName.trim(), invite.student_id, invite.id, normalizedEmail, childInfo);
           return res.status(200).json({ success: true });
         }
       }
@@ -106,7 +118,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!authData.user) return res.status(500).json({ error: 'User creation failed' });
 
-    await linkParent(supabase, authData.user.id, fullName.trim(), invite.student_id, invite.id, normalizedEmail);
+    await linkParent(supabase, authData.user.id, fullName.trim(), invite.student_id, invite.id, normalizedEmail, childInfo);
 
     return res.status(200).json({ success: true });
   } catch (err: any) {
@@ -121,7 +133,8 @@ async function linkParent(
   fullName: string,
   studentId: string,
   inviteId: string,
-  parentEmail: string
+  parentEmail: string,
+  childInfo?: { child_birth_date?: string; grade?: string }
 ) {
   const { data: profileRow, error: profErr } = await supabase
     .from('parent_profiles')
@@ -149,7 +162,10 @@ async function linkParent(
   );
   if (psErr) console.error('[register-parent] parent_students upsert', psErr);
 
-  await supabase.from('students').update({ parent_user_id: userId }).eq('id', studentId);
+  const studentUpdate: Record<string, unknown> = { parent_user_id: userId };
+  if (childInfo?.child_birth_date) studentUpdate.child_birth_date = childInfo.child_birth_date;
+  if (childInfo?.grade) studentUpdate.grade = childInfo.grade;
+  await supabase.from('students').update(studentUpdate).eq('id', studentId);
 
   await supabase.from('parent_invites').update({ used: true }).eq('id', inviteId);
 

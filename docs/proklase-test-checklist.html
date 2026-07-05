@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PRO Klasė — Intake Funnel Test Checklist</title>
+<style>
+  :root {
+    --bg: #f5f7fb;
+    --card: #ffffff;
+    --ink: #1f2937;
+    --muted: #6b7280;
+    --line: #e5e7eb;
+    --brand: #4f46e5;
+    --brand-soft: #eef2ff;
+    --ok: #16a34a;
+    --ok-soft: #dcfce7;
+    --warn: #b45309;
+    --warn-soft: #fef3c7;
+    --danger: #dc2626;
+    --danger-soft: #fee2e2;
+    --code-bg: #0f172a;
+    --code-ink: #e2e8f0;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.55;
+  }
+  header.top {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(255,255,255,0.92);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+    padding: 14px 20px;
+  }
+  .top-row { display: flex; align-items: center; gap: 16px; max-width: 980px; margin: 0 auto; flex-wrap: wrap; }
+  .top h1 { font-size: 18px; margin: 0; flex: 1 1 260px; }
+  .progress-wrap { flex: 1 1 240px; min-width: 200px; }
+  .bar { height: 10px; background: var(--line); border-radius: 99px; overflow: hidden; }
+  .bar > span { display: block; height: 100%; width: 0%; background: linear-gradient(90deg,#6366f1,#4f46e5); transition: width .25s ease; }
+  .progress-label { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .btns { display: flex; gap: 8px; }
+  button.act {
+    border: 1px solid var(--line); background: #fff; color: var(--ink);
+    border-radius: 8px; padding: 7px 12px; font-size: 13px; cursor: pointer;
+  }
+  button.act:hover { background: #f3f4f6; }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 20px 80px; }
+  .intro {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 20px 22px; margin-bottom: 22px;
+  }
+  .intro h2 { margin: 0 0 8px; font-size: 16px; }
+  .intro p { margin: 6px 0; color: var(--ink); }
+  .pill {
+    display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 9px;
+    border-radius: 99px; background: var(--brand-soft); color: var(--brand); margin-right: 6px;
+    vertical-align: middle; letter-spacing: .2px;
+  }
+  .pill.ok { background: var(--ok-soft); color: var(--ok); }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .pill.flag { background: #f1f5f9; color: #334155; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  details.section {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    margin-bottom: 16px; overflow: hidden;
+  }
+  details.section > summary {
+    list-style: none; cursor: pointer; padding: 16px 20px; font-weight: 700; font-size: 15px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  details.section > summary::-webkit-details-marker { display: none; }
+  details.section > summary .chev { margin-left: auto; color: var(--muted); transition: transform .2s; }
+  details.section[open] > summary .chev { transform: rotate(90deg); }
+  .section-body { padding: 4px 20px 18px; }
+  .phase-label { font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
+  .item {
+    border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin: 12px 0;
+    background: #fff;
+  }
+  .item h4 { margin: 0 0 6px; font-size: 14.5px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .item .num { color: var(--brand); font-weight: 800; }
+  .check { display: flex; gap: 10px; align-items: flex-start; margin: 8px 0; }
+  .check input { margin-top: 3px; width: 16px; height: 16px; accent-color: var(--brand); flex: 0 0 auto; cursor: pointer; }
+  .check label { cursor: pointer; }
+  .check.done label { color: var(--muted); text-decoration: line-through; }
+  .expected {
+    background: var(--ok-soft); border-left: 3px solid var(--ok); border-radius: 6px;
+    padding: 8px 12px; margin: 8px 0 2px; font-size: 13.5px;
+  }
+  .expected b { color: #14532d; }
+  .note {
+    background: var(--warn-soft); border-left: 3px solid var(--warn); border-radius: 6px;
+    padding: 8px 12px; margin: 8px 0; font-size: 13px;
+  }
+  ul.steps { margin: 6px 0 4px; padding-left: 20px; }
+  ul.steps li { margin: 3px 0; }
+  code { background: #eef2f7; padding: 1px 6px; border-radius: 5px; font-size: 12.5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); padding: 12px 14px; border-radius: 10px;
+    overflow-x: auto; font-size: 12.5px; line-height: 1.5; margin: 8px 0;
+  }
+  pre code { background: none; padding: 0; color: inherit; }
+  table.cron { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+  table.cron th, table.cron td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; }
+  table.cron th { background: #f8fafc; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; padding: 24px; }
+  @media print {
+    header.top { position: static; }
+    .btns, .progress-wrap { display: none; }
+    details.section { break-inside: avoid; border: 1px solid #ccc; }
+    details.section:not([open]) > summary + * { display: block; }
+    details.section > summary .chev { display: none; }
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-row">
+    <h1>PRO Klasė — Intake Funnel Test Checklist</h1>
+    <div class="progress-wrap">
+      <div class="bar"><span id="barFill"></span></div>
+      <div class="progress-label" id="progressLabel">0 / 0 done</div>
+    </div>
+    <div class="btns">
+      <button class="act" id="expandAll">Expand all</button>
+      <button class="act" id="printBtn">Print</button>
+      <button class="act" id="resetBtn">Reset</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="intro">
+    <h2>Before you start</h2>
+    <p>
+      <span class="pill ok">Test DB ready</span>
+      The test organization <b>“Paskutine Pamoka”</b> already has all 7 PRO Klasė feature flags enabled
+      in the test database, so you can test every flow as that org.
+    </p>
+    <p><b>Run the app against the test DB:</b></p>
+    <pre><code>npm run dev:test     # frontend (3000) + API (3002) pointed at TEST_SUPABASE_*</code></pre>
+    <p>
+      <b>Flags &amp; setup:</b> Toggle org features in the Admin Panel
+      (platform admin → organizations → features) or directly in <code>organizations.features</code> (JSONB).
+      The relevant flags:
+    </p>
+    <p>
+      <span class="pill flag">tutor_frequency_search</span>
+      <span class="pill flag">trial_reservation_flow</span>
+      <span class="pill flag">trial_followup_alert</span>
+      <span class="pill flag">package_reservation_flow</span>
+      <span class="pill flag">student_card_booking</span>
+      <span class="pill flag">monthly_packages</span>
+      <span class="pill flag">flexible_invitations</span>
+    </p>
+    <div class="note">
+      <b>Tip — testing auto-release / expiry fast:</b> the reserve→pay deadline defaults to 24h.
+      To force a quick auto-release, either set a low deadline in the org features
+      (<code>trial_reservation_deadline_hours</code> / <code>package_payment_deadline_hours</code>, in hours),
+      or set the hold’s <code>sessions.reservation_expires_at</code> (and package <code>lesson_packages.expires_at</code>)
+      to a past timestamp in the DB, then run the matching cron (see “Cron jobs”).
+    </div>
+    <div class="note">
+      <b>Local cron base URL:</b> <code>http://localhost:3002/api/&lt;cron&gt;</code> — locally cron endpoints
+      need no auth. On Vercel they require <code>Authorization: Bearer &lt;CRON_SECRET&gt;</code>.
+    </div>
+  </section>
+
+  <!-- ───────────────────────── PHASE 1 ───────────────────────── -->
+  <details class="section" open>
+    <summary><span class="phase-label">Phase 1</span>&nbsp;Tutor Match · Trial Reservation · Follow-up Alert <span class="chev">▶</span></summary>
+    <div class="section-body">
+
+      <div class="item">
+        <h4><span class="num">1.</span> Tutor search by frequency <span class="pill flag">tutor_frequency_search</span></h4>
+        <ul class="steps">
+          <li>As <b>org admin</b> of Paskutine Pamoka, open the “Find lesson / tutor” search (student card → find tutor).</li>
+          <li>Pick a <b>subject</b>, a <b>free-time</b> window, and a <b>frequency</b> (“Pamokų per savaitę”, e.g. 2×/week).</li>
+        </ul>
+        <div class="check"><input type="checkbox" data-k="p1-1a"><label>Results only show tutors with enough matching free slots for the chosen frequency (badge “Tinka N/sav.”).</label></div>
+        <div class="check"><input type="checkbox" data-k="p1-1b"><label>The student’s <b>primary tutor is ranked first</b> when they match.</label></div>
+        <div class="check"><input type="checkbox" data-k="p1-1c"><label>With the flag OFF (another org), the frequency field / ranking is not shown.</label></div>
+        <div class="expected"><b>Expected:</b> frequency-aware filtering + primary-tutor-first ordering, gated by the flag.</div>
+      </div>
+
+      <div class="item">
+        <h4><span class="num">2.</span> Trial reservation — reserve → pay → confirm <span class="pill flag">trial_reservation_flow</span></h4>
+        <ul class="steps">
+          <li>Start a trial booking for a student; reserve a time slot.</li>
+          <li>Confirm the slot is <b>held</b> (not yet a confirmed lesson) with a payment deadline.</li>
+          <li>Complete payment within the deadline (Stripe test card or manual confirm).</li>
+        </ul>
+        <div class="check"><input type="checkbox" data-k="p1-2a"><label>On reserve: a hold is created with <code>payment_status='reserved'</code>, <code>reservation_expires_at</code> set; slot looks blocked.</label></div>
+        <div class="check"><input type="checkbox" data-k="p1-2b"><label>Tutor is <b>not</b> notified and student/parent are <b>not</b> invited yet (only after payment).</label></div>
+        <div class="check"><input type="checkbox" data-k="p1-2c"><label>After payment: hold flips to <code>payment_status='paid'</code>, <code>reservation_expires_at</code> cleared, tutor notified, invite sent.</label></div>
+        <div class="check"><input type="checkbox" data-k="p1-2d"><label>Paying twice / late webhook does <b>not</b> double-confirm or double-notify (exactly-once).</label></div>
+        <div class="expected"><b>Expected:</b> reserve-then-pay holds the slot; confirmation + notifications happen only once, only after payment.</div>
+      </div>
+
+      <div class="item">
+        <h4><span class="num">2b.</span> Trial reservation — unpaid → auto-release <span class="pill flag">trial_reservation_flow</span></h4>
+        <ul class="steps">
+          <li>Reserve a trial slot but <b>do not pay</b>.</li>
+          <li>Make it expire (low deadline, or set <code>reservation_expires_at</code> to the past).</li>
+          <li>Run the cron: <code>GET http://localhost:3002/api/expire-trial-reservations</code>.</li>
+        </ul>
+        <div class="check"><input type="checkbox" data-k="p1-2e"><label>The held session is cancelled (<code>status='cancelled'</code>, <code>payment_status='expired'</code>) and the slot is free again.</label></div>
+        <div class="check"><input type="checkbox" data-k="p1-2f"><label>Cancellation reason is generic (“Rezervacija nebuvo apmokėta laiku”), not trial-specific wording.</label></div>
+        <div class="expected"><b>Expected:</b> unpaid holds auto-release after the deadline and the time becomes bookable again.</div>
+      </div>
+
+      <div class="item">
+        <h4><span class="num">8.</span> Trial follow-up alert (no package after trial) <span class="pill flag">trial_followup_alert</span></h4>
+        <ul class="steps">
+          <li>Complete a trial lesson for a student (or run <code>GET .../api/auto-complete-sessions</code> after the end time).</li>
+          <li>Do <b>not</b> send a lesson package to that student.</li>
+          <li>Open the org admin dashboard and the student’s card.</li>
+        </ul>
+        <div class="check"><input type="checkbox" data-k="p1-8a"><label>Student appears in the <b>“Needs attention” / „Reikia dėmesio“</b> section on the company dashboard.</label></div>
+        <div class="check"><input type="checkbox" data-k="p1-8b"><label>Student card shows a <b>red status</b> indicating no package was sent after the trial.</label></div>
+        <div class="check"><input type="checkbox" data-k="p1-8c"><label>After a package <b>is</b> sent, the student drops out of “Needs attention” and the red status clears.</label></div>
+        <div class="expected"><b>Expected:</b> post-trial students with no package are surfaced for follow-up; clears once a package is sent.</div>
+      </div>
+
+    </div>
+  </details>
+
+  <!-- ───────────────────────── PHASE 2 ───────────────────────── -->
+  <details class="section" open>
+    <summary><span class="phase-label">Phase 2</span>&nbsp;Package Pre-book · Card Booking · Monthly Packages · Flexible Invites <span class="chev">▶</span></summary>
+    <div class="section-body">
+
+      <div class="item">
+        <h4><span class="num">3.</span> Package pre-book (reserve times when sending a package) <span class="pill flag">package_reservation_flow</span></h4>
+        <ul class="steps">
+          <li>On a student’s card, send/create a package; choose a tutor, price, and <b>reserve lesson times</b> up front.</li>
+          <li>Add several reserved times, then create the package.</li>
+        </ul>
+        <div class="check"><input type="checkbox" data-k="p2-3a"><label>Reserved times become <b>held sessions</b> (<code>payment_status='reserved'</code>) linked to the package.</label></div>
+        <div class="check"><input type="checkbox" data-k="p2-3b"><label>Package credits move correctly: <code>available_lessons</code> ↓ and <code>reserved_lessons</code> ↑ by the number reserved (on both the package and per-subject item).</label></div>
+        <div class="check"><input type="checkbox" data-k="p2-3c"><label>A time that overlaps an existing active lesson is rejected (no hold created, credits untouched).</label></div>
+        <div class="check"><input type="checkbox" data-k="p2-3d"><label>After payment, held sessions become confirmed paid lessons.</label></div>
+        <div class="expected"><b>Expected:</b> a package can carry pre-booked, reserved slots that convert to lessons on payment.</div>
+      </div>
+
+      <div class="item">
+        <h4><span class="num">4.</span> Book lessons from the student card <span class="pill flag">student_card_booking</span></h4>
+        <ul class="steps">
+          <li>Open a student card as org admin; use the embedded calendar / “Find &amp; book lesson” to assign a tutor and book a lesson.</li>
+        </ul>
+        <div class="check"><input type="checkbox" data-k="p2-4a"><label>A lesson can be booked directly from the card without leaving it.</label></div>
+        <div class="check"><input type="checkbox" data-k="p2-4b"><label>The assigned <b>tutor is notified</b> about the new/changed lesson (booking goes through the shared admin-create path).</label></div>
+        <div class="check"><input type="checkbox" data-k="p2-4c"><label>The new lesson shows up in the tutor’s and the org calendar.</label></div>
+        <div class="expected"><b>Expected:</b> in-card booking works and always notifies the tutor.</div>
+      </div>
+
+      <div class="item">
+        <h4><span class="num">5.</span> Package payment deadline (24h before first lesson) <span class="pill flag">package_reservation_flow</span></h4>
+        <ul class="steps">
+          <li>Pre-book a package with a first lesson some days out; note the generated payment deadline.</li>
+          <li>(Optional) set <code>package_payment_deadline_hours</code> in org features to change the window.</li>
+        </ul>
+        <div class="check"><input type="checkbox" data-k="p2-5a"><label>Deadline = <b>first lesson − N hours</b> (default 24h), shown on the hold (<code>reservation_expires_at</code>).</label></div>
+        <div class="check"><input type="checkbox" data-k="p2-5b"><label>If the first lesson is very soon, the deadline clamps to <b>now + 1h</b> (payer always gets some time).</label></div>
+        <div class="check"><input type="checkbox" data-k="p2-5c"><label>Unpaid past deadline → <code>GET .../api/expire-trial-reservations</code> releases the holds and deactivates the unpaid package.</label></div>
+        <div class="check"><input type="checkbox" data-k="p2-5d"><label>If the package was already paid, the cron leaves it untouched (safety net).</label></div>
+        <div class="expected"><b>Expected:</b> package payment window is anchored to the first lesson, configurable, with auto-release of unpaid holds.</div>
+      </div>
+
+      <div class="item">
+        <h4><span class="num">6.</span> Monthly packages (calendar-month validity + same-month reschedule) <span class="pill flag">monthly_packages</span></h4>
+        <ul class="steps">
+          <li>Pay a package whose lessons fall in a given month; check the package <code>expires_at</code>.</li>
+          <li>As a tutor, try to reschedule a <b>package</b> lesson within the same month, then across into the next month.</li>
+        </ul>
+        <div class="check"><input type="checkbox" data-k="p2-6a"><label>On payment, package <code>expires_at</code> is set to the <b>end of the lesson’s calendar month</b> (Europe/Vilnius; e.g. an August lesson → 1 Sep 00:00).</label></div>
+        <div class="check"><input type="checkbox" data-k="p2-6b"><label>Rescheduling a package lesson <b>within the same month</b> is allowed.</label></div>
+        <div class="check"><input type="checkbox" data-k="p2-6c"><label>Rescheduling a package lesson <b>into another month</b> is blocked with a clear message.</label></div>
+        <div class="check"><input type="checkbox" data-k="p2-6d"><label>The reschedule guard applies <b>only to package lessons</b> — one-off / trial lessons can still move across months.</label></div>
+        <div class="check"><input type="checkbox" data-k="p2-6e"><label>Moved package lessons get a <b>distinct visual indicator</b> (color/badge) in calendars.</label></div>
+        <div class="check"><input type="checkbox" data-k="p2-6f"><label><code>GET .../api/expire-packages</code> deactivates packages whose month has ended.</label></div>
+        <div class="expected"><b>Expected:</b> package lessons are bound to their paid calendar month; reschedules stay in-month; moves are visible.</div>
+      </div>
+
+      <div class="item">
+        <h4><span class="num">7.</span> Flexible invitations (student and/or parent) <span class="pill flag">flexible_invitations</span></h4>
+        <ul class="steps">
+          <li>Add a student and choose the <b>invite target</b>: only student, or student + parent (with parent contact details).</li>
+          <li>Open the parent registration link and complete it.</li>
+          <li>Schedule an upcoming lesson and run <code>GET .../api/send-reminders</code>.</li>
+        </ul>
+        <div class="check"><input type="checkbox" data-k="p2-7a"><label>Invite-target choice appears and is respected (student-only vs student + parent).</label></div>
+        <div class="check"><input type="checkbox" data-k="p2-7b"><label>Parent registration form is <b>parent-oriented</b> (asks child’s birth date / grade); those persist on the student.</label></div>
+        <div class="check"><input type="checkbox" data-k="p2-7c"><label>Lesson reminders go to <b>both</b> the student and the parent(s), <b>deduplicated</b> (no double emails).</label></div>
+        <div class="check"><input type="checkbox" data-k="p2-7d"><label>Opted-out emails are excluded (case-insensitive match).</label></div>
+        <div class="expected"><b>Expected:</b> invitations and reminders cover student and/or parent per the chosen target, without duplicates.</div>
+      </div>
+
+    </div>
+  </details>
+
+  <!-- ───────────────────────── CRON ───────────────────────── -->
+  <details class="section">
+    <summary>Cron jobs — how to trigger &amp; schedules <span class="chev">▶</span></summary>
+    <div class="section-body">
+      <p>Locally (no auth needed), trigger any cron with a GET:</p>
+      <pre><code>curl http://localhost:3002/api/expire-trial-reservations
+curl http://localhost:3002/api/expire-packages
+curl http://localhost:3002/api/send-reminders
+curl http://localhost:3002/api/auto-complete-sessions</code></pre>
+      <p>On Vercel they run on this schedule and require the bearer secret:</p>
+      <table class="cron">
+        <tr><th>Cron</th><th>Schedule</th><th>Purpose for this funnel</th></tr>
+        <tr><td><code>expire-trial-reservations</code></td><td>every 15 min</td><td>auto-release unpaid trial &amp; package holds</td></tr>
+        <tr><td><code>expire-packages</code></td><td>every 6 hours</td><td>deactivate packages past their calendar month</td></tr>
+        <tr><td><code>send-reminders</code></td><td>every 5 min</td><td>lesson reminders to student + parent(s)</td></tr>
+        <tr><td><code>auto-complete-sessions</code></td><td>every 5 min</td><td>mark finished lessons complete (drives the follow-up alert)</td></tr>
+      </table>
+      <pre><code># Vercel / prod style
+curl -H "Authorization: Bearer $CRON_SECRET" https://&lt;host&gt;/api/expire-trial-reservations</code></pre>
+      <div class="check"><input type="checkbox" data-k="cron-1"><label>Each cron returns HTTP 200 with a JSON summary (e.g. <code>{ released, packagesExpired }</code>).</label></div>
+      <div class="check"><input type="checkbox" data-k="cron-2"><label>With a wrong/missing bearer in prod mode, crons return 401.</label></div>
+    </div>
+  </details>
+
+  <!-- ───────────────────────── SMOKE TEST ───────────────────────── -->
+  <details class="section">
+    <summary>Automated smoke test (run on each deploy) <span class="chev">▶</span></summary>
+    <div class="section-body">
+      <p>Deterministic, no DB/credentials — exercises reserve → pay → auto-release and the month boundary against the real helpers:</p>
+      <pre><code>npx vitest run tests/integration/intake-funnel-smoke.test.ts
+# or the whole suite
+npm test</code></pre>
+      <div class="check"><input type="checkbox" data-k="smoke-1"><label>Smoke test passes (6/6).</label></div>
+      <div class="check"><input type="checkbox" data-k="smoke-2"><label>Full suite is green and <code>npm run lint</code> / <code>npm run lint:api</code> are clean.</label></div>
+    </div>
+  </details>
+
+  <footer>PRO Klasė intake funnel · Phase 1 + Phase 2 · progress saved in this browser (localStorage).</footer>
+</main>
+
+<script>
+  (function () {
+    var KEY = 'proklase-test-checklist-v1';
+    var boxes = Array.prototype.slice.call(document.querySelectorAll('input[type=checkbox][data-k]'));
+    var saved = {};
+    try { saved = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { saved = {}; }
+
+    function persist() {
+      var state = {};
+      boxes.forEach(function (b) { state[b.dataset.k] = b.checked; });
+      try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+    }
+    function refreshProgress() {
+      var done = boxes.filter(function (b) { return b.checked; }).length;
+      var pct = boxes.length ? Math.round((done / boxes.length) * 100) : 0;
+      document.getElementById('barFill').style.width = pct + '%';
+      document.getElementById('progressLabel').textContent = done + ' / ' + boxes.length + ' done (' + pct + '%)';
+    }
+    function syncRow(b) {
+      var row = b.closest('.check');
+      if (row) row.classList.toggle('done', b.checked);
+    }
+
+    boxes.forEach(function (b) {
+      if (saved[b.dataset.k]) b.checked = true;
+      syncRow(b);
+      b.addEventListener('change', function () { syncRow(b); persist(); refreshProgress(); });
+    });
+    refreshProgress();
+
+    document.getElementById('resetBtn').addEventListener('click', function () {
+      if (!confirm('Clear all checkboxes?')) return;
+      boxes.forEach(function (b) { b.checked = false; syncRow(b); });
+      persist(); refreshProgress();
+    });
+    document.getElementById('printBtn').addEventListener('click', function () { window.print(); });
+
+    var expandBtn = document.getElementById('expandAll');
+    expandBtn.addEventListener('click', function () {
+      var sections = Array.prototype.slice.call(document.querySelectorAll('details.section'));
+      var anyClosed = sections.some(function (s) { return !s.open; });
+      sections.forEach(function (s) { s.open = anyClosed; });
+      expandBtn.textContent = anyClosed ? 'Collapse all' : 'Expand all';
+    });
+  })();
+</script>
+</body>
+</html>

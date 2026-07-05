@@ -21,7 +21,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return json(res, 500, { error: 'Missing Supabase env vars' });
   }
 
-  const { packageId, subjectId } = req.body as { packageId?: string; subjectId?: string };
+  const { packageId, subjectId, startIso } = req.body as { packageId?: string; subjectId?: string; startIso?: string };
   if (!packageId) return json(res, 400, { error: 'packageId is required' });
 
   const supabase = createClient(supabaseUrl, serviceRoleKey);
@@ -54,6 +54,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   if (available <= 0) {
     return json(res, 409, { error: 'No available lessons in package' });
+  }
+
+  // Calendar-month packages (req 6): when the package is month-bound (expires_at
+  // set to month end), a booked lesson must fall on/before that expiry, i.e.
+  // within the package's calendar month. Only enforced when the caller supplies
+  // the lesson start; legacy callers without it are unaffected.
+  if (startIso && expiresAtMs !== null && !Number.isNaN(expiresAtMs)) {
+    const startMs = new Date(startIso).getTime();
+    if (!Number.isNaN(startMs) && startMs > expiresAtMs) {
+      return json(res, 409, { error: 'Lesson is outside the package month', code: 'outside_package_month' });
+    }
   }
 
   // Pick the matching package item to decrement.

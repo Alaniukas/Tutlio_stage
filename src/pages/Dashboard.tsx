@@ -56,6 +56,7 @@ import {
     tutorStudentCountEstimatedDeduped,
 } from '@/lib/preload';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { formatContactForTutorView } from '@/lib/orgContactVisibility';
 import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
 import { buildNoShowSessionPatch, noShowWhenLabelLt, type NoShowWhen } from '@/lib/noShowWhen';
@@ -163,7 +164,7 @@ export default function DashboardPage() {
         restoreAll: restoreAllRecentPaymentRows,
         ready: recentPaymentRowsDismissReady,
     } = useDismissibleDashboardItemIds(recentPaymentRowsKey);
-    const { contactVisibility } = useOrgFeatures();
+    const { contactVisibility, hasFeature: hasOrgFeature } = useOrgFeatures();
     const [searchParams, setSearchParams] = useSearchParams();
     const dc = getCached<any>('tutor_dashboard');
     const [sessions, setSessions] = useState<Session[]>(dc?.sessions ?? []);
@@ -191,6 +192,7 @@ export default function DashboardPage() {
     const isOrgTutor: boolean | null = ctxProfile ? !!ctxProfile.organization_id : orgTutorFallback;
     const [isEditingTime, setIsEditingTime] = useState(false);
     const [editNewStartTime, setEditNewStartTime] = useState('');
+    const [rescheduleReason, setRescheduleReason] = useState('');
 
     // View comment (same as Calendar – add/edit without full edit)
     const [viewCommentText, setViewCommentText] = useState('');
@@ -689,6 +691,25 @@ export default function DashboardPage() {
             const newStart = new Date(editNewStartTime);
             const newEnd = new Date(newStart.getTime() + durMs);
 
+            const truncMinPre = (d: Date) => Math.floor(d.getTime() / 60000);
+            if (truncMinPre(oldStart) !== truncMinPre(newStart) && rescheduleReason.trim().length < 5) {
+                alert(t('cal.rescheduleReasonRequired'));
+                setSaving(false);
+                return;
+            }
+
+            // Monthly packages (req 6): a package lesson can only be moved within
+            // the same calendar month (anchored on its original start). One-off /
+            // trial lessons (no package) are unconstrained.
+            if (oldStart.getTime() !== newStart.getTime() && hasOrgFeature('monthly_packages') && !!(selectedSession as any).lesson_package_id) {
+                const anchor = rescheduleAnchorDate((selectedSession as any).original_start_time, oldStart);
+                if (!isSameCalendarMonth(newStart, anchor)) {
+                    alert(t('cal.rescheduleSameMonthOnly'));
+                    setSaving(false);
+                    return;
+                }
+            }
+
             // Fetch to check overlaps (excluding current session)
             const { data: overlapping } = await supabase
                 .from('sessions')
@@ -714,11 +735,21 @@ export default function DashboardPage() {
             }
             const { error } = await supabase.from('sessions').update({
                 start_time: newStart.toISOString(),
-                end_time: newEnd.toISOString()
+                end_time: newEnd.toISOString(),
             }).eq('id', selectedSession.id);
 
             if (!error) {
-                const timeChanged = oldStart.getTime() !== newStart.getTime();
+                const truncMin = (d: Date) => Math.floor(d.getTime() / 60000);
+                const timeChanged = truncMin(oldStart) !== truncMin(newStart);
+
+                await supabase.from('sessions').update({
+                    original_start_time: (selectedSession as any).original_start_time ?? oldStart.toISOString(),
+                    rescheduled_at: new Date().toISOString(),
+                    reschedule_reason: rescheduleReason.trim(),
+                }).eq('id', selectedSession.id)
+                  .then(({ error: reschedErr }) => {
+                    if (reschedErr) console.warn('[Dashboard] reschedule tracking columns not available:', reschedErr.message);
+                  });
                 if (timeChanged && leaveFreeTimeOnReschedule && currentUserId) {
                     const released = await releaseSessionSlotViaApi({
                         tutorId: currentUserId,
@@ -755,6 +786,7 @@ export default function DashboardPage() {
                             newTime: format(newStart, 'HH:mm'),
                             rescheduledBy: 'tutor',
                             recipientRole: 'student',
+                            reason: rescheduleReason.trim(),
                         }
                     });
                 }
@@ -763,6 +795,7 @@ export default function DashboardPage() {
 
                 setIsEditingTime(false);
                 setLeaveFreeTimeOnReschedule(false);
+                setRescheduleReason('');
                 setToastMessage({ message: t('dash.rescheduleSuccess'), type: 'success' });
                 fetchData();
                 setIsModalOpen(false);
@@ -1905,6 +1938,7 @@ export default function DashboardPage() {
                                             type="button"
                                             onClick={() => {
                                                 setEditNewStartTime(format(new Date(selectedSession.start_time), "yyyy-MM-dd'T'HH:mm"));
+                                                setRescheduleReason('');
                                                 setIsEditingTime(true);
                                             }}
                                             className="text-gray-400 hover:text-indigo-600 p-1 rounded-md transition-colors shrink-0 -mr-1"
@@ -1924,9 +1958,37 @@ export default function DashboardPage() {
                                 />
                                             <span className="text-xs text-gray-600 leading-snug">{t('dash.leaveFreeTime')}</span>
                                         </label>
+                                        {editNewStartTime && selectedSession &&
+                                            Math.floor(new Date(editNewStartTime).getTime() / 60000) !== Math.floor(new Date(selectedSession.start_time).getTime() / 60000) && (
+                                            <div className="space-y-1">
+                                                <p className="text-xs font-medium text-gray-600">{t('cal.rescheduleReasonLabel')}</p>
+                                                <textarea
+                                                    value={rescheduleReason}
+                                                    onChange={(e) => setRescheduleReason(e.target.value)}
+                                                    placeholder={t('cal.rescheduleReasonPlaceholder')}
+                                                    className="w-full p-2 rounded-lg border border-gray-200 text-xs resize-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 outline-none"
+                                                    rows={2}
+                                                />
+                                                <p className="text-[11px] text-gray-500">
+                                                    {isOrgTutor ? t('cal.rescheduleReasonHelper') : t('cal.rescheduleReasonHelperSolo')}
+                                                </p>
+                                                {rescheduleReason.length > 0 && rescheduleReason.trim().length < 5 && (
+                                                    <p className="text-[11px] text-red-500">{t('dash.minChars', { min: '5', current: String(rescheduleReason.trim().length) })}</p>
+                                                )}
+                                            </div>
+                                        )}
                                         <div className="flex gap-2">
                                             <Button size="sm" variant="outline" className="h-7 px-2 text-xs flex-1 rounded-lg" onClick={() => setIsEditingTime(false)}>{t('dash.cancelEdit')}</Button>
-                                            <Button size="sm" className="h-7 px-2 text-xs flex-1 rounded-lg" onClick={handleReschedule} disabled={saving}>{saving ? '...' : t('dash.saveEdit')}</Button>
+                                            <Button
+                                                size="sm"
+                                                className="h-7 px-2 text-xs flex-1 rounded-lg"
+                                                onClick={handleReschedule}
+                                                disabled={saving || (
+                                                    !!editNewStartTime && !!selectedSession &&
+                                                    Math.floor(new Date(editNewStartTime).getTime() / 60000) !== Math.floor(new Date(selectedSession.start_time).getTime() / 60000) &&
+                                                    rescheduleReason.trim().length < 5
+                                                )}
+                                            >{saving ? '...' : t('dash.saveEdit')}</Button>
                                         </div>
                                     </div>
                                 ) : (

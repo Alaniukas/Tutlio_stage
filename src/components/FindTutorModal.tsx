@@ -6,21 +6,21 @@ import { DateInput } from '@/components/ui/date-input';
 import { TimeInput } from '@/components/ui/time-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/lib/supabase';
-import { Loader2, Search, CalendarDays } from 'lucide-react';
+import { Loader2, Search, CalendarDays, Star } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { fmtMoney } from '@/lib/marketMoney';
 import { cn } from '@/lib/utils';
-import { format, addDays, startOfDay, endOfDay } from 'date-fns';
+import { format, addDays } from 'date-fns';
+import {
+  computeTutorSlots,
+  groupAndRankTutors,
+  type AvailabilityRule,
+  type BusyInterval,
+  type MatchSlot,
+  type MatchSubject,
+} from '@/lib/tutorMatching';
 
-export interface TutorSlotPick {
-  tutorId: string;
-  subjectId: string;
-  tutorName: string;
-  subjectName: string;
-  price: number;
-  start: Date;
-  end: Date;
-}
+export type TutorSlotPick = MatchSlot;
 
 interface FindTutorModalProps {
   isOpen: boolean;
@@ -28,20 +28,23 @@ interface FindTutorModalProps {
   orgId: string | null;
   /** Paspaudus rezultatą – uždaryti paiešką ir atidaryti užsakymą (pvz. org tvarkaraštyje) */
   onPickSlot?: (slot: TutorSlotPick) => void;
+  /** When opened from a student context, this tutor is ranked first. */
+  primaryTutorId?: string | null;
+  /** Enables the lessons-per-week frequency search + ranked grouping (org feature flag). */
+  frequencyEnabled?: boolean;
 }
 
-type TutorSlot = TutorSlotPick;
-
-export default function FindTutorModal({ isOpen, onClose, orgId, onPickSlot }: FindTutorModalProps) {
+export default function FindTutorModal({ isOpen, onClose, orgId, onPickSlot, primaryTutorId, frequencyEnabled }: FindTutorModalProps) {
   const { t } = useTranslation();
-  const [subjects, setSubjects] = useState<{ id: string; name: string; price: number; tutor_id: string }[]>([]);
+  const [subjects, setSubjects] = useState<MatchSubject[]>([]);
   const [selectedSubjectName, setSelectedSubjectName] = useState('');
   const [dateFrom, setDateFrom] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [dateTo, setDateTo] = useState(format(addDays(new Date(), 7), 'yyyy-MM-dd'));
   const [timeFrom, setTimeFrom] = useState('08:00');
   const [timeTo, setTimeTo] = useState('20:00');
+  const [frequency, setFrequency] = useState(1);
   const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState<TutorSlot[]>([]);
+  const [results, setResults] = useState<MatchSlot[]>([]);
   const [searched, setSearched] = useState(false);
   const [tutors, setTutors] = useState<Record<string, string>>({});
 
@@ -64,8 +67,8 @@ export default function FindTutorModal({ isOpen, onClose, orgId, onPickSlot }: F
 
       const tutorIds = tutorList.map((t: any) => t.id);
       if (tutorIds.length === 0) return;
-      const { data: subjectsData } = await supabase.from('subjects').select('id, name, price, tutor_id').in('tutor_id', tutorIds).order('name');
-      setSubjects(subjectsData || []);
+      const { data: subjectsData } = await supabase.from('subjects').select('id, name, price, duration_minutes, tutor_id').in('tutor_id', tutorIds).order('name');
+      setSubjects((subjectsData as MatchSubject[]) || []);
     })();
   }, [isOpen, orgId]);
 
@@ -80,12 +83,14 @@ export default function FindTutorModal({ isOpen, onClose, orgId, onPickSlot }: F
     const tutorIds = Object.keys(tutors);
     if (tutorIds.length === 0) { setResults([]); setLoading(false); return; }
 
-    const from = startOfDay(new Date(dateFrom));
-    const to = endOfDay(new Date(dateTo));
+    const from = new Date(dateFrom);
+    from.setHours(0, 0, 0, 0);
+    const to = new Date(dateTo);
+    to.setHours(23, 59, 59, 999);
 
     const { data: availability } = await supabase
       .from('availability')
-      .select('tutor_id, day_of_week, start_time, end_time')
+      .select('tutor_id, day_of_week, start_time, end_time, is_recurring, specific_date, end_date, created_at, subject_ids')
       .in('tutor_id', tutorIds);
 
     const { data: sessions } = await supabase
@@ -96,67 +101,53 @@ export default function FindTutorModal({ isOpen, onClose, orgId, onPickSlot }: F
       .lte('end_time', to.toISOString())
       .neq('status', 'cancelled');
 
-    const sessionsByTutor: Record<string, { start: Date; end: Date }[]> = {};
-    for (const s of sessions || []) {
-      if (!sessionsByTutor[s.tutor_id]) sessionsByTutor[s.tutor_id] = [];
-      sessionsByTutor[s.tutor_id].push({ start: new Date(s.start_time), end: new Date(s.end_time) });
-    }
+    const busy: BusyInterval[] = (sessions || []).map((s: any) => ({
+      tutor_id: s.tutor_id,
+      start: new Date(s.start_time),
+      end: new Date(s.end_time),
+    }));
 
-    const matchingSubjects = selectedSubjectName
-      ? subjects.filter(s => s.name === selectedSubjectName)
-      : subjects;
-    const tutorSubjectMap: Record<string, { id: string; name: string; price: number }[]> = {};
-    for (const s of matchingSubjects) {
-      if (!tutorSubjectMap[s.tutor_id]) tutorSubjectMap[s.tutor_id] = [];
-      tutorSubjectMap[s.tutor_id].push({ id: s.id, name: s.name, price: s.price });
-    }
+    const slots = computeTutorSlots(
+      (availability as AvailabilityRule[]) || [],
+      busy,
+      subjects,
+      tutors,
+      { dateFrom, dateTo, timeFrom, timeTo, subjectName: selectedSubjectName },
+    );
 
-    const slots: TutorSlot[] = [];
-    const [fromH, fromM] = timeFrom.split(':').map(Number);
-    const [toH, toM] = timeTo.split(':').map(Number);
-    const fromMinutes = fromH * 60 + fromM;
-    const toMinutes = toH * 60 + toM;
-
-    for (let d = new Date(from); d <= to; d = addDays(d, 1)) {
-      const dayOfWeek = d.getDay();
-      for (const avail of (availability || [])) {
-        if (avail.day_of_week !== dayOfWeek) continue;
-        const tutorSubs = tutorSubjectMap[avail.tutor_id];
-        if (!tutorSubs || tutorSubs.length === 0) continue;
-
-        const [aH, aM] = avail.start_time.split(':').map(Number);
-        const [eH, eM] = avail.end_time.split(':').map(Number);
-        const availStart = Math.max(aH * 60 + aM, fromMinutes);
-        const availEnd = Math.min(eH * 60 + eM, toMinutes);
-        if (availEnd <= availStart) continue;
-
-        const slotStart = new Date(d);
-        slotStart.setHours(Math.floor(availStart / 60), availStart % 60, 0, 0);
-        const slotEnd = new Date(d);
-        slotEnd.setHours(Math.floor(availEnd / 60), availEnd % 60, 0, 0);
-
-        const tutorSessions = sessionsByTutor[avail.tutor_id] || [];
-        const hasConflict = tutorSessions.some(s => s.start < slotEnd && s.end > slotStart);
-        if (hasConflict) continue;
-
-        for (const sub of tutorSubs) {
-          slots.push({
-            tutorId: avail.tutor_id,
-            subjectId: sub.id,
-            tutorName: tutors[avail.tutor_id] || '—',
-            subjectName: sub.name,
-            price: sub.price,
-            start: slotStart,
-            end: slotEnd,
-          });
-        }
-      }
-    }
-
-    slots.sort((a, b) => a.start.getTime() - b.start.getTime());
     setResults(slots);
     setLoading(false);
   };
+
+  const groups = useMemo(
+    () => groupAndRankTutors(results, { frequencyPerWeek: frequency, primaryTutorId }),
+    [results, frequency, primaryTutorId],
+  );
+
+  const renderSlotButton = (slot: MatchSlot) => (
+    <button
+      key={`${slot.tutorId}-${slot.subjectId}-${slot.start.getTime()}`}
+      type="button"
+      disabled={!onPickSlot}
+      onClick={() => {
+        if (!onPickSlot) return;
+        onPickSlot(slot);
+      }}
+      className={cn(
+        'w-full flex items-center justify-between p-3 border border-gray-200 rounded-xl text-left transition-colors',
+        onPickSlot
+          ? 'hover:border-indigo-400 hover:bg-indigo-50/50 cursor-pointer'
+          : 'opacity-90 cursor-default',
+      )}
+    >
+      <div>
+        {!frequencyEnabled && <p className="text-sm font-medium text-gray-900">{slot.tutorName}</p>}
+        <p className="text-xs text-gray-500">
+          {slot.subjectName} &middot; {format(slot.start, 'MMM d, HH:mm')}–{format(slot.end, 'HH:mm')} &middot; {fmtMoney(slot.price)}
+        </p>
+      </div>
+    </button>
+  );
 
   return (
     <Dialog open={isOpen} onOpenChange={open => { if (!open) onClose(); }}>
@@ -169,15 +160,30 @@ export default function FindTutorModal({ isOpen, onClose, orgId, onPickSlot }: F
         </DialogHeader>
 
         <div className="space-y-4">
-          <div>
-            <Label className="text-xs">{t('findLesson.subject')}</Label>
-            <Select value={selectedSubjectName || '__all__'} onValueChange={v => setSelectedSubjectName(v === '__all__' ? '' : v)}>
-              <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">{t('findLesson.allSubjects')}</SelectItem>
-                {uniqueSubjectNames.map(n => <SelectItem key={n} value={n}>{n}</SelectItem>)}
-              </SelectContent>
-            </Select>
+          <div className={cn('grid gap-3', frequencyEnabled ? 'grid-cols-2' : 'grid-cols-1')}>
+            <div>
+              <Label className="text-xs">{t('findLesson.subject')}</Label>
+              <Select value={selectedSubjectName || '__all__'} onValueChange={v => setSelectedSubjectName(v === '__all__' ? '' : v)}>
+                <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">{t('findLesson.allSubjects')}</SelectItem>
+                  {uniqueSubjectNames.map(n => <SelectItem key={n} value={n}>{n}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            {frequencyEnabled && (
+              <div>
+                <Label className="text-xs">{t('findLesson.frequency')}</Label>
+                <Select value={String(frequency)} onValueChange={v => setFrequency(Number(v))}>
+                  <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {[1, 2, 3, 4, 5].map(n => (
+                      <SelectItem key={n} value={String(n)}>{t('findLesson.lessonsPerWeek', { count: n })}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -237,38 +243,50 @@ export default function FindTutorModal({ isOpen, onClose, orgId, onPickSlot }: F
             </div>
           )}
 
-          {results.length > 0 && (
-            <div className="space-y-2 max-h-[300px] overflow-y-auto">
-              {onPickSlot && (
-                <p className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-2.5 py-1.5">
-                  {t('findLesson.tapToBook')}
-                </p>
-              )}
-              {results.map((slot) => (
-                <button
-                  key={`${slot.tutorId}-${slot.subjectId}-${slot.start.getTime()}`}
-                  type="button"
-                  disabled={!onPickSlot}
-                  onClick={() => {
-                    if (!onPickSlot) return;
-                    onPickSlot(slot);
-                    onClose();
-                  }}
-                  className={cn(
-                    'w-full flex items-center justify-between p-3 border border-gray-200 rounded-xl text-left transition-colors',
-                    onPickSlot
-                      ? 'hover:border-indigo-400 hover:bg-indigo-50/50 cursor-pointer'
-                      : 'opacity-90 cursor-default',
-                  )}
-                >
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">{slot.tutorName}</p>
-                    <p className="text-xs text-gray-500">
-                      {slot.subjectName} &middot; {format(slot.start, 'MMM d, HH:mm')}–{format(slot.end, 'HH:mm')} &middot; {fmtMoney(slot.price)}
-                    </p>
+          {results.length > 0 && onPickSlot && (
+            <p className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-2.5 py-1.5">
+              {t('findLesson.tapToBook')}
+            </p>
+          )}
+
+          {/* Frequency mode: results grouped + ranked by tutor */}
+          {frequencyEnabled && results.length > 0 && (
+            <div className="space-y-3 max-h-[320px] overflow-y-auto">
+              {groups.map((group) => (
+                <div key={group.tutorId} className="border border-gray-200 rounded-xl p-2.5">
+                  <div className="flex items-center justify-between gap-2 px-1 pb-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{group.tutorName}</p>
+                      {group.isPrimary && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">
+                          <Star className="w-3 h-3" />
+                          {t('findLesson.primaryTutor')}
+                        </span>
+                      )}
+                    </div>
+                    <span
+                      className={cn(
+                        'text-[10px] font-medium px-1.5 py-0.5 rounded whitespace-nowrap',
+                        group.coversFrequency ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700',
+                      )}
+                    >
+                      {group.coversFrequency
+                        ? t('findLesson.coversFrequency', { count: group.weeklyCoverage })
+                        : t('findLesson.partialCoverage', { count: group.weeklyCoverage })}
+                    </span>
                   </div>
-                </button>
+                  <div className="space-y-1.5">
+                    {group.slots.map(renderSlotButton)}
+                  </div>
+                </div>
               ))}
+            </div>
+          )}
+
+          {/* Default mode: flat slot list */}
+          {!frequencyEnabled && results.length > 0 && (
+            <div className="space-y-2 max-h-[300px] overflow-y-auto">
+              {results.map(renderSlotButton)}
             </div>
           )}
         </div>

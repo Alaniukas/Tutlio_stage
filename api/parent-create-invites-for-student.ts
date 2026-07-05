@@ -79,6 +79,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       organizationId = (prof?.organization_id as string | null) ?? null;
     }
 
+    let orgName: string | null = null;
+    let orgLocale: string | null = null;
+    if (organizationId) {
+      const { data: orgRow, error: orgErr } = await supabase
+        .from('organizations')
+        .select('name, preferred_locale')
+        .eq('id', organizationId)
+        .maybeSingle();
+      if (orgErr) {
+        // preferred_locale column may not exist yet; fall back to name-only query.
+        const { data: fallbackRow } = await supabase
+          .from('organizations')
+          .select('name')
+          .eq('id', organizationId)
+          .maybeSingle();
+        orgName = (fallbackRow?.name as string | null) ?? null;
+      } else {
+        orgName = (orgRow?.name as string | null) ?? null;
+        orgLocale = (orgRow?.preferred_locale as string | null) ?? null;
+      }
+    }
+
     let allowed = false;
     if (tutorId && tutorId === auth.userId) allowed = true;
     if (!allowed && organizationId) {
@@ -119,8 +141,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const results: { email: string; ok: boolean; error?: string; code?: string }[] = [];
 
     const appOrigin = publicOriginFromRequest(req);
+    const explicitLocale = typeof body.locale === 'string' ? body.locale : undefined;
     const emailLocale = inviteEmailLocale(
-      typeof body.locale === 'string' ? body.locale : undefined,
+      explicitLocale || orgLocale || undefined,
       appOrigin,
     );
 
@@ -135,7 +158,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         source: 'school_admin',
         invitedByUserId: auth.userId,
         locale: emailLocale,
-        uiLocale: typeof body.locale === 'string' ? body.locale : undefined,
+        uiLocale: explicitLocale || orgLocale || undefined,
+        orgName,
       });
       if ('error' in r) {
         results.push({ email: t.email, ok: false, error: r.error });

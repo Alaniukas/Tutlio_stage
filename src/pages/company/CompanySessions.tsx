@@ -51,6 +51,7 @@ interface Session {
   paid: boolean;
   payment_status: string | null;
   cancellation_reason: string | null;
+  reschedule_reason?: string | null;
   cancelled_by?: 'tutor' | 'student' | null;
   tutor_name: string;
   student_name: string;
@@ -89,6 +90,7 @@ function mapOrgSessionRow(row: any, tutorList: { id: string; full_name: string }
     paid: row.paid,
     payment_status: row.payment_status || null,
     cancellation_reason: row.cancellation_reason,
+    reschedule_reason: row.reschedule_reason ?? null,
     cancelled_by: row.cancelled_by ?? null,
     tutor_name: tutorList.find((t) => t.id === row.tutor_id)?.full_name || '–',
     student_name: row.student?.full_name || '–',
@@ -341,6 +343,7 @@ export default function CompanySessions() {
       if (Number.isNaN(newStart.getTime())) throw new Error(t('compSch.invalidStartDateTime'));
       const newEnd = new Date(newStart.getTime() + editDurationMinutes * 60 * 1000);
 
+      const paidChanged = editPaid !== selectedSession.paid;
       const payload: Record<string, any> = {
         start_time: newStart.toISOString(),
         end_time: newEnd.toISOString(),
@@ -351,7 +354,7 @@ export default function CompanySessions() {
         student_id: editStudentId || selectedSession.student_id,
         tutor_id: editTutorId || selectedSession.tutor_id,
         paid: editPaid,
-        payment_status: editPaid ? 'paid' : 'pending',
+        ...(paidChanged ? { payment_status: editPaid ? 'paid' : 'pending' } : {}),
         status: editStatus,
       };
 
@@ -374,6 +377,7 @@ export default function CompanySessions() {
       setSelectedSession(null);
       loadData();
     } catch (err: any) {
+      console.error('[CompanySessions] save edit error', err);
       alert(t('compSch.errorSaving', { msg: err.message }));
     }
     setSavingEdit(false);
@@ -991,6 +995,13 @@ export default function CompanySessions() {
                     <div>
                       <Label className="text-xs text-gray-500">{t('compSess.cancellationReason')}</Label>
                       <p className="text-sm mt-1 text-red-600">{selectedSession.cancellation_reason}</p>
+                    </div>
+                  )}
+
+                  {selectedSession.reschedule_reason && selectedSession.status !== 'cancelled' && (
+                    <div>
+                      <Label className="text-xs text-gray-500">{t('common.rescheduleReason')}</Label>
+                      <p className="text-sm mt-1 text-blue-700 whitespace-pre-wrap">{selectedSession.reschedule_reason}</p>
                     </div>
                   )}
 

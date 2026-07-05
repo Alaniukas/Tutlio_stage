@@ -85,6 +85,20 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     pricingTier: 'premium',
   },
 
+  school_contract_esign: {
+    id: 'school_contract_esign',
+    name: 'Sutarčių pasirašymas el. parašu (GoSign)',
+    nameEn: 'Contract e-signing (GoSign)',
+    description:
+      'Mokyklos sutartys pasirašomos el. parašu per Registrų centro GoSign (direktorė pasirašo sistemoje, tėvai – per saugią nuorodą). Reikia GoSign prieigų (GOSIGN_* aplinkos kintamieji).',
+    descriptionEn:
+      'School contracts are e-signed via Registrų centras GoSign (director signs in-app, parents via a secure link). Requires GoSign credentials (GOSIGN_* env vars).',
+    category: 'integrations',
+    defaultValue: false,
+    requiresSetup: true,
+    pricingTier: 'enterprise',
+  },
+
   per_student_payment_override: {
     id: 'per_student_payment_override',
     name: 'Mokinio mokėjimo būdas (individualiai)',
@@ -139,6 +153,120 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     defaultValue: false,
     requiresSetup: true,
     pricingTier: 'enterprise',
+  },
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Pro Klase intake funnel (Phase 1)
+  // ─────────────────────────────────────────────────────────────────────
+
+  tutor_frequency_search: {
+    id: 'tutor_frequency_search',
+    name: 'Korepetitorių paieška pagal dažnį',
+    nameEn: 'Tutor search by frequency',
+    description:
+      'Org admin gali ieškoti korepetitorių pagal dalyką, laisvą laiką ir pamokų dažnį per savaitę (pvz. 2 k./sav.). Pirmenybė teikiama mokinio pagrindiniam korepetitoriui.',
+    descriptionEn:
+      'Org admin can search tutors by subject, free time, and lessons-per-week frequency (e.g. 2x/week). The student\'s primary tutor is ranked first.',
+    category: 'advanced',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
+
+  trial_reservation_flow: {
+    id: 'trial_reservation_flow',
+    name: 'Bandomosios pamokos rezervacija (pirma apmokėjimas)',
+    nameEn: 'Trial reservation (pay-to-confirm)',
+    description:
+      'Rezervuojami laikai bandomajai pamokai ir laikomi kol apmokama. Neapmokėjus per nustatytą terminą, laikas vėl tampa laisvas. Korepetitorius informuojamas ir mokinys/tėvas kviečiami tik po apmokėjimo. Terminą galite nustatyti žemiau (val.).',
+    descriptionEn:
+      'Trial lesson slots are reserved and held until paid. If unpaid within the deadline, the slot is released. The tutor is notified and the student/parent invited only after payment. Configure the deadline (hours) below.',
+    category: 'payments',
+    defaultValue: false,
+    requiresSetup: true,
+    pricingTier: 'premium',
+  },
+
+  trial_followup_alert: {
+    id: 'trial_followup_alert',
+    name: 'Įspėjimas: po bandomosios neišsiųstas paketas',
+    nameEn: 'Alert: no package after trial',
+    description:
+      'Po įvykusios bandomosios pamokos mokinys pažymimas raudonai „Reikia dėmesio" skiltyje ir mokinio kortelėje, jei dar neišsiųstas pamokų paketas.',
+    descriptionEn:
+      'After a completed trial lesson, the student is flagged red in the "Needs attention" section and on the student card if no lesson package has been sent yet.',
+    category: 'advanced',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Pro Klase intake funnel (Phase 2)
+  // ─────────────────────────────────────────────────────────────────────
+
+  package_reservation_flow: {
+    id: 'package_reservation_flow',
+    name: 'Paketo rezervacija su laikais (apmokėjimas iki termino)',
+    nameEn: 'Package reservation with times (pay-by-deadline)',
+    description:
+      'Siunčiant paketą po bandomosios pamokos galima iš karto rezervuoti pamokų laikus. Laikai laikomi kol apmokama; neapmokėjus iki termino (nustatomas val. prieš pirmą pamoką, žemiau) laikai atlaisvinami ir paketas deaktyvuojamas. Korepetitorius informuojamas ir mokinys/tėvas kviečiami tik po apmokėjimo.',
+    descriptionEn:
+      'When sending a package after a trial, lesson times can be reserved up front. Slots are held until paid; if unpaid by the deadline (configured in hours before the first lesson, below) they are released and the package is deactivated. The tutor is notified and the student/parent invited only after payment.',
+    category: 'payments',
+    defaultValue: false,
+    requiresSetup: true,
+    pricingTier: 'premium',
+  },
+
+  student_card_booking: {
+    id: 'student_card_booking',
+    name: 'Pamokų rezervavimas mokinio kortelėje',
+    nameEn: 'Book lessons from the student card',
+    description:
+      'Org admin gali ieškoti korepetitoriaus laiko ir rezervuoti pamokas tiesiai mokinio kortelėje. Korepetitorius visada informuojamas apie naujas pamokas.',
+    descriptionEn:
+      'Org admin can find a tutor slot and book lessons directly from the student card. The tutor is always notified about new lessons.',
+    category: 'advanced',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
+
+  monthly_packages: {
+    id: 'monthly_packages',
+    name: 'Mėnesiniai paketai (kalendorinis mėnuo)',
+    nameEn: 'Calendar-month packages',
+    description:
+      'Paketo pamokos galioja tik tą kalendorinį mėnesį, už kurį apmokėta. Jei paketas apmokėtas be iš anksto rezervuotų pamokų, jis galioja bent 1 mėnesį nuo apmokėjimo. Korepetitorius pamoką gali perkelti tik to paties mėnesio ribose; perkeltos pamokos pažymimos atskira spalva.',
+    descriptionEn:
+      'Package lessons are valid only for the calendar month they were paid for. If a package is paid with no pre-booked lessons, it stays valid for at least 1 month from payment. A tutor can reschedule a lesson only within the same month; moved lessons get a distinct color.',
+    category: 'payments',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
+
+  flexible_invitations: {
+    id: 'flexible_invitations',
+    name: 'Lankstūs kvietimai (mokinys ir (arba) tėvas)',
+    nameEn: 'Flexible invitations (student and/or parent)',
+    description:
+      'Galima pasirinkti pakviesti tik mokinį arba ir mokinį, ir tėvą. Registracijos forma orientuota į tėvą (klausiama vaiko gimimo datos). Priminimai apie pamokas siunčiami tiek mokiniui, tiek tėvui.',
+    descriptionEn:
+      'Choose to invite only the student or both the student and a parent. The registration form is parent-oriented (asks for the child\'s birth date). Lesson reminders are sent to both the student and the parent.',
+    category: 'advanced',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
+
+  disable_student_reschedule_cancel: {
+    id: 'disable_student_reschedule_cancel',
+    name: 'Mokinys negali perkelti / atšaukti pamokų',
+    nameEn: 'Students cannot reschedule / cancel lessons',
+    description:
+      'Mokinio ir tėvų portale paslepiami pamokų perkėlimo bei atšaukimo mygtukai, o serveris atmeta tokius bandymus. Pamokas perkelti ar atšaukti gali tik korepetitorius arba administracija.',
+    descriptionEn:
+      'Hides lesson reschedule/cancel actions in the student & parent portal and the server rejects such attempts. Only the tutor or the organization admin can move or cancel lessons.',
+    category: 'advanced',
+    defaultValue: false,
+    pricingTier: 'premium',
   },
 };
 

@@ -41,7 +41,7 @@ type TutorPay = {
   full_name: string;
 };
 
-type AttentionReason = 'payment' | 'attendance';
+type AttentionReason = 'payment' | 'attendance' | 'trial_no_package';
 
 interface OrgSessionRow {
   id: string;
@@ -157,7 +157,7 @@ export default function CompanyDashboard() {
 
       const { data: adminRow } = await supabase
         .from('organization_admins')
-        .select('organization_id, organizations(name, tutor_license_count)')
+        .select('organization_id, organizations(name, tutor_license_count, features)')
         .eq('user_id', user.id)
         .maybeSingle();
 
@@ -168,6 +168,10 @@ export default function CompanyDashboard() {
       const orgRaw = adminRow.organizations as any;
       const org = Array.isArray(orgRaw) ? orgRaw[0] : orgRaw;
       const organizationId = adminRow.organization_id;
+      const orgFeatures = org?.features && typeof org.features === 'object' && !Array.isArray(org.features)
+        ? (org.features as Record<string, unknown>)
+        : {};
+      const trialFollowupAlertEnabled = orgFeatures.trial_followup_alert === true;
       setOrgIdForDismiss(organizationId);
       setOrgName(org?.name || '');
       const cap = Number(org?.tutor_license_count) || 0;
@@ -329,11 +333,55 @@ export default function CompanyDashboard() {
         .filter((s) => isAttendanceFlagged(s, now) && isAfter(new Date(s.start_time), past30))
         .forEach((s) => addAttentionReason(s, 'attendance'));
 
+      // Req 8 (flag-gated): students whose trial lesson is done but no real
+      // (non-trial) package has been sent yet — needs a follow-up.
+      if (trialFollowupAlertEnabled) {
+        const { data: trialSessions } = await supabase
+          .from('sessions')
+          .select('id, tutor_id, student_id, start_time, end_time, status, paid, price, topic, payment_status, meeting_link, tutor_joined_at, student_joined_at, tutor_comment, student:students(full_name), subjects!inner(is_trial)')
+          .in('tutor_id', tutorIds)
+          .eq('status', 'completed')
+          .eq('subjects.is_trial', true)
+          .gte('start_time', past30.toISOString())
+          .order('start_time', { ascending: false })
+          .limit(200);
+
+        const trialStudentIds = [...new Set((trialSessions || []).map((s: any) => s.student_id).filter(Boolean))] as string[];
+        const studentsWithPackage = new Set<string>();
+        if (trialStudentIds.length > 0) {
+          const { data: pkgs } = await supabase
+            .from('lesson_packages')
+            .select('student_id, subjects(is_trial)')
+            .in('student_id', trialStudentIds);
+          for (const p of pkgs || []) {
+            const subj = Array.isArray((p as any).subjects) ? (p as any).subjects[0] : (p as any).subjects;
+            // A real (non-trial) package means the follow-up is done.
+            if (subj?.is_trial !== true) studentsWithPackage.add((p as any).student_id);
+          }
+        }
+
+        const seenTrialStudents = new Set<string>();
+        for (const s of trialSessions || []) {
+          const sid = (s as any).student_id;
+          if (!sid || seenTrialStudents.has(sid) || studentsWithPackage.has(sid)) continue;
+          seenTrialStudents.add(sid);
+          const normalized: OrgSessionRow = {
+            ...(s as any),
+            tutor_name: tutorMap.get((s as any).tutor_id)?.full_name || t('common.tutor'),
+            student: Array.isArray((s as any).student) ? (s as any).student[0] ?? null : (s as any).student ?? null,
+          };
+          addAttentionReason(normalized, 'trial_no_package');
+        }
+      }
+
       const attentionFiltered = Array.from(attentionMap.values())
         .sort((a, b) => {
           const aAttendance = a.reasons.includes('attendance') ? 0 : 1;
           const bAttendance = b.reasons.includes('attendance') ? 0 : 1;
           if (aAttendance !== bAttendance) return aAttendance - bAttendance;
+          const aTrial = a.reasons.includes('trial_no_package') ? 0 : 1;
+          const bTrial = b.reasons.includes('trial_no_package') ? 0 : 1;
+          if (aTrial !== bTrial) return aTrial - bTrial;
           if (a.payment_status === 'paid_by_student' && b.payment_status !== 'paid_by_student') return -1;
           if (b.payment_status === 'paid_by_student' && a.payment_status !== 'paid_by_student') return 1;
           return new Date(b.start_time).getTime() - new Date(a.start_time).getTime();
@@ -694,6 +742,7 @@ export default function CompanyDashboard() {
                     const end = new Date(s.end_time);
                     const hasPaymentReason = s.reasons.includes('payment');
                     const hasAttendanceReason = s.reasons.includes('attendance');
+                    const hasTrialNoPackageReason = s.reasons.includes('trial_no_package');
                     const isPendingConfirm = s.payment_status === 'paid_by_student';
                     const deadlineBaseHours = tp?.payment_deadline_hours ?? 24;
                     const deadline =
@@ -710,7 +759,7 @@ export default function CompanyDashboard() {
                       >
                         <div
                           className={`w-1 self-stretch min-h-[2.75rem] rounded-full flex-shrink-0 ${
-                            hasAttendanceReason ? 'bg-rose-400' : isPendingConfirm ? 'bg-amber-400' : 'bg-red-400'
+                            hasAttendanceReason ? 'bg-rose-400' : hasTrialNoPackageReason ? 'bg-red-500' : isPendingConfirm ? 'bg-amber-400' : 'bg-red-400'
                           }`}
                         />
                         <div
@@ -744,6 +793,12 @@ export default function CompanyDashboard() {
                             {format(start, 'd MMM, HH:mm', { locale: dateFnsLocale })}
                             {' · '}
                             {s.tutor_name || '—'}
+                            {hasTrialNoPackageReason && (
+                              <>
+                                {' · '}
+                                <span className="text-red-600 font-medium">{t('dash.trialNoPackage')}</span>
+                              </>
+                            )}
                             {hasAttendanceReason && (
                               <>
                                 {' · '}

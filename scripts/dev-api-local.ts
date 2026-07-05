@@ -39,7 +39,10 @@ function loadEnvFile(name: string) {
       (key === 'SUPABASE_URL' ||
         key === 'SUPABASE_SERVICE_ROLE_KEY' ||
         key === 'VITE_SUPABASE_URL' ||
-        key === 'VITE_SUPABASE_ANON_KEY');
+        key === 'VITE_SUPABASE_ANON_KEY' ||
+        key === 'STRIPE_SECRET_KEY' ||
+        key === 'STRIPE_WEBHOOK_SECRET' ||
+        key === 'STRIPE_CONNECT_WEBHOOK_SECRET');
     if (preserveFromParent && process.env[key] !== undefined) continue;
     if (process.env[key] === undefined || name === '.env.local') process.env[key] = value;
   }

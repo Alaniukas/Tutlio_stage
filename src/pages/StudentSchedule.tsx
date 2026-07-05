@@ -245,6 +245,8 @@ export default function StudentSchedule() {
     const [creditBalance, setCreditBalance] = useState(0);
     const [activePackages, setActivePackages] = useState<LessonPackageSummary[]>([]);
     const [tutorOrgIsSchool, setTutorOrgIsSchool] = useState(false);
+    /** Org feature `disable_student_reschedule_cancel`: students/parents cannot move or cancel lessons. */
+    const [studentActionsDisabled, setStudentActionsDisabled] = useState(false);
     const [tutorOrgFeeProfile, setTutorOrgFeeProfile] = useState<OrgFeeProfile | null>(null);
     const [tutorSoloManualPayments, setTutorSoloManualPayments] = useState(false);
     const [tutorPerlasEnabled, setTutorPerlasEnabled] = useState(false);
@@ -689,17 +691,21 @@ export default function StudentSchedule() {
             let resolvedFeeProfile: OrgFeeProfile | null = null;
             const orgId =
                 tutorProfile.data && (tutorProfile.data as { organization_id?: string | null }).organization_id;
+            let actionsDisabledResolved = false;
             if (orgId) {
                 const { data: oe } = await supabase
                     .from('organizations')
-                    .select('entity_type, slug')
+                    .select('entity_type, slug, features')
                     .eq('id', orgId)
                     .maybeSingle();
                 tutorOrgSchoolResolved = oe?.entity_type === 'school';
                 resolvedFeeProfile = orgFeeProfile((oe as { slug?: string | null })?.slug) ?? orgFeeProfile(orgId);
+                actionsDisabledResolved =
+                    ((oe as { features?: Record<string, unknown> | null })?.features)?.disable_student_reschedule_cancel === true;
             }
             setTutorOrgIsSchool(tutorOrgSchoolResolved);
             setTutorOrgFeeProfile(resolvedFeeProfile);
+            setStudentActionsDisabled(actionsDisabledResolved);
         }
 
         // Filter subjects by student grade
@@ -1268,7 +1274,7 @@ export default function StudentSchedule() {
                     const reserveRes = await fetch('/api/reserve-package-lesson', {
                         method: 'POST',
                         headers: await authHeaders(),
-                        body: JSON.stringify({ packageId: activePackage.id, subjectId: selectedSubjectId }),
+                        body: JSON.stringify({ packageId: activePackage.id, subjectId: selectedSubjectId, startIso: selectedTime.toISOString() }),
                     });
                     const reserveJson = await reserveRes.json().catch(() => ({}));
                     if (!reserveRes.ok) {
@@ -2319,6 +2325,11 @@ export default function StudentSchedule() {
                             )}
 
                             {mySessionData?.status === 'active' && mySessionData.start_time && isAfter(new Date(mySessionData.start_time), new Date()) && (
+                                studentActionsDisabled ? (
+                                    <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                                        {t('stuSess.actionsDisabledByOrg')}
+                                    </p>
+                                ) : (
                                 <div className="grid grid-cols-2 gap-3">
                                     <Button
                                         variant="outline"
@@ -2341,6 +2352,7 @@ export default function StudentSchedule() {
                                         {t('stuSched.cancelLesson')}
                                     </Button>
                                 </div>
+                                )
                             )}
                         </div>
                         <DialogFooter>

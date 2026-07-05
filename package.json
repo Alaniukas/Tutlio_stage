@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "concurrently \"npm:dev:frontend\" \"npm:dev:api\" --names \"VITE,API\" --prefix-colors \"cyan,magenta\"",
     "dev:prod": "zsh -ac 'set -a; source .env.local; export SUPABASE_URL=\"$VITE_SUPABASE_URL\"; export VITE_SUPABASE_URL=\"$VITE_SUPABASE_URL\"; export VITE_SUPABASE_ANON_KEY=\"$VITE_SUPABASE_ANON_KEY\"; npm run dev'",
-    "dev:test": "zsh -ac 'set -a; source .env.local; export SUPABASE_URL=\"$TEST_SUPABASE_URL\"; export SUPABASE_SERVICE_ROLE_KEY=\"$TEST_SUPABASE_SERVICE_ROLE_KEY\"; export VITE_SUPABASE_URL=\"$TEST_SUPABASE_URL\"; export VITE_SUPABASE_ANON_KEY=\"$TEST_SUPABASE_ANON_KEY\"; npm run dev'",
+    "dev:test": "zsh -ac 'set -a; source .env.local; export SUPABASE_URL=\"$TEST_SUPABASE_URL\"; export SUPABASE_SERVICE_ROLE_KEY=\"$TEST_SUPABASE_SERVICE_ROLE_KEY\"; export VITE_SUPABASE_URL=\"$TEST_SUPABASE_URL\"; export VITE_SUPABASE_ANON_KEY=\"$TEST_SUPABASE_ANON_KEY\"; export STRIPE_SECRET_KEY=\"${TEST_STRIPE_SECRET_KEY:-$STRIPE_SECRET_KEY}\"; export STRIPE_WEBHOOK_SECRET=\"${TEST_STRIPE_WEBHOOK_SECRET:-$STRIPE_WEBHOOK_SECRET}\"; export STRIPE_CONNECT_WEBHOOK_SECRET=\"${TEST_STRIPE_CONNECT_WEBHOOK_SECRET:-$STRIPE_CONNECT_WEBHOOK_SECRET}\"; npm run dev'",
     "dev:frontend": "vite --port=3000 --host=0.0.0.0",
     "dev:api": "tsx scripts/dev-api-local.ts",
     "free:3002": "kill-port 3002",

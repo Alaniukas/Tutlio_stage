@@ -63,6 +63,67 @@ function isExcludedPath(pathname: string): boolean {
 const ABOUT_SLUGS = new Set(['apie-mus', 'about']);
 const CONTACT_SLUGS = new Set(['kontaktai', 'contacts']);
 
+const PLATFORM_PREFIXES = new Set(['schools', 'teachers']);
+
+const CANONICAL_ORIGINS: Record<string, string> = {
+  lt: 'https://www.tutlio.lt',
+  pl: 'https://www.tutlio.pl',
+  com: 'https://www.tutlio.com',
+};
+
+function canonicalOriginForLocale(locale: string): string {
+  if (locale === 'lt') return CANONICAL_ORIGINS.lt;
+  if (locale === 'pl') return CANONICAL_ORIGINS.pl;
+  return CANONICAL_ORIGINS.com;
+}
+
+function originForHost(host: string): string | null {
+  if (host.includes('tutlio.lt')) return CANONICAL_ORIGINS.lt;
+  if (host.includes('tutlio.pl')) return CANONICAL_ORIGINS.pl;
+  if (host.includes('tutlio.com')) return CANONICAL_ORIGINS.com;
+  return null; // vercel.app previews and unknown hosts stay untouched
+}
+
+/**
+ * The default locale never carries a URL prefix (/en/pricing on .com is a
+ * duplicate of /pricing), so the prefixed alias 308s to the bare path for
+ * every visitor. Platform-prefixed paths nest the locale one segment deeper
+ * (/schools/en/pricing → /schools/pricing).
+ */
+export function defaultLocaleStripRedirect(pathname: string, host: string): string | null {
+  const segments = pathname.split('/').filter(Boolean);
+  const localeIdx = PLATFORM_PREFIXES.has(segments[0]) ? 1 : 0;
+  const seg = segments[localeIdx];
+  if (!seg || !LOCALES.has(seg) || seg !== defaultLocale(host)) return null;
+  const rest = segments.filter((_, i) => i !== localeIdx).join('/');
+  return rest ? `/${rest}` : '/';
+}
+
+/**
+ * Bots only: a locale whose canonical home is another Tutlio domain 308s
+ * there (tutlio.com/lt/pricing → tutlio.lt/pricing) instead of serving
+ * duplicate content with a cross-domain canonical hint — Search Console
+ * shows Google overriding some of those hints ("Google chose different
+ * canonical than user"), and a redirect is the strongest canonical signal.
+ * Humans stay on-domain: the SPA language switcher navigates same-domain
+ * and sessions don't span domains.
+ */
+export function crossDomainLocaleRedirect(pathname: string, host: string): string | null {
+  const origin = originForHost(host);
+  if (!origin) return null;
+  const segments = pathname.split('/').filter(Boolean);
+  const platform = PLATFORM_PREFIXES.has(segments[0]) ? segments[0] : '';
+  const localeIdx = platform ? 1 : 0;
+  const locale = segments[localeIdx];
+  if (!locale || !LOCALES.has(locale)) return null;
+  const targetOrigin = canonicalOriginForLocale(locale);
+  if (targetOrigin === origin) return null;
+  const targetHost = targetOrigin.replace('https://', '');
+  const keepLocale = locale !== defaultLocale(targetHost);
+  const parts = [platform, keepLocale ? locale : '', ...segments.slice(localeIdx + 1)].filter(Boolean);
+  return `${targetOrigin}${parts.length ? `/${parts.join('/')}` : '/'}`;
+}
+
 /**
  * The about/contact pages have Lithuanian and English slugs. The Lithuanian
  * slug is canonical for the lt locale, the English one everywhere else —
@@ -162,9 +223,12 @@ export default function middleware(request: Request) {
   const url = new URL(request.url);
   const host = request.headers.get('host') || '';
 
-  const aliasTarget = canonicalSlugRedirect(url.pathname, host);
-  if (aliasTarget) {
-    return Response.redirect(new URL(`${aliasTarget}${url.search}`, request.url), 308);
+  // Same-domain URL canonicalization for everyone, collapsed into one hop:
+  // strip a default-locale prefix, then canonicalize localized slug aliases.
+  const strippedPath = defaultLocaleStripRedirect(url.pathname, host);
+  const canonicalPath = canonicalSlugRedirect(strippedPath || url.pathname, host) || strippedPath;
+  if (canonicalPath) {
+    return Response.redirect(new URL(`${canonicalPath}${url.search}`, request.url), 308);
   }
 
   if (!isBot(request)) {
@@ -173,6 +237,11 @@ export default function middleware(request: Request) {
 
   if (isExcludedPath(url.pathname)) {
     return next();
+  }
+
+  const crossDomainTarget = crossDomainLocaleRedirect(url.pathname, host);
+  if (crossDomainTarget) {
+    return Response.redirect(`${crossDomainTarget}${url.search}`, 308);
   }
 
   const dest = ssrDestination(request);

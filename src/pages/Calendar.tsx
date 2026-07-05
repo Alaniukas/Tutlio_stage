@@ -106,6 +106,7 @@ import { recordJoinClick } from '@/lib/joinTracking';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { formatContactForTutorView } from '@/lib/orgContactVisibility';
 import Toast from '@/components/Toast';
 import { dedupeAsync } from '@/lib/dataCache';
@@ -133,7 +134,7 @@ const localizer = dateFnsLocalizer({
 });
 
 const CALENDAR_SESSION_COLUMNS =
-  'id, tutor_id, student_id, start_time, end_time, status, paid, meeting_link, whiteboard_room_id, cancellation_reason, cancelled_at, topic, price, payment_status, tutor_comment, show_comment_to_student, hidden_from_calendar, subject_id, available_spots, recurring_session_id, lesson_package_id, payment_batch_id, no_show_when, is_late_cancelled, subjects(is_trial, name), student:students(full_name, email, phone, payer_email, payer_phone, grade, admin_comment, admin_comment_visible_to_tutor)';
+  '*, subjects(is_trial, name), student:students(full_name, email, phone, payer_email, payer_phone, grade, admin_comment, admin_comment_visible_to_tutor)';
 
 interface Session {
   id: string;
@@ -145,6 +146,7 @@ interface Session {
   paid: boolean;
   meeting_link?: string;
   cancellation_reason?: string;
+  reschedule_reason?: string | null;
   cancelled_at?: string;
   topic?: string;
   price?: number;
@@ -232,7 +234,7 @@ export default function CalendarPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const orgPolicy = useOrgTutorPolicy();
   const licenseFrozen = orgPolicy.isOrgTutor && orgPolicy.orgUsesLicenses && !orgPolicy.hasActiveLicense;
-  const { contactVisibility } = useOrgFeatures();
+  const { contactVisibility, hasFeature: hasOrgFeature } = useOrgFeatures();
   const { user: ctxUser, profile: ctxProfile } = useUser();
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -327,6 +329,7 @@ export default function CalendarPage() {
   const [massCancelError, setMassCancelError] = useState<string | null>(null);
   const [isEditingSession, setIsEditingSession] = useState(false);
   const [editNewStartTime, setEditNewStartTime] = useState('');
+  const [rescheduleReason, setRescheduleReason] = useState('');
   const [editDurationMinutes, setEditDurationMinutes] = useState<number>(60);
   const [editTopic, setEditTopic] = useState('');
   const [editMeetingLink, setEditMeetingLink] = useState('');
@@ -2736,9 +2739,16 @@ export default function CalendarPage() {
       const newStart = new Date(editNewStartTime);
       const newEnd = new Date(newStart.getTime() + durMs);
 
-      const timeChanged = oldStart.getTime() !== newStart.getTime();
+      const truncMin = (d: Date) => Math.floor(d.getTime() / 60000);
+      const timeChanged = truncMin(oldStart) !== truncMin(newStart);
       const durationChanged =
         Math.round((oldEnd.getTime() - oldStart.getTime()) / 60000) !== Math.round(editDurationMinutes);
+
+      if (timeChanged && rescheduleReason.trim().length < 5) {
+        alert(t('cal.rescheduleReasonRequired'));
+        setSaving(false);
+        return;
+      }
 
       /** Same calendar slot = same wall-clock start/end (group lesson: one row per student). */
       const groupPeerIdSet =
@@ -2770,6 +2780,19 @@ export default function CalendarPage() {
       }
 
       const applyToAllFuture = groupEditChoice === 'all_future' && (isGroupSession || !!selectedEvent.recurring_session_id);
+
+      // Monthly packages (req 6): a package lesson can only be moved within the
+      // same calendar month (anchored on its original start). One-off / trial
+      // lessons (no package) are unconstrained.
+      if (timeChanged && !applyToAllFuture && hasOrgFeature('monthly_packages') && !!(selectedEvent as any).lesson_package_id) {
+        const anchor = rescheduleAnchorDate((selectedEvent as any).original_start_time, oldStart);
+        if (!isSameCalendarMonth(newStart, anchor)) {
+          alert(t('cal.rescheduleSameMonthOnly'));
+          setSaving(false);
+          return;
+        }
+      }
+
       let error: any = null;
 
       const editSessionPayload = {
@@ -2853,6 +2876,16 @@ export default function CalendarPage() {
                 break;
               }
             }
+
+            if (!error && timeChanged && futureList.length > 0) {
+              await supabase
+                .from('sessions')
+                .update({ reschedule_reason: rescheduleReason.trim() })
+                .in('id', futureList.map((s) => s.id))
+                .then(({ error: reschedErr }) => {
+                  if (reschedErr) console.warn('[Calendar] reschedule tracking columns not available:', reschedErr.message);
+                });
+            }
           }
         }
       } else {
@@ -2862,6 +2895,17 @@ export default function CalendarPage() {
           ...editSessionPayload,
         }).eq('id', selectedEvent.id);
         error = singleError;
+
+        if (!singleError && timeChanged) {
+          await supabase.from('sessions').update({
+            original_start_time: (selectedEvent as any).original_start_time ?? oldStart.toISOString(),
+            rescheduled_at: new Date().toISOString(),
+            reschedule_reason: rescheduleReason.trim(),
+          }).eq('id', selectedEvent.id)
+            .then(({ error: reschedErr }) => {
+              if (reschedErr) console.warn('[Calendar] reschedule tracking columns not available:', reschedErr.message);
+            });
+        }
       }
 
       if (!error) {
@@ -2929,6 +2973,7 @@ export default function CalendarPage() {
                 newTime: format(newStart, 'HH:mm'),
                 rescheduledBy: 'tutor',
                 recipientRole: 'student',
+                reason: rescheduleReason.trim(),
                 ...(orgIdEditSave ? { organizationId: orgIdEditSave } : {}),
               }
             });
@@ -3533,13 +3578,20 @@ export default function CalendarPage() {
       }
     }
 
+    // Moved-lesson indicator (req 6): dashed amber outline when a package lesson
+    // has been rescheduled (original_start_time set) and the org uses monthly
+    // packages. Matches the same-month guard scope (package lessons only).
+    const isMovedLesson =
+      hasOrgFeature('monthly_packages') && !!event.original_start_time && !!event.lesson_package_id;
+
     return {
       style: {
         backgroundColor,
         opacity: 1,
-        border: 'none',
+        border: isMovedLesson ? '2px dashed #f59e0b' : 'none',
         borderRadius: '8px',
         color: 'white',
+        ...(isMovedLesson ? { boxShadow: 'inset 0 0 0 9999px rgba(245, 158, 11, 0.18)' } : {}),
       },
     };
   };
@@ -4353,6 +4405,7 @@ export default function CalendarPage() {
                   setEditPrice(Number(selectedEvent.price ?? 0) || 0);
                   setEditTutorComment(selectedEvent.tutor_comment || '');
                   setEditShowCommentToStudent(selectedEvent.show_comment_to_student || false);
+                  setRescheduleReason('');
                   setIsEditingSession(true);
                 }} className="text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 h-8 px-2 flex-shrink-0">
                   <Edit2 className="w-3.5 h-3.5 mr-1" /> <span className="hidden sm:inline">{t('cal.editBtn')}</span>
@@ -4382,6 +4435,25 @@ export default function CalendarPage() {
                 <Label>{t('cal.timeLabel')}</Label>
                 <DateTimeSpinner value={editNewStartTime} onChange={setEditNewStartTime} />
               </div>
+              {editNewStartTime && selectedEvent &&
+                Math.floor(new Date(editNewStartTime).getTime() / 60000) !== Math.floor(selectedEvent.start_time.getTime() / 60000) && (
+                <div className="space-y-2">
+                  <Label>{t('cal.rescheduleReasonLabel')}</Label>
+                  <textarea
+                    value={rescheduleReason}
+                    onChange={(e) => setRescheduleReason(e.target.value)}
+                    placeholder={t('cal.rescheduleReasonPlaceholder')}
+                    className="w-full p-3 rounded-xl border border-gray-200 text-sm resize-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 outline-none"
+                    rows={2}
+                  />
+                  <p className="text-xs text-gray-500">
+                    {isOrgTutor ? t('cal.rescheduleReasonHelper') : t('cal.rescheduleReasonHelperSolo')}
+                  </p>
+                  {rescheduleReason.length > 0 && rescheduleReason.trim().length < 5 && (
+                    <p className="text-xs text-red-500">{t('dash.minChars', { min: '5', current: String(rescheduleReason.trim().length) })}</p>
+                  )}
+                </div>
+              )}
               <label className="flex items-start gap-2 cursor-pointer">
                 <Checkbox
                   checked={leaveFreeTimeOnReschedule}
@@ -4442,7 +4514,15 @@ export default function CalendarPage() {
               </div>
               <div className="flex gap-2 pt-2">
                 <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setIsEditingSession(false)}>{t('cal.cancelEdit')}</Button>
-                <Button onClick={handleSaveChanges} disabled={saving} className="flex-1 rounded-xl">
+                <Button
+                  onClick={handleSaveChanges}
+                  disabled={saving || (
+                    !!editNewStartTime && !!selectedEvent &&
+                    Math.floor(new Date(editNewStartTime).getTime() / 60000) !== Math.floor(selectedEvent.start_time.getTime() / 60000) &&
+                    rescheduleReason.trim().length < 5
+                  )}
+                  className="flex-1 rounded-xl"
+                >
                   {saving ? t('cal.savingEdit') : t('cal.saveEdit')}
                 </Button>
               </div>
@@ -4660,6 +4740,7 @@ export default function CalendarPage() {
                     orgTutorCopy={orgPolicy.isOrgTutor}
                     hidePaymentStatus={orgPolicy.isOrgTutor}
                     endTime={selectedEvent?.end_time}
+                    moved={hasOrgFeature('monthly_packages') && !!(selectedEvent as any)?.original_start_time && !!(selectedEvent as any)?.lesson_package_id}
                   />
                 </div>
                 {!orgPolicy.hideMoney && !orgPolicy.isOrgTutor && (
@@ -4675,6 +4756,13 @@ export default function CalendarPage() {
                 </div>
                 )}
               </div>
+
+              {selectedEvent?.reschedule_reason && selectedEvent.status !== 'cancelled' && (
+                <div className="p-3 rounded-xl border border-blue-100 bg-blue-50">
+                  <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-1">{t('common.rescheduleReason')}</p>
+                  <p className="text-sm text-blue-900 whitespace-pre-wrap">{selectedEvent.reschedule_reason}</p>
+                </div>
+              )}
 
               {/* Comment – always visible and editable in view mode */}
               <div className="space-y-2 mt-3 pt-3 border-t border-gray-100">
@@ -5209,6 +5297,7 @@ export default function CalendarPage() {
                   setEditPrice(Number(selectedEvent.price ?? 0) || 0);
                   setEditTutorComment(selectedEvent.tutor_comment || '');
                   setEditShowCommentToStudent(selectedEvent.show_comment_to_student || false);
+                  setRescheduleReason('');
                   setIsEditingSession(true);
                 }
               }}

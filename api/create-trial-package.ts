@@ -9,6 +9,11 @@ import { marketFromRequest } from './_lib/market.js';
 import { chargeCurrency, lessonCheckoutBreakdownCents, checkoutBaseMetadata, orgFeeProfile } from './_lib/marketMoney.js';
 import { customerTotalEur } from './_lib/stripeLessonPricing.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
+import {
+  isTrialReservationFlowEnabled,
+  getTrialReservationDeadlineHours,
+  trialReservationExpiryIso,
+} from './_lib/trialReservation.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -32,12 +37,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return json(res, 401, { error: 'Unauthorized' });
   }
 
-  const { studentId, tutorId, topic, durationMinutes, priceEur } = req.body as {
+  const { studentId, tutorId, topic, durationMinutes, priceEur, startIso, endIso } = req.body as {
     studentId?: string;
     tutorId?: string;
     topic?: string;
     durationMinutes?: number;
     priceEur?: number;
+    /** Reservation flow: when provided (and the org has trial_reservation_flow on), the slot is held pending payment. */
+    startIso?: string;
+    endIso?: string;
   };
   if (!studentId || !tutorId) {
     return json(res, 400, { error: 'Missing studentId or tutorId' });
@@ -223,6 +231,58 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (trialItemErr) {
       await supabase.from('lesson_packages').delete().eq('id', lessonPackage.id);
       return json(res, 500, { error: 'Nepavyko sukurti bandomosios pamokos paketo punkto', details: trialItemErr.message });
+    }
+
+    // Reservation flow: when enabled and a slot is provided, hold the slot now
+    // (status='active' so it blocks the calendar; payment_status='reserved' until
+    // paid). An unpaid hold auto-releases after the org's deadline via cron.
+    if (isTrialReservationFlowEnabled(features) && startIso && endIso) {
+      const start = new Date(startIso);
+      const end = new Date(endIso);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end.getTime() <= start.getTime()) {
+        await supabase.from('lesson_packages').delete().eq('id', lessonPackage.id);
+        return json(res, 400, { error: 'Netinkamas bandomosios pamokos laikas' });
+      }
+
+      const { data: conflicts } = await supabase
+        .from('sessions')
+        .select('id')
+        .eq('tutor_id', tutorId)
+        .eq('status', 'active')
+        .lt('start_time', end.toISOString())
+        .gt('end_time', start.toISOString())
+        .limit(1);
+      if (conflicts && conflicts.length > 0) {
+        await supabase.from('lesson_packages').delete().eq('id', lessonPackage.id);
+        return json(res, 409, { error: 'Korepetitorius šiuo metu jau turi pamoką' });
+      }
+
+      const reservationExpiresAt = trialReservationExpiryIso(getTrialReservationDeadlineHours(features));
+      const { error: heldErr } = await supabase
+        .from('sessions')
+        .insert({
+          tutor_id: tutorId,
+          student_id: studentId,
+          subject_id: subjectId,
+          start_time: start.toISOString(),
+          end_time: end.toISOString(),
+          status: 'active',
+          paid: false,
+          payment_status: 'reserved',
+          reservation_expires_at: reservationExpiresAt,
+          lesson_package_id: lessonPackage.id,
+          topic: trialTopic,
+          price: trialPriceEur,
+          created_by_role: 'org_admin',
+        });
+      if (heldErr) {
+        await supabase.from('lesson_packages').delete().eq('id', lessonPackage.id);
+        return json(res, 500, { error: 'Nepavyko rezervuoti bandomosios pamokos laiko', details: heldErr.message });
+      }
+
+      // Move the trial credit available -> reserved to match the held slot.
+      await supabase.from('lesson_packages').update({ available_lessons: 0, reserved_lessons: 1 }).eq('id', lessonPackage.id);
+      await supabase.from('lesson_package_items').update({ available_lessons: 0, reserved_lessons: 1 }).eq('package_id', lessonPackage.id);
     }
 
     const customerEmail = student.payer_email || student.email || undefined;

@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, FileText, Send, CheckCircle, Edit2, Trash2 } from 'lucide-react';
+import { Plus, FileText, Send, CheckCircle, Edit2, Trash2, PenLine } from 'lucide-react';
 import Toast from '@/components/Toast';
 import { sendEmail } from '@/lib/email';
 import { useTranslation } from '@/lib/i18n';
@@ -68,7 +68,7 @@ interface Contract {
   student_id: string;
   filled_body: string;
   annual_fee: number;
-  signing_status: 'draft' | 'sent' | 'signed';
+  signing_status: 'draft' | 'sent' | 'awaiting_school_signature' | 'signed_by_school' | 'signed';
   signed_at: string | null;
   sent_at: string | null;
   created_at: string;
@@ -119,6 +119,16 @@ function schoolTemplateUploadContentType(file: File, fileExt: string): string {
   if (fileExt === 'docx') return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
   if (fileExt === 'pdf') return 'application/pdf';
   return 'application/octet-stream';
+}
+
+/** Template display name from an uploaded file name: extension stripped, capped length. */
+function templateNameFromFileName(fileName: string): string {
+  return fileName
+    .replace(/\.(pdf|docx)$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80)
+    .trim();
 }
 
 const CONTRACTS_CACHE_KEY = 'company_contracts';
@@ -213,7 +223,9 @@ export default function CompanyContracts() {
     if (isSchoolView && !templatePdfFile && !tForm.pdf_url) return;
     setSaving(true);
     const resolvedTemplateName = isSchoolView
-      ? (tForm.name.trim() || templatePdfFile?.name || `Sutarties sablonas ${new Date().toLocaleDateString('lt-LT')}`)
+      ? (tForm.name.trim()
+        || (templatePdfFile ? templateNameFromFileName(templatePdfFile.name) : '')
+        || `Sutarties sablonas ${new Date().toLocaleDateString('lt-LT')}`)
       : tForm.name.trim();
 
     const payload: {
@@ -325,6 +337,12 @@ export default function CompanyContracts() {
       return;
     }
     setTemplatePdfFile(candidate);
+    // School admins pick a file instead of typing a name, so the template name
+    // follows the newest uploaded file (they can still adjust it in the input).
+    if (isSchoolView) {
+      const derived = templateNameFromFileName(candidate.name);
+      if (derived) setTForm((prev) => ({ ...prev, name: derived }));
+    }
   };
 
   const deleteTemplate = async (id: string) => {
@@ -1314,10 +1332,40 @@ export default function CompanyContracts() {
     input.click();
   };
 
+  // GoSign: directorė initiates her (in-app) signature, then is redirected to
+  // the GoSign signing page. Only shown for contracts in 'awaiting_school_signature'.
+  const signAsSchool = async (contract: Contract) => {
+    try {
+      const hdrs = await authHeaders();
+      if (!hdrs.Authorization) {
+        setToast({ message: 'Turite būti prisijungę.', type: 'error' });
+        return;
+      }
+      setSaving(true);
+      const res = await fetch('/api/school-contract-sign-init', {
+        method: 'POST',
+        headers: hdrs,
+        body: JSON.stringify({ contractId: contract.id }),
+      });
+      const j = (await res.json().catch(() => ({}))) as { signingUrl?: string; error?: string };
+      if (res.ok && j.signingUrl) {
+        window.location.href = j.signingUrl;
+        return;
+      }
+      setToast({ message: j.error || 'Nepavyko pradėti pasirašymo.', type: 'error' });
+    } catch (e: any) {
+      setToast({ message: e?.message || 'Klaida pradedant pasirašymą.', type: 'error' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const statusBadge = (s: Contract['signing_status']) => {
     const map = {
       draft: { label: tr('school.draft'), cls: 'bg-gray-100 text-gray-600' },
       sent: { label: tr('school.sentStatus'), cls: 'bg-amber-50 text-amber-700' },
+      awaiting_school_signature: { label: 'Laukia mokyklos parašo', cls: 'bg-indigo-50 text-indigo-700' },
+      signed_by_school: { label: 'Pasirašyta mokyklos', cls: 'bg-blue-50 text-blue-700' },
       signed: { label: tr('school.signedStatus'), cls: 'bg-green-50 text-green-700' },
     };
     const { label, cls } = map[s];
@@ -1397,7 +1445,17 @@ export default function CompanyContracts() {
                           <Send className="w-3.5 h-3.5 mr-1.5" /> {tr('school.send')}
                         </Button>
                       )}
-                      {c.signing_status === 'sent' && (
+                      {c.signing_status === 'awaiting_school_signature' && (
+                        <Button size="sm" onClick={() => signAsSchool(c)} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                          <PenLine className="w-3.5 h-3.5 mr-1.5" /> Pasirašyti (direktorė)
+                        </Button>
+                      )}
+                      {c.signing_status === 'signed_by_school' && (
+                        <span className="text-xs text-blue-700 self-center">Laukiama tėvų parašo…</span>
+                      )}
+                      {(c.signing_status === 'sent' ||
+                        c.signing_status === 'awaiting_school_signature' ||
+                        c.signing_status === 'signed_by_school') && (
                         <Button size="sm" variant="outline" onClick={() => markSigned(c)} className="text-green-700 border-green-200 hover:bg-green-50">
                           <CheckCircle className="w-3.5 h-3.5 mr-1.5" /> {tr('school.markSigned')}
                         </Button>
@@ -1429,8 +1487,8 @@ export default function CompanyContracts() {
             <div className="grid gap-3">
               {templates.map((tpl) => (
                 <div key={tpl.id} className="bg-white rounded-xl border border-gray-200 p-4 flex items-center justify-between gap-3">
-                  <div>
-                    <p className="font-semibold text-gray-900">{tpl.name}</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-gray-900 break-words">{tpl.name}</p>
                     <p className="text-sm text-gray-500 mt-0.5">
                       {tr('school.defaultFee')} {tpl.annual_fee_default ? fmtMoney(tpl.annual_fee_default) : tr('school.defaultFeeNotSet')}
                     </p>
@@ -1484,6 +1542,12 @@ export default function CompanyContracts() {
                   />
                 </div>
               </>
+            )}
+            {isSchoolView && (
+              <div className="space-y-2">
+                <Label>{tr('school.templateName')}</Label>
+                <Input value={tForm.name} onChange={(e) => setTForm({ ...tForm, name: e.target.value })} placeholder={tr('school.templateNamePlaceholder')} />
+              </div>
             )}
             <div className="space-y-2">
               <Label>{isSchoolView ? 'Ikelti faila' : tr('school.templatePdf')}</Label>

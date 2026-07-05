@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Settings, Save, Trash2, Plus, BookOpen, Clock, Euro, Pencil, Users, Eye, AlertTriangle, Mail } from 'lucide-react';
+import { Settings, Save, Trash2, Plus, BookOpen, Clock, Euro, Pencil, Users, Eye, AlertTriangle, Mail, Globe, Building2 } from 'lucide-react';
 import Toast from '@/components/Toast';
 import { useTranslation } from '@/lib/i18n';
 import {
@@ -31,6 +31,7 @@ import {
   type StudentSeesTutorContactMode,
 } from '@/lib/orgContactVisibility';
 import { getCached, setCache } from '@/lib/dataCache';
+import { SUPPORTED_LOCALES, LOCALE_NAMES, type Locale } from '@/lib/i18n/core';
 
 type TrialCommentMode = 'student_and_parent' | 'internal_only';
 
@@ -124,10 +125,16 @@ export default function CompanySettings() {
     sc?.trialCommentMode ?? 'internal_only'
   );
   const [trialCommentRequired, setTrialCommentRequired] = useState(sc?.trialCommentRequired ?? false);
+  // Reservation flow only: hours a held trial slot waits for payment before auto-release.
+  const [trialReservationDeadlineHours, setTrialReservationDeadlineHours] = useState(sc?.trialReservationDeadlineHours ?? 24);
+  // Package reservation flow only: hours before the first lesson a held package slot waits for payment.
+  const [packagePaymentDeadlineHours, setPackagePaymentDeadlineHours] = useState(sc?.packagePaymentDeadlineHours ?? 24);
   const [notifyTutorsOnAssign, setNotifyTutorsOnAssign] = useState(sc?.notifyTutorsOnAssign ?? false);
   const [enableManualStudentPayments, setEnableManualStudentPayments] = useState(sc?.enableManualStudentPayments ?? false);
   // Optional address shown to parents (e.g. contract emails) for questions; empty falls back to the org email.
   const [contactEmail, setContactEmail] = useState<string>(sc?.contactEmail ?? '');
+  const [publicName, setPublicName] = useState<string>(sc?.publicName ?? '');
+  const [orgLocale, setOrgLocale] = useState<string>(sc?.orgLocale ?? '');
 
   useEffect(() => { if (!getCached('company_settings')) fetchSettings(); }, []);
 
@@ -155,7 +162,7 @@ export default function CompanySettings() {
 
     const { data: orgData } = await supabase
       .from('organizations')
-      .select('default_cancellation_hours, default_cancellation_fee_percent, default_reminder_student_hours, default_reminder_tutor_hours, default_break_between_lessons, default_min_booking_hours, default_company_commission_percent, org_tutors_can_edit_lesson_settings, org_tutor_lesson_edit, org_subject_templates, features, tutor_license_count')
+      .select('default_cancellation_hours, default_cancellation_fee_percent, default_reminder_student_hours, default_reminder_tutor_hours, default_break_between_lessons, default_min_booking_hours, default_company_commission_percent, org_tutors_can_edit_lesson_settings, org_tutor_lesson_edit, org_subject_templates, features, tutor_license_count, preferred_locale')
       .eq('id', adminRow.organization_id)
       .single();
 
@@ -171,7 +178,10 @@ export default function CompanySettings() {
     let nextTrialPriceEur = 0;
     let nextTrialCommentMode: TrialCommentMode = 'internal_only';
     let nextTrialCommentRequired = false;
+    let nextTrialReservationDeadlineHours = 24;
+    let nextPackagePaymentDeadlineHours = 24;
     let nextContactEmail = '';
+    let nextPublicName = '';
 
     if (orgData) {
       const rawFeat = (orgData as { features?: unknown }).features;
@@ -192,8 +202,14 @@ export default function CompanySettings() {
       if (fcm === 'student_and_parent' || fcm === 'internal_only') nextTrialCommentMode = fcm;
       const fcr = featObj['trial_comment_required'];
       nextTrialCommentRequired = fcr === true;
+      const frd = featObj['trial_reservation_deadline_hours'];
+      if (typeof frd === 'number' && Number.isFinite(frd) && frd > 0) nextTrialReservationDeadlineHours = Math.round(frd);
+      const fpd = featObj['package_payment_deadline_hours'];
+      if (typeof fpd === 'number' && Number.isFinite(fpd) && fpd > 0) nextPackagePaymentDeadlineHours = Math.round(fpd);
       const fce = featObj['contact_email'];
       if (typeof fce === 'string') nextContactEmail = fce.trim();
+      const fpn = featObj['public_name'];
+      if (typeof fpn === 'string') nextPublicName = fpn.trim();
       setEnableManualStudentPayments(
         featObj['manual_payments'] === true || featObj['enable_manual_student_payments'] === true,
       );
@@ -220,8 +236,12 @@ export default function CompanySettings() {
       setTrialPriceEur(nextTrialPriceEur);
       setTrialCommentMode(nextTrialCommentMode);
       setTrialCommentRequired(nextTrialCommentRequired);
+      setTrialReservationDeadlineHours(nextTrialReservationDeadlineHours);
+      setPackagePaymentDeadlineHours(nextPackagePaymentDeadlineHours);
       setNotifyTutorsOnAssign(featObj['notify_tutors_on_student_assign'] === true);
       setContactEmail(nextContactEmail);
+      setPublicName(nextPublicName);
+      setOrgLocale(typeof (orgData as any)?.preferred_locale === 'string' ? (orgData as any).preferred_locale : '');
       setSettings(nextSettings);
       setLessonEditScope(nextLessonEditScope);
     }
@@ -314,7 +334,11 @@ export default function CompanySettings() {
         trialPriceEur: nextTrialPriceEur,
         trialCommentMode: nextTrialCommentMode,
         trialCommentRequired: nextTrialCommentRequired,
+        trialReservationDeadlineHours: nextTrialReservationDeadlineHours,
+        packagePaymentDeadlineHours: nextPackagePaymentDeadlineHours,
         contactEmail: nextContactEmail,
+        publicName: nextPublicName,
+        orgLocale: typeof (orgData as any)?.preferred_locale === 'string' ? (orgData as any).preferred_locale : '',
         orgTutors: tutorList,
         subjects: merged,
       });
@@ -558,9 +582,12 @@ export default function CompanySettings() {
       trial_lesson_price_eur: Math.max(0, Number(trialPriceEur) || 0),
       trial_lesson_comment_mode: trialCommentMode,
       trial_comment_required: trialCommentRequired,
+      trial_reservation_deadline_hours: Math.max(1, Math.round(Number(trialReservationDeadlineHours) || 24)),
+      package_payment_deadline_hours: Math.max(1, Math.round(Number(packagePaymentDeadlineHours) || 24)),
       notify_tutors_on_student_assign: notifyTutorsOnAssign,
       enable_manual_student_payments: enableManualStudentPayments,
       contact_email: contactEmail.trim(),
+      public_name: publicName.trim(),
     };
 
     const { error } = await supabase
@@ -576,6 +603,7 @@ export default function CompanySettings() {
         org_tutor_lesson_edit: lessonEditScope,
         org_tutors_can_edit_lesson_settings: anyLessonEdit,
         features: mergedFeatures,
+        preferred_locale: orgLocale || null,
       })
       .eq('id', orgId);
 
@@ -650,9 +678,12 @@ export default function CompanySettings() {
       trialPriceEur,
       trialCommentMode,
       trialCommentRequired,
+      trialReservationDeadlineHours,
+      packagePaymentDeadlineHours,
       notifyTutorsOnAssign,
       enableManualStudentPayments,
       contactEmail,
+      orgLocale,
       orgTutors,
       subjects,
     });
@@ -720,6 +751,25 @@ export default function CompanySettings() {
 
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
             <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center flex-shrink-0">
+                <Building2 className="w-5 h-5 text-amber-600" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-lg font-semibold text-gray-900">{t('compSet.publicNameTitle')}</h2>
+                <p className="text-xs text-gray-500 mt-0.5">{t('compSet.publicNameDesc')}</p>
+              </div>
+            </div>
+            <Input
+              type="text"
+              value={publicName}
+              onChange={(e) => setPublicName(e.target.value)}
+              placeholder={t('compSet.publicNamePlaceholder')}
+              className="rounded-xl"
+            />
+          </div>
+
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
+            <div className="flex items-start gap-3">
               <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center flex-shrink-0">
                 <Mail className="w-5 h-5 text-emerald-600" />
               </div>
@@ -735,6 +785,27 @@ export default function CompanySettings() {
               placeholder={t('compSet.parentContactEmailPlaceholder')}
               className="rounded-xl"
             />
+          </div>
+
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-violet-50 border border-violet-100 flex items-center justify-center flex-shrink-0">
+                <Globe className="w-5 h-5 text-violet-600" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-lg font-semibold text-gray-900">{t('compSet.orgLocaleTitle')}</h2>
+                <p className="text-xs text-gray-500 mt-0.5">{t('compSet.orgLocaleDesc')}</p>
+              </div>
+            </div>
+            <Select value={orgLocale || '_none'} onValueChange={(v) => setOrgLocale(v === '_none' ? '' : v)}>
+              <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_none">{t('compSet.orgLocaleAuto')}</SelectItem>
+                {SUPPORTED_LOCALES.map((loc) => (
+                  <SelectItem key={loc} value={loc}>{LOCALE_NAMES[loc]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
@@ -863,6 +934,40 @@ export default function CompanySettings() {
                 </label>
                 <p className="text-xs text-gray-400 ml-6">{t('compSet.trialCommentRequiredDesc')}</p>
               </div>
+              {orgFeaturesSnapshot['trial_reservation_flow'] === true && (
+                <div className="space-y-1.5 col-span-full border-t border-gray-100 pt-4">
+                  <Label className="text-xs">{t('compSet.trialReservationDeadline')}</Label>
+                  <div className="flex items-center gap-2 max-w-xs">
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={trialReservationDeadlineHours}
+                      onChange={(e) => setTrialReservationDeadlineHours(Number(e.target.value))}
+                      className="w-28 rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                    />
+                    <span className="text-sm text-gray-500">{t('compSet.hours')}</span>
+                  </div>
+                  <p className="text-xs text-gray-400">{t('compSet.trialReservationDeadlineDesc')}</p>
+                </div>
+              )}
+              {orgFeaturesSnapshot['package_reservation_flow'] === true && (
+                <div className="space-y-1.5 col-span-full border-t border-gray-100 pt-4">
+                  <Label className="text-xs">{t('compSet.packagePaymentDeadline')}</Label>
+                  <div className="flex items-center gap-2 max-w-xs">
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={packagePaymentDeadlineHours}
+                      onChange={(e) => setPackagePaymentDeadlineHours(Number(e.target.value))}
+                      className="w-28 rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                    />
+                    <span className="text-sm text-gray-500">{t('compSet.hours')}</span>
+                  </div>
+                  <p className="text-xs text-gray-400">{t('compSet.packagePaymentDeadlineDesc')}</p>
+                </div>
+              )}
             </div>
           </div>
 

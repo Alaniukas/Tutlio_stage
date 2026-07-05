@@ -14,6 +14,8 @@ import {
 } from './_lib/enterpriseLicenseWebhook.js';
 import { isSubscriptionOnlyPriceId } from './_lib/stripe-subscription-env.js';
 import { summarizeStripeOnboarding } from './_lib/stripeAccountOnboarding.js';
+import { sendTrialReservationConfirmedNotifications } from './_lib/trialReservation.js';
+import { applyMonthlyPackageExpiry } from './_lib/packageMonth.js';
 
 const getStripe = () => {
     const key = process.env.STRIPE_SECRET_KEY;
@@ -546,15 +548,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 // If there are pre-created sessions tied to this package (e.g. trial lessons),
                 // mark them as paid now so the UI doesn't show "awaiting payment".
                 try {
+                    // Confirm trial soft-holds. The atomic UPDATE ... WHERE payment_status='reserved'
+                    // is the exactly-once guard: this and confirm-package-payment.ts both attempt it,
+                    // but only the caller that actually flips a row notifies (tutor email + deferred
+                    // student/parent invite), so the success-page/webhook race can't double-send.
+                    const { data: confirmedHolds } = await supabase
+                        .from('sessions')
+                        .update({ paid: true, payment_status: 'paid', reservation_expires_at: null })
+                        .eq('lesson_package_id', packageId)
+                        .eq('payment_status', 'reserved')
+                        .select('id, tutor_id, student_id, start_time, end_time, topic, meeting_link');
+
                     const { data: paidSessions } = await supabase
                         .from('sessions')
                         .update({ paid: true, payment_status: 'paid' })
                         .eq('lesson_package_id', packageId)
                         .eq('paid', false)
                         .select('id, tutor_id');
-                    for (const ps of paidSessions || []) {
+
+                    for (const ps of [...(confirmedHolds || []), ...(paidSessions || [])]) {
                         syncSessionToGoogle(ps.id, ps.tutor_id).catch(() => {});
                     }
+
+                    if (confirmedHolds && confirmedHolds.length > 0) {
+                        await sendTrialReservationConfirmedNotifications(supabase, {
+                            appUrl: APP_URL,
+                            holds: confirmedHolds as any,
+                        });
+                    }
+
+                    // Calendar-month packages (req 6): cap validity to the month of the first lesson.
+                    await applyMonthlyPackageExpiry(supabase, {
+                        packageId,
+                        tutorId: (updatedPackage as any).tutor_id,
+                    });
                 } catch (e) {
                     console.error('[stripe-webhook] Error updating sessions for prepaid package:', e);
                 }

@@ -187,6 +187,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
     }
 
+    // Org feature: students/parents may be blocked from cancelling entirely
+    // (disable_student_reschedule_cancel). Tutor/org-admin cancels are unaffected.
+    if (cancelledBy === 'student' && !auth.isInternal) {
+        const { data: tutorOrgRow } = await supabase
+            .from('profiles')
+            .select('organization_id')
+            .eq('id', tutorId)
+            .maybeSingle();
+        const cancelOrgId = (tutorOrgRow as { organization_id?: string | null } | null)?.organization_id;
+        if (cancelOrgId) {
+            const { data: orgFeatRow } = await supabase
+                .from('organizations')
+                .select('features')
+                .eq('id', cancelOrgId)
+                .maybeSingle();
+            const feats = (orgFeatRow as { features?: Record<string, unknown> | null } | null)?.features;
+            if (feats && feats.disable_student_reschedule_cancel === true) {
+                return res.status(403).json({ error: 'student_actions_disabled' });
+            }
+        }
+    }
+
     // 1. Mark session as cancelled
     const { data: session, error: cancelError } = await supabase
         .from('sessions')

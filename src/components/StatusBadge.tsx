@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { CreditCard, CheckCircle, Clock, XCircle, UserX, AlertCircle } from 'lucide-react';
+import { CreditCard, CheckCircle, Clock, XCircle, UserX, AlertCircle, RefreshCw } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 
 function lessonHasEnded(endTime?: string | Date | null): boolean {
@@ -21,9 +21,28 @@ interface StatusBadgeProps {
     treatUnpaidAsReserved?: boolean;
     /** When set, past `active` sessions are treated as occurred for display (until marked completed). */
     endTime?: string | Date | null;
+    /** Lesson was rescheduled (req 6, monthly_packages) — shows a secondary "moved" chip. */
+    moved?: boolean;
 }
 
-export default function StatusBadge({
+export default function StatusBadge(props: StatusBadgeProps) {
+    const { t } = useTranslation();
+    if (!props.moved) return <StatusBadgeBase {...props} />;
+    return (
+        <span className="inline-flex items-center gap-1 flex-wrap">
+            <StatusBadgeBase {...props} />
+            <span
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800 text-[10px] font-medium"
+                title={t('status.movedHint')}
+            >
+                <RefreshCw className="w-3 h-3" />
+                {t('status.moved')}
+            </span>
+        </span>
+    );
+}
+
+function StatusBadgeBase({
     status,
     paymentStatus,
     paid,
@@ -98,6 +117,17 @@ export default function StatusBadge({
             <span className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 text-xs font-medium", className)}>
                 <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
                 {t('status.completedUnpaid')}
+            </span>
+        );
+    }
+
+    // Trial reservation soft-hold: slot is held until the trial is paid. Once
+    // paid, payment_status flips to 'paid' and this no longer applies.
+    if (paymentStatus === 'reserved' && !paid) {
+        return (
+            <span className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-violet-100 text-violet-700 text-xs font-medium", className)}>
+                <Clock className="w-3.5 h-3.5" />
+                {t('status.reservedAwaitingPayment')}
             </span>
         );
     }

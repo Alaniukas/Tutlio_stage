@@ -32,6 +32,8 @@ export async function insertParentInviteAndSendEmail(opts: {
   locale?: string;
   /** UI locale for URL path prefix (lt, en, pl, …). Falls back to `locale`. */
   uiLocale?: string;
+  /** Organization name for school-context invites. */
+  orgName?: string | null;
 }): Promise<ParentInviteResult> {
   const {
     supabase,
@@ -44,6 +46,7 @@ export async function insertParentInviteAndSendEmail(opts: {
     invitedByUserId,
     locale,
     uiLocale,
+    orgName,
   } = opts;
 
   const trimmedEmail = parentEmail.trim().toLowerCase();
@@ -121,6 +124,7 @@ export async function insertParentInviteAndSendEmail(opts: {
     locale,
     publicHost: origin,
     isSchool: source === 'school_admin',
+    orgName: orgName ?? null,
   });
 
   if (emailResult.ok === false) {

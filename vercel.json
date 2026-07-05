@@ -3,6 +3,7 @@
     "outputDirectory": "dist",
     "framework": "vite",
     "devCommand": null,
+    "trailingSlash": false,
     "functions": {
         "api/page-render.ts": {
             "maxDuration": 30
@@ -101,6 +102,10 @@
         {
             "path": "/api/expire-packages",
             "schedule": "0 */6 * * *"
+        },
+        {
+            "path": "/api/expire-trial-reservations",
+            "schedule": "*/15 * * * *"
         },
         {
             "path": "/api/cleanup-whiteboard-data",

@@ -1,9 +1,10 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { renderAndStoreSchoolContractPdf } from './_lib/schoolContractPdf.js';
+import { isGoSignConfigured } from './_lib/gosignConfig.js';
 
 const CONTRACT_SELECT =
-  'id, student_id, organization_id, template_id, contract_number, annual_fee, filled_body, media_publicity_consent, template:school_contract_templates(pdf_url), organizations(name, email, entity_type), student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent)';
+  'id, student_id, organization_id, template_id, contract_number, annual_fee, filled_body, media_publicity_consent, template:school_contract_templates(pdf_url), organizations(name, email, entity_type, features), student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent)';
 
 function pageHtml(content: string) {
   return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Sutarties duomenų papildymas</title></head><body style="margin:0;font-family:'Segoe UI',Arial,sans-serif;background:linear-gradient(135deg,#f5f3ff 0%,#ecfeff 50%,#f0fdf4 100%);padding:24px;"><div style="max-width:720px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:24px;box-shadow:0 10px 35px rgba(2,6,23,.08);">${content}</div></body></html>`;
@@ -300,12 +301,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (uploadedPath) {
+    // When GoSign e-signing is enabled for this org (and configured), move
+    // straight into the signing pipeline — directorė signs next. Otherwise keep
+    // the legacy manual flow ('sent' → admin marks signed).
+    const esignEnabled =
+      Boolean(((freshContract || contract) as any)?.organizations?.features?.school_contract_esign) &&
+      isGoSignConfigured();
     const { error: updateErr } = await supabase
       .from('school_contracts')
       .update({
         pdf_url: uploadedPath,
         filled_body: renderedBody,
-        signing_status: 'sent',
+        signing_status: esignEnabled ? 'awaiting_school_signature' : 'sent',
         sent_at: new Date().toISOString(),
       })
       .eq('id', (contract as any).id);

@@ -38,6 +38,7 @@ import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { isPlMarket } from '@/lib/market';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import {
   isPerStudentPaymentOverrideEnabled,
   getEffectivePaymentActions,
@@ -1038,7 +1039,19 @@ export default function StudentsPage() {
     const newEnd = new Date(newStart.getTime() + Math.max(5, editDurationMinutes) * 60 * 1000);
     const oldStart = new Date(selectedSessionForModal.start_time);
     const oldEnd = new Date(selectedSessionForModal.end_time);
-    const timeChanged = oldStart.getTime() !== newStart.getTime();
+    const truncMin = (d: Date) => Math.floor(d.getTime() / 60000);
+    const timeChanged = truncMin(oldStart) !== truncMin(newStart);
+
+    // Monthly packages (req 6): a package lesson can only be moved within the
+    // same calendar month (anchored on its original start). One-off / trial
+    // lessons (no package) are unconstrained.
+    if (timeChanged && hasFeature('monthly_packages') && !!(selectedSessionForModal as any).lesson_package_id) {
+      const anchor = rescheduleAnchorDate((selectedSessionForModal as any).original_start_time, oldStart);
+      if (!isSameCalendarMonth(newStart, anchor)) {
+        setToastMessage({ message: t('cal.rescheduleSameMonthOnly'), type: 'error' });
+        return;
+      }
+    }
 
     setSavingSession(true);
     const payload: Record<string, any> = {
@@ -1054,6 +1067,19 @@ export default function StudentsPage() {
       .from('sessions')
       .update(payload)
       .eq('id', selectedSessionForModal.id);
+
+    if (!error && timeChanged) {
+      await supabase
+        .from('sessions')
+        .update({
+          original_start_time: (selectedSessionForModal as any).original_start_time ?? oldStart.toISOString(),
+          rescheduled_at: new Date().toISOString(),
+        })
+        .eq('id', selectedSessionForModal.id)
+        .then(({ error: reschedErr }) => {
+          if (reschedErr) console.warn('[Students] reschedule tracking columns not available:', reschedErr.message);
+        });
+    }
 
     if (!error) {
       const { data: { user: authUser } } = await supabase.auth.getUser();

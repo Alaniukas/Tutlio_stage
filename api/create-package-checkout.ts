@@ -21,6 +21,11 @@ import {
   aggregatePackageTotals,
   itemsForEmailPayload,
 } from './_lib/packageItems.js';
+import {
+  isPackageReservationFlowEnabled,
+  getPackagePaymentDeadlineHours,
+} from './_lib/trialReservation.js';
+import { reservePackageSlots, type PackageSlotInput } from './_lib/packageSlots.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -84,6 +89,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         expiresAt?: string;
         /** Default true: generate S.F. and attach to payment email when invoice profile exists */
         attachSalesInvoice?: boolean;
+        /** Reservation flow (req 3): pre-book lesson times held until paid by the deadline. */
+        slots?: PackageSlotInput[];
     };
     const tutorId = body.tutorId;
     const studentId = body.studentId;
@@ -163,11 +170,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let ownerName = tutor.full_name || 'Korepetitorius';
         let useSchoolOrgAbsorbedFees = false;
         let feeProfile: OrgFeeProfile | null = null;
+        let orgFeatures: Record<string, unknown> | null = null;
 
         if (tutor.organization_id) {
             const { data: org } = await supabase
                 .from('organizations')
-                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type, slug')
+                .select('stripe_account_id, stripe_onboarding_complete, name, entity_type, slug, features')
                 .eq('id', tutor.organization_id)
                 .single();
 
@@ -176,6 +184,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
             stripeAccountId = org.stripe_account_id;
             ownerName = org.name || ownerName;
+            orgFeatures = (org as { features?: Record<string, unknown> | null }).features ?? null;
             feeProfile = orgFeeProfile((org as { slug?: string | null }).slug) ?? orgFeeProfile(tutor.organization_id);
             // A custom org fee profile is always charged on top (payer pays the fee), even for schools.
             useSchoolOrgAbsorbedFees = org.entity_type === 'school' && !feeProfile;
@@ -250,6 +259,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             console.error('Error creating package items:', itemsInsertErr);
             await supabase.from('lesson_packages').delete().eq('id', lessonPackage.id);
             return json(res, 500, { error: 'Nepavyko sukurti paketo punktų', details: itemsInsertErr.message });
+        }
+
+        // 5c. Reservation flow (req 3+5): when the org has it on and the admin
+        // pre-booked times, hold the slots now (reserved) and move credits
+        // available->reserved. Unpaid holds auto-release via the cron.
+        if (isPackageReservationFlowEnabled(orgFeatures) && Array.isArray(body.slots) && body.slots.length > 0) {
+            const reserveResult = await reservePackageSlots(supabase, {
+                tutorId,
+                studentId,
+                packageId: lessonPackage.id,
+                slots: body.slots,
+                items: resolvedItems.map((it) => ({
+                    subjectId: it.subjectId,
+                    subjectName: it.subjectName,
+                    pricePerLesson: it.pricePerLesson,
+                    totalLessons: it.totalLessons,
+                })),
+                deadlineHours: getPackagePaymentDeadlineHours(orgFeatures),
+            });
+            if (reserveResult.error) {
+                await supabase.from('lesson_packages').delete().eq('id', lessonPackage.id);
+                return json(res, reserveResult.status || 500, { error: reserveResult.error });
+            }
         }
 
         // 6. Determine customer email (payer or student)

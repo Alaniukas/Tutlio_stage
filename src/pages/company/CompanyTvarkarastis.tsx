@@ -36,6 +36,7 @@ import { getCached, setCache } from '@/lib/dataCache';
 import { supabase } from '@/lib/supabase';
 import { sendEmail } from '@/lib/email';
 import { assertTutorSlotsFree, runOrgAdminCreateSession } from '@/pages/company/orgAdminSessionCreate';
+import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
 import { authHeaders } from '@/lib/apiHelpers';
 import { cancelSessionAndFillWaitlist, releaseSessionSlotViaApi } from '@/lib/lesson-actions';
@@ -366,6 +367,7 @@ export default function CompanyTvarkarastis() {
   const [cancellationReason, setCancellationReason] = useState('');
   const [leaveFreeTimeOnCancel, setLeaveFreeTimeOnCancel] = useState(false);
   const [leaveFreeTimeOnReschedule, setLeaveFreeTimeOnReschedule] = useState(false);
+  const [rescheduleReason, setRescheduleReason] = useState('');
   const [isDeleteRecurringDialogOpen, setIsDeleteRecurringDialogOpen] = useState(false);
 
   // Availability edit state
@@ -451,6 +453,7 @@ export default function CompanyTvarkarastis() {
   const [findLessonBookIsPaid, setFindLessonBookIsPaid] = useState(false);
   const [findLessonBookMeetingLink, setFindLessonBookMeetingLink] = useState('');
   const [findLessonBookTutorMeetingLink, setFindLessonBookTutorMeetingLink] = useState('');
+  const [findLessonBookTrialSending, setFindLessonBookTrialSending] = useState(false);
 
   useEffect(() => {
     if (!featuresLoading && organizationId) {
@@ -1111,11 +1114,20 @@ export default function CompanyTvarkarastis() {
       bgColor = '#10b981'; // green - completed paid
     }
 
+    // Moved-lesson indicator (req 6): dashed amber outline when a package lesson
+    // was rescheduled (original_start_time set) and the org uses monthly packages.
+    // Matches the same-month guard scope (package lessons only).
+    const isMovedLesson =
+      hasFeature('monthly_packages') && !!session.original_start_time && !!session.lesson_package_id;
+
     return {
       style: {
         backgroundColor: bgColor,
-        borderColor: bgColor,
+        borderColor: isMovedLesson ? '#f59e0b' : bgColor,
         color: '#fff',
+        ...(isMovedLesson
+          ? { border: '2px dashed #f59e0b', boxShadow: 'inset 0 0 0 9999px rgba(245, 158, 11, 0.18)' }
+          : {}),
       },
     };
   };
@@ -1233,7 +1245,32 @@ export default function CompanyTvarkarastis() {
         throw new Error(t('compSch.invalidEndDuration'));
       }
 
-      const payload = {
+      const oldStartForMove = new Date(selectedEvent.start_time);
+      const oldEndForMove = new Date(selectedEvent.end_time);
+      const truncMin = (d: Date) => Math.floor(d.getTime() / 60000);
+      const timeChangedForMove =
+        truncMin(oldStartForMove) !== truncMin(newStart) || truncMin(oldEndForMove) !== truncMin(newEnd);
+      const isSingleEdit = !(groupEditChoice === 'all_future' && selectedEvent.recurring_session_id);
+
+      // Reschedule reason is mandatory when the lesson start moves (duration-only
+      // edits are not a reschedule).
+      const startChangedForReason = truncMin(oldStartForMove) !== truncMin(newStart);
+      if (startChangedForReason && rescheduleReason.trim().length < 5) {
+        throw new Error(t('cal.rescheduleReasonRequired'));
+      }
+
+      // Monthly packages (req 6): a package lesson can only be moved within the
+      // same calendar month (anchored on its original start). One-off / trial
+      // lessons (no package) are unconstrained.
+      if (timeChangedForMove && isSingleEdit && hasFeature('monthly_packages') && !!(selectedEvent as any).lesson_package_id) {
+        const anchor = rescheduleAnchorDate((selectedEvent as any).original_start_time, oldStartForMove);
+        if (!isSameCalendarMonth(newStart, anchor)) {
+          throw new Error(t('cal.rescheduleSameMonthOnly'));
+        }
+      }
+
+      const paidChanged = editPaid !== selectedEvent.paid;
+      const payload: Record<string, any> = {
         start_time: newStart.toISOString(),
         end_time: newEnd.toISOString(),
         topic: editTopic || null,
@@ -1243,7 +1280,7 @@ export default function CompanyTvarkarastis() {
         student_id: editStudentId || selectedEvent.student_id,
         tutor_id: editTutorId || selectedEvent.tutor_id,
         paid: editPaid,
-        payment_status: editPaid ? 'paid' : 'pending',
+        ...(paidChanged ? { payment_status: editPaid ? 'paid' : 'pending' } : {}),
         status: editStatus,
       };
 
@@ -1261,6 +1298,15 @@ export default function CompanyTvarkarastis() {
           .select('id');
         if (error) throw new Error(error.message);
         if (!data?.length) throw new Error(t('compSch.saveFailedPermissionsOrRecords'));
+        if (startChangedForReason) {
+          await supabase
+            .from('sessions')
+            .update({ reschedule_reason: rescheduleReason.trim() })
+            .in('id', data.map((row: { id: string }) => row.id))
+            .then(({ error: reschedErr }) => {
+              if (reschedErr) console.warn('[OrgSchedule] reschedule tracking columns not available:', reschedErr.message);
+            });
+        }
       } else {
         const { data, error } = await supabase
           .from('sessions')
@@ -1271,10 +1317,24 @@ export default function CompanyTvarkarastis() {
         if (!data?.length) throw new Error(t('compSch.saveFailedPermissions'));
       }
 
+      if (timeChangedForMove && isSingleEdit) {
+        await supabase
+          .from('sessions')
+          .update({
+            original_start_time: (selectedEvent as any).original_start_time ?? oldStartForMove.toISOString(),
+            rescheduled_at: new Date().toISOString(),
+            ...(startChangedForReason ? { reschedule_reason: rescheduleReason.trim() } : {}),
+          })
+          .eq('id', selectedEvent.id)
+          .then(({ error: reschedErr }) => {
+            if (reschedErr) console.warn('[OrgSchedule] reschedule tracking columns not available:', reschedErr.message);
+          });
+      }
+
       const oldStart = new Date(selectedEvent.start_time);
       const oldEnd = new Date(selectedEvent.end_time);
       const timeChanged =
-        oldStart.getTime() !== newStart.getTime() || oldEnd.getTime() !== newEnd.getTime();
+        truncMin(oldStart) !== truncMin(newStart) || truncMin(oldEnd) !== truncMin(newEnd);
 
       if (timeChanged && leaveFreeTimeOnReschedule) {
         await releaseSessionSlotViaApi({
@@ -1311,6 +1371,7 @@ export default function CompanyTvarkarastis() {
           newDate: format(newStart, 'yyyy-MM-dd'),
           newTime: `${format(newStart, 'HH:mm')}–${format(newEnd, 'HH:mm')}`,
           rescheduledBy: 'org_admin' as const,
+          reason: rescheduleReason.trim(),
           ...((tutorRow as any)?.organization_id ? { organizationId: (tutorRow as any).organization_id } : {}),
         };
 
@@ -1346,6 +1407,7 @@ export default function CompanyTvarkarastis() {
       setIsEventDetailOpen(false);
       fetchData();
     } catch (err: any) {
+      console.error('[OrgSchedule] save session error', err);
       alert(t('compSch.errorSaving', { msg: err.message }));
     }
     setSaving(false);
@@ -1679,7 +1741,7 @@ export default function CompanyTvarkarastis() {
       }
 
       const matchedTpl = subj
-        ? orgSubjectTemplates.find(t => t.name.toLowerCase() === (subj.name || '').toLowerCase())
+        ? orgSubjectTemplates.find(tp => tp.name.toLowerCase() === (subj.name || '').toLowerCase())
         : undefined;
       const bookTsp = matchedTpl
         ? tutorSubjectPrices.find(
@@ -1687,37 +1749,36 @@ export default function CompanyTvarkarastis() {
           )
         : undefined;
 
-      const meetingLinkVal = findLessonBookMeetingLink.trim() || null;
+      // Route through the shared create path so the tutor is always notified
+      // (booking_notification) and package credits / payment status are handled
+      // consistently with the main "Create session" dialog.
+      const priceStudentId = isGroup ? studentIds[0] : findLessonBookStudentId;
+      const bookPricing = individualPricing.find(
+        p => p.student_id === priceStudentId && p.subject_id === findLessonBook.subjectId,
+      );
+      const bookPrice = bookPricing?.price ?? bookTsp?.price ?? subj?.price ?? 0;
 
-      const sessionRows = studentIds.map((studentId, index) => {
-        const pricing = individualPricing.find(
-          p => p.student_id === studentId && p.subject_id === findLessonBook.subjectId,
-        );
-        const studentPrice = pricing?.price ?? bookTsp?.price ?? subj?.price ?? null;
-
-        return {
-          tutor_id: findLessonBook.tutorId,
-          student_id: studentId,
-          subject_id: findLessonBook.subjectId || null,
-          start_time: selectedSlot.startIso,
-          end_time: selectedSlot.endIso,
-          topic: findLessonBookTopic || subj?.name || null,
-          meeting_link: meetingLinkVal,
-          price: studentPrice,
-          status: 'active',
-          paid: findLessonBookIsPaid,
-          payment_status: findLessonBookIsPaid ? 'paid' : 'pending',
-          created_by_role: 'org_admin',
-          available_spots: isGroup ? Math.max(0, (subj?.max_students ?? 5) - (index + 1)) : null,
-        };
+      await runOrgAdminCreateSession({
+        supabase,
+        createTutorId: findLessonBook.tutorId,
+        createSubjectId: findLessonBook.subjectId,
+        createStudentId: isGroup ? '' : findLessonBookStudentId,
+        createStudentIds: studentIds,
+        createStartTime: selectedSlot.startIso,
+        createEndTime: selectedSlot.endIso,
+        createTopic: findLessonBookTopic,
+        createMeetingLink: findLessonBookMeetingLink.trim(),
+        createIsRecurring: false,
+        createRecurringEndDate: '',
+        createIsPaid: findLessonBookIsPaid,
+        createPrice: bookPrice,
+        createTutorComment: '',
+        createShowCommentToStudent: false,
+        subjects,
+        individualPricing,
+        tutorSubjectPrices,
+        orgSubjectTemplateId: matchedTpl?.id,
       });
-
-      await assertTutorSlotsFree(supabase, findLessonBook.tutorId, [
-        { start: new Date(selectedSlot.startIso), end: new Date(selectedSlot.endIso) },
-      ]);
-
-      const { error } = await supabase.from('sessions').insert(sessionRows);
-      if (error) throw new Error(error.message);
 
       setFindLessonBook(null);
       setFindLessonBookStudentId('');
@@ -1732,6 +1793,55 @@ export default function CompanyTvarkarastis() {
       alert(t('compSch.errorGeneric', { msg: err.message }));
     }
     setFindLessonBookSaving(false);
+  };
+
+  // Reservation flow (req 2): hold the selected slot as a trial and send the
+  // payment link. The slot is confirmed only after payment; unpaid holds
+  // auto-release after the org deadline.
+  const handleFindLessonBookReserveTrial = async () => {
+    if (!findLessonBook) return;
+    if (!findLessonBookStudentId) {
+      alert(t('compSch.selectStudentAlert'));
+      return;
+    }
+    const selectedSlot =
+      findLessonBookSlots.find((s) => s.startIso === findLessonBookSelectedSlot) || findLessonBookSlots[0];
+    if (!selectedSlot) {
+      alert(t('findLesson.noSubSlots'));
+      return;
+    }
+    setFindLessonBookTrialSending(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const resp = await fetch('/api/create-trial-package', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
+        body: JSON.stringify({
+          studentId: findLessonBookStudentId,
+          tutorId: findLessonBook.tutorId,
+          startIso: selectedSlot.startIso,
+          endIso: selectedSlot.endIso,
+        }),
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error((json as any).error || t('findLesson.trialReserveFailed'));
+      setFindLessonBook(null);
+      setFindLessonBookStudentId('');
+      setFindLessonBookStudentIds([]);
+      setFindLessonBookTopic('');
+      setFindLessonBookSelectedSlot('');
+      setFindLessonBookIsPaid(false);
+      setFindLessonBookMeetingLink('');
+      setFindLessonBookTutorMeetingLink('');
+      alert(t('findLesson.trialReserveSent'));
+      fetchData();
+    } catch (err: any) {
+      alert(t('compSch.errorGeneric', { msg: err.message }));
+    }
+    setFindLessonBookTrialSending(false);
   };
 
   const handleCreateSession = async () => {
@@ -2749,6 +2859,7 @@ export default function CompanyTvarkarastis() {
                       paymentStatus={selectedEvent.payment_status ?? undefined}
                       paid={selectedEvent.paid}
                       endTime={selectedEvent.end_time}
+                      moved={hasFeature('monthly_packages') && !!(selectedEvent as any).original_start_time && !!(selectedEvent as any).lesson_package_id}
                     />
                   </div>
                 </div>
@@ -2914,6 +3025,7 @@ export default function CompanyTvarkarastis() {
                           setEditPaid((selectedEvent as any).paid || false);
                           setEditStatus(selectedEvent.status);
                           setGroupEditChoice('single');
+                          setRescheduleReason('');
                           setIsEditingSession(true);
                         }}
                       >
@@ -3002,6 +3114,23 @@ export default function CompanyTvarkarastis() {
                     <DateTimeSpinner value={editStartTime} onChange={setEditStartTime} />
                   </div>
                 </div>
+                {editStartTime && selectedEvent &&
+                  Math.floor(new Date(editStartTime).getTime() / 60000) !== Math.floor(selectedEvent.start_time.getTime() / 60000) && (
+                  <div className="space-y-2">
+                    <Label>{t('cal.rescheduleReasonLabel')}</Label>
+                    <textarea
+                      value={rescheduleReason}
+                      onChange={(e) => setRescheduleReason(e.target.value)}
+                      placeholder={t('cal.rescheduleReasonPlaceholder')}
+                      className="w-full p-3 rounded-xl border border-gray-200 text-sm resize-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 outline-none"
+                      rows={2}
+                    />
+                    <p className="text-xs text-gray-500">{t('cal.rescheduleReasonHelper')}</p>
+                    {rescheduleReason.length > 0 && rescheduleReason.trim().length < 5 && (
+                      <p className="text-xs text-red-500">{t('dash.minChars', { min: '5', current: String(rescheduleReason.trim().length) })}</p>
+                    )}
+                  </div>
+                )}
                 <label className="flex items-start gap-2 cursor-pointer">
                   <Checkbox
                     checked={leaveFreeTimeOnReschedule}
@@ -3144,7 +3273,15 @@ export default function CompanyTvarkarastis() {
             ) : (
               <>
                 <Button variant="outline" className="rounded-xl" onClick={() => setIsEditingSession(false)}>{t('compSch.back')}</Button>
-                <Button className="rounded-xl" onClick={handleSaveSession} disabled={saving}>
+                <Button
+                  className="rounded-xl"
+                  onClick={handleSaveSession}
+                  disabled={saving || (
+                    !!editStartTime && !!selectedEvent &&
+                    Math.floor(new Date(editStartTime).getTime() / 60000) !== Math.floor(selectedEvent.start_time.getTime() / 60000) &&
+                    rescheduleReason.trim().length < 5
+                  )}
+                >
                   {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{t('compSch.saving')}</> : t('compSch.save')}
                 </Button>
               </>
@@ -3756,10 +3893,32 @@ export default function CompanyTvarkarastis() {
             >
               {t('compSch.cancel')}
             </Button>
+            {hasFeature('trial_reservation_flow') && (
+              <Button
+                variant="outline"
+                className="rounded-xl border-amber-300 text-amber-700 hover:bg-amber-50"
+                onClick={() => void handleFindLessonBookReserveTrial()}
+                disabled={
+                  findLessonBookTrialSending ||
+                  findLessonBookSaving ||
+                  findLessonBookSlots.length === 0 ||
+                  !findLessonBookStudentId
+                }
+              >
+                {findLessonBookTrialSending ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    {t('compSch.creating')}
+                  </>
+                ) : (
+                  t('findLesson.reserveTrial')
+                )}
+              </Button>
+            )}
             <Button
               className="rounded-xl bg-indigo-600 hover:bg-indigo-700"
               onClick={() => void handleFindLessonBookCreate()}
-              disabled={findLessonBookSaving || findLessonBookSlots.length === 0}
+              disabled={findLessonBookSaving || findLessonBookTrialSending || findLessonBookSlots.length === 0}
             >
               {findLessonBookSaving ? (
                 <>
@@ -3778,7 +3937,9 @@ export default function CompanyTvarkarastis() {
         isOpen={findLessonOpen}
         onClose={() => setFindLessonOpen(false)}
         orgId={organizationId}
+        frequencyEnabled={hasFeature('tutor_frequency_search')}
         onPickSlot={(slot) => {
+          setFindLessonOpen(false);
           setFindLessonBook({
             tutorId: slot.tutorId,
             subjectId: slot.subjectId,

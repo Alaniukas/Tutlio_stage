@@ -6,6 +6,7 @@ import { authHeaders } from '@/lib/apiHelpers';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { DateInput } from '@/components/ui/date-input';
+import { TimeInput } from '@/components/ui/time-input';
 import { Label } from '@/components/ui/label';
 import {
   Dialog,
@@ -23,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, Trash2, User, Mail, Phone, GraduationCap, CheckCircle, XCircle, Sparkles, Package, Loader2, FileText, Search, Euro, Clock, MessageSquare, Archive, ArchiveRestore, Download } from 'lucide-react';
+import { Plus, Trash2, User, Mail, Phone, GraduationCap, CheckCircle, XCircle, Sparkles, Package, Loader2, FileText, Search, Euro, Clock, MessageSquare, Archive, ArchiveRestore, Download, AlertCircle } from 'lucide-react';
 import { sendEmail } from '@/lib/email';
 import Toast from '@/components/Toast';
 import { useTranslation } from '@/lib/i18n';
@@ -42,6 +43,8 @@ import {
 } from '@/lib/studentPaymentModel';
 import StudentPaymentModelSection from '@/components/StudentPaymentModelSection';
 import SendInvoiceModal from '@/components/SendInvoiceModal';
+import FindTutorModal from '@/components/FindTutorModal';
+import FindLessonBookDialog, { type FindLessonBookPick } from '@/components/FindLessonBookDialog';
 import PackageItemsEditor, { type PackageEditorItem, type PackageEditorSubject } from '@/components/PackageItemsEditor';
 import { pickStudentContactsForTutorEmail, shouldShowPayerContactSection } from '@/lib/orgContactVisibility';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
@@ -227,6 +230,8 @@ export default function CompanyStudents() {
   const [students, setStudents] = useState<Student[]>(stc?.students ?? []);
   const [tutors, setTutors] = useState<Tutor[]>(stc?.tutors ?? []);
   const [contractsByStudent, setContractsByStudent] = useState<Record<string, StudentContractInfo>>(stc?.contractsByStudent ?? {});
+  // Req 8 (trial_followup_alert): student IDs with a completed trial but no real package sent yet.
+  const [trialNoPackageStudentIds, setTrialNoPackageStudentIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(!stc);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -251,6 +256,8 @@ export default function CompanyStudents() {
     student_city: '',
     child_birth_date: '',
     tutor_ids: [] as string[],
+    // Flexible invitations (req 7): who to invite on create when enabled.
+    invite_target: 'student' as 'student' | 'both',
   });
   const [tutorSubjects, setTutorSubjects] = useState<SubjectOption[]>([]);
   const [selectedSubjectForInvite, setSelectedSubjectForInvite] = useState('');
@@ -265,6 +272,11 @@ export default function CompanyStudents() {
   // Past sessions for student modal (fetched by student_id when modal opens — reliable vs org-wide cache/timing)
   const [modalRecentSessions, setModalRecentSessions] = useState<Session[]>([]);
   const [loadingModalSessions, setLoadingModalSessions] = useState(false);
+  const [modalSessionsRefreshKey, setModalSessionsRefreshKey] = useState(0);
+
+  // Book a lesson from the student card (req 4, gated by student_card_booking)
+  const [findLessonOpen, setFindLessonOpen] = useState(false);
+  const [findLessonPick, setFindLessonPick] = useState<FindLessonBookPick | null>(null);
 
   // Student Detail Modal State
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
@@ -314,6 +326,11 @@ export default function CompanyStudents() {
   const [pkgExpiresAt, setPkgExpiresAt] = useState('');
   const [pkgSending, setPkgSending] = useState(false);
   const [pkgAttachSalesInvoice, setPkgAttachSalesInvoice] = useState(true);
+  // Optional pre-booked package times (req 3, gated by package_reservation_flow)
+  const [pkgReserveSlots, setPkgReserveSlots] = useState<Array<{ subjectId: string; startIso: string; endIso: string }>>([]);
+  const [pkgSlotSubjectId, setPkgSlotSubjectId] = useState('');
+  const [pkgSlotDate, setPkgSlotDate] = useState('');
+  const [pkgSlotTime, setPkgSlotTime] = useState('16:00');
   const [deactivatingPackageId, setDeactivatingPackageId] = useState<string | null>(null);
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
   const [studentSearch, setStudentSearch] = useState('');
@@ -642,7 +659,7 @@ export default function CompanyStudents() {
       cancelled = true;
       setLoadingModalSessions(false);
     };
-  }, [selectedStudent?.id, isStudentModalOpen]);
+  }, [selectedStudent?.id, isStudentModalOpen, modalSessionsRefreshKey]);
 
   const fetchData = async () => {
     if (!getCached('company_students')) setLoading(true);
@@ -762,6 +779,49 @@ export default function CompanyStudents() {
     }
     setContractsByStudent(contractMap);
 
+    // Req 8 (trial_followup_alert, flag-gated): flag students whose trial lesson is
+    // completed but no real (non-trial) package has been sent yet. Queried inline off
+    // the org's features to avoid useOrgFeatures() load-timing races inside this effect.
+    const trialNoPackageIds = new Set<string>();
+    {
+      const { data: orgRow } = await supabase
+        .from('organizations')
+        .select('features')
+        .eq('id', adminRow.organization_id)
+        .maybeSingle();
+      const feats = orgRow?.features && typeof orgRow.features === 'object' && !Array.isArray(orgRow.features)
+        ? (orgRow.features as Record<string, unknown>)
+        : {};
+      if (feats.trial_followup_alert === true && fetchedStudents.length > 0) {
+        const studentIds = fetchedStudents.map((s) => s.id);
+        const thirtyAgo = new Date();
+        thirtyAgo.setDate(thirtyAgo.getDate() - 30);
+        const [trialRes, pkgRes] = await Promise.all([
+          supabase
+            .from('sessions')
+            .select('student_id, subjects!inner(is_trial)')
+            .in('student_id', studentIds)
+            .eq('status', 'completed')
+            .eq('subjects.is_trial', true)
+            .gte('start_time', thirtyAgo.toISOString()),
+          supabase
+            .from('lesson_packages')
+            .select('student_id, subjects(is_trial)')
+            .in('student_id', studentIds),
+        ]);
+        const withRealPackage = new Set<string>();
+        for (const p of pkgRes.data || []) {
+          const subj = Array.isArray((p as any).subjects) ? (p as any).subjects[0] : (p as any).subjects;
+          if (subj?.is_trial !== true) withRealPackage.add((p as any).student_id);
+        }
+        for (const row of trialRes.data || []) {
+          const sid = (row as any).student_id;
+          if (sid && !withRealPackage.has(sid)) trialNoPackageIds.add(sid);
+        }
+      }
+    }
+    setTrialNoPackageStudentIds(trialNoPackageIds);
+
     setCache('company_students', { students: fetchedStudents, tutors: tutorsWithSubjects, contractsByStudent: contractMap });
     setLoading(false);
   };
@@ -831,6 +891,9 @@ export default function CompanyStudents() {
           })),
           ...(pkgExpiresAt ? { expiresAt: pkgExpiresAt } : {}),
           ...(!orgUsesManualPackages ? { attachSalesInvoice: pkgAttachSalesInvoice } : {}),
+          ...(hasFeature('package_reservation_flow') && pkgReserveSlots.length > 0
+            ? { slots: pkgReserveSlots }
+            : {}),
         }),
       });
       const result = await response.json().catch(() => ({}));
@@ -844,6 +907,10 @@ export default function CompanyStudents() {
       setToastMessage({ message: t('compStu.packageSent', { name: selectedStudent.full_name }), type: 'success' });
       setSendPackageOpen(false);
       setPkgExpiresAt('');
+      setPkgReserveSlots([]);
+      setPkgSlotSubjectId('');
+      setPkgSlotDate('');
+      setPkgSlotTime('16:00');
       const { data } = await supabase
         .from('lesson_packages')
         .select('*, subject:subjects(name, color), lesson_package_items(subject_id, total_lessons, available_lessons, total_price, position, subjects!inner(name, color))')
@@ -855,6 +922,26 @@ export default function CompanyStudents() {
       setToastMessage({ message: err.message, type: 'error' });
     }
     setPkgSending(false);
+  };
+
+  const formatPkgSlot = (iso: string): string => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const addPkgReserveSlot = () => {
+    if (!pkgSlotSubjectId || !pkgSlotDate || !pkgSlotTime) return;
+    const subj = packageSubjects.find((ps: any) => ps.id === pkgSlotSubjectId);
+    const durationMin = Number(subj?.duration_minutes) || 60;
+    const start = new Date(`${pkgSlotDate}T${pkgSlotTime}:00`);
+    if (Number.isNaN(start.getTime())) return;
+    const end = new Date(start.getTime() + durationMin * 60000);
+    setPkgReserveSlots((prev) => [
+      ...prev,
+      { subjectId: pkgSlotSubjectId, startIso: start.toISOString(), endIso: end.toISOString() },
+    ]);
   };
 
   const handleDeactivatePackage = async (packageId: string) => {
@@ -1159,6 +1246,14 @@ export default function CompanyStudents() {
       }
     }
 
+    // Flexible invitations (req 7): when the admin chose "student + parent" and
+    // the feature is on, also send parent portal invites for each new student.
+    if (hasFeature('flexible_invitations') && newStudent.invite_target === 'both') {
+      for (const row of inserted) {
+        await sendParentPortalInvites(row.id, false);
+      }
+    }
+
     // Notify assigned tutors about new student
     if (orgId && inserted.length > 0) {
       const { data: orgRow } = await supabase.from('organizations').select('features').eq('id', orgId).single();
@@ -1211,6 +1306,7 @@ export default function CompanyStudents() {
       student_city: '',
       child_birth_date: '',
       tutor_ids: [],
+      invite_target: 'student',
     });
     setSelectedSubjectForInvite('');
     setCustomPrice('');
@@ -1633,6 +1729,58 @@ export default function CompanyStudents() {
                   </div>
                   </div>
 
+                  {!isSchoolView && hasFeature('flexible_invitations') && (
+                    <div className="rounded-xl border border-gray-200 p-3 space-y-3">
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        {t('compStu.parentContactLabel')}
+                      </p>
+                      <div className="grid sm:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label>{t('compStu.parentNameLabel')}</Label>
+                          <Input
+                            value={newStudent.payer_name}
+                            onChange={(e) => setNewStudent({ ...newStudent, payer_name: e.target.value })}
+                            placeholder={t('compStu.parentNamePlaceholder')}
+                            className="rounded-xl"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>{t('compStu.parentEmailLabel')}</Label>
+                          <Input
+                            type="email"
+                            value={newStudent.payer_email}
+                            onChange={(e) => setNewStudent({ ...newStudent, payer_email: e.target.value })}
+                            placeholder="tevas@example.com"
+                            className="rounded-xl"
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>{t('compStu.inviteTargetLabel')}</Label>
+                        <div className="flex gap-2 flex-wrap">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={newStudent.invite_target === 'student' ? 'default' : 'outline'}
+                            className="rounded-xl text-xs"
+                            onClick={() => setNewStudent({ ...newStudent, invite_target: 'student' })}
+                          >
+                            {t('compStu.inviteStudentOnly')}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={newStudent.invite_target === 'both' ? 'default' : 'outline'}
+                            className="rounded-xl text-xs"
+                            onClick={() => setNewStudent({ ...newStudent, invite_target: 'both' })}
+                          >
+                            {t('compStu.inviteStudentAndParent')}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {isSchoolView && (
                     <div className="grid sm:grid-cols-3 gap-4">
                       <div className="space-y-2">
@@ -1967,6 +2115,7 @@ export default function CompanyStudents() {
                 const student = g.primary;
                 const initials = student.full_name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
                 const hasTutor = g.rows.some((r) => r.tutor_id);
+                const needsPackage = g.rows.some((r) => trialNoPackageStudentIds.has(r.id));
                 const tutorNames = hasTutor
                   ? Array.from(new Set(g.rows.filter((r) => r.tutor?.full_name).map((r) => r.tutor!.full_name)))
                   : [];
@@ -2009,6 +2158,14 @@ export default function CompanyStudents() {
                             </span>
                           )}
                         </div>
+                        {needsPackage && (
+                          <div className="mt-1">
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-700 bg-red-50 border border-red-200 rounded-md px-1.5 py-0.5">
+                              <AlertCircle className="w-3 h-3" />
+                              {t('compStu.noPackageSent')}
+                            </span>
+                          </div>
+                        )}
                         {isSchoolView && (
                           <SchoolStudentContractStatus
                             student={student}
@@ -2051,7 +2208,7 @@ export default function CompanyStudents() {
                             {student.invite_code}
                           </code>
                           <div className="flex items-center gap-1.5">
-                            {isSchoolView && (student.payer_email || student.parent_secondary_email) && (
+                            {(isSchoolView || hasFeature('flexible_invitations')) && (student.payer_email || student.parent_secondary_email) && (
                               <button
                                 type="button"
                                 onClick={(e) => { e.stopPropagation(); void sendParentPortalInvites(student.id, true); }}
@@ -2101,6 +2258,7 @@ export default function CompanyStudents() {
                     const student = g.primary;
                     const initials = student.full_name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
                     const hasTutorDt = g.rows.some((r) => r.tutor_id);
+                    const needsPackage = g.rows.some((r) => trialNoPackageStudentIds.has(r.id));
                     const tutorNames = hasTutorDt
                       ? Array.from(new Set(g.rows.filter((r) => r.tutor?.full_name).map((r) => r.tutor!.full_name)))
                       : [];
@@ -2123,11 +2281,17 @@ export default function CompanyStudents() {
                             </div>
                             <div className="min-w-0 flex-1">
                               <p className="font-semibold text-gray-900 truncate">{student.full_name}</p>
-                              <div className="mt-1">
+                              <div className="mt-1 flex flex-wrap items-center gap-1">
                                 {student.linked_user_id ? (
                                   <span className="text-[11px] text-green-700 bg-green-50 border border-green-200 rounded-md px-2 py-0.5">{t('compStu.connected')}</span>
                                 ) : (
                                   <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-0.5">{t('compStu.notConnected')}</span>
+                                )}
+                                {needsPackage && (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-0.5">
+                                    <AlertCircle className="w-3 h-3" />
+                                    {t('compStu.noPackageSent')}
+                                  </span>
                                 )}
                               </div>
                               {isSchoolView && (
@@ -2190,7 +2354,7 @@ export default function CompanyStudents() {
                         </td>
                         <td className="px-4 py-4 text-right align-top">
                           <div className="inline-flex items-center gap-1.5">
-                            {isSchoolView && (student.payer_email || student.parent_secondary_email) && (
+                            {(isSchoolView || hasFeature('flexible_invitations')) && (student.payer_email || student.parent_secondary_email) && (
                               <button
                                 type="button"
                                 onClick={(e) => { e.stopPropagation(); void sendParentPortalInvites(student.id, true); }}
@@ -2480,9 +2644,10 @@ export default function CompanyStudents() {
                     )}
                     <div className="pt-1 flex items-center gap-2 flex-wrap">
                       {(() => {
+                        const canInviteParents = isSchoolView || hasFeature('flexible_invitations');
                         const inviteRecipient =
                           (selectedStudent.email || '').trim() ||
-                          (isSchoolView ? (selectedStudent.payer_email || '').trim() : '');
+                          (canInviteParents ? (selectedStudent.payer_email || '').trim() : '');
                         return (
                           <Button
                             type="button"
@@ -2498,7 +2663,8 @@ export default function CompanyStudents() {
                           </Button>
                         );
                       })()}
-                      {isSchoolView && (
+                      {(isSchoolView || hasFeature('flexible_invitations')) &&
+                        (selectedStudent.payer_email || selectedStudent.parent_secondary_email) && (
                         <Button
                           type="button"
                           size="sm"
@@ -3130,6 +3296,83 @@ export default function CompanyStudents() {
                         items={pkgItems}
                         onChange={setPkgItems}
                       />
+                      {!orgFeaturesLoading && hasFeature('package_reservation_flow') && (
+                        <div className="space-y-2 border-t border-violet-200 pt-3">
+                          <p className="text-xs font-semibold text-violet-800">{t('package.reserveTimesTitle')}</p>
+                          <p className="text-[11px] text-violet-600">{t('package.reserveTimesHint')}</p>
+                          {pkgReserveSlots.length > 0 && (
+                            <ul className="space-y-1">
+                              {pkgReserveSlots.map((s, idx) => {
+                                const subjName = packageSubjects.find((ps: any) => ps.id === s.subjectId)?.name || '';
+                                return (
+                                  <li
+                                    key={`${s.subjectId}-${s.startIso}-${idx}`}
+                                    className="flex items-center justify-between gap-2 text-xs bg-white border border-violet-200 rounded-lg px-2 py-1"
+                                  >
+                                    <span className="truncate">{subjName} · {formatPkgSlot(s.startIso)}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setPkgReserveSlots((prev) => prev.filter((_, i) => i !== idx))}
+                                      className="text-violet-500 hover:text-rose-600 shrink-0"
+                                      aria-label={t('compStu.removeBtn')}
+                                    >
+                                      <XCircle className="w-3.5 h-3.5" />
+                                    </button>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          )}
+                          <div className="grid grid-cols-12 gap-2 items-end">
+                            <div className="col-span-5 space-y-1">
+                              <Label className="text-xs">{t('compSch.subject')}</Label>
+                              <Select value={pkgSlotSubjectId} onValueChange={setPkgSlotSubjectId}>
+                                <SelectTrigger className="h-8 text-xs rounded-lg">
+                                  <SelectValue placeholder="…" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {pkgItems.map((it) => {
+                                    const subj = packageSubjects.find((ps: any) => ps.id === it.subjectId);
+                                    return subj ? (
+                                      <SelectItem key={subj.id} value={subj.id}>
+                                        {subj.name}
+                                      </SelectItem>
+                                    ) : null;
+                                  })}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="col-span-3 space-y-1">
+                              <Label className="text-xs">{t('compSch.date')}</Label>
+                              <DateInput
+                                value={pkgSlotDate}
+                                min={new Date().toISOString().split('T')[0]}
+                                onChange={(e) => setPkgSlotDate(e.target.value)}
+                                className="h-8 text-xs rounded-lg"
+                              />
+                            </div>
+                            <div className="col-span-2 space-y-1">
+                              <Label className="text-xs">{t('compSch.time')}</Label>
+                              <TimeInput
+                                value={pkgSlotTime}
+                                onChange={(v) => setPkgSlotTime(v)}
+                                className="h-8 text-xs rounded-lg"
+                              />
+                            </div>
+                            <div className="col-span-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 w-full text-xs rounded-lg border-violet-300 text-violet-700 hover:bg-violet-100"
+                                onClick={addPkgReserveSlot}
+                                disabled={!pkgSlotSubjectId || !pkgSlotDate || !pkgSlotTime}
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                       <div className="grid grid-cols-3 gap-2">
                         <div className="space-y-1 col-span-2">
                           <Label className="text-xs">{t('package.validUntil')}</Label>
@@ -3252,6 +3495,22 @@ export default function CompanyStudents() {
                   )}
                 </div>
 
+                {/* Book a lesson from the student card (req 4) */}
+                {!orgFeaturesLoading && hasFeature('student_card_booking') && (
+                  <div className="border-t border-gray-100 pt-4">
+                    <h4 className="font-semibold mb-1 text-gray-900">{t('compStu.bookLessonTitle')}</h4>
+                    <p className="text-xs text-gray-500 mb-3">{t('compStu.bookLessonDesc')}</p>
+                    <Button
+                      variant="outline"
+                      className="rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                      onClick={() => setFindLessonOpen(true)}
+                    >
+                      <Search className="w-4 h-4 mr-2" />
+                      {t('compStu.bookLessonFindTutor')}
+                    </Button>
+                  </div>
+                )}
+
                 {/* Sessions */}
                 <div className="border-t border-gray-100 pt-4">
                   <h4 className="font-semibold mb-3 text-gray-900">{t('compStu.studentSessions')}</h4>
@@ -3285,6 +3544,38 @@ export default function CompanyStudents() {
             fetchData();
           }}
         />
+
+        {!orgFeaturesLoading && hasFeature('student_card_booking') && (
+          <>
+            <FindTutorModal
+              isOpen={findLessonOpen}
+              onClose={() => setFindLessonOpen(false)}
+              orgId={orgId}
+              primaryTutorId={selectedStudent?.tutor_id ?? null}
+              frequencyEnabled={hasFeature('tutor_frequency_search')}
+              onPickSlot={(slot) => {
+                setFindLessonPick({
+                  tutorId: slot.tutorId,
+                  tutorName: slot.tutorName,
+                  subjectId: slot.subjectId,
+                  subjectName: slot.subjectName,
+                  startIso: slot.start.toISOString(),
+                  endIso: slot.end.toISOString(),
+                });
+              }}
+            />
+            <FindLessonBookDialog
+              pick={findLessonPick}
+              studentId={selectedStudent?.id ?? ''}
+              onClose={() => setFindLessonPick(null)}
+              onBooked={() => {
+                setFindLessonPick(null);
+                setModalSessionsRefreshKey((k) => k + 1);
+                fetchData();
+              }}
+            />
+          </>
+        )}
 
         <Dialog open={trialModalOpen} onOpenChange={setTrialModalOpen}>
           <DialogContent className="w-[95vw] sm:max-w-[520px] max-h-[90vh] overflow-y-auto">

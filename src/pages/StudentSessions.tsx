@@ -50,6 +50,7 @@ interface Session {
     is_late_cancelled?: boolean;
     cancellation_penalty_amount?: number | null;
     penalty_resolution?: string | null;
+    reschedule_reason?: string | null;
 }
 
 
@@ -162,6 +163,8 @@ export default function StudentSessions() {
     const [manualPaymentsOnly, setManualPaymentsOnly] = useState(false);
     const [creditBalance, setCreditBalance] = useState(0);
     const [tutorOrgIsSchool, setTutorOrgIsSchool] = useState(false);
+    /** Org feature `disable_student_reschedule_cancel`: students/parents cannot move or cancel lessons. */
+    const [studentActionsDisabled, setStudentActionsDisabled] = useState(false);
     const [tutorOrgFeeProfile, setTutorOrgFeeProfile] = useState<OrgFeeProfile | null>(null);
     const [tutorPerlasEnabled, setTutorPerlasEnabled] = useState(false);
     const [perlasLoading, setPerlasLoading] = useState(false);
@@ -462,7 +465,11 @@ export default function StudentSessions() {
             returnToRef.current = state.returnTo;
         }
         setSelectedSession(session);
-        if (state.flow === 'reschedule') {
+        if (studentActionsDisabled && (state.flow === 'reschedule' || state.flow === 'cancel' || state.flow === 'cancel_after_payment')) {
+            // Org blocks student reschedule/cancel: show plain lesson details instead.
+            setIsModalOpen(true);
+            navigate(location.pathname, { replace: true, state: null });
+        } else if (state.flow === 'reschedule') {
             setIsModalOpen(false);
             setSelectedNewSlot(null);
             setRescheduleLoading(true);
@@ -487,7 +494,7 @@ export default function StudentSessions() {
             setIsCancelModalOpen(true);
             navigate(location.pathname, { replace: true, state: null });
         }
-    }, [sessions]);
+    }, [sessions, studentActionsDisabled]);
 
     const fetchSessions = async () => {
         if (isParentLessonsRoute && skipNextParentDuplicateFetchRef.current) {
@@ -515,6 +522,7 @@ export default function StudentSessions() {
         await dedupeAsync(dedupeKey, async () => {
         setTutorOrgIsSchool(false);
         setTutorOrgFeeProfile(null);
+        setStudentActionsDisabled(false);
         setSessionsFetchError(null);
         /** When fixing URL (?studentId=) we still fetch using this id in-flight; defer navigation until success. */
         let parentUrlSyncStudentId: string | null = null;
@@ -662,7 +670,7 @@ export default function StudentSessions() {
 
         /** Narrow columns + no nested embed — `*, subjects(...)` pegged Postgres/RLS (statement timeouts). */
         const SESSION_LIST_COLUMNS =
-            'id,start_time,end_time,status,paid,price,topic,meeting_link,whiteboard_room_id,payment_status,tutor_comment,show_comment_to_student,subject_id,lesson_package_id,is_late_cancelled,cancellation_penalty_amount,penalty_resolution,cancelled_by,no_show_when';
+            'id,start_time,end_time,status,paid,price,topic,meeting_link,whiteboard_room_id,payment_status,tutor_comment,show_comment_to_student,subject_id,lesson_package_id,is_late_cancelled,cancellation_penalty_amount,penalty_resolution,cancelled_by,no_show_when,reschedule_reason';
 
         const secondaryGen = ++sessionsSecondaryGenRef.current;
 
@@ -695,12 +703,14 @@ export default function StudentSessions() {
         if (tutorSub?.organization_id) {
             const { data: orgPay } = await supabase
                 .from('organizations')
-                .select('enable_per_lesson, enable_monthly_billing')
+                .select('enable_per_lesson, enable_monthly_billing, features')
                 .eq('id', tutorSub.organization_id)
                 .maybeSingle();
             if (orgPay) {
                 enablePerLesson = (orgPay as { enable_per_lesson?: boolean }).enable_per_lesson ?? enablePerLesson;
                 enableMonthlyBilling = !!(orgPay as { enable_monthly_billing?: boolean }).enable_monthly_billing;
+                const orgFeatures = (orgPay as { features?: Record<string, unknown> | null }).features;
+                setStudentActionsDisabled(orgFeatures?.disable_student_reschedule_cancel === true);
             }
         }
         setTutorPaymentFlags({
@@ -887,6 +897,7 @@ export default function StudentSessions() {
 
     // ── Open cancel flow ──────────────────────────────────────────────────────
     const openCancelFlow = () => {
+        if (studentActionsDisabled) return;
         setIsModalOpen(false);
         setCancellationReason('');
         setSelectedNewSlot(null);
@@ -896,6 +907,7 @@ export default function StudentSessions() {
 
     // ── Open reschedule flow ──────────────────────────────────────────────────
     const openRescheduleFlow = () => {
+        if (studentActionsDisabled) return;
         setIsModalOpen(false);
         setSelectedNewSlot(null);
         setRescheduleLoading(true);
@@ -1032,7 +1044,7 @@ export default function StudentSessions() {
                 }
                 return true;
             } else {
-                alert(json.error || t('stuSess.cancelFailed'));
+                alert(json.error === 'student_actions_disabled' ? t('stuSess.actionsDisabledByOrg') : (json.error || t('stuSess.cancelFailed')));
                 return false;
             }
         } catch (e) {
@@ -1110,7 +1122,12 @@ export default function StudentSessions() {
                 setTimeout(() => navigate(returnTo), 1200);
             }
         } else {
-            const errorMsg = data?.error || error?.message || t('stuSess.unknownError');
+            const rawErr = data?.error || error?.message || t('stuSess.unknownError');
+            const errorMsg = rawErr === 'different_month'
+                ? t('cal.rescheduleSameMonthOnly')
+                : rawErr === 'student_actions_disabled'
+                    ? t('stuSess.actionsDisabledByOrg')
+                    : rawErr;
             alert('Nepavyko perkelti: ' + errorMsg);
         }
         setSaving(false);
@@ -1705,6 +1722,14 @@ export default function StudentSessions() {
                             </div>
                         )}
 
+                        {/* Why the lesson was moved (tutor / org admin reschedule) */}
+                        {selectedSession?.reschedule_reason && selectedSession.status !== 'cancelled' && (
+                            <div className="p-3 rounded-xl bg-blue-50 border border-blue-100">
+                                <p className="text-xs font-semibold text-blue-700 uppercase tracking-wider mb-1">{t('common.rescheduleReason')}</p>
+                                <div className="text-sm text-blue-900 whitespace-pre-wrap">{selectedSession.reschedule_reason}</div>
+                            </div>
+                        )}
+
                         {/* Tutor contact */}
                         {(tutorName || tutorEmail) && (
                             <div className="bg-violet-50 rounded-xl p-3 border border-violet-100 flex items-center gap-3">
@@ -1811,8 +1836,13 @@ export default function StudentSessions() {
                         )}
                     </div>
 
-                    {/* Two-button footer: Reschedule + Cancel */}
+                    {/* Two-button footer: Reschedule + Cancel (hidden when the org disables student self-service) */}
                     {selectedSession?.status === 'active' && isAfter(new Date(selectedSession.end_time), new Date()) && (
+                        studentActionsDisabled ? (
+                            <p className="mt-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                                {t('stuSess.actionsDisabledByOrg')}
+                            </p>
+                        ) : (
                         <DialogFooter className="mt-2 flex gap-2 sm:flex-row">
                             <Button
                                 variant="outline"
@@ -1832,6 +1862,7 @@ export default function StudentSessions() {
                                 {t('stuSess.cancelBtn')}
                             </Button>
                         </DialogFooter>
+                        )
                     )}
                 </DialogContent>
             </Dialog>
@@ -1923,6 +1954,7 @@ export default function StudentSessions() {
                                 )}
 
                                 <div className="flex gap-3">
+                                    {!studentActionsDisabled && (
                                     <Button
                                         variant="outline"
                                         onClick={openRescheduleFlow}
@@ -1932,6 +1964,7 @@ export default function StudentSessions() {
                                         <RefreshCw className={cn("w-4 h-4 mr-2", rescheduleLoading && "animate-spin")} />
                                         Perkelti
                                     </Button>
+                                    )}
                                     {hasPenalty && paymentType === 'per_lesson' && !selectedSession.paid && !manualPaymentsOnly ? (
                                         <Button
                                             variant="destructive"

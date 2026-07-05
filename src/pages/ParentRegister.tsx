@@ -4,6 +4,18 @@ import { fetchParentInvitePreviewByCode, fetchParentInvitePreviewByToken } from 
 import { useTranslation } from '@/lib/i18n';
 import { Check, Eye, EyeOff, Users } from 'lucide-react';
 
+/** Whole-years age from an ISO (yyyy-mm-dd) birth date, or null if unparseable. */
+function ageFromIso(iso: string): number | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age -= 1;
+  return age >= 0 && age < 130 ? age : null;
+}
+
 export default function ParentRegister() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -26,6 +38,10 @@ export default function ParentRegister() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
+
+  // Parent-oriented registration (req 7): confirm the child's details.
+  const [childBirthDate, setChildBirthDate] = useState('');
+  const [childGrade, setChildGrade] = useState('');
 
   useEffect(() => {
     if (!tokenFromUrl) {
@@ -117,6 +133,8 @@ export default function ParentRegister() {
         body.code = manualCode.trim().toUpperCase();
         body.email = manualEmail.trim();
       }
+      if (childBirthDate.trim()) body.childBirthDate = childBirthDate.trim();
+      if (childGrade.trim()) body.childGrade = childGrade.trim();
 
       const resp = await fetch('/api/register-parent', {
         method: 'POST',
@@ -263,6 +281,37 @@ export default function ParentRegister() {
                 className="w-full mt-1 rounded-xl border border-gray-200 px-3 py-2.5 text-sm"
                 placeholder={t('parent.fullNamePlaceholder')}
               />
+            </div>
+            <div className="rounded-xl border border-violet-100 bg-violet-50/40 p-3 space-y-3">
+              <p className="text-xs font-semibold text-violet-700">
+                {t('parent.childInfoTitle', { student: invite.student_name })}
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-600">{t('parent.childBirthDate')}</label>
+                  <input
+                    type="date"
+                    value={childBirthDate}
+                    onChange={(e) => setChildBirthDate(e.target.value)}
+                    className="w-full mt-1 rounded-xl border border-gray-200 px-3 py-2.5 text-sm"
+                  />
+                  {childBirthDate && (
+                    <p className="text-[11px] text-gray-500 mt-1">
+                      {t('parent.childAge', { age: String(ageFromIso(childBirthDate) ?? '—') })}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-600">{t('parent.childGrade')}</label>
+                  <input
+                    type="text"
+                    value={childGrade}
+                    onChange={(e) => setChildGrade(e.target.value)}
+                    className="w-full mt-1 rounded-xl border border-gray-200 px-3 py-2.5 text-sm"
+                    placeholder={t('parent.childGradePlaceholder')}
+                  />
+                </div>
+              </div>
             </div>
             <div>
               <label className="text-sm font-medium text-gray-700">{t('parent.password')}</label>

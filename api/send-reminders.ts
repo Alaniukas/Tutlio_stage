@@ -8,6 +8,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { isOrgTutor } from './_lib/isOrgTutor.js';
 import { requireCronAuth } from './_lib/cronAuth.js';
+import { dedupeReminderRecipients, type ReminderRecipient } from './_lib/reminderRecipients.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -28,6 +29,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const results: { session?: number; deadline?: any; afterLesson?: any; schoolInstallments?: any } = {};
   let totalSent = 0;
 
+  // Cache org features across the session loop (req 7: flexible_invitations gates
+  // expanded parent reminder recipients, so other orgs' email volume is unchanged).
+  const orgFeaturesCache = new Map<string, Record<string, unknown> | null>();
+  const getOrgFeatures = async (orgId: string | null): Promise<Record<string, unknown> | null> => {
+    if (!orgId) return null;
+    if (orgFeaturesCache.has(orgId)) return orgFeaturesCache.get(orgId) ?? null;
+    const { data } = await supabase.from('organizations').select('features').eq('id', orgId).maybeSingle();
+    const feat = (data?.features as Record<string, unknown> | null) ?? null;
+    orgFeaturesCache.set(orgId, feat);
+    return feat;
+  };
+
   try {
     const now = new Date();
     const maxFuture = new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString();
@@ -37,7 +50,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .select(`
         id, start_time, end_time, topic, price, meeting_link, whiteboard_room_id,
         reminder_student_sent, reminder_tutor_sent, reminder_payer_sent,
-        student:students(id, full_name, email, payment_payer, payer_email, payer_name),
+        student:students(id, full_name, email, payment_payer, payer_email, payer_name, parent_secondary_email, parent_secondary_name),
         tutor:profiles(id, full_name, email, phone, reminder_student_hours, reminder_tutor_hours, organization_id)
       `)
       .eq('status', 'active')
@@ -89,47 +102,93 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         }
 
-// Payer (parent): same time window as student; skip if payer_email === student.email
-        const payerEmail = (student as any)?.payer_email?.trim();
-        const isPayerParent = (student as any)?.payment_payer === 'parent';
-        const payerName = (student as any)?.payer_name || null;
-        const payerIsDifferentFromStudent = payerEmail && payerEmail !== (student?.email || '').trim();
+        // Parent/payer reminders: same time window as student.
+        // Default: only the paying parent (payment_payer==='parent').
+        // With flexible_invitations on: remind ALL parent contacts (payer +
+        // secondary + registered parents), decoupled from who pays.
+        if (reminderStudentHours > 0 && !session.reminder_payer_sent && diffHours <= reminderStudentHours && diffHours >= 0) {
+          const studentEmailNorm = (student?.email || '').trim().toLowerCase();
+          const payerEmail = (student as any)?.payer_email?.trim() || '';
+          const payerName = (student as any)?.payer_name || null;
+          const isPayerParent = (student as any)?.payment_payer === 'parent';
+          const flexibleInvites = (await getOrgFeatures(orgId))?.flexible_invitations === true;
 
-        let parentOptedOut = false;
-        if (isPayerParent && payerEmail) {
-          const { data: pp } = await supabase
-            .from('parent_profiles')
-            .select('disable_lesson_reminders')
-            .eq('email', payerEmail)
-            .limit(1)
-            .single();
-          if (pp?.disable_lesson_reminders) parentOptedOut = true;
-        }
+          const candidates: ReminderRecipient[] = [];
 
-        if (reminderStudentHours > 0 && !session.reminder_payer_sent && isPayerParent && payerIsDifferentFromStudent && !parentOptedOut && diffHours <= reminderStudentHours && diffHours >= 0) {
-          try {
-            const resp = await fetch(`${API_URL}/api/send-email`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
-              body: JSON.stringify({
-                type: 'session_reminder_payer',
-                to: payerEmail,
-                data: {
-                  ...baseData,
-                  recipientName: payerName || undefined,
-                  studentName: student?.full_name || 'Mokinys',
-                  tutorName: tutor?.full_name || 'Korepetitorius',
-                  tutorEmail: tutor?.email || undefined,
-                  tutorPhone: tutor?.phone || undefined,
-                },
-              }),
-            });
-            if (resp.ok) {
-              await supabase.from('sessions').update({ reminder_payer_sent: true }).eq('id', session.id);
-              totalSent++;
+          if (flexibleInvites) {
+            if (payerEmail) candidates.push({ email: payerEmail, name: payerName });
+            const secEmail = (student as any)?.parent_secondary_email?.trim() || '';
+            if (secEmail) candidates.push({ email: secEmail, name: (student as any)?.parent_secondary_name || null });
+            // Registered parents linked to this student.
+            const { data: links } = await supabase
+              .from('parent_students')
+              .select('parent_id')
+              .eq('student_id', (student as any)?.id);
+            const parentIds = (links || []).map((l: any) => l.parent_id).filter(Boolean);
+            if (parentIds.length > 0) {
+              const { data: profs } = await supabase
+                .from('parent_profiles')
+                .select('email, full_name, disable_lesson_reminders')
+                .in('id', parentIds);
+              for (const p of profs || []) {
+                if (p?.disable_lesson_reminders) continue;
+                if (p?.email) candidates.push({ email: String(p.email), name: p.full_name || null });
+              }
             }
-          } catch (e) {
-            console.error('[send-reminders] payer reminder error:', e);
+          } else if (isPayerParent && payerEmail) {
+            candidates.push({ email: payerEmail, name: payerName });
+          }
+
+          // Resolve opt-outs for raw payer/secondary emails (registered parents
+          // were already filtered above by their profile flag). parent_profiles
+          // stores emails lowercased, so match on the lowercased candidates.
+          const optedOut = new Set<string>();
+          if (candidates.length > 0) {
+            const lookupEmails = [...new Set(candidates.map((c) => c.email.trim().toLowerCase()))];
+            const { data: optRows } = await supabase
+              .from('parent_profiles')
+              .select('email, disable_lesson_reminders')
+              .in('email', lookupEmails);
+            for (const r of optRows || []) {
+              if (r?.disable_lesson_reminders && r?.email) optedOut.add(String(r.email).toLowerCase());
+            }
+          }
+
+          // Dedup, drop the student's own email and opt-outs.
+          const recipients = dedupeReminderRecipients(candidates, {
+            studentEmail: studentEmailNorm,
+            optedOutEmails: optedOut,
+          });
+
+          let anyParentSent = false;
+          for (const r of recipients) {
+            try {
+              const resp = await fetch(`${API_URL}/api/send-email`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
+                body: JSON.stringify({
+                  type: 'session_reminder_payer',
+                  to: r.email,
+                  data: {
+                    ...baseData,
+                    recipientName: r.name || undefined,
+                    studentName: student?.full_name || 'Mokinys',
+                    tutorName: tutor?.full_name || 'Korepetitorius',
+                    tutorEmail: tutor?.email || undefined,
+                    tutorPhone: tutor?.phone || undefined,
+                  },
+                }),
+              });
+              if (resp.ok) {
+                anyParentSent = true;
+                totalSent++;
+              }
+            } catch (e) {
+              console.error('[send-reminders] parent reminder error:', e);
+            }
+          }
+          if (anyParentSent) {
+            await supabase.from('sessions').update({ reminder_payer_sent: true }).eq('id', session.id);
           }
         }
 

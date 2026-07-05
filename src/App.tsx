@@ -27,6 +27,8 @@ const Login = lazy(() => import('@/pages/Login'));
 const AuthCallback = lazy(() => import('@/pages/AuthCallback'));
 const Register = lazy(() => import('@/pages/Register'));
 const ResetPassword = lazy(() => import('@/pages/ResetPassword'));
+const SchoolSign = lazy(() => import('@/pages/SchoolSign'));
+const SchoolSignReturn = lazy(() => import('@/pages/SchoolSignReturn'));
 const DashboardPage = lazy(() => import('@/pages/Dashboard'));
 const CalendarPage = lazy(() => import('@/pages/Calendar'));
 const StudentsPage = lazy(() => import('@/pages/Students'));
@@ -215,6 +217,8 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/parent-register" element={<ParentRegister />} />
         <Route path="/:locale/parent-register" element={<ParentRegister />} />
         <Route path="/school-contract-complete" element={<SchoolContractComplete />} />
+        <Route path="/school-sign" element={<SchoolSign />} />
+        <Route path="/school-sign/return" element={<SchoolSignReturn />} />
         <Route path="/stripe-success" element={<StripeSuccess />} />
         <Route path="/enterprise/success" element={<EnterpriseSuccess />} />
         <Route path="/:locale/enterprise/success" element={<EnterpriseSuccess />} />

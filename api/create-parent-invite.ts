@@ -53,13 +53,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: student, error: stErr } = await supabase
     .from('students')
-    .select('id, full_name, tutor_id')
+    .select('id, full_name, tutor_id, organization_id')
     .eq('id', studentId)
     .single();
 
   if (stErr || !student) return res.status(404).json({ error: 'Student not found' });
 
+  let orgName: string | null = null;
+  let orgLocale: string | null = null;
+  const orgId = (student.organization_id as string | null) ?? null;
+  if (orgId) {
+    const { data: orgRow, error: orgErr } = await supabase
+      .from('organizations')
+      .select('name, preferred_locale')
+      .eq('id', orgId)
+      .maybeSingle();
+    if (orgErr) {
+      const { data: fallbackRow } = await supabase
+        .from('organizations')
+        .select('name')
+        .eq('id', orgId)
+        .maybeSingle();
+      orgName = (fallbackRow?.name as string | null) ?? null;
+    } else {
+      orgName = (orgRow?.name as string | null) ?? null;
+      orgLocale = (orgRow?.preferred_locale as string | null) ?? null;
+    }
+  }
+
   const appOrigin = publicOriginFromRequest(req);
+  const explicitLocale =
+    typeof (req.body as { locale?: string })?.locale === 'string'
+      ? (req.body as { locale?: string }).locale
+      : undefined;
   const result = await insertParentInviteAndSendEmail({
     supabase,
     appUrl: appOrigin,
@@ -69,16 +95,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     parentName: parentName ?? null,
     source: source ?? null,
     invitedByUserId: invitedByUserId ?? null,
-    locale: inviteEmailLocale(
-      typeof (req.body as { locale?: string })?.locale === 'string'
-        ? (req.body as { locale?: string }).locale
-        : undefined,
-      appOrigin,
-    ),
-    uiLocale:
-      typeof (req.body as { locale?: string })?.locale === 'string'
-        ? (req.body as { locale?: string }).locale
-        : undefined,
+    locale: inviteEmailLocale(explicitLocale || orgLocale || undefined, appOrigin),
+    uiLocale: explicitLocale || orgLocale || undefined,
+    orgName,
   });
 
   if ('error' in result) {

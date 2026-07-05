@@ -768,6 +768,13 @@ function lessonRescheduled(d: any, locale: Locale) {
           </table>
         </div>`;
 
+  const reasonBlock = d.reason
+    ? `<div class="info-card" style="background:#eff6ff; border-color:#bfdbfe; margin-top: 16px;">
+        <h3 style="color:#1e3a8a; font-size:15px; margin:0 0 8px 0;">${t(locale, 'em.rescheduleReason')}</h3>
+        <p style="color:#1d4ed8; font-size:14px; margin:0; line-height:1.5;">${d.reason}</p>
+      </div>`
+    : '';
+
   const disputeNote =
     !wasRescheduledByRecipient && !isOrgAdmin
       ? `<p style="color:#6b7280; font-size:13px; margin-top: 20px;">${t(locale, 'em.disputeNote', { role: isTutorRecipient ? t(locale, 'em.withStudent') : t(locale, 'em.withTutor') })}</p>`
@@ -786,6 +793,7 @@ function lessonRescheduled(d: any, locale: Locale) {
         <p class="greeting">${t(locale, 'em.hiName', { name: recipientName })}</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">${messageText}</p>
         ${scheduleCards}
+        ${reasonBlock}
         ${disputeNote}
         <div style="text-align:center; margin-top:20px;">
           ${outlookEmailButton(accountLink, t(locale, 'em.btnGoToAccount'), '#2563eb', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
@@ -1167,6 +1175,56 @@ function paymentSuccess(d: any, locale: Locale) {
           ${outlookEmailButton(`${appUrl}/student/sessions`, t(locale, 'em.btnViewReservation'), '#059669', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
         </div>
       </div>${footerFor(locale)}`, locale),
+  };
+}
+
+// School-contract e-signing (GoSign). Lithuanian-only B2B feature, so the copy
+// is inline LT rather than going through the 12-locale i18n dictionaries.
+function schoolContractSignRequest(d: any, _locale: Locale) {
+  const student = d.studentName ? ` – ${d.studentName}` : '';
+  return {
+    subject: `Pasirašykite ugdymo sutartį${student}`,
+    html: wrap(
+      `
+      <div class="header" style="${headerInlineStyle('#6366f1', '#4f46e5')}">
+        <h2 style="color:#ffffff; font-size:24px; margin:0; font-weight:700;">Sutartis paruošta pasirašyti</h2>
+      </div>
+      <div class="body">
+        <p class="greeting">Sveiki${d.parentName ? `, ${d.parentName}` : ''},</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          ${d.schoolName || 'Mokykla'} pasirašė ugdymo sutartį${d.studentName ? ` dėl ${d.studentName}` : ''}.
+          Kviečiame ją pasirašyti elektroniniu parašu (Smart-ID, Mobiliuoju parašu arba el. parašo kortele).
+        </p>
+        <div style="text-align:center; margin-top:24px;">
+          ${outlookEmailButton(d.signUrl, 'Pasirašyti sutartį', '#4f46e5', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
+        </div>
+        <p style="color:#9ca3af; font-size:12px; margin-top:16px;">
+          Ši nuoroda asmeninė – neperduokite jos kitiems. Nuoroda galioja 14 dienų.
+        </p>
+      </div>${footerFor('lt')}`,
+      'lt',
+    ),
+  };
+}
+
+function schoolContractFullySigned(d: any, _locale: Locale) {
+  const student = d.studentName ? ` – ${d.studentName}` : '';
+  return {
+    subject: `Sutartis pasirašyta abiejų šalių${student}`,
+    html: wrap(
+      `
+      <div class="header" style="${headerInlineStyle('#10b981', '#059669')}">
+        <h2 style="color:#ffffff; font-size:24px; margin:0; font-weight:700;">Sutartis pasirašyta</h2>
+      </div>
+      <div class="body">
+        <p class="greeting">Sveiki${d.parentName ? `, ${d.parentName}` : ''},</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          Ugdymo sutartis${d.studentName ? ` dėl ${d.studentName}` : ''} pasirašyta abiejų šalių.
+          Netrukus gausite atskirą laišką dėl apmokėjimo.
+        </p>
+      </div>${footerFor('lt')}`,
+      'lt',
+    ),
   };
 }
 
@@ -1910,7 +1968,7 @@ function schoolContract(d: any, locale: Locale) {
       <div class="body">
         <p class="greeting">Sveiki, ${esc(d.recipientName || d.parentName || d.studentName)},</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          Prašome peržiūrėti Ugdymo šeimoje sutartį mokiniui <strong>${esc(d.studentName)}</strong> (${esc(d.schoolName)}).
+          Prašome peržiūrėti Ugdymo šeimoje sutartį mokiniui <strong>${esc(d.studentName)}</strong>.
         </p>
         <div class="info-card">
           <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
@@ -2273,6 +2331,8 @@ const USER_TRIGGERABLE_EMAIL_TYPES = new Set([
   'tutor_student_assigned',
   'school_contract',
   'school_installment_request',
+  'school_contract_sign_request',
+  'school_contract_fully_signed',
 ]);
 
 async function isAuthenticatedUser(req: VercelRequest): Promise<boolean> {
@@ -2444,7 +2504,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           <div class="body">
             <p class="greeting">${t(locale, 'em.hiNameNoEmoji', { name: d.parentName || studentName })}</p>
             <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-              ${t(locale, 'em.parentInviteBody', { student: studentName })}
+              ${t(locale, d.isSchool ? 'em.parentInviteBodySchool' : 'em.parentInviteBody', { student: studentName, org: d.orgName || '' })}
             </p>
             <p style="color:#4b5563; font-size:14px; line-height:1.6;">
               ${t(locale, 'em.parentInviteBenefits')}
@@ -2486,9 +2546,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             // school emails. Signed contracts still go to the org email (schoolEmail).
             const orgContactEmail = String((features.contact_email as string) || '').trim();
             if (orgContactEmail) (data as any).contactEmail = orgContactEmail;
+            // Optional parent-facing display name (e.g. Mokykla be sienų „Laisvi
+            // vaikai“) shown instead of the legal org name in emails. Contract PDFs
+            // ({{school_name}}) keep the legal name. esc() to match sanitizeEmailData,
+            // which already escaped the caller-provided value being replaced.
+            const orgPublicName = String((features.public_name as string) || '').trim();
+            if (orgPublicName) {
+              (data as any).schoolName = esc(orgPublicName);
+              if ((data as any).context === 'school' && (data as any).tutorName) (data as any).tutorName = esc(orgPublicName);
+            }
             if (features.custom_branding) {
               orgBranding = {
-                name: org.name,
+                name: orgPublicName || org.name,
                 logo_url: org.logo_url ?? null,
                 brand_color: org.brand_color || '#6366f1',
                 brand_color_secondary: (org as { brand_color_secondary?: string | null }).brand_color_secondary || undefined,
@@ -2565,6 +2634,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'penalty_payment_success': emailContent = penaltyPaymentSuccess(data, locale); break;
       case 'penalty_payment_tutor': emailContent = penaltyPaymentTutor(data, locale); break;
       case 'lesson_confirmed_tutor': emailContent = lessonConfirmedTutor(data, locale); break;
+      case 'school_contract_sign_request': emailContent = schoolContractSignRequest(data, locale); break;
+      case 'school_contract_fully_signed': emailContent = schoolContractFullySigned(data, locale); break;
       case 'payment_received_tutor': emailContent = paymentReceivedTutor(data, locale); break;
       case 'payment_failed': emailContent = paymentFailed(data, locale); break;
       case 'session_comment_added': emailContent = sessionCommentAdded(data, locale); break;
