@@ -92,11 +92,28 @@ function originForHost(host: string): string | null {
  */
 export function defaultLocaleStripRedirect(pathname: string, host: string): string | null {
   const segments = pathname.split('/').filter(Boolean);
-  const localeIdx = PLATFORM_PREFIXES.has(segments[0]) ? 1 : 0;
+  const localeIdx = PLATFORM_PREFIXES.has(segments[0] || '') ? 1 : 0;
   const seg = segments[localeIdx];
   if (!seg || !LOCALES.has(seg) || seg !== defaultLocale(host)) return null;
   const rest = segments.filter((_, i) => i !== localeIdx).join('/');
   return rest ? `/${rest}` : '/';
+}
+
+/**
+ * Same-domain canonical form of a pathname, collapsed into a single hop:
+ * no trailing slash (bots previously hard-404ed on /pricing/), no
+ * default-locale prefix, canonical about/contact slug. Null when the path
+ * is already canonical. Also enforced by vercel.json "trailingSlash": false,
+ * but handled here too so the contract holds regardless of whether platform
+ * normalization runs before or after middleware.
+ */
+export function sameDomainCanonicalPath(pathname: string, host: string): string | null {
+  const noSlash =
+    pathname.length > 1 && pathname.endsWith('/') ? pathname.replace(/\/+$/, '') || '/' : null;
+  const base = noSlash || pathname;
+  const stripped = defaultLocaleStripRedirect(base, host);
+  const withSlug = canonicalSlugRedirect(stripped || base, host);
+  return withSlug || stripped || noSlash;
 }
 
 /**
@@ -112,7 +129,7 @@ export function crossDomainLocaleRedirect(pathname: string, host: string): strin
   const origin = originForHost(host);
   if (!origin) return null;
   const segments = pathname.split('/').filter(Boolean);
-  const platform = PLATFORM_PREFIXES.has(segments[0]) ? segments[0] : '';
+  const platform = PLATFORM_PREFIXES.has(segments[0] || '') ? segments[0] : '';
   const localeIdx = platform ? 1 : 0;
   const locale = segments[localeIdx];
   if (!locale || !LOCALES.has(locale)) return null;
@@ -224,9 +241,8 @@ export default function middleware(request: Request) {
   const host = request.headers.get('host') || '';
 
   // Same-domain URL canonicalization for everyone, collapsed into one hop:
-  // strip a default-locale prefix, then canonicalize localized slug aliases.
-  const strippedPath = defaultLocaleStripRedirect(url.pathname, host);
-  const canonicalPath = canonicalSlugRedirect(strippedPath || url.pathname, host) || strippedPath;
+  // trailing slash, default-locale prefix, localized slug aliases.
+  const canonicalPath = sameDomainCanonicalPath(url.pathname, host);
   if (canonicalPath) {
     return Response.redirect(new URL(`${canonicalPath}${url.search}`, request.url), 308);
   }

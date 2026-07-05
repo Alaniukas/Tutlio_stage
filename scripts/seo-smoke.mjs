@@ -19,6 +19,13 @@ const INDEXNOW_KEY = '8f3e9f035b622995d5cb1b8cc7f0aa7f';
 const DEFAULTS = ['https://www.tutlio.com', 'https://www.tutlio.lt', 'https://www.tutlio.pl'];
 const ALIAS_SLUG = { 'www.tutlio.com': '/apie-mus', 'www.tutlio.pl': '/apie-mus', 'www.tutlio.lt': '/about' };
 const CANONICAL_SLUG = { 'www.tutlio.com': '/about', 'www.tutlio.pl': '/about', 'www.tutlio.lt': '/apie-mus' };
+const DEFAULT_LOCALE = { 'www.tutlio.com': 'en', 'www.tutlio.pl': 'pl', 'www.tutlio.lt': 'lt' };
+/** A locale canonical on another domain + where its URLs must 308 for bots. */
+const FOREIGN_LOCALE = {
+  'www.tutlio.com': { locale: 'lt', target: 'https://www.tutlio.lt/pricing' },
+  'www.tutlio.lt': { locale: 'en', target: 'https://www.tutlio.com/pricing' },
+  'www.tutlio.pl': { locale: 'en', target: 'https://www.tutlio.com/pricing' },
+};
 
 const origins = process.argv.slice(2).filter((a) => a.startsWith('http'));
 const targets = origins.length ? origins : DEFAULTS;
@@ -63,8 +70,43 @@ async function checkDomain(origin) {
   const missing = await get(`${origin}/this-page-never-existed-${Date.now()}`, GOOGLEBOT);
   check('unknown URL is a hard 404 for bots', missing.status === 404, `status ${missing.status}`);
 
-  const missingDeep = await get(`${origin}/en/this-page-never-existed`, GOOGLEBOT);
-  check('unknown locale-prefixed URL is 404 for bots', missingDeep.status === 404, `status ${missingDeep.status}`);
+  // Locale-prefixed unknown URLs may hop through canonicalization redirects
+  // (default-locale strip / cross-domain) but must terminate in a hard 404.
+  const missingDeep = await get(`${origin}/en/this-page-never-existed`, GOOGLEBOT, 'follow');
+  check('unknown locale-prefixed URL ends in 404 for bots', missingDeep.status === 404, `status ${missingDeep.status}`);
+
+  // Same-origin redirects may carry a relative Location header.
+  const samePath = (location) => location.replace(origin, '');
+
+  const defLocale = DEFAULT_LOCALE[host];
+  const stripped = await get(`${origin}/${defLocale}/pricing`, GOOGLEBOT);
+  check(
+    `/${defLocale}/pricing 308 → /pricing (default-locale strip)`,
+    stripped.status === 308 && samePath(stripped.location) === '/pricing',
+    `status ${stripped.status} → ${stripped.location}`,
+  );
+
+  const foreign = FOREIGN_LOCALE[host];
+  const cross = await get(`${origin}/${foreign.locale}/pricing`, GOOGLEBOT);
+  check(
+    `/${foreign.locale}/pricing 308 → canonical domain for bots`,
+    cross.status === 308 && cross.location.startsWith(foreign.target),
+    `status ${cross.status} → ${cross.location}`,
+  );
+
+  const humanCross = await get(`${origin}/${foreign.locale}/pricing`, HUMAN);
+  check(
+    `/${foreign.locale}/pricing stays 200 SPA for humans`,
+    humanCross.status === 200 && humanCross.body.includes('noindex'),
+    `status ${humanCross.status}`,
+  );
+
+  const slash = await get(`${origin}/pricing/`, GOOGLEBOT);
+  check(
+    'trailing slash 308 → clean URL',
+    slash.status === 308 && samePath(slash.location) === '/pricing',
+    `status ${slash.status} → ${slash.location}`,
+  );
 
   const alias = await get(`${origin}${ALIAS_SLUG[host]}`, GOOGLEBOT);
   check(

@@ -15,6 +15,9 @@ import {
   ssrDestination,
   canonicalSlugRedirect,
   defaultLocale as middlewareDefaultLocale,
+  defaultLocaleStripRedirect,
+  crossDomainLocaleRedirect,
+  sameDomainCanonicalPath,
 } from '../../middleware.js';
 import { STATIC_PAGES, alternatesXmlFor } from '../../api/sitemap.js';
 
@@ -177,5 +180,90 @@ describe('sitemap', () => {
 
     const withEn = alternatesXmlFor(urlFor, ['lt', 'en'], true);
     expect(withEn).toContain('x-default');
+  });
+});
+
+describe('default-locale prefix strip redirect (all visitors)', () => {
+  it('strips the default-locale prefix on each domain', () => {
+    expect(defaultLocaleStripRedirect('/en', 'www.tutlio.com')).toBe('/');
+    expect(defaultLocaleStripRedirect('/en/', 'www.tutlio.com')).toBe('/');
+    expect(defaultLocaleStripRedirect('/en/pricing', 'www.tutlio.com')).toBe('/pricing');
+    expect(defaultLocaleStripRedirect('/en/blog/some-post', 'www.tutlio.com')).toBe('/blog/some-post');
+    expect(defaultLocaleStripRedirect('/lt', 'www.tutlio.lt')).toBe('/');
+    expect(defaultLocaleStripRedirect('/lt/pricing', 'www.tutlio.lt')).toBe('/pricing');
+    expect(defaultLocaleStripRedirect('/pl/pricing', 'www.tutlio.pl')).toBe('/pricing');
+  });
+
+  it('strips the default locale nested after a platform prefix', () => {
+    expect(defaultLocaleStripRedirect('/schools/en', 'www.tutlio.com')).toBe('/schools');
+    expect(defaultLocaleStripRedirect('/schools/en/pricing', 'www.tutlio.com')).toBe('/schools/pricing');
+    expect(defaultLocaleStripRedirect('/teachers/lt', 'www.tutlio.lt')).toBe('/teachers');
+  });
+
+  it('leaves non-default locales, bare paths, and unknown segments alone', () => {
+    expect(defaultLocaleStripRedirect('/lt/pricing', 'www.tutlio.com')).toBeNull();
+    expect(defaultLocaleStripRedirect('/fr/pricing', 'www.tutlio.com')).toBeNull();
+    expect(defaultLocaleStripRedirect('/en/pricing', 'www.tutlio.lt')).toBeNull();
+    expect(defaultLocaleStripRedirect('/pricing', 'www.tutlio.com')).toBeNull();
+    expect(defaultLocaleStripRedirect('/', 'www.tutlio.com')).toBeNull();
+    expect(defaultLocaleStripRedirect('/schools', 'www.tutlio.com')).toBeNull();
+    expect(defaultLocaleStripRedirect('/english/pricing', 'www.tutlio.com')).toBeNull();
+  });
+
+  it('strips locale-prefixed app routes to their bare SPA path', () => {
+    expect(defaultLocaleStripRedirect('/en/login', 'www.tutlio.com')).toBe('/login');
+    expect(defaultLocaleStripRedirect('/lt/register', 'www.tutlio.lt')).toBe('/register');
+  });
+});
+
+describe('cross-domain locale redirect (bots)', () => {
+  it('sends wrong-domain locales to their canonical domain, dropping a now-default prefix', () => {
+    expect(crossDomainLocaleRedirect('/lt', 'www.tutlio.com')).toBe('https://www.tutlio.lt/');
+    expect(crossDomainLocaleRedirect('/lt/pricing', 'www.tutlio.com')).toBe('https://www.tutlio.lt/pricing');
+    expect(crossDomainLocaleRedirect('/pl/pricing', 'www.tutlio.com')).toBe('https://www.tutlio.pl/pricing');
+    expect(crossDomainLocaleRedirect('/en/pricing', 'www.tutlio.lt')).toBe('https://www.tutlio.com/pricing');
+    expect(crossDomainLocaleRedirect('/lt/blog/irasas', 'www.tutlio.com')).toBe('https://www.tutlio.lt/blog/irasas');
+  });
+
+  it('keeps the locale prefix when it is not the default on the target domain', () => {
+    expect(crossDomainLocaleRedirect('/fr/pricing', 'www.tutlio.lt')).toBe('https://www.tutlio.com/fr/pricing');
+    expect(crossDomainLocaleRedirect('/de', 'www.tutlio.lt')).toBe('https://www.tutlio.com/de');
+    expect(crossDomainLocaleRedirect('/se/features/calendar', 'www.tutlio.pl')).toBe('https://www.tutlio.com/se/features/calendar');
+  });
+
+  it('handles platform-prefixed paths', () => {
+    expect(crossDomainLocaleRedirect('/schools/lt/pricing', 'www.tutlio.com')).toBe('https://www.tutlio.lt/schools/pricing');
+    expect(crossDomainLocaleRedirect('/schools/fr', 'www.tutlio.lt')).toBe('https://www.tutlio.com/schools/fr');
+  });
+
+  it('returns null for same-domain locales, unprefixed paths, and unknown hosts', () => {
+    expect(crossDomainLocaleRedirect('/fr/pricing', 'www.tutlio.com')).toBeNull();
+    expect(crossDomainLocaleRedirect('/lt/pricing', 'www.tutlio.lt')).toBeNull();
+    expect(crossDomainLocaleRedirect('/pricing', 'www.tutlio.com')).toBeNull();
+    expect(crossDomainLocaleRedirect('/', 'www.tutlio.com')).toBeNull();
+    expect(crossDomainLocaleRedirect('/lt/pricing', 'tutlio-abc123.vercel.app')).toBeNull();
+  });
+});
+
+describe('sameDomainCanonicalPath (single-hop URL canonicalization)', () => {
+  it('strips trailing slashes', () => {
+    expect(sameDomainCanonicalPath('/pricing/', 'www.tutlio.com')).toBe('/pricing');
+    expect(sameDomainCanonicalPath('/blog/post/', 'www.tutlio.lt')).toBe('/blog/post');
+    expect(sameDomainCanonicalPath('/', 'www.tutlio.com')).toBeNull();
+  });
+
+  it('collapses slash + default-locale prefix + slug alias into one hop', () => {
+    expect(sameDomainCanonicalPath('/en/apie-mus', 'www.tutlio.com')).toBe('/about');
+    expect(sameDomainCanonicalPath('/en/apie-mus/', 'www.tutlio.com')).toBe('/about');
+    expect(sameDomainCanonicalPath('/lt/about/', 'www.tutlio.lt')).toBe('/apie-mus');
+    expect(sameDomainCanonicalPath('/en/pricing/', 'www.tutlio.com')).toBe('/pricing');
+  });
+
+  it('returns null for already-canonical paths', () => {
+    expect(sameDomainCanonicalPath('/pricing', 'www.tutlio.com')).toBeNull();
+    expect(sameDomainCanonicalPath('/about', 'www.tutlio.com')).toBeNull();
+    expect(sameDomainCanonicalPath('/apie-mus', 'www.tutlio.lt')).toBeNull();
+    expect(sameDomainCanonicalPath('/fr/pricing', 'www.tutlio.com')).toBeNull();
+    expect(sameDomainCanonicalPath('/schools', 'www.tutlio.lt')).toBeNull();
   });
 });
