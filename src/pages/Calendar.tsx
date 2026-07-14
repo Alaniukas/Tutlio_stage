@@ -99,6 +99,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
 import {
   advanceRecurringOccurrence,
+  isRecurringEndDateOpen,
   recurringMaterializeEndDate,
 } from '@/lib/recurringSessions';
 import { resolveLessonMeetingLink } from '@/lib/meetingLink';
@@ -235,6 +236,8 @@ export default function CalendarPage() {
   const orgPolicy = useOrgTutorPolicy();
   const licenseFrozen = orgPolicy.isOrgTutor && orgPolicy.orgUsesLicenses && !orgPolicy.hasActiveLicense;
   const { contactVisibility, hasFeature: hasOrgFeature } = useOrgFeatures();
+  // Org feature: ended lessons are not auto-completed — the tutor must confirm the outcome.
+  const requiresStatusConfirmation = hasOrgFeature('tutor_lesson_status_confirmation');
   const { user: ctxUser, profile: ctxProfile } = useUser();
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -358,6 +361,7 @@ export default function CalendarPage() {
   const [editingSlot, setEditingSlot] = useState<{ ruleId: string; ruleStart: string; ruleEnd: string; ruleIsRecurring: boolean; ruleDate: string | null; ruleDayOfWeek: number | null; blockStart: Date; subjectIds: string[]; meetingLink?: string | null } | null>(null);
   const [slotEditStart, setSlotEditStart] = useState('');
   const [slotEditEnd, setSlotEditEnd] = useState('');
+  // The selector is no longer shown, but preserve legacy restrictions when editing old rows.
   const [slotEditSubjects, setSlotEditSubjects] = useState<string[]>([]);
   const [slotEditMeetingLink, setSlotEditMeetingLink] = useState('');
   const [slotSaving, setSlotSaving] = useState(false);
@@ -1345,6 +1349,7 @@ export default function CalendarPage() {
               topic: topic || null,
               price,
               active: true,
+              frequency: recurringFrequency,
             })
             .select('id, student_id')
             .single();
@@ -1550,6 +1555,13 @@ export default function CalendarPage() {
             const hasPayer = normalizedPayer === 'parent' && payerEmail.length > 0;
             const recurringWeekday = getDay(firstStart);
             const recurringTime = format(firstStart, 'HH:mm');
+            const schedule = Array.from(new Map(
+              studentSessionList.map((session) => {
+                const start = new Date(session.start_time);
+                const item = { weekday: getDay(start), time: format(start, 'HH:mm') };
+                return [`${item.weekday}-${item.time}`, item] as const;
+              }),
+            ).values()).sort((a, b) => a.weekday - b.weekday || a.time.localeCompare(b.time));
 
             const studentNotifyTo = await resolveStudentNotificationEmail(studentData);
             if (studentNotifyTo) {
@@ -1565,6 +1577,8 @@ export default function CalendarPage() {
                   sessions: sessionDates,
                   recurringWeekday,
                   recurringTime,
+                  ongoingSchedule: isRecurringEndDateOpen(recurringEndDate),
+                  schedule,
                   ...(orgIdBranding ? { organizationId: orgIdBranding } : {}),
                 },
               }).catch(err => console.error('Error sending recurring booking email:', err));
@@ -1586,6 +1600,8 @@ export default function CalendarPage() {
                   sessions: sessionDates,
                   recurringWeekday,
                   recurringTime,
+                  ongoingSchedule: isRecurringEndDateOpen(recurringEndDate),
+                  schedule,
                   paymentReminderNote: true,
                   ...(orgIdBranding ? { organizationId: orgIdBranding } : {}),
                 },
@@ -3221,6 +3237,56 @@ export default function CalendarPage() {
     }
   };
 
+  /**
+   * Org feature tutor_lesson_status_confirmation: finalize an ended lesson via the
+   * server, which stamps who/when confirmed and settles package counters.
+   */
+  const handleConfirmSessionStatus = async (
+    session: Session,
+    status: 'completed' | 'no_show' | 'cancelled',
+    late = false,
+  ) => {
+    if (status === 'cancelled' && !window.confirm(t('cal.confirmStatusCancelPrompt'))) return;
+    setNoShowSavingId(session.id);
+    try {
+      const resp = await fetch('/api/confirm-session-status', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({
+          sessionId: session.id,
+          status,
+          late,
+          ...(status === 'no_show'
+            ? { noShowWhen: defaultNoShowWhenForNow(new Date(session.start_time), new Date(session.end_time)) }
+            : {}),
+        }),
+      });
+      const json = await resp.json().catch(() => ({} as Record<string, unknown>));
+      if (!resp.ok) {
+        setToastMessage({
+          message: t('cal.confirmStatusError', { msg: String((json as any).error || resp.status) }),
+          type: 'error',
+        });
+        return;
+      }
+      setSessions((prev) => prev.map((s) => (s.id === session.id ? { ...s, status } : s)));
+      setSelectedEvent((prev) => (prev && prev.id === session.id ? { ...prev, status } : prev));
+      setIsEventModalOpen(false);
+      fetchData({ silent: true });
+      if (status === 'no_show') {
+        void (async () => {
+          await fetch('/api/notify-session-no-show', {
+            method: 'POST',
+            headers: await authHeaders(),
+            body: JSON.stringify({ sessionId: session.id }),
+          });
+        })().catch(() => {});
+      }
+    } finally {
+      setNoShowSavingId(null);
+    }
+  };
+
   const handleAddStudentToGroup = async () => {
     if (!selectedEvent || addToGroupStudentIds.length === 0) return;
     setSaving(true);
@@ -4740,6 +4806,7 @@ export default function CalendarPage() {
                     orgTutorCopy={orgPolicy.isOrgTutor}
                     hidePaymentStatus={orgPolicy.isOrgTutor}
                     endTime={selectedEvent?.end_time}
+                    pendingConfirmation={requiresStatusConfirmation}
                     moved={hasOrgFeature('monthly_packages') && !!(selectedEvent as any)?.original_start_time && !!(selectedEvent as any)?.lesson_package_id}
                   />
                 </div>
@@ -4905,7 +4972,62 @@ export default function CalendarPage() {
                 </Button>
               </div>
             )}
-            {selectedEvent?.status === 'active' && (
+            {requiresStatusConfirmation &&
+              !isGroupSession &&
+              selectedEvent?.status === 'active' &&
+              isAfter(new Date(), selectedEvent.end_time) && (
+                <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 space-y-2">
+                  <p className="text-sm font-semibold text-amber-900">{t('cal.confirmStatusPrompt')}</p>
+                  <p className="text-xs text-amber-800/80">{t('cal.confirmStatusDesc')}</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => void handleConfirmSessionStatus(selectedEvent, 'completed')}
+                      disabled={noShowSavingId === selectedEvent.id}
+                      className="rounded-xl bg-green-600 hover:bg-green-700 text-white"
+                    >
+                      <CheckCircle className="w-4 h-4 mr-1" />
+                      {t('cal.statusHappened')}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void handleConfirmSessionStatus(selectedEvent, 'completed', true)}
+                      disabled={noShowSavingId === selectedEvent.id}
+                      className="rounded-xl text-amber-800 border-amber-300 hover:bg-amber-100"
+                    >
+                      <Clock className="w-4 h-4 mr-1" />
+                      {t('cal.statusHappenedLate')}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void handleConfirmSessionStatus(selectedEvent, 'no_show')}
+                      disabled={noShowSavingId === selectedEvent.id}
+                      className="rounded-xl text-rose-700 border-rose-200 hover:bg-rose-50"
+                    >
+                      <UserX className="w-4 h-4 mr-1" />
+                      {t('cal.statusNoShowOpt')}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void handleConfirmSessionStatus(selectedEvent, 'cancelled')}
+                      disabled={noShowSavingId === selectedEvent.id}
+                      className="rounded-xl text-gray-700 border-gray-300 hover:bg-gray-100"
+                    >
+                      <XCircle className="w-4 h-4 mr-1" />
+                      {t('cal.statusCancelledOpt')}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            {selectedEvent?.status === 'active' &&
+              !(
+                requiresStatusConfirmation &&
+                !isGroupSession &&
+                isAfter(new Date(), selectedEvent.end_time)
+              ) && (
               <div className="flex flex-wrap gap-2">
                 <Button
                   variant="destructive"
@@ -5544,43 +5666,6 @@ export default function CalendarPage() {
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('dash.end')}</label>
                 <TimeSpinner value={slotEditEnd} onChange={setSlotEditEnd} minuteStep={1} />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('cal.subjectsForSlot')}</label>
-              <div className="text-xs text-gray-400 mb-2">
-                {slotEditSubjects.length > 0
-                  ? t('cal.selectedSubjects', { count: String(slotEditSubjects.length) })
-                  : t('cal.noSubjectsSelected')}
-              </div>
-              <div className="grid grid-cols-2 gap-2 max-h-[160px] overflow-y-auto pr-1">
-                {subjects.map(subject => (
-                  <label key={subject.id} className="flex items-start gap-2 p-2 rounded-lg border border-gray-100 hover:bg-gray-50 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500"
-                      checked={slotEditSubjects.includes(subject.id)}
-                      onChange={(e) => {
-                        if (e.target.checked) setSlotEditSubjects([...slotEditSubjects, subject.id]);
-                        else setSlotEditSubjects(slotEditSubjects.filter(id => id !== subject.id));
-                      }}
-                    />
-                    <div className="flex flex-col">
-                      <span className="text-sm font-medium text-gray-700">
-                        {subject.name}
-                        {subject.is_group && subject.max_students && (
-                          <span className="text-xs text-violet-600 font-semibold ml-1">
-                            {t('cal.groupMaxSeats', { max: String(subject.max_students) })}
-                          </span>
-                        )}
-                      </span>
-                      {subject.grade_min && subject.grade_max && (
-                        <span className="text-[10px] text-gray-400">{subject.grade_min}-{subject.grade_max === 13 ? t('lessonSet.gradeUniversity') : `${subject.grade_max} ${t('lessonSet.gradeShort')}`}</span>
-                      )}
-                    </div>
-                  </label>
-                ))}
               </div>
             </div>
 

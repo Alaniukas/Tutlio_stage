@@ -193,24 +193,15 @@ export async function renderAndStoreSchoolContractPdf(
   const templatePathOrUrl = String(contract.template?.pdf_url || '').trim();
   const templatePath = templatePathOrUrl ? extractSchoolContractStoragePath(templatePathOrUrl) : '';
   if (templatePath.toLowerCase().endsWith('.docx')) {
-    try {
-      const { data: signedData } = await supabase.storage.from(BUCKET).createSignedUrl(templatePath, 300);
-      if (!signedData?.signedUrl) throw new Error('Failed to sign template URL');
-      pdfBytes = await createDocxTemplatePdf({ fetchUrl: signedData.signedUrl, payload: templatePayload });
-    } catch {
-      pdfBytes = await createSimpleContractPdf({
-        contractNumber: String(contract.contract_number || ''),
-        studentName: String(st.full_name || ''),
-        parentName,
-        parentEmail,
-        parentPhone,
-        parentPersonalCode,
-        childBirthDate,
-        address: fullAddress,
-        annualFee: contract.annual_fee || 0,
-        body: renderedBody,
-      });
+    // A DOCX template is the school's authoritative layout. A conversion hiccup
+    // must not overwrite the contract with the synthesized text PDF — that
+    // different-looking document would go out for review and e-signing. Throw so
+    // the caller returns a retryable error and the previous PDF stays in place.
+    const { data: signedData, error: signErr } = await supabase.storage.from(BUCKET).createSignedUrl(templatePath, 300);
+    if (signErr || !signedData?.signedUrl) {
+      throw new Error(`Nepavyko pasiekti sutarties DOCX šablono${signErr?.message ? `: ${signErr.message}` : ''}`);
     }
+    pdfBytes = await createDocxTemplatePdf({ fetchUrl: signedData.signedUrl, payload: templatePayload });
   } else {
     pdfBytes = await createSimpleContractPdf({
       contractNumber: String(contract.contract_number || ''),

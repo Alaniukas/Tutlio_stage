@@ -3,6 +3,7 @@ import { startOfDay, format } from 'date-fns';
 import {
   computeTutorSlots,
   groupAndRankTutors,
+  subtractBusyFromMatchSlots,
   type AvailabilityRule,
   type MatchSubject,
   type MatchSlot,
@@ -32,6 +33,26 @@ describe('computeTutorSlots', () => {
     end_time: '17:00',
     is_recurring: true,
   };
+
+  it('honours multiple weekday-specific preferred time windows', () => {
+    const monday = dayInfo('2026-07-06');
+    const thursday = dayInfo('2026-07-09');
+    const slots = computeTutorSlots([
+      { ...recurring, day_of_week: monday.dow, start_time: '09:00', end_time: '21:00' },
+      { ...recurring, day_of_week: thursday.dow, start_time: '09:00', end_time: '21:00' },
+    ], [], [subjMath], NAMES, {
+      dateFrom: monday.dateStr,
+      dateTo: '2026-07-12',
+      ...ALL_DAY,
+      preferredWindows: [
+        { dayOfWeek: monday.dow, startTime: '12:00', endTime: '14:00' },
+        { dayOfWeek: thursday.dow, startTime: '17:00', endTime: '20:00' },
+      ],
+    });
+
+    expect(slots).toHaveLength(2);
+    expect(slots.map((slot) => format(slot.start, 'HH:mm'))).toEqual(['12:00', '17:00']);
+  });
 
   it('matches a recurring rule on the right weekday', () => {
     const slots = computeTutorSlots([recurring], [], [subjMath], NAMES, params);
@@ -211,6 +232,41 @@ describe('computeTutorSlots', () => {
     for (let i = 1; i < slots.length; i++) {
       expect(slots[i].start.getTime()).toBeGreaterThanOrEqual(slots[i - 1].start.getTime());
     }
+  });
+});
+
+describe('subtractBusyFromMatchSlots', () => {
+  const makeSlot = (startHour: number, endHour: number): MatchSlot => ({
+    tutorId: 't1',
+    subjectId: 'math',
+    tutorName: 'Alice',
+    subjectName: 'Math',
+    price: 20,
+    durationMinutes: 60,
+    start: new Date(2026, 6, 13, startHour),
+    end: new Date(2026, 6, 13, endHour),
+  });
+
+  it('removes an exactly booked lesson from the visible search results', () => {
+    const slot = makeSlot(16, 17);
+    expect(subtractBusyFromMatchSlots([slot], [{
+      tutor_id: 't1',
+      start: new Date(2026, 6, 13, 16),
+      end: new Date(2026, 6, 13, 17),
+    }])).toEqual([]);
+  });
+
+  it('keeps the free parts of a larger window after a lesson is booked', () => {
+    const result = subtractBusyFromMatchSlots([makeSlot(16, 20)], [{
+      tutor_id: 't1',
+      start: new Date(2026, 6, 13, 17),
+      end: new Date(2026, 6, 13, 18),
+    }]);
+
+    expect(result.map((slot) => [slot.start.getHours(), slot.end.getHours()])).toEqual([
+      [16, 17],
+      [18, 20],
+    ]);
   });
 });
 

@@ -94,6 +94,68 @@ describe('school_contract signing instructions', () => {
     expect(html).not.toContain('Kaip pasirašyti?');
     expect(html).toContain('Prašome papildyti trūkstamus duomenis');
   });
+
+  it('requires parent review even when no data is missing in the GoSign flow', async () => {
+    const { html } = await sendEmail('school_contract', {
+      schoolName: 'VšĮ „Laisvi vaikai"',
+      studentName: 'Jonukas Pet',
+      recipientName: 'Irminta Mal',
+      pdfUrl: 'https://example.com/review.pdf',
+      completionUrl: 'https://tutlio.lt/school-contract-complete?token=safe-token',
+      requiresReview: true,
+      esignFlow: true,
+      missingFields: [],
+    });
+    expect(html).toContain('Peržiūrėti ir patvirtinti sutartį');
+    expect(html).toContain('safe-token');
+    expect(html).not.toContain('Pasirašytą sutartį prašome atsiųsti mokyklai');
+  });
+});
+
+describe('school_contract GoSign notifications', () => {
+  it('emails the admin after review with Tutlio and PDF links', async () => {
+    const { html } = await sendEmail('school_contract_completion_admin', {
+      studentName: 'Jonukas Pet',
+      contractNumber: 'SUT-001',
+      contractsUrl: 'https://tutlio.lt/school/contracts',
+      pdfUrl: 'https://example.com/reviewed.pdf',
+    });
+    expect(html).toContain('Sutartis paruošta mokyklos parašui');
+    expect(html).toContain('https://tutlio.lt/school/contracts');
+    expect(html).toContain('https://example.com/reviewed.pdf');
+  });
+
+  it('emails the admin after the parent signs the final document', async () => {
+    const { html } = await sendEmail('school_contract_parent_signed_admin', {
+      parentName: 'Irminta Mal',
+      studentName: 'Jonukas Pet',
+      contractsUrl: 'https://tutlio.lt/school/contracts',
+      pdfUrl: 'https://example.com/final.pdf',
+    });
+    expect(html).toContain('Sutartis pasirašyta abiejų šalių');
+    expect(html).toContain('https://example.com/final.pdf');
+  });
+
+  it('includes the signed PDF in the parent signature invitation and completion email', async () => {
+    const invite = await sendEmail('school_contract_sign_request', {
+      parentName: 'Irminta Mal',
+      studentName: 'Jonukas Pet',
+      signUrl: 'https://tutlio.lt/pasirasymas/sutarties/per/go-sign/token-1',
+      pdfUrl: 'https://example.com/school-signed.pdf',
+    });
+    expect(invite.html).toContain('/pasirasymas/sutarties/per/go-sign/token-1');
+    expect(invite.html).toContain('https://example.com/school-signed.pdf');
+
+    vi.clearAllMocks();
+    sendMock.mockResolvedValue({ data: { id: 'email-2' }, error: null });
+    const complete = await sendEmail('school_contract_fully_signed', {
+      parentName: 'Irminta Mal',
+      studentName: 'Jonukas Pet',
+      pdfUrl: 'https://example.com/final.pdf',
+    });
+    expect(complete.html).toContain('https://example.com/final.pdf');
+    expect(complete.html).toContain('Atskiru laišku gausite apmokėjimo informaciją');
+  });
 });
 
 describe('school_contract questions contact', () => {

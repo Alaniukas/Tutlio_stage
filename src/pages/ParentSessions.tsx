@@ -8,6 +8,7 @@ import { ArrowLeft, CalendarDays, ListOrdered, MessageCircle } from 'lucide-reac
 import { Button } from '@/components/ui/button';
 import StatusBadge from '@/components/StatusBadge';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
+import { isSelfBookingDisabledForStudent } from '@/lib/studentBookingPolicy';
 
 interface Session {
   id: string;
@@ -35,9 +36,12 @@ export default function ParentSessions() {
   const [studentName, setStudentName] = useState('');
   const [loading, setLoading] = useState(true);
   const [validChild, setValidChild] = useState(false);
+  /** Org feature disable_student_booking — show a neutral calendar label instead of "Book". */
+  const [bookingDisabled, setBookingDisabled] = useState(false);
 
   useEffect(() => {
     if (!user || !studentId) return;
+    void isSelfBookingDisabledForStudent(studentId).then(setBookingDisabled);
     (async () => {
       setLoading(true);
 
@@ -125,7 +129,7 @@ export default function ParentSessions() {
           <Button variant="outline" size="sm" className="rounded-lg" asChild>
             <Link to={schedulePath}>
               <CalendarDays className="w-4 h-4 mr-1.5" />
-              {t('parent.bookSchedule')}
+              {bookingDisabled ? t('nav.calendar') : t('parent.bookSchedule')}
             </Link>
           </Button>
           <Button variant="outline" size="sm" className="rounded-lg" asChild>

@@ -21,6 +21,7 @@ import {
   MessageSquare,
   FileText,
   School,
+  BadgeEuro,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import OrgSuspendedBanner from '@/components/OrgSuspendedBanner';
@@ -29,6 +30,33 @@ import { useTranslation } from '@/lib/i18n';
 import { useTotalChatUnread } from '@/hooks/useChat';
 import { OrgEntityProvider, type OrgEntityType } from '@/contexts/OrgEntityContext';
 import { useUser } from '@/contexts/UserContext';
+
+export function buildCompanyNavItems(
+  isSchool: boolean,
+  orgBasePath: '/school' | '/company',
+  t: (key: string) => string,
+) {
+  const base = [
+    { href: `${orgBasePath}`, label: t('companyNav.overview'), icon: LayoutDashboard, exact: true },
+    { href: `${orgBasePath}/tutors`, label: isSchool ? t('companyNav.teachers') : t('companyNav.tutors'), icon: Users },
+    { href: `${orgBasePath}/students`, label: t('companyNav.students'), icon: GraduationCap },
+    { href: `${orgBasePath}/sessions`, label: t('companyNav.sessions'), icon: BookOpen },
+    { href: `${orgBasePath}/schedule`, label: t('companyNav.schedule'), icon: CalendarDays },
+    { href: `${orgBasePath}/messages`, label: t('companyNav.messages'), icon: MessageSquare },
+    { href: `${orgBasePath}/stats`, label: t('companyNav.stats'), icon: BarChart3 },
+    { href: `${orgBasePath}/settings`, label: t('companyNav.lessonSettings'), icon: Settings },
+  ];
+  if (isSchool) {
+    base.push({ href: `${orgBasePath}/contracts`, label: t('companyNav.contracts'), icon: FileText });
+  }
+  base.push({ href: `${orgBasePath}/finance`, label: t('companyNav.finance'), icon: CreditCard });
+  if (!isSchool) {
+    base.push({ href: `${orgBasePath}/dynamic-pricing`, label: t('companyNav.dynamicPricing'), icon: BadgeEuro });
+  }
+  // Help stays last so the operational organization tools remain grouped.
+  base.push({ href: `${orgBasePath}/instructions`, label: t('companyNav.instructions'), icon: HelpCircle });
+  return base;
+}
 
 export default function CompanyLayout() {
   const { t } = useTranslation();
@@ -56,26 +84,10 @@ export default function CompanyLayout() {
   const BrandIcon = isSchool ? School : Building2;
   const brandLabel = isSchool ? t('layout.tutlioSchool') : t('layout.tutlioCompany');
 
-  const NAV_ITEMS = useMemo(() => {
-    const base = [
-      { href: `${orgBasePath}`, label: t('companyNav.overview'), icon: LayoutDashboard, exact: true },
-      { href: `${orgBasePath}/tutors`, label: isSchool ? t('companyNav.teachers') : t('companyNav.tutors'), icon: Users },
-      { href: `${orgBasePath}/students`, label: t('companyNav.students'), icon: GraduationCap },
-      { href: `${orgBasePath}/sessions`, label: t('companyNav.sessions'), icon: BookOpen },
-      { href: `${orgBasePath}/schedule`, label: t('companyNav.schedule'), icon: CalendarDays },
-      { href: `${orgBasePath}/messages`, label: t('companyNav.messages'), icon: MessageSquare },
-      { href: `${orgBasePath}/stats`, label: t('companyNav.stats'), icon: BarChart3 },
-      { href: `${orgBasePath}/settings`, label: t('companyNav.lessonSettings'), icon: Settings },
-    ];
-    if (isSchool) {
-      base.push({ href: `${orgBasePath}/contracts`, label: t('companyNav.contracts'), icon: FileText });
-    }
-    base.push(
-      { href: `${orgBasePath}/finance`, label: t('companyNav.finance'), icon: CreditCard },
-      { href: `${orgBasePath}/instructions`, label: t('companyNav.instructions'), icon: HelpCircle },
-    );
-    return base;
-  }, [t, isSchool, orgBasePath]);
+  const NAV_ITEMS = useMemo(
+    () => buildCompanyNavItems(isSchool, orgBasePath, t),
+    [t, isSchool, orgBasePath],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -124,7 +136,11 @@ export default function CompanyLayout() {
 
   const Sidebar = ({ mobile = false }: { mobile?: boolean }) => (
     <nav className={cn('flex flex-col h-full min-h-0', mobile && 'pt-4')}>
-      <div className={cn('px-6 py-5 flex items-center gap-3 border-b flex-shrink-0', borderColor)}>
+      <Link
+        to={orgBasePath}
+        onClick={() => setMobileOpen(false)}
+        className={cn('px-6 py-5 flex items-center gap-3 border-b flex-shrink-0', borderColor)}
+      >
         <div className="w-9 h-9 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center flex-shrink-0">
           <BrandIcon className="w-5 h-5 text-white" />
         </div>
@@ -132,7 +148,7 @@ export default function CompanyLayout() {
           <p className={cn('text-xs font-medium leading-none mb-0.5', inactiveText)}>{brandLabel}</p>
           <p className="text-sm font-semibold text-white truncate">{orgName || '...'}</p>
         </div>
-      </div>
+      </Link>
 
       <div className="flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-1">
         {NAV_ITEMS.map((item) => {

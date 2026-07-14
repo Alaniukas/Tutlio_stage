@@ -61,6 +61,7 @@ const CompanySettings = lazy(() => import('@/pages/company/CompanySettings'));
 const CompanyContracts = lazy(() => import('@/pages/company/CompanyContracts'));
 const CompanyFinanceHub = lazy(() => import('@/pages/company/CompanyFinanceHub'));
 const CompanyInstructions = lazy(() => import('@/pages/company/CompanyInstructions'));
+const CompanyDynamicPricing = lazy(() => import('@/pages/company/CompanyDynamicPricing'));
 const CompanyMessages = lazy(() => import('@/pages/company/CompanyMessages'));
 const ParentDashboard = lazy(() => import('@/pages/ParentDashboard'));
 const ParentSessions = lazy(() => import('@/pages/ParentSessions'));
@@ -219,6 +220,8 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/school-contract-complete" element={<SchoolContractComplete />} />
         <Route path="/school-sign" element={<SchoolSign />} />
         <Route path="/school-sign/return" element={<SchoolSignReturn />} />
+        <Route path="/pasirasymas/sutarties/per/go-sign/:token" element={<SchoolSign />} />
+        <Route path="/pasirasymas/sutarties/per/go-sign/:token/rezultatas" element={<SchoolSignReturn />} />
         <Route path="/stripe-success" element={<StripeSuccess />} />
         <Route path="/enterprise/success" element={<EnterpriseSuccess />} />
         <Route path="/:locale/enterprise/success" element={<EnterpriseSuccess />} />
@@ -309,6 +312,7 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/company/messages" element={<CompanyMessages />} />
             <Route path="/company/stats" element={<CompanyStats />} />
             <Route path="/company/instructions" element={<CompanyInstructions />} />
+            <Route path="/company/dynamic-pricing" element={<CompanyDynamicPricing />} />
             <Route path="/company/settings" element={<CompanySettings />} />
             <Route path="/company/finance" element={<CompanyFinanceHub />} />
             <Route path="/company/contracts" element={<CompanyContracts />} />
@@ -322,6 +326,7 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/school/messages" element={<CompanyMessages />} />
             <Route path="/school/stats" element={<CompanyStats />} />
             <Route path="/school/instructions" element={<CompanyInstructions />} />
+            <Route path="/school/dynamic-pricing" element={<Navigate to="/school" replace />} />
             <Route path="/school/settings" element={<CompanySettings />} />
             <Route path="/school/finance" element={<CompanyFinanceHub />} />
             <Route path="/school/contracts" element={<CompanyContracts />} />

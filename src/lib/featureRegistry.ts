@@ -268,6 +268,45 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     defaultValue: false,
     pricingTier: 'premium',
   },
+
+  tutor_lesson_status_confirmation: {
+    id: 'tutor_lesson_status_confirmation',
+    name: 'Korepetitorius privalo pažymėti pamokos statusą',
+    nameEn: 'Tutor must confirm lesson status',
+    description:
+      'Pasibaigusios pamokos nebežymimos „įvykusiomis“ automatiškai. Korepetitorius po kiekvienos pamokos privalo nurodyti jos statusą (įvyko, įvyko bet vėlavo, mokinys neatvyko, atšaukta). Kol statusas nepažymėtas, pamoka rodoma kaip privalomas darbas ir korepetitoriui siunčiami priminimai.',
+    descriptionEn:
+      'Ended lessons are no longer auto-marked completed. After each lesson the tutor must set its status (happened, happened late, no-show, cancelled). Until confirmed, the lesson shows as a must-do task and the tutor keeps getting reminders.',
+    category: 'advanced',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
+
+  disable_student_booking: {
+    id: 'disable_student_booking',
+    name: 'Mokinys negali rezervuoti pamokų',
+    nameEn: 'Students cannot book lessons',
+    description:
+      'Mokinio ir tėvų portale paslepiama pamokų rezervavimo funkcija („Rezervuoti"), o serveris atmeta tokius bandymus. Pamokas kuria tik korepetitorius arba administracija.',
+    descriptionEn:
+      'Hides the lesson booking ("Book") function in the student & parent portal and the server rejects such attempts. Only the tutor or the organization admin creates lessons.',
+    category: 'advanced',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
+
+  auto_trial_first_lesson: {
+    id: 'auto_trial_first_lesson',
+    name: 'Pirmoji pamoka automatiškai bandomoji',
+    nameEn: 'First lesson defaults to trial',
+    description:
+      'Tvarkaraštyje kuriant pamoką mokiniui, kuris dar neturi nė vienos pamokos, ji automatiškai pažymima kaip bandomoji su org. bandomosios pamokos tema, trukme ir kaina. Administratorius gali viską pakoreguoti prieš išsaugant.',
+    descriptionEn:
+      'When creating a lesson in the schedule for a student with no lessons yet, it is automatically marked as a trial with the org trial topic, duration and price. The admin can adjust everything before saving.',
+    category: 'automation',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
 };
 
 /**

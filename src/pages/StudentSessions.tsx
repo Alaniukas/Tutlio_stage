@@ -165,6 +165,10 @@ export default function StudentSessions() {
     const [tutorOrgIsSchool, setTutorOrgIsSchool] = useState(false);
     /** Org feature `disable_student_reschedule_cancel`: students/parents cannot move or cancel lessons. */
     const [studentActionsDisabled, setStudentActionsDisabled] = useState(false);
+    // Whether the org reschedule/cancel policy has been resolved for the current fetch.
+    // Guards the nav-state flow so a warm session cache can't open the reschedule
+    // picker before we know the org forbids it (the RPC would reject it anyway).
+    const [studentActionsResolved, setStudentActionsResolved] = useState(false);
     const [tutorOrgFeeProfile, setTutorOrgFeeProfile] = useState<OrgFeeProfile | null>(null);
     const [tutorPerlasEnabled, setTutorPerlasEnabled] = useState(false);
     const [perlasLoading, setPerlasLoading] = useState(false);
@@ -458,6 +462,10 @@ export default function StudentSessions() {
         if (navStateConsumed.current) return;
         const state = location.state as { sessionId?: string; flow?: 'cancel' | 'reschedule' | 'cancel_after_payment'; returnTo?: string } | null;
         if (!state?.sessionId || sessions.length === 0) return;
+        // Wait for the org policy before consuming action intents (cached sessions
+        // arrive earlier than the policy fetch; acting on them opened a doomed flow).
+        const isActionFlow = state.flow === 'reschedule' || state.flow === 'cancel' || state.flow === 'cancel_after_payment';
+        if (isActionFlow && !studentActionsResolved) return;
         const session = sessions.find(s => s.id === state.sessionId);
         if (!session) return;
         navStateConsumed.current = true;
@@ -494,7 +502,7 @@ export default function StudentSessions() {
             setIsCancelModalOpen(true);
             navigate(location.pathname, { replace: true, state: null });
         }
-    }, [sessions, studentActionsDisabled]);
+    }, [sessions, studentActionsDisabled, studentActionsResolved]);
 
     const fetchSessions = async () => {
         if (isParentLessonsRoute && skipNextParentDuplicateFetchRef.current) {
@@ -523,6 +531,7 @@ export default function StudentSessions() {
         setTutorOrgIsSchool(false);
         setTutorOrgFeeProfile(null);
         setStudentActionsDisabled(false);
+        setStudentActionsResolved(false);
         setSessionsFetchError(null);
         /** When fixing URL (?studentId=) we still fetch using this id in-flight; defer navigation until success. */
         let parentUrlSyncStudentId: string | null = null;
@@ -713,6 +722,7 @@ export default function StudentSessions() {
                 setStudentActionsDisabled(orgFeatures?.disable_student_reschedule_cancel === true);
             }
         }
+        setStudentActionsResolved(true);
         setTutorPaymentFlags({
             enable_per_lesson: enablePerLesson,
             enable_monthly_billing: enableMonthlyBilling,

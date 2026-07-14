@@ -13,6 +13,29 @@ import {
   extractXmlElement,
   GoSignError,
 } from '../../api/_lib/gosign';
+import { normalizePem } from '../../api/_lib/gosignConfig';
+
+describe('gosign — PEM normalization', () => {
+  it('extracts the first complete key from a quote-wrapped concatenated value', () => {
+    const first =
+      '-----BEGIN RSA PRIVATE KEY-----\nFIRST\n-----END RSA PRIVATE KEY-----';
+    const malformed =
+      `"${first}\nSECOND-WITHOUT-BEGIN\n-----END RSA PRIVATE KEY-----"`;
+
+    expect(normalizePem(malformed)).toBe(first);
+  });
+
+  it('converts a base64 DER RSA private key into usable PEM', () => {
+    const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const derBase64 = privateKey.export({ type: 'pkcs1', format: 'der' }).toString('base64');
+    const normalized = normalizePem(derBase64);
+    const normalizedPublic = crypto.createPublicKey(crypto.createPrivateKey(normalized));
+
+    expect(
+      normalizedPublic.export({ type: 'spki', format: 'pem' }).toString(),
+    ).toBe(publicKey.export({ type: 'spki', format: 'pem' }).toString());
+  });
+});
 
 /**
  * Golden vector from RC's own docs (response-verification.html): a real
@@ -72,6 +95,28 @@ describe('gosign — signature-content serialization', () => {
     expect(s).toBe('<clientId>c</clientId><responseUrl>https://x/app</responseUrl><signingType>Signature</signingType><fileDigest>DIGEST</fileDigest>');
     expect(s).not.toContain('BASE64PDF');
     expect(s).not.toContain('signerPersonalCode');
+  });
+
+  it('matches RC live server-side canonicalization (real vector, excludes fileId)', () => {
+    // The exact string RC reported generating its signature from during a live
+    // InitSigning call. Guards against re-introducing fileId into the signature.
+    const s = serializeSignedContent(
+      initOneSignSignableFields({
+        clientId: 'TUTLIO_PRODID',
+        locale: 'lt',
+        responseUrl: 'https://tutlio.lt/school-sign/return?token=integration-test',
+        position: 'hidden',
+        signingType: 'Signature',
+        file: { fileId: 'itest-1', fileDigest: 'lvO+3Js5B1C7D/rHW8Y39vidB38=', fileName: 'test.pdf', content: 'x' },
+      }),
+    );
+    expect(s).toBe(
+      '<clientId>TUTLIO_PRODID</clientId><locale>lt</locale>' +
+        '<responseUrl>https://tutlio.lt/school-sign/return?token=integration-test</responseUrl>' +
+        '<position>hidden</position><signingType>Signature</signingType>' +
+        '<fileDigest>lvO+3Js5B1C7D/rHW8Y39vidB38=</fileDigest><fileName>test.pdf</fileName>',
+    );
+    expect(s).not.toContain('itest-1'); // fileId must NOT be signed
   });
 
   it('renders booleans as literal true/false', () => {

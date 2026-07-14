@@ -4,7 +4,7 @@
  * Lithuanian-only (school "ugdymo šeimoje" B2B flow).
  */
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 
 type Info = {
   studentName?: string;
@@ -16,8 +16,9 @@ type Info = {
 };
 
 export default function SchoolSign() {
+  const { token: pathToken } = useParams<{ token?: string }>();
   const [params] = useSearchParams();
-  const token = params.get('token') || '';
+  const token = pathToken || params.get('token') || '';
   const [state, setState] = useState<'loading' | 'ready' | 'signed' | 'notready' | 'error'>('loading');
   const [info, setInfo] = useState<Info>({});
   const [err, setErr] = useState('');

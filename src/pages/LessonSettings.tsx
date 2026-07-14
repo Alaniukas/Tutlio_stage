@@ -292,6 +292,13 @@ export default function LessonSettingsPage() {
   const canEditBreakBetween = !orgName || (!orgPolicy.loading && orgPolicy.editBreakBetweenLessons);
   const canEditMinBooking = !orgName || (!orgPolicy.loading && orgPolicy.editMinBookingHours);
   const canEditReminders = !orgName || (!orgPolicy.loading && orgPolicy.editReminders);
+  // Org-locked policy blocks are hidden entirely, not rendered read-only: tutors
+  // shouldn't be shown the org's internal rules (cancellation fees, booking windows).
+  const hideCancellation = !!(orgName && !canEditCancellation);
+  const hideMinBooking = !!(orgName && !canEditMinBooking);
+  const hideBreakBetween = !!(orgName && !canEditBreakBetween);
+  const hideReminders = !!(orgName && !canEditReminders);
+  const hidePolicySection = hideCancellation && hideMinBooking && hideBreakBetween && hideReminders;
   /** Profile fields (not subjects) – "Save all" */
   const canSaveProfileFields =
     !orgName ||
@@ -637,7 +644,8 @@ export default function LessonSettingsPage() {
           </div>
         </SettingsSection>
 
-        {/* === LESSON & NOTIFICATION SETTINGS === */}
+        {/* === LESSON & NOTIFICATION SETTINGS (hidden when fully org-managed) === */}
+        {!hidePolicySection && (
         <SettingsSection
           icon={<Bell className="w-5 h-5 text-violet-600" />}
           iconBg="bg-violet-100"
@@ -648,15 +656,11 @@ export default function LessonSettingsPage() {
           <div className="pt-4 space-y-8">
 
             {/* Cancellation */}
+            {!hideCancellation && (
             <div>
               <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
                 <ShieldAlert className="w-4 h-4 text-amber-600" /> {t('lessonSet.cancelPolicy')}
               </h3>
-              {orgName && !canEditCancellation && (
-                <div className="flex items-center gap-2 mb-3 text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                  <Lock className="w-3.5 h-3.5 flex-shrink-0" /> {t('lessonSet.orgManaged')}
-                </div>
-              )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <DropdownWithCustom
                   label={t('lessonSet.cancelDeadline')}
@@ -701,22 +705,19 @@ export default function LessonSettingsPage() {
                   })()) }} />
                 </div>
               )}
+              <div className="h-px bg-gray-100 mt-8" />
             </div>
-
-            <div className="h-px bg-gray-100" />
+            )}
 
             {/* Registration + Payment Validation */}
+            {!(hideMinBooking && hideBreakBetween) && (
             <div>
               <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
                 <CalendarClock className="w-4 h-4 text-blue-600" /> {t('lessonSet.registrationSettings')}
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {!hideMinBooking && (
                 <div className="space-y-2">
-                  {orgName && !canEditMinBooking && (
-                    <div className="flex items-center gap-2 text-xs text-blue-800 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
-                      <Lock className="w-3.5 h-3.5 flex-shrink-0" /> {t('lessonSet.orgManagedShort')}
-                    </div>
-                  )}
                   <DropdownWithCustom
                     label={t('lessonSet.bookingDeadline')}
                     options={BOOKING_HOURS_OPTIONS}
@@ -738,12 +739,9 @@ export default function LessonSettingsPage() {
                     customLabel={t('lessonSet.customInput')} changeLabel={t('lessonSet.change')} listLabel={t('lessonSet.listView')}
                   />
                 </div>
+                )}
+                {!hideBreakBetween && (
                 <div className="space-y-2">
-                  {orgName && !canEditBreakBetween && (
-                    <div className="flex items-center gap-2 text-xs text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
-                      <Lock className="w-3.5 h-3.5 flex-shrink-0" /> {t('lessonSet.orgManagedShort')}
-                    </div>
-                  )}
                   <DropdownWithCustom
                     label={t('lessonSet.breakBetween')}
                     options={BREAK_MINUTES_OPTIONS}
@@ -758,21 +756,18 @@ export default function LessonSettingsPage() {
                     customLabel={t('lessonSet.customInput')} changeLabel={t('lessonSet.change')} listLabel={t('lessonSet.listView')}
                   />
                 </div>
+                )}
               </div>
+              <div className="h-px bg-gray-100 mt-8" />
             </div>
-
-            <div className="h-px bg-gray-100" />
+            )}
 
             {/* Notifications */}
+            {!hideReminders && (
             <div>
               <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
                 <Bell className="w-4 h-4 text-violet-600" /> {t('lessonSet.reminders')}
               </h3>
-              {orgName && !canEditReminders && (
-                <div className="flex items-center gap-2 mb-3 text-xs text-violet-800 bg-violet-50 border border-violet-100 rounded-lg px-3 py-2">
-                  <Lock className="w-3.5 h-3.5 flex-shrink-0" /> {t('lessonSet.orgManaged')}
-                </div>
-              )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <DropdownWithCustom
                   label={t('lessonSet.reminderStudent')}
@@ -801,12 +796,13 @@ export default function LessonSettingsPage() {
                   customLabel={t('lessonSet.customInput')} changeLabel={t('lessonSet.change')} listLabel={t('lessonSet.listView')}
                 />
               </div>
+              <div className="h-px bg-gray-100 mt-8" />
             </div>
-
-            <div className="h-px bg-gray-100" />
+            )}
 
           </div>
         </SettingsSection>
+        )}
 
         {/* Bottom save button (mobile) */}
         <div className="pb-6 flex justify-end">

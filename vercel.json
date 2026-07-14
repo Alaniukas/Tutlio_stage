@@ -31,6 +31,9 @@
         },
         "api/admin-blog-auto.ts": {
             "maxDuration": 120
+        },
+        "api/school-contract-sign-reconcile.ts": {
+            "maxDuration": 60
         }
     },
     "headers": [
@@ -106,6 +109,18 @@
         {
             "path": "/api/expire-trial-reservations",
             "schedule": "*/15 * * * *"
+        },
+        {
+            "path": "/api/school-contract-sign-reconcile",
+            "schedule": "* * * * *"
+        },
+        {
+            "path": "/api/materialize-recurring-sessions",
+            "schedule": "15 0 * * *"
+        },
+        {
+            "path": "/api/generate-monthly-packages",
+            "schedule": "30 0 * * *"
         },
         {
             "path": "/api/cleanup-whiteboard-data",

@@ -45,6 +45,8 @@ export interface MatchSlot {
   tutorName: string;
   subjectName: string;
   price: number;
+  /** Minimum duration that must still fit after a newly booked interval is removed. */
+  durationMinutes?: number;
   start: Date;
   end: Date;
 }
@@ -56,6 +58,15 @@ export interface MatchParams {
   timeTo: string; // HH:MM
   /** Empty / undefined => all subjects. */
   subjectName?: string;
+  /**
+   * Optional recurring weekly preferences. When supplied, only these weekday
+   * windows are considered. Multiple windows for the same weekday are allowed.
+   */
+  preferredWindows?: Array<{
+    dayOfWeek: number;
+    startTime: string;
+    endTime: string;
+  }>;
 }
 
 function parseHM(value: string): number {
@@ -100,6 +111,10 @@ export function computeTutorSlots(
   for (let d = new Date(from); d <= to; d = addDays(d, 1)) {
     const dayOfWeek = d.getDay();
     const dateStr = format(d, 'yyyy-MM-dd');
+    const preferredWindows = params.preferredWindows?.length
+      ? params.preferredWindows.filter((window) => window.dayOfWeek === dayOfWeek)
+      : [{ dayOfWeek, startTime: params.timeFrom, endTime: params.timeTo }];
+    if (preferredWindows.length === 0) continue;
 
     for (const avail of availability) {
       const isRecurring = avail.is_recurring !== false; // default true
@@ -120,48 +135,59 @@ export function computeTutorSlots(
         : tutorSubs;
       if (subsForRule.length === 0) continue;
 
-      const availStart = Math.max(parseHM(avail.start_time), fromMinutes);
-      const availEnd = Math.min(parseHM(avail.end_time), toMinutes);
-      if (availEnd <= availStart) continue;
+      for (const preferred of preferredWindows) {
+        const availStart = Math.max(
+          parseHM(avail.start_time),
+          parseHM(preferred.startTime),
+          fromMinutes,
+        );
+        const availEnd = Math.min(
+          parseHM(avail.end_time),
+          parseHM(preferred.endTime),
+          toMinutes,
+        );
+        if (availEnd <= availStart) continue;
 
-      const slotStart = new Date(d);
-      slotStart.setHours(Math.floor(availStart / 60), availStart % 60, 0, 0);
-      const slotEnd = new Date(d);
-      slotEnd.setHours(Math.floor(availEnd / 60), availEnd % 60, 0, 0);
+        const slotStart = new Date(d);
+        slotStart.setHours(Math.floor(availStart / 60), availStart % 60, 0, 0);
+        const slotEnd = new Date(d);
+        slotEnd.setHours(Math.floor(availEnd / 60), availEnd % 60, 0, 0);
 
-      // Subtract busy intervals from the window: a booked lesson no longer
-      // hides the whole day, only the time it actually occupies.
-      const tutorBusy = busyByTutor[avail.tutor_id] || [];
-      let freeWindows: Array<{ start: Date; end: Date }> = [{ start: slotStart, end: slotEnd }];
-      for (const b of tutorBusy) {
-        if (b.end <= slotStart || b.start >= slotEnd) continue;
-        const next: Array<{ start: Date; end: Date }> = [];
-        for (const w of freeWindows) {
-          if (b.end <= w.start || b.start >= w.end) {
-            next.push(w);
-            continue;
+        // Subtract busy intervals from the window: a booked lesson no longer
+        // hides the whole day, only the time it actually occupies.
+        const tutorBusy = busyByTutor[avail.tutor_id] || [];
+        let freeWindows: Array<{ start: Date; end: Date }> = [{ start: slotStart, end: slotEnd }];
+        for (const b of tutorBusy) {
+          if (b.end <= slotStart || b.start >= slotEnd) continue;
+          const next: Array<{ start: Date; end: Date }> = [];
+          for (const w of freeWindows) {
+            if (b.end <= w.start || b.start >= w.end) {
+              next.push(w);
+              continue;
+            }
+            if (b.start > w.start) next.push({ start: w.start, end: b.start });
+            if (b.end < w.end) next.push({ start: b.end, end: w.end });
           }
-          if (b.start > w.start) next.push({ start: w.start, end: b.start });
-          if (b.end < w.end) next.push({ start: b.end, end: w.end });
+          freeWindows = next;
         }
-        freeWindows = next;
-      }
-      if (freeWindows.length === 0) continue;
+        if (freeWindows.length === 0) continue;
 
-      for (const sub of subsForRule) {
-        const durationMin = Number(sub.duration_minutes) > 0 ? Number(sub.duration_minutes) : 60;
-        const durMs = durationMin * 60_000;
-        for (const w of freeWindows) {
-          if (w.end.getTime() - w.start.getTime() < durMs) continue;
-          slots.push({
-            tutorId: avail.tutor_id,
-            subjectId: sub.id,
-            tutorName: tutorNames[avail.tutor_id] || '—',
-            subjectName: sub.name,
-            price: sub.price,
-            start: w.start,
-            end: w.end,
-          });
+        for (const sub of subsForRule) {
+          const durationMin = Number(sub.duration_minutes) > 0 ? Number(sub.duration_minutes) : 60;
+          const durMs = durationMin * 60_000;
+          for (const w of freeWindows) {
+            if (w.end.getTime() - w.start.getTime() < durMs) continue;
+            slots.push({
+              tutorId: avail.tutor_id,
+              subjectId: sub.id,
+              tutorName: tutorNames[avail.tutor_id] || '—',
+              subjectName: sub.name,
+              price: sub.price,
+              durationMinutes: durationMin,
+              start: w.start,
+              end: w.end,
+            });
+          }
         }
       }
     }
@@ -169,6 +195,51 @@ export function computeTutorSlots(
 
   slots.sort((a, b) => a.start.getTime() - b.start.getTime());
   return slots;
+}
+
+/**
+ * Remove newly booked intervals from already-rendered search results.
+ *
+ * The search modal can stay mounted behind the booking dialog, so its previous
+ * results would otherwise remain visible until another database search. A busy
+ * interval may split a larger free window into two usable results; fragments
+ * shorter than the subject duration are discarded.
+ */
+export function subtractBusyFromMatchSlots(
+  slots: MatchSlot[],
+  busy: BusyInterval[],
+): MatchSlot[] {
+  const next: MatchSlot[] = [];
+
+  for (const slot of slots) {
+    let fragments: Array<{ start: Date; end: Date }> = [{ start: slot.start, end: slot.end }];
+    for (const interval of busy) {
+      if (interval.tutor_id !== slot.tutorId) continue;
+      const updated: Array<{ start: Date; end: Date }> = [];
+      for (const fragment of fragments) {
+        if (interval.end <= fragment.start || interval.start >= fragment.end) {
+          updated.push(fragment);
+          continue;
+        }
+        if (interval.start > fragment.start) {
+          updated.push({ start: fragment.start, end: interval.start });
+        }
+        if (interval.end < fragment.end) {
+          updated.push({ start: interval.end, end: fragment.end });
+        }
+      }
+      fragments = updated;
+      if (fragments.length === 0) break;
+    }
+
+    const minimumDurationMs = (slot.durationMinutes || 60) * 60_000;
+    for (const fragment of fragments) {
+      if (fragment.end.getTime() - fragment.start.getTime() < minimumDurationMs) continue;
+      next.push({ ...slot, start: fragment.start, end: fragment.end });
+    }
+  }
+
+  return next.sort((a, b) => a.start.getTime() - b.start.getTime());
 }
 
 export interface TutorMatchGroup {

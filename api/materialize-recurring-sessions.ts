@@ -1,0 +1,215 @@
+import type { VercelRequest, VercelResponse } from './types';
+import { createClient } from '@supabase/supabase-js';
+import { requireCronAuth } from './_lib/cronAuth.js';
+import {
+  buildRollingOccurrenceDates,
+  recurringDurationMs,
+  wallClockToUtc,
+  type RecurringFrequency,
+} from './_lib/recurringOccurrences.js';
+import { findActivePackageForBooking } from '../src/lib/lessonPackageBooking.js';
+import { defaultSessionPaymentStatusForStudent } from '../src/lib/studentPaymentModel.js';
+
+const HORIZON_DAYS = 42;
+
+type RecurringTemplate = {
+  id: string;
+  tutor_id: string;
+  student_id: string;
+  subject_id: string | null;
+  start_date: string;
+  end_date: string | null;
+  start_time: string;
+  end_time: string;
+  frequency: RecurringFrequency | null;
+  meeting_link: string | null;
+  topic: string | null;
+  price: number | null;
+};
+
+function ymdInVilnius(value: Date): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Vilnius',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(value);
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+  if (!requireCronAuth(req, res)) return;
+
+  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  if (!supabaseUrl || !serviceRoleKey) {
+    return res.status(500).json({ error: 'Missing Supabase server configuration' });
+  }
+  const supabase = createClient(supabaseUrl, serviceRoleKey);
+
+  const now = new Date();
+  const windowStartYmd = ymdInVilnius(now);
+  const horizon = new Date(now.getTime() + HORIZON_DAYS * 86_400_000);
+  const windowEndYmd = ymdInVilnius(horizon);
+
+  const { data, error } = await supabase
+    .from('recurring_individual_sessions')
+    .select('id, tutor_id, student_id, subject_id, start_date, end_date, start_time, end_time, frequency, meeting_link, topic, price')
+    .eq('active', true)
+    .is('end_date', null)
+    .lte('start_date', windowEndYmd)
+    .limit(1000);
+
+  if (error) return res.status(500).json({ error: error.message });
+  const templates = (data || []) as RecurringTemplate[];
+  if (templates.length === 0) return res.status(200).json({ success: true, created: 0, skipped: 0 });
+
+  const studentIds = [...new Set(templates.map((template) => template.student_id))];
+  const subjectIds = [...new Set(templates.map((template) => template.subject_id).filter(Boolean))] as string[];
+  const [{ data: studentRows }, { data: subjectRows }] = await Promise.all([
+    supabase
+      .from('students')
+      .select('id, payment_model')
+      .in('id', studentIds),
+    subjectIds.length > 0
+      ? supabase.from('subjects').select('id, is_group').in('id', subjectIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; is_group: boolean | null }> }),
+  ]);
+  const paymentModelByStudent = new Map(
+    (studentRows || []).map((student: any) => [student.id as string, student.payment_model as string | null]),
+  );
+  const groupSubjectIds = new Set(
+    (subjectRows || []).filter((subject: any) => subject.is_group === true).map((subject: any) => subject.id as string),
+  );
+
+  let created = 0;
+  let skipped = 0;
+
+  for (const template of templates) {
+    const durationMs = recurringDurationMs(template.start_time, template.end_time);
+    if (durationMs <= 0) {
+      skipped += 1;
+      continue;
+    }
+
+    const dates = buildRollingOccurrenceDates(template, windowStartYmd, windowEndYmd);
+    if (dates.length === 0) continue;
+    const occurrenceStarts = dates.map((date) => wallClockToUtc(date, template.start_time));
+    const rangeStart = occurrenceStarts[0]!.toISOString();
+    const rangeEnd = new Date(occurrenceStarts.at(-1)!.getTime() + durationMs).toISOString();
+
+    const [{ data: existingRows }, { data: tutorBusyRows }] = await Promise.all([
+      supabase
+        .from('sessions')
+        .select('start_time')
+        .eq('recurring_session_id', template.id)
+        .gte('start_time', rangeStart)
+        .lte('start_time', rangeEnd),
+      supabase
+        .from('sessions')
+        .select('start_time, end_time, subject_id')
+        .eq('tutor_id', template.tutor_id)
+        .eq('status', 'active')
+        .lt('start_time', rangeEnd)
+        .gt('end_time', rangeStart),
+    ]);
+
+    const existing = new Set((existingRows || []).map((row: any) => new Date(row.start_time).toISOString()));
+    const busy = (tutorBusyRows || []).map((row: any) => ({
+      start: new Date(row.start_time).getTime(),
+      end: new Date(row.end_time).getTime(),
+      subjectId: row.subject_id as string | null,
+    }));
+
+    const packageMatch = template.subject_id
+      ? await findActivePackageForBooking(supabase, {
+        studentId: template.student_id,
+        subjectId: template.subject_id,
+      })
+      : null;
+    let packageUsed = 0;
+    const packageCapacity = packageMatch
+      ? Math.max(0, Math.floor(Math.min(
+        packageMatch.pkg.available_lessons,
+        packageMatch.item.available_lessons,
+      )))
+      : 0;
+
+    const rows: Array<Record<string, unknown>> = [];
+    for (const start of occurrenceStarts) {
+      const startIso = start.toISOString();
+      if (existing.has(startIso)) continue;
+      const end = new Date(start.getTime() + durationMs);
+      const overlaps = busy.some((interval) => {
+        const overlapsTime = start.getTime() < interval.end && end.getTime() > interval.start;
+        const sameGroupSlot =
+          !!template.subject_id &&
+          groupSubjectIds.has(template.subject_id) &&
+          interval.subjectId === template.subject_id &&
+          interval.start === start.getTime() &&
+          interval.end === end.getTime();
+        return overlapsTime && !sameGroupSlot;
+      });
+      if (overlaps) {
+        skipped += 1;
+        continue;
+      }
+
+      const usesPackage = packageUsed < packageCapacity;
+      if (usesPackage) packageUsed += 1;
+      rows.push({
+        tutor_id: template.tutor_id,
+        student_id: template.student_id,
+        subject_id: template.subject_id,
+        start_time: startIso,
+        end_time: end.toISOString(),
+        status: 'active',
+        meeting_link: template.meeting_link,
+        topic: template.topic,
+        price: template.price,
+        paid: usesPackage,
+        payment_status: defaultSessionPaymentStatusForStudent(
+          paymentModelByStudent.get(template.student_id) ?? null,
+          { paid: false, hasPackage: usesPackage },
+        ),
+        lesson_package_id: usesPackage ? packageMatch!.pkg.id : null,
+        recurring_session_id: template.id,
+      });
+      busy.push({ start: start.getTime(), end: end.getTime(), subjectId: template.subject_id });
+    }
+
+    if (rows.length === 0) continue;
+    const { error: insertError } = await supabase.from('sessions').insert(rows);
+    if (insertError) {
+      console.error('[materialize-recurring-sessions] insert failed', template.id, insertError.message);
+      skipped += rows.length;
+      continue;
+    }
+    created += rows.length;
+
+    if (packageMatch && packageUsed > 0) {
+      const { error: itemError } = await supabase
+        .from('lesson_package_items')
+        .update({
+          available_lessons: packageMatch.item.available_lessons - packageUsed,
+          reserved_lessons: packageMatch.item.reserved_lessons + packageUsed,
+        })
+        .eq('id', packageMatch.item.id);
+      if (!itemError) {
+        await supabase
+          .from('lesson_packages')
+          .update({
+            available_lessons: packageMatch.pkg.available_lessons - packageUsed,
+            reserved_lessons: packageMatch.pkg.reserved_lessons + packageUsed,
+          })
+          .eq('id', packageMatch.pkg.id);
+      } else {
+        console.error('[materialize-recurring-sessions] package item update failed', itemError.message);
+      }
+    }
+  }
+
+  return res.status(200).json({ success: true, created, skipped, templates: templates.length });
+}

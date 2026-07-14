@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
 import { getCached, setCache } from '@/lib/dataCache';
 import { parentFullNameForUserDeduped, parentStudentLinksDeduped } from '@/lib/preload';
+import { fetchSelfBookingDisabledMap } from '@/lib/studentBookingPolicy';
 import { useUser } from '@/contexts/UserContext';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from '@/lib/i18n';
@@ -93,6 +94,8 @@ export default function ParentDashboard() {
   const [selectedTutorPolicy, setSelectedTutorPolicy] =
     useState<ChildTutorPolicy | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  /** Org feature disable_student_booking, per child. */
+  const [bookingDisabledMap, setBookingDisabledMap] = useState<Record<string, boolean>>({});
   const now = useMemo(() => new Date(), []);
 
   useEffect(() => {
@@ -129,6 +132,9 @@ export default function ParentDashboard() {
         .filter((s: any) => s?.id);
 
       const studentIds: string[] = [...new Set(studentsRaw.map((s: any) => s.id))];
+      void fetchSelfBookingDisabledMap(studentIds).then((m) => {
+        if (!cancelled) setBookingDisabledMap(m);
+      });
       if (studentIds.length === 0) {
         if (!cancelled) {
           setChildren([]);
@@ -213,7 +219,7 @@ export default function ParentDashboard() {
       if (orgIdsToCheck.length > 0) {
         const { data: orgs } = await supabase
           .from('organizations')
-          .select('id, perlas_finance_enabled, entity_type, name, slug')
+          .select('id, perlas_finance_enabled, entity_type, name, slug, features')
           .in('id', [...new Set(orgIdsToCheck)]);
         const orgById = new Map((orgs ?? []).map((o: any) => [o.id, o]));
         for (const tp of tutorProfilesList) {
@@ -227,6 +233,7 @@ export default function ParentDashboard() {
           }
           existing.orgIsSchool = org.entity_type === 'school';
           existing.orgFeeProfile = orgFeeProfile(org.slug) ?? orgFeeProfile(tp.organization_id);
+          existing.studentActionsDisabled = (org.features as Record<string, unknown> | null)?.disable_student_reschedule_cancel === true;
           // Stripe Checkout charges in the org's name — show the same provider here.
           if (org.name) existing.providerName = org.name;
         }
@@ -509,6 +516,7 @@ export default function ParentDashboard() {
                 onOpenSession={openSessionModal}
                 navigate={navigate}
                 formatCountdown={formatCountdown}
+                bookingDisabled={bookingDisabledMap[child.studentId] === true}
               />
             ))}
 
@@ -540,6 +548,7 @@ function ChildBlock({
   onOpenSession,
   navigate,
   formatCountdown,
+  bookingDisabled,
 }: {
   child: ChildInfo;
   t: (key: string, params?: Record<string, string | number>) => string;
@@ -552,6 +561,8 @@ function ChildBlock({
   ) => void;
   navigate: ReturnType<typeof useNavigate>;
   formatCountdown: (dateStr: string) => string;
+  /** Org feature disable_student_booking: hide booking wording; calendar stays viewable. */
+  bookingDisabled: boolean;
 }) {
   const { fmt } = useMarketMoney();
   const next = child.nextSession;
@@ -593,7 +604,7 @@ function ChildBlock({
             <CalendarDays className="w-5 h-5 text-violet-600" />
           </div>
           <span className="text-xs font-bold text-gray-700">
-            {t('studentDash.book')}
+            {bookingDisabled ? t('nav.calendar') : t('studentDash.book')}
           </span>
         </button>
         <button
@@ -709,8 +720,8 @@ function ChildBlock({
         </div>
       ) : (
         <div
-          onClick={() => navigate(schedulePath)}
-          className="rounded-[2rem] p-8 bg-white border-2 border-dashed border-gray-200 text-center cursor-pointer hover:border-violet-300 hover:bg-violet-50/50 transition-all flex flex-col items-center justify-center group"
+          onClick={bookingDisabled ? undefined : () => navigate(schedulePath)}
+          className={`rounded-[2rem] p-8 bg-white border-2 border-dashed border-gray-200 text-center transition-all flex flex-col items-center justify-center group ${bookingDisabled ? '' : 'cursor-pointer hover:border-violet-300 hover:bg-violet-50/50'}`}
         >
           <div className="w-16 h-16 rounded-full bg-gray-50 group-hover:bg-violet-100 flex items-center justify-center mb-4 transition-colors">
             <CalendarDays className="w-7 h-7 text-gray-400 group-hover:text-violet-600 transition-colors" />
@@ -718,9 +729,11 @@ function ChildBlock({
           <h3 className="text-lg font-bold text-gray-900 mb-1 tracking-tight">
             {t('parent.noUpcomingFor', { name: child.fullName })}
           </h3>
-          <p className="text-gray-500 text-sm font-medium">
-            {t('parent.tapToBook')}
-          </p>
+          {!bookingDisabled && (
+            <p className="text-gray-500 text-sm font-medium">
+              {t('parent.tapToBook')}
+            </p>
+          )}
         </div>
       )}
 

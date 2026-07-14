@@ -165,6 +165,9 @@ export default function DashboardPage() {
         ready: recentPaymentRowsDismissReady,
     } = useDismissibleDashboardItemIds(recentPaymentRowsKey);
     const { contactVisibility, hasFeature: hasOrgFeature } = useOrgFeatures();
+    // Org feature: ended lessons are not auto-completed — the tutor must confirm each outcome.
+    const requiresStatusConfirmation = hasOrgFeature('tutor_lesson_status_confirmation');
+    const [confirmingStatusId, setConfirmingStatusId] = useState<string | null>(null);
     const [searchParams, setSearchParams] = useSearchParams();
     const dc = getCached<any>('tutor_dashboard');
     const [sessions, setSessions] = useState<Session[]>(dc?.sessions ?? []);
@@ -839,6 +842,45 @@ export default function DashboardPage() {
         setSaving(false);
     };
 
+    /**
+     * Org feature tutor_lesson_status_confirmation: the tutor confirms an ended
+     * lesson's outcome (įvyko / vėlavo / neatvyko / atšaukta) via the server,
+     * which stamps the confirmation and settles package counters.
+     */
+    const confirmLessonStatus = async (
+        session: Session,
+        status: 'completed' | 'no_show' | 'cancelled',
+        late = false,
+    ) => {
+        if (status === 'no_show' && !window.confirm(t('dash.confirmNoShowPrompt'))) return;
+        if (status === 'cancelled' && !window.confirm(t('dash.confirmCancelPrompt'))) return;
+        setConfirmingStatusId(session.id);
+        try {
+            const resp = await fetch('/api/confirm-session-status', {
+                method: 'POST',
+                headers: await authHeaders(),
+                body: JSON.stringify({ sessionId: session.id, status, late }),
+            });
+            const json = await resp.json().catch(() => ({} as Record<string, unknown>));
+            if (!resp.ok) {
+                setToastMessage({ message: t('dash.confirmStatusError', { msg: String((json as any).error || resp.status) }), type: 'error' });
+                return;
+            }
+            setSessions((prev) => prev.map((s) => (s.id === session.id ? { ...s, status } : s)));
+            if (status === 'no_show') {
+                void (async () => {
+                    await fetch('/api/notify-session-no-show', {
+                        method: 'POST',
+                        headers: await authHeaders(),
+                        body: JSON.stringify({ sessionId: session.id }),
+                    });
+                })().catch(() => {});
+            }
+        } finally {
+            setConfirmingStatusId(null);
+        }
+    };
+
     const handleRevertLessonToPlannedDashboard = async () => {
         if (!selectedSession) return;
         setSaving(true);
@@ -994,6 +1036,14 @@ export default function DashboardPage() {
         const d = new Date(s.start_time);
         return s.status === 'active' && d.toDateString() === now.toDateString();
     });
+
+    // Must-do queue (tutor_lesson_status_confirmation): ended lessons whose outcome
+    // the tutor has not confirmed yet. Newest first; not dismissible by design.
+    const pendingStatusSessions = requiresStatusConfirmation
+        ? sessions
+              .filter((s) => s.status === 'active' && isBefore(new Date(s.end_time), now))
+              .sort((a, b) => new Date(b.end_time).getTime() - new Date(a.end_time).getTime())
+        : [];
 
     // Needs attention: sessions where payment deadline is approaching (within 6h) or passed and still unpaid
     const nowMs = now.getTime();
@@ -1162,6 +1212,82 @@ export default function DashboardPage() {
                         <p className="text-xs text-gray-500 mt-1">{t('dash.upcomingLessons')}</p>
                     </div>
                 </div>
+
+                {requiresStatusConfirmation && pendingStatusSessions.length > 0 && (
+                    <div className="bg-white rounded-2xl shadow-sm border-2 border-amber-300 p-5 mb-6">
+                        <div className="flex items-center justify-between mb-1">
+                            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                                <AlertCircle className="w-5 h-5 text-amber-600" />
+                                {t('dash.confirmStatusesTitle')}
+                            </h2>
+                            <span className="text-xs font-bold text-amber-800 bg-amber-100 px-2.5 py-1 rounded-full">
+                                {pendingStatusSessions.length}
+                            </span>
+                        </div>
+                        <p className="text-xs text-gray-500 mb-4">{t('dash.confirmStatusesDesc')}</p>
+                        <div className="space-y-2">
+                            {pendingStatusSessions.slice(0, 8).map((s) => (
+                                <div key={s.id} className="flex flex-col sm:flex-row sm:items-center gap-2 p-3 rounded-xl bg-amber-50/60 border border-amber-100">
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-semibold text-gray-900 truncate">{s.student?.full_name || '—'}</p>
+                                        <p className="text-xs text-gray-500">
+                                            {format(new Date(s.start_time), 'MMM d, HH:mm', { locale: dateFnsLocale })}
+                                            {' – '}
+                                            {format(new Date(s.end_time), 'HH:mm')}
+                                            {s.subjects?.name ? ` · ${s.subjects.name}` : s.topic ? ` · ${s.topic}` : ''}
+                                        </p>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        <Button
+                                            size="sm"
+                                            disabled={confirmingStatusId === s.id}
+                                            onClick={() => void confirmLessonStatus(s, 'completed')}
+                                            className="rounded-lg h-8 px-2.5 text-xs bg-green-600 hover:bg-green-700 text-white"
+                                        >
+                                            <CheckCircle className="w-3.5 h-3.5 mr-1" />
+                                            {t('dash.statusHappened')}
+                                        </Button>
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={confirmingStatusId === s.id}
+                                            onClick={() => void confirmLessonStatus(s, 'completed', true)}
+                                            className="rounded-lg h-8 px-2.5 text-xs text-amber-800 border-amber-300 hover:bg-amber-100"
+                                        >
+                                            <Clock className="w-3.5 h-3.5 mr-1" />
+                                            {t('dash.statusHappenedLate')}
+                                        </Button>
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={confirmingStatusId === s.id}
+                                            onClick={() => void confirmLessonStatus(s, 'no_show')}
+                                            className="rounded-lg h-8 px-2.5 text-xs text-rose-700 border-rose-200 hover:bg-rose-50"
+                                        >
+                                            <UserX className="w-3.5 h-3.5 mr-1" />
+                                            {t('dash.statusNoShow')}
+                                        </Button>
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={confirmingStatusId === s.id}
+                                            onClick={() => void confirmLessonStatus(s, 'cancelled')}
+                                            className="rounded-lg h-8 px-2.5 text-xs text-gray-700 border-gray-300 hover:bg-gray-100"
+                                        >
+                                            <XCircle className="w-3.5 h-3.5 mr-1" />
+                                            {t('dash.statusCancelled')}
+                                        </Button>
+                                    </div>
+                                </div>
+                            ))}
+                            {pendingStatusSessions.length > 8 && (
+                                <Link to="/calendar" className="block text-center text-xs text-indigo-600 hover:underline pt-1">
+                                    {t('dash.confirmStatusesMore', { count: pendingStatusSessions.length - 8 })}
+                                </Link>
+                            )}
+                        </div>
+                    </div>
+                )}
 
                 <div className={cn('grid grid-cols-1 gap-6', isOrgTutor === true ? '' : 'md:grid-cols-2')}>
                     {/* Sessions: org tutor — separate upcoming + cancelled (no € / penalty resolution); others — tabs */}

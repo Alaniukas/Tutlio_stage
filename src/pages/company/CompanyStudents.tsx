@@ -45,12 +45,19 @@ import StudentPaymentModelSection from '@/components/StudentPaymentModelSection'
 import SendInvoiceModal from '@/components/SendInvoiceModal';
 import FindTutorModal from '@/components/FindTutorModal';
 import FindLessonBookDialog, { type FindLessonBookPick } from '@/components/FindLessonBookDialog';
+import type { BusyInterval } from '@/lib/tutorMatching';
 import PackageItemsEditor, { type PackageEditorItem, type PackageEditorSubject } from '@/components/PackageItemsEditor';
 import { pickStudentContactsForTutorEmail, shouldShowPayerContactSection } from '@/lib/orgContactVisibility';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { findOrgTutorEmailConflict } from '@/lib/orgStudentTutorGuards';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
+import {
+  parseStudentGrade,
+  resolveOrganizationLessonPrice,
+  type OrganizationDynamicPricingRule,
+} from '@/lib/organizationDynamicPricing';
+import { formatLocalYmd, monthlyPackagePeriodFrom } from '@/lib/monthlyPackagePlan';
 
 interface Student {
   id: string;
@@ -58,6 +65,9 @@ interface Student {
   full_name: string;
   email: string;
   phone: string;
+  grade?: string | null;
+  pricing_lessons_per_week?: number | null;
+  pricing_lessons_per_week_is_manual?: boolean | null;
   media_publicity_consent?: string | null;
   payer_name?: string | null;
   payer_email?: string | null;
@@ -234,6 +244,7 @@ export default function CompanyStudents() {
   const [trialNoPackageStudentIds, setTrialNoPackageStudentIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(!stc);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [addStudentFindTutorOpen, setAddStudentFindTutorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [orgId, setOrgId] = useState<string | null>(null);
   const [baseUrl, setBaseUrl] = useState('');
@@ -241,6 +252,7 @@ export default function CompanyStudents() {
     full_name: '',
     email: '',
     phone: '',
+    grade: '',
     payer_name: '',
     payer_email: '',
     payer_phone: '',
@@ -277,6 +289,7 @@ export default function CompanyStudents() {
   // Book a lesson from the student card (req 4, gated by student_card_booking)
   const [findLessonOpen, setFindLessonOpen] = useState(false);
   const [findLessonPick, setFindLessonPick] = useState<FindLessonBookPick | null>(null);
+  const [findLessonBookedIntervals, setFindLessonBookedIntervals] = useState<BusyInterval[]>([]);
 
   // Student Detail Modal State
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
@@ -326,6 +339,9 @@ export default function CompanyStudents() {
   const [pkgExpiresAt, setPkgExpiresAt] = useState('');
   const [pkgSending, setPkgSending] = useState(false);
   const [pkgAttachSalesInvoice, setPkgAttachSalesInvoice] = useState(true);
+  const [pkgGrade, setPkgGrade] = useState(1);
+  const [pkgLessonsPerWeek, setPkgLessonsPerWeek] = useState(1);
+  const [pkgDynamicPricingRules, setPkgDynamicPricingRules] = useState<OrganizationDynamicPricingRule[]>([]);
   // Optional pre-booked package times (req 3, gated by package_reservation_flow)
   const [pkgReserveSlots, setPkgReserveSlots] = useState<Array<{ subjectId: string; startIso: string; endIso: string }>>([]);
   const [pkgSlotSubjectId, setPkgSlotSubjectId] = useState('');
@@ -368,6 +384,12 @@ export default function CompanyStudents() {
     enable_monthly_billing: false,
     enable_prepaid_packages: false,
   });
+
+  const monthlyPackageMode = !orgFeaturesLoading && hasFeature('monthly_packages');
+  const monthlyPackagePeriod = useMemo(
+    () => monthlyPackagePeriodFrom(formatLocalYmd(new Date()), pkgLessonsPerWeek),
+    [pkgLessonsPerWeek],
+  );
 
   // Org admin: source of truth is organizations.enable_* (sync to profiles may be delayed after login).
   useEffect(() => {
@@ -531,7 +553,7 @@ export default function CompanyStudents() {
     let cancelled = false;
     (async () => {
       setLoadingPackages(true);
-      const [pkgRes, subjRes, pricingRes] = await Promise.all([
+      const [pkgRes, subjRes, pricingRes, dynamicPricingRes] = await Promise.all([
         supabase
           .from('lesson_packages')
           .select('*, subject:subjects(name, color), lesson_package_items(subject_id, total_lessons, available_lessons, total_price, position, subjects!inner(name, color))')
@@ -549,6 +571,12 @@ export default function CompanyStudents() {
           .select('subject_id, price')
           .eq('student_id', selectedStudent.id)
           .eq('tutor_id', selectedStudent.tutor_id),
+        orgId
+          ? supabase
+            .from('organization_dynamic_pricing')
+            .select('id, organization_id, grade_min, grade_max, lessons_per_week, price')
+            .eq('organization_id', orgId)
+          : Promise.resolve({ data: [] as OrganizationDynamicPricingRule[] }),
       ]);
       if (!cancelled) {
         setStudentPackages(pkgRes.data || []);
@@ -556,10 +584,33 @@ export default function CompanyStudents() {
         const pricingMap: Record<string, number> = {};
         (pricingRes.data || []).forEach((p: any) => { pricingMap[p.subject_id] = Number(p.price); });
         setPkgIndividualPricing(pricingMap);
+        const dynamicRules = (dynamicPricingRes.data || []).map((rule: any) => ({
+          ...rule,
+          grade_min: Number(rule.grade_min),
+          grade_max: Number(rule.grade_max),
+          lessons_per_week: Number(rule.lessons_per_week),
+          price: Number(rule.price),
+        }));
+        setPkgDynamicPricingRules(dynamicRules);
+        const initialGrade = parseStudentGrade(selectedStudent.grade) ?? 1;
+        const initialFrequency = Math.max(1, Number(selectedStudent.pricing_lessons_per_week) || 1);
+        setPkgGrade(initialGrade);
+        setPkgLessonsPerWeek(initialFrequency);
         const first = subjRes.data?.[0];
         if (first) {
-          const initialPrice = pricingMap[first.id] ?? Number(first.price ?? 0);
-          setPkgItems([{ subjectId: first.id, totalLessons: 5, pricePerLesson: initialPrice }]);
+          const initialPrice = resolveOrganizationLessonPrice({
+            rules: dynamicRules,
+            student: { grade: String(initialGrade), pricing_lessons_per_week: initialFrequency },
+            lessonsPerWeek: initialFrequency,
+            individualPrice: pricingMap[first.id],
+            fallbackPrice: Number(first.price ?? 0),
+          });
+          const period = monthlyPackagePeriodFrom(formatLocalYmd(new Date()), initialFrequency);
+          setPkgItems([{
+            subjectId: first.id,
+            totalLessons: monthlyPackageMode ? period.totalLessons : 5,
+            pricePerLesson: initialPrice,
+          }]);
         } else {
           setPkgItems([]);
         }
@@ -567,7 +618,39 @@ export default function CompanyStudents() {
       }
     })();
     return () => { cancelled = true; };
-  }, [selectedStudent, isStudentModalOpen]);
+  }, [selectedStudent, isStudentModalOpen, orgId, monthlyPackageMode]);
+
+  useEffect(() => {
+    if (!monthlyPackageMode || !sendPackageOpen || pkgItems.length === 0) return;
+    const current = pkgItems[0];
+    const subject = packageSubjects.find((row: any) => row.id === current.subjectId);
+    if (!subject) return;
+    const price = resolveOrganizationLessonPrice({
+      rules: pkgDynamicPricingRules,
+      student: { grade: String(pkgGrade), pricing_lessons_per_week: pkgLessonsPerWeek },
+      lessonsPerWeek: pkgLessonsPerWeek,
+      individualPrice: pkgIndividualPricing[current.subjectId],
+      fallbackPrice: Number(subject.price ?? 0),
+    });
+    setPkgItems((items) => {
+      const item = items[0];
+      if (!item) return items;
+      if (item.totalLessons === monthlyPackagePeriod.totalLessons && item.pricePerLesson === price && items.length === 1) {
+        return items;
+      }
+      return [{ ...item, totalLessons: monthlyPackagePeriod.totalLessons, pricePerLesson: price }];
+    });
+  }, [
+    monthlyPackageMode,
+    sendPackageOpen,
+    pkgGrade,
+    pkgLessonsPerWeek,
+    pkgDynamicPricingRules,
+    pkgIndividualPricing,
+    packageSubjects,
+    monthlyPackagePeriod.totalLessons,
+    pkgItems[0]?.subjectId,
+  ]);
 
   useEffect(() => {
     if (!selectedStudent || !isStudentModalOpen) {
@@ -889,7 +972,17 @@ export default function CompanyStudents() {
             totalLessons: it.totalLessons,
             pricePerLesson: it.pricePerLesson,
           })),
-          ...(pkgExpiresAt ? { expiresAt: pkgExpiresAt } : {}),
+          ...(monthlyPackageMode
+            ? {
+              expiresAt: monthlyPackagePeriod.periodEnd,
+              monthlyPlan: {
+                grade: pkgGrade,
+                lessonsPerWeek: pkgLessonsPerWeek,
+                periodStart: monthlyPackagePeriod.periodStart,
+                periodEnd: monthlyPackagePeriod.periodEnd,
+              },
+            }
+            : pkgExpiresAt ? { expiresAt: pkgExpiresAt } : {}),
           ...(!orgUsesManualPackages ? { attachSalesInvoice: pkgAttachSalesInvoice } : {}),
           ...(hasFeature('package_reservation_flow') && pkgReserveSlots.length > 0
             ? { slots: pkgReserveSlots }
@@ -1174,6 +1267,7 @@ export default function CompanyStudents() {
           full_name: newStudent.full_name,
           email: newStudent.email,
           phone: newStudent.phone?.trim() || null,
+          grade: newStudent.grade || null,
           payer_name: contactParent.name || null,
           payer_email: contactParent.email || null,
           payer_phone: contactParent.phone || null,
@@ -1291,6 +1385,7 @@ export default function CompanyStudents() {
       full_name: '',
       email: '',
       phone: '',
+      grade: '',
       payer_name: '',
       payer_email: '',
       payer_phone: '',
@@ -1423,6 +1518,58 @@ export default function CompanyStudents() {
     setToastMessage({ message: t('compStu.commentSaved'), type: 'success' });
     invalidateCache('company_contracts');
     fetchData();
+  };
+
+  const handleUpdateStudentGrade = async (grade: string) => {
+    if (!selectedStudent) return;
+    const ids = selectedStudentGroup.length > 0
+      ? selectedStudentGroup.map((row) => row.id)
+      : [selectedStudent.id];
+    const nextGrade = grade === 'unset' ? null : grade;
+    const { error } = await supabase
+      .from('students')
+      .update({ grade: nextGrade })
+      .in('id', ids);
+    if (error) {
+      setToastMessage({ message: t('compStu.errorPrefix', { msg: error.message }), type: 'error' });
+      return;
+    }
+
+    setSelectedStudent((current) => (current ? { ...current, grade: nextGrade } : current));
+    setSelectedStudentGroup((current) => current.map((row) => ({ ...row, grade: nextGrade })));
+    setStudents((current) => current.map((row) => (ids.includes(row.id) ? { ...row, grade: nextGrade } : row)));
+    setToastMessage({ message: t('dynamicPricing.studentGradeSaved'), type: 'success' });
+  };
+
+  /**
+   * Item 9 (dynamic pricing): contracted lessons-per-week the admin decides.
+   * 'auto' recomputes from the recurring schedule; a number pins it manually.
+   * The RPC also re-prices upcoming unpaid lessons to the matching tier.
+   */
+  const handleUpdateStudentFrequency = async (value: string) => {
+    if (!selectedStudent) return;
+    const ids = selectedStudentGroup.length > 0
+      ? selectedStudentGroup.map((row) => row.id)
+      : [selectedStudent.id];
+    const manual = value !== 'auto';
+    const freq = manual ? Number(value) : null;
+    let effective: number | null = freq;
+    for (const id of ids) {
+      const { data, error } = await supabase.rpc('set_student_pricing_frequency', {
+        p_student_id: id,
+        p_lessons_per_week: freq,
+      });
+      if (error) {
+        setToastMessage({ message: t('compStu.errorPrefix', { msg: error.message }), type: 'error' });
+        return;
+      }
+      if (id === selectedStudent.id) effective = (data as number | null) ?? null;
+    }
+    const patch = { pricing_lessons_per_week: effective, pricing_lessons_per_week_is_manual: manual };
+    setSelectedStudent((current) => (current ? { ...current, ...patch } : current));
+    setSelectedStudentGroup((current) => current.map((row) => ({ ...row, ...patch })));
+    setStudents((current) => current.map((row) => (ids.includes(row.id) ? { ...row, ...patch } : row)));
+    setToastMessage({ message: t('dynamicPricing.frequencySaved'), type: 'success' });
   };
 
   const handleDetachStudent = async (id: string) => {
@@ -1613,7 +1760,22 @@ export default function CompanyStudents() {
               <form onSubmit={handleAddStudent}>
                 <div className="grid gap-4 py-4">
                   <div className="space-y-2">
-                    <Label>{t('compStu.tutorsRequired')}</Label>
+                    <div className="flex items-center justify-between gap-3">
+                      <Label>{t('compStu.tutorsRequired')}</Label>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 rounded-lg border-indigo-200 text-xs text-indigo-700 hover:bg-indigo-50"
+                        onClick={() => {
+                          setMultiTutorPickerOpen(false);
+                          setAddStudentFindTutorOpen(true);
+                        }}
+                      >
+                        <Search className="mr-1.5 h-3.5 w-3.5" />
+                        {t('compStu.findTutorByAvailability')}
+                      </Button>
+                    </div>
                     <div className="relative">
                       <button
                         type="button"
@@ -1726,6 +1888,27 @@ export default function CompanyStudents() {
                       placeholder="+370 600 00000"
                       className="rounded-xl"
                     />
+                  </div>
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label>{t('studentSettings.grade')}</Label>
+                    <Select
+                      value={newStudent.grade || 'unset'}
+                      onValueChange={(value) => setNewStudent({ ...newStudent, grade: value === 'unset' ? '' : value })}
+                    >
+                      <SelectTrigger className="rounded-xl">
+                        <SelectValue placeholder={t('dynamicPricing.gradeUnset')} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unset">{t('dynamicPricing.gradeUnset')}</SelectItem>
+                        {Array.from({ length: 12 }, (_, index) => (
+                          <SelectItem key={index + 1} value={`${index + 1} klasė`}>
+                            {t('onboard.gradeN', { n: index + 1 })}
+                          </SelectItem>
+                        ))}
+                        <SelectItem value="Studentas">{t('lessonSet.gradeUniversity')}</SelectItem>
+                        <SelectItem value="Kita">{t('onboard.gradeOther')}</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                   </div>
 
@@ -2526,6 +2709,56 @@ export default function CompanyStudents() {
                     <p className="text-gray-600 text-sm">
                       {t('compStu.codeInline')} <code className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">{selectedStudent.invite_code}</code>
                     </p>
+                    <div className="mt-3 max-w-xs space-y-1.5">
+                      <Label className="text-xs text-gray-500">{t('studentSettings.grade')}</Label>
+                      <Select
+                        value={selectedStudent.grade || 'unset'}
+                        onValueChange={(value) => void handleUpdateStudentGrade(value)}
+                      >
+                        <SelectTrigger className="h-9 rounded-xl bg-white">
+                          <SelectValue placeholder={t('dynamicPricing.gradeUnset')} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="unset">{t('dynamicPricing.gradeUnset')}</SelectItem>
+                          {Array.from({ length: 12 }, (_, index) => (
+                            <SelectItem key={index + 1} value={`${index + 1} klasė`}>
+                              {t('onboard.gradeN', { n: index + 1 })}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value="Studentas">{t('lessonSet.gradeUniversity')}</SelectItem>
+                          <SelectItem value="Kita">{t('onboard.gradeOther')}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Label className="text-xs text-gray-500">{t('dynamicPricing.frequencyLabel')}</Label>
+                      <Select
+                        value={
+                          selectedStudent.pricing_lessons_per_week_is_manual && selectedStudent.pricing_lessons_per_week
+                            ? String(selectedStudent.pricing_lessons_per_week)
+                            : 'auto'
+                        }
+                        onValueChange={(value) => void handleUpdateStudentFrequency(value)}
+                      >
+                        <SelectTrigger className="h-9 rounded-xl bg-white">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="auto">{t('dynamicPricing.frequencyAuto')}</SelectItem>
+                          {Array.from({ length: 7 }, (_, index) => (
+                            <SelectItem key={index + 1} value={String(index + 1)}>
+                              {t('dynamicPricing.frequencyOption', { n: index + 1 })}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[11px] text-gray-500">
+                        {selectedStudent.pricing_lessons_per_week
+                          ? t('dynamicPricing.studentFrequency', { frequency: selectedStudent.pricing_lessons_per_week })
+                          : t('dynamicPricing.studentFrequencyUnset')}
+                      </p>
+                      {!selectedStudent.grade && (
+                        <p className="text-[11px] text-amber-700">{t('dynamicPricing.studentGradeRequired')}</p>
+                      )}
+                    </div>
                     {isSchoolView && selectedStudent && (
                       <SchoolStudentContractStatus
                         student={selectedStudent}
@@ -3288,14 +3521,85 @@ export default function CompanyStudents() {
                   {sendPackageOpen && (
                     <div className="mb-4 p-4 bg-violet-50 border border-violet-200 rounded-xl space-y-3">
                       <p className="text-xs font-semibold text-violet-800">{t('compStu.sendPackageTitle')}</p>
-                      <PackageItemsEditor
-                        compact
-                        disabled={pkgSending || orgFeaturesLoading}
-                        subjects={packageSubjects as PackageEditorSubject[]}
-                        individualPricing={pkgIndividualPricing}
-                        items={pkgItems}
-                        onChange={setPkgItems}
-                      />
+                      {monthlyPackageMode ? (
+                        <div className="space-y-3 rounded-xl border border-violet-200 bg-white/70 p-3">
+                          <div className="space-y-1">
+                            <Label className="text-[11px] text-violet-900">{t('package.itemSubject')}</Label>
+                            <Select
+                              value={pkgItems[0]?.subjectId || ''}
+                              onValueChange={(subjectId) => {
+                                const subject = packageSubjects.find((row: any) => row.id === subjectId);
+                                const price = resolveOrganizationLessonPrice({
+                                  rules: pkgDynamicPricingRules,
+                                  student: { grade: String(pkgGrade), pricing_lessons_per_week: pkgLessonsPerWeek },
+                                  lessonsPerWeek: pkgLessonsPerWeek,
+                                  individualPrice: pkgIndividualPricing[subjectId],
+                                  fallbackPrice: Number(subject?.price ?? 0),
+                                });
+                                setPkgItems([{
+                                  subjectId,
+                                  totalLessons: monthlyPackagePeriod.totalLessons,
+                                  pricePerLesson: price,
+                                }]);
+                              }}
+                            >
+                              <SelectTrigger className="h-9 rounded-lg text-xs">
+                                <SelectValue placeholder={t('package.selectSubject')} />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {packageSubjects.map((subject: any) => (
+                                  <SelectItem key={subject.id} value={subject.id}>{subject.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <Label className="text-[11px] text-violet-900">{t('package.studentGrade')}</Label>
+                              <Select value={String(pkgGrade)} onValueChange={(value) => setPkgGrade(Number(value))}>
+                                <SelectTrigger className="h-9 rounded-lg text-xs"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  {Array.from({ length: 12 }, (_, index) => index + 1).map((grade) => (
+                                    <SelectItem key={grade} value={String(grade)}>{t('package.gradeValue', { grade })}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-[11px] text-violet-900">{t('package.weeklyFrequency')}</Label>
+                              <Select value={String(pkgLessonsPerWeek)} onValueChange={(value) => setPkgLessonsPerWeek(Number(value))}>
+                                <SelectTrigger className="h-9 rounded-lg text-xs"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  {[1, 2, 3, 4, 5].map((count) => (
+                                    <SelectItem key={count} value={String(count)}>{t('findLesson.lessonsPerWeek', { count })}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                          <div className="rounded-lg bg-violet-50 px-3 py-2 text-xs text-violet-800">
+                            <p className="font-medium">
+                              {t('package.monthlyCalculation', {
+                                from: monthlyPackagePeriod.periodStart,
+                                to: monthlyPackagePeriod.periodEnd,
+                                lessons: monthlyPackagePeriod.totalLessons,
+                              })}
+                            </p>
+                            <p className="mt-1 text-[11px] text-violet-600">
+                              {t('package.monthlyAutoRenewHint', { date: monthlyPackagePeriod.nextGenerationDate })}
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <PackageItemsEditor
+                          compact
+                          disabled={pkgSending || orgFeaturesLoading}
+                          subjects={packageSubjects as PackageEditorSubject[]}
+                          individualPricing={pkgIndividualPricing}
+                          items={pkgItems}
+                          onChange={setPkgItems}
+                        />
+                      )}
                       {!orgFeaturesLoading && hasFeature('package_reservation_flow') && (
                         <div className="space-y-2 border-t border-violet-200 pt-3">
                           <p className="text-xs font-semibold text-violet-800">{t('package.reserveTimesTitle')}</p>
@@ -3374,6 +3678,8 @@ export default function CompanyStudents() {
                         </div>
                       )}
                       <div className="grid grid-cols-3 gap-2">
+                        {!monthlyPackageMode && (
+                        <>
                         <div className="space-y-1 col-span-2">
                           <Label className="text-xs">{t('package.validUntil')}</Label>
                           <DateInput
@@ -3389,6 +3695,16 @@ export default function CompanyStudents() {
                             {pkgSending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : t('compStu.sendBtn')}
                           </Button>
                         </div>
+                        </>
+                        )}
+                        {monthlyPackageMode && (
+                          <div className="col-span-3">
+                            <Button size="sm" className="h-9 w-full rounded-lg bg-violet-600 text-xs hover:bg-violet-700"
+                              onClick={handleSendPackage} disabled={pkgSending || pkgItems.length === 0 || orgFeaturesLoading}>
+                              {pkgSending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : t('compStu.sendBtn')}
+                            </Button>
+                          </div>
+                        )}
                       </div>
                       {!orgUsesManualPackages && (
                       <label className="flex items-start gap-2 cursor-pointer text-xs text-violet-900">
@@ -3404,7 +3720,7 @@ export default function CompanyStudents() {
                         </span>
                       </label>
                       )}
-                      <p className="text-[11px] text-violet-500">{t('package.validUntilHint')}</p>
+                      {!monthlyPackageMode && <p className="text-[11px] text-violet-500">{t('package.validUntilHint')}</p>}
                       <p className="text-xs text-violet-600">
                         {orgUsesManualPackages ? t('compStu.manualPackageSendHint') : t('compStu.stripePaymentHint')}
                       </p>
@@ -3503,7 +3819,10 @@ export default function CompanyStudents() {
                     <Button
                       variant="outline"
                       className="rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50"
-                      onClick={() => setFindLessonOpen(true)}
+                      onClick={() => {
+                        setFindLessonBookedIntervals([]);
+                        setFindLessonOpen(true);
+                      }}
                     >
                       <Search className="w-4 h-4 mr-2" />
                       {t('compStu.bookLessonFindTutor')}
@@ -3545,6 +3864,22 @@ export default function CompanyStudents() {
           }}
         />
 
+        <FindTutorModal
+          isOpen={addStudentFindTutorOpen}
+          onClose={() => setAddStudentFindTutorOpen(false)}
+          orgId={orgId}
+          frequencyEnabled
+          onPickTutor={(tutor) => {
+            setNewStudent((current) => ({
+              ...current,
+              tutor_ids: current.tutor_ids.includes(tutor.id)
+                ? current.tutor_ids
+                : [...current.tutor_ids, tutor.id],
+            }));
+            setAddStudentFindTutorOpen(false);
+          }}
+        />
+
         {!orgFeaturesLoading && hasFeature('student_card_booking') && (
           <>
             <FindTutorModal
@@ -3553,6 +3888,7 @@ export default function CompanyStudents() {
               orgId={orgId}
               primaryTutorId={selectedStudent?.tutor_id ?? null}
               frequencyEnabled={hasFeature('tutor_frequency_search')}
+              busyIntervals={findLessonBookedIntervals}
               onPickSlot={(slot) => {
                 setFindLessonPick({
                   tutorId: slot.tutorId,
@@ -3568,8 +3904,15 @@ export default function CompanyStudents() {
               pick={findLessonPick}
               studentId={selectedStudent?.id ?? ''}
               onClose={() => setFindLessonPick(null)}
-              onBooked={() => {
-                setFindLessonPick(null);
+              onBooked={(booking) => {
+                setFindLessonBookedIntervals((current) => [
+                  ...current,
+                  {
+                    tutor_id: booking.tutorId,
+                    start: new Date(booking.startIso),
+                    end: new Date(booking.endIso),
+                  },
+                ]);
                 setModalSessionsRefreshKey((k) => k + 1);
                 fetchData();
               }}
@@ -3621,6 +3964,9 @@ export default function CompanyStudents() {
               <div className="text-xs text-gray-500">
                 {t('compStu.tutorInline')} <span className="font-semibold text-gray-800">{selectedStudent?.tutor?.full_name || '—'}</span>
               </div>
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
+                {t('compStu.trialWithoutDateHint')}
+              </div>
             </div>
             <DialogFooter>
               <Button
@@ -3666,7 +4012,7 @@ export default function CompanyStudents() {
                 }}
               >
                 {trialSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                {t('compStu.confirmAndSend')}
+                {t('compStu.confirmAndSendWithoutDate')}
               </Button>
             </DialogFooter>
           </DialogContent>

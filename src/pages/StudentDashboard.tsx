@@ -93,6 +93,10 @@ export default function StudentDashboard() {
         enable_per_lesson: true,
         enable_monthly_billing: false,
     });
+    // Org feature disable_student_reschedule_cancel — hide self-service reschedule/cancel entry points.
+    const [studentActionsDisabled, setStudentActionsDisabled] = useState(false);
+    // Org feature disable_student_booking — hide self-service booking entry points.
+    const [studentBookingDisabled, setStudentBookingDisabled] = useState(false);
     const { blocked: paymentBookingBlocked, loading: paymentBlockLoading } = useStudentPaymentBlock(activeStudentId);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
     const now = new Date();
@@ -284,13 +288,19 @@ export default function StudentDashboard() {
                 if (oid) {
                     const { data: orgPay } = await supabase
                         .from('organizations')
-                        .select('enable_per_lesson, enable_monthly_billing')
+                        .select('enable_per_lesson, enable_monthly_billing, features')
                         .eq('id', oid)
                         .maybeSingle();
                     if (orgPay) {
                         enablePerLesson = (orgPay as { enable_per_lesson?: boolean }).enable_per_lesson ?? enablePerLesson;
                         enableMonthlyBilling = !!(orgPay as { enable_monthly_billing?: boolean }).enable_monthly_billing;
+                        const orgFeatures = (orgPay as { features?: Record<string, unknown> | null }).features;
+                        setStudentActionsDisabled(orgFeatures?.disable_student_reschedule_cancel === true);
+                        setStudentBookingDisabled(orgFeatures?.disable_student_booking === true);
                     }
+                } else {
+                    setStudentActionsDisabled(false);
+                    setStudentBookingDisabled(false);
                 }
                 setTutorPaymentFlags({
                     enable_per_lesson: enablePerLesson,
@@ -459,13 +469,15 @@ export default function StudentDashboard() {
                     </div>
                 )}
 
-                <div className="grid grid-cols-3 gap-3">
-                    <button onClick={() => navigate('/student/schedule')} className="bg-white hover:bg-violet-50 hover:border-violet-200 transition-all rounded-3xl p-4 flex flex-col items-center justify-center gap-2 border border-gray-100 shadow-sm aspect-square group">
-                        <div className="w-12 h-12 rounded-full bg-violet-100 flex items-center justify-center group-hover:scale-110 transition-transform">
-                            <CalendarDays className="w-5 h-5 text-violet-600" />
-                        </div>
-                        <span className="text-xs font-bold text-gray-700">{t('studentDash.book')}</span>
-                    </button>
+                <div className={`grid ${studentBookingDisabled ? 'grid-cols-2' : 'grid-cols-3'} gap-3`}>
+                    {!studentBookingDisabled && (
+                        <button onClick={() => navigate('/student/schedule')} className="bg-white hover:bg-violet-50 hover:border-violet-200 transition-all rounded-3xl p-4 flex flex-col items-center justify-center gap-2 border border-gray-100 shadow-sm aspect-square group">
+                            <div className="w-12 h-12 rounded-full bg-violet-100 flex items-center justify-center group-hover:scale-110 transition-transform">
+                                <CalendarDays className="w-5 h-5 text-violet-600" />
+                            </div>
+                            <span className="text-xs font-bold text-gray-700">{t('studentDash.book')}</span>
+                        </button>
+                    )}
                     <button onClick={() => navigate('/student/sessions')} className="bg-white hover:bg-blue-50 hover:border-blue-200 transition-all rounded-3xl p-4 flex flex-col items-center justify-center gap-2 border border-gray-100 shadow-sm aspect-square group">
                         <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center group-hover:scale-110 transition-transform">
                             <BookOpen className="w-5 h-5 text-blue-600" />
@@ -651,12 +663,17 @@ export default function StudentDashboard() {
                         </div>
                     </div>
                 ) : (
-                    <div onClick={() => navigate('/student/schedule')} className="rounded-[2rem] p-8 bg-white border-2 border-dashed border-gray-200 text-center cursor-pointer hover:border-violet-300 hover:bg-violet-50/50 transition-all flex flex-col items-center justify-center group">
+                    <div
+                        onClick={studentBookingDisabled ? undefined : () => navigate('/student/schedule')}
+                        className={`rounded-[2rem] p-8 bg-white border-2 border-dashed border-gray-200 text-center transition-all flex flex-col items-center justify-center group ${studentBookingDisabled ? '' : 'cursor-pointer hover:border-violet-300 hover:bg-violet-50/50'}`}
+                    >
                         <div className="w-16 h-16 rounded-full bg-gray-50 group-hover:bg-violet-100 flex items-center justify-center mb-4 transition-colors">
                             <CalendarDays className="w-7 h-7 text-gray-400 group-hover:text-violet-600 transition-colors" />
                         </div>
                         <h3 className="text-xl font-bold text-gray-900 mb-1 tracking-tight">{t('studentDash.noLessons')}</h3>
-                        <p className="text-gray-500 text-sm font-medium">{t('studentDash.tapToBook')}</p>
+                        {!studentBookingDisabled && (
+                            <p className="text-gray-500 text-sm font-medium">{t('studentDash.tapToBook')}</p>
+                        )}
                     </div>
                 )}
 
@@ -852,6 +869,11 @@ export default function StudentDashboard() {
                     )}
 
                     {selectedSession?.status === 'active' && isAfter(new Date(selectedSession.end_time), new Date()) && (
+                        studentActionsDisabled ? (
+                            <p className="mt-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                                {t('stuSess.actionsDisabledByOrg')}
+                            </p>
+                        ) : (
                         <DialogFooter className="mt-2 flex gap-2 sm:flex-row">
                             <Button
                                 variant="outline"
@@ -870,6 +892,7 @@ export default function StudentDashboard() {
                                 {t('studentDash.cancelLesson')}
                             </Button>
                         </DialogFooter>
+                        )
                     )}
                 </DialogContent>
             </Dialog>

@@ -23,6 +23,11 @@ interface StatusBadgeProps {
     endTime?: string | Date | null;
     /** Lesson was rescheduled (req 6, monthly_packages) — shows a secondary "moved" chip. */
     moved?: boolean;
+    /**
+     * Org feature tutor_lesson_status_confirmation: past `active` lessons are NOT
+     * auto-completed — show "status needed" instead of deriving "completed".
+     */
+    pendingConfirmation?: boolean;
 }
 
 export default function StatusBadge(props: StatusBadgeProps) {
@@ -53,10 +58,20 @@ function StatusBadgeBase({
     hidePaymentStatus,
     treatUnpaidAsReserved,
     endTime,
+    pendingConfirmation,
 }: StatusBadgeProps) {
     const { t } = useTranslation();
 
     const ended = lessonHasEnded(endTime);
+
+    if (pendingConfirmation && status === 'active' && ended) {
+        return (
+            <span className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 text-xs font-medium", className)}>
+                <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                {t('status.needsStatusConfirmation')}
+            </span>
+        );
+    }
 
     if (status === 'cancelled') {
         return (

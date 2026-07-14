@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, FileText, Send, CheckCircle, Edit2, Trash2, PenLine } from 'lucide-react';
+import { Plus, FileText, Send, CheckCircle, Edit2, Trash2, PenLine, Settings, Save } from 'lucide-react';
 import Toast from '@/components/Toast';
 import { sendEmail } from '@/lib/email';
 import { useTranslation } from '@/lib/i18n';
@@ -32,6 +32,12 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { schoolContractPdfStoragePath } from '@/lib/schoolContractPdfPath';
 import { openContractFileInNewTab } from '@/lib/contractStorage';
 import { fmtMoney } from '@/lib/marketMoney';
+import { validateDocxTemplateBytes } from '@/lib/docxTemplateValidation';
+import {
+  mergeSchoolContractSigningSettings,
+  parseSchoolContractSigningSettings,
+  type SchoolContractSigningSettings,
+} from '@/lib/schoolContractSigningSettings';
 
 interface Student {
   id: string;
@@ -75,6 +81,7 @@ interface Contract {
   pdf_url?: string | null;
   signed_contract_url?: string | null;
   signed_uploaded_at?: string | null;
+  completion_submitted_at?: string | null;
   additional_fee_amount?: number | null;
   additional_fee_purpose?: string | null;
   student?: { full_name: string; email: string; phone?: string | null; payer_name: string | null; payer_email: string | null; payer_phone?: string | null; payer_personal_code?: string | null; parent_secondary_name?: string | null; parent_secondary_email?: string | null; parent_secondary_phone?: string | null; parent_secondary_personal_code?: string | null; parent_secondary_address?: string | null; student_address?: string | null; student_city?: string | null; child_birth_date?: string | null };
@@ -132,6 +139,7 @@ function templateNameFromFileName(fileName: string): string {
 }
 
 const CONTRACTS_CACHE_KEY = 'company_contracts';
+const CONTRACTS_SELECT = '*, media_publicity_consent, student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent)';
 
 export default function CompanyContracts() {
   const { t: tr } = useTranslation();
@@ -141,6 +149,12 @@ export default function CompanyContracts() {
   const [orgId, setOrgId] = useState<string | null>(cc?.orgId ?? null);
   const [orgName, setOrgName] = useState(cc?.orgName ?? '');
   const [orgEmail, setOrgEmail] = useState(cc?.orgEmail ?? '');
+  const [orgFeatures, setOrgFeatures] = useState<Record<string, unknown>>(cc?.orgFeatures ?? {});
+  const [eSignEnabled, setESignEnabled] = useState(Boolean(cc?.eSignEnabled));
+  const [signingSettings, setSigningSettings] = useState<SchoolContractSigningSettings>(
+    cc?.signingSettings ?? parseSchoolContractSigningSettings({}, cc?.orgEmail ?? ''),
+  );
+  const [savingSigningSettings, setSavingSigningSettings] = useState(false);
   const [templates, setTemplates] = useState<Template[]>(cc?.templates ?? []);
   const [contracts, setContracts] = useState<Contract[]>(cc?.contracts ?? []);
   const [students, setStudents] = useState<Student[]>(cc?.students ?? []);
@@ -188,7 +202,7 @@ export default function CompanyContracts() {
 
     const { data: admin } = await supabase
       .from('organization_admins')
-      .select('organization_id, organizations(name, email)')
+      .select('organization_id, organizations(name, email, features)')
       .eq('user_id', user.id)
       .maybeSingle();
 
@@ -196,12 +210,19 @@ export default function CompanyContracts() {
     setOrgId(admin.organization_id);
     const name = (admin.organizations as any)?.name || '';
     const email = (admin.organizations as any)?.email || '';
+    const features = (admin.organizations as any)?.features && typeof (admin.organizations as any).features === 'object'
+      ? (admin.organizations as any).features as Record<string, unknown>
+      : {};
+    const nextSigningSettings = parseSchoolContractSigningSettings(features, email);
     setOrgName(name);
     setOrgEmail(email);
+    setOrgFeatures(features);
+    setESignEnabled(features.school_contract_esign === true);
+    setSigningSettings(nextSigningSettings);
 
     const [tRes, cRes, sRes] = await Promise.all([
       supabase.from('school_contract_templates').select('*').eq('organization_id', admin.organization_id).order('created_at', { ascending: false }),
-      supabase.from('school_contracts').select('*, media_publicity_consent, student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent)').eq('organization_id', admin.organization_id).is('archived_at', null).order('created_at', { ascending: false }),
+      supabase.from('school_contracts').select(CONTRACTS_SELECT).eq('organization_id', admin.organization_id).is('archived_at', null).order('created_at', { ascending: false }),
       supabase.from('students').select('id, full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent').eq('organization_id', admin.organization_id).order('full_name'),
     ]);
 
@@ -211,11 +232,93 @@ export default function CompanyContracts() {
     setTemplates(tData);
     setContracts(cData);
     setStudents(sData);
-    setCache(CONTRACTS_CACHE_KEY, { orgId: admin.organization_id, orgName: name, orgEmail: email, templates: tData, contracts: cData, students: sData });
+    setCache(CONTRACTS_CACHE_KEY, {
+      orgId: admin.organization_id,
+      orgName: name,
+      orgEmail: email,
+      orgFeatures: features,
+      eSignEnabled: features.school_contract_esign === true,
+      signingSettings: nextSigningSettings,
+      templates: tData,
+      contracts: cData,
+      students: sData,
+    });
     setLoading(false);
   };
 
   const reload = () => { invalidateCache(CONTRACTS_CACHE_KEY); load(); };
+
+  /**
+   * Status polling must not put the whole page back into its initial loading
+   * state. Refresh only contract cards so settings/forms stay untouched and no
+   * spinner flashes while the server reconciles GoSign in the background.
+   */
+  const refreshContractsSilently = async () => {
+    if (!orgId) return;
+    const { data, error } = await supabase
+      .from('school_contracts')
+      .select(CONTRACTS_SELECT)
+      .eq('organization_id', orgId)
+      .is('archived_at', null)
+      .order('created_at', { ascending: false });
+    if (error) {
+      console.error('[CompanyContracts] background contract refresh failed:', error.message);
+      return;
+    }
+    const nextContracts = (data || []) as Contract[];
+    setContracts(nextContracts);
+    const cached = getCached<any>(CONTRACTS_CACHE_KEY);
+    if (cached) setCache(CONTRACTS_CACHE_KEY, { ...cached, contracts: nextContracts });
+  };
+
+  useEffect(() => {
+    if (!orgId) return;
+    const refresh = () => { void refreshContractsSilently(); };
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin === window.location.origin && event.data?.type === 'tutlio:school-contract-updated') refresh();
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === 'tutlio:school-contract-updated') refresh();
+    };
+    window.addEventListener('message', onMessage);
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('focus', refresh);
+    const hasPending = contracts.some((contract) =>
+      ['sent', 'awaiting_school_signature', 'signed_by_school'].includes(contract.signing_status),
+    );
+    const timer = hasPending ? window.setInterval(refresh, 30_000) : undefined;
+    return () => {
+      window.removeEventListener('message', onMessage);
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('focus', refresh);
+      if (timer) window.clearInterval(timer);
+    };
+  }, [orgId, contracts.map((contract) => `${contract.id}:${contract.signing_status}`).join('|')]);
+
+  const saveSigningSettings = async () => {
+    if (!orgId) return;
+    const email = signingSettings.email.trim();
+    if (!/^\S+@\S+\.\S+$/.test(email)) {
+      setToast({ message: 'Įveskite teisingą sutarčių srauto el. pašto adresą.', type: 'error' });
+      return;
+    }
+    if (!signingSettings.reason.trim()) {
+      setToast({ message: 'Įveskite el. parašo paskirtį.', type: 'error' });
+      return;
+    }
+    setSavingSigningSettings(true);
+    const mergedFeatures = mergeSchoolContractSigningSettings(orgFeatures, signingSettings);
+    const { error } = await supabase.from('organizations').update({ features: mergedFeatures }).eq('id', orgId);
+    setSavingSigningSettings(false);
+    if (error) {
+      setToast({ message: error.message, type: 'error' });
+      return;
+    }
+    setOrgFeatures(mergedFeatures);
+    setSigningSettings(parseSchoolContractSigningSettings(mergedFeatures, orgEmail));
+    invalidateCache(CONTRACTS_CACHE_KEY);
+    setToast({ message: 'El. pasirašymo nustatymai išsaugoti.', type: 'success' });
+  };
 
   const saveTemplate = async () => {
     if (!orgId) return;
@@ -244,6 +347,14 @@ export default function CompanyContracts() {
 
     if (templatePdfFile) {
       const fileExt = templatePdfFile.name.split('.').pop()?.toLowerCase() || 'pdf';
+      if (fileExt === 'docx') {
+        const validationError = validateDocxTemplateBytes(await templatePdfFile.arrayBuffer());
+        if (validationError) {
+          setToast({ message: validationError, type: 'error' });
+          setSaving(false);
+          return;
+        }
+      }
       const hdrs = await authHeaders();
       if (!hdrs.Authorization) {
         setToast({ message: tr('school.toastTemplateMustBeLogged'), type: 'error' });
@@ -294,11 +405,13 @@ export default function CompanyContracts() {
 
       // If admin uploads DOCX template, extract text once and keep as editable body placeholders source.
       // This allows populating contract fields from the exact template wording and still sending PDF output.
+      // Schools included: their `filled_body` (and any legacy text fallback) must carry
+      // the real contract wording from the uploaded DOCX, not the generic default body.
       if (fileExt === 'docx') {
         try {
           const buffer = await templatePdfFile.arrayBuffer();
           const extracted = await mammoth.extractRawText({ arrayBuffer: buffer });
-          if (!isSchoolView && (extracted.value || '').trim()) {
+          if ((extracted.value || '').trim()) {
             payload.body = extracted.value;
           }
         } catch {
@@ -327,13 +440,21 @@ export default function CompanyContracts() {
   const setTemplateFileFromCandidate = (candidate: File | null) => {
     if (!candidate) return;
     const lowerName = candidate.name.toLowerCase();
-    const isAllowed =
-      candidate.type === 'application/pdf' ||
+    const isDocx =
       candidate.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-      lowerName.endsWith('.pdf') ||
       lowerName.endsWith('.docx');
+    const isPdf = candidate.type === 'application/pdf' || lowerName.endsWith('.pdf');
+    // School contracts are generated by filling the uploaded DOCX, so the layout
+    // matches the uploaded document. A PDF template can't be filled — it would
+    // silently degrade to the synthesized text PDF, so schools may only use DOCX.
+    const isAllowed = isSchoolView ? isDocx : isDocx || isPdf;
     if (!isAllowed) {
-      setToast({ message: 'Galima ikelti tik PDF arba DOCX faila.', type: 'error' });
+      setToast({
+        message: isSchoolView
+          ? 'Įkelkite DOCX formato šabloną. Tik DOCX failą sistema gali užpildyti mokinio duomenimis nekeisdama jūsų dokumento formato.'
+          : 'Galima ikelti tik PDF arba DOCX faila.',
+        type: 'error',
+      });
       return;
     }
     setTemplatePdfFile(candidate);
@@ -493,7 +614,8 @@ export default function CompanyContracts() {
       to: params.recipientEmail,
       data: {
         schoolName: orgName,
-        schoolEmail: orgEmail,
+        schoolEmail: signingSettings.email || orgEmail,
+        contactEmail: signingSettings.email || orgEmail,
         studentName: params.studentName,
         parentName: params.parentName,
         recipientName: params.parentName,
@@ -696,6 +818,10 @@ export default function CompanyContracts() {
     school_name: orgName || '',
   });
 
+  /** True when the template has an uploaded DOCX file (fillable while keeping the school's own layout). */
+  const templateFileIsDocx = (url?: string | null) =>
+    String(url || '').toLowerCase().replace(/[?#].*$/, '').endsWith('.docx');
+
   const createFilledTemplateFile = async (params: {
     contractId: string;
     templateUrl?: string | null;
@@ -738,8 +864,7 @@ export default function CompanyContracts() {
       contractNumber: params.contractNumber,
     });
 
-    const lowerUrl = (params.templateUrl || '').toLowerCase();
-    if (lowerUrl.endsWith('.docx')) {
+    if (templateFileIsDocx(params.templateUrl)) {
       try {
         const hdrs = await authHeaders();
         if (!hdrs.Authorization) {
@@ -1004,14 +1129,20 @@ export default function CompanyContracts() {
         }
 
         const sendContractChainOk = await (async (): Promise<boolean> => {
-          const shouldIncludeCompletion = (isSchoolView && missingFields.length > 0) || (parentsWillFillMissing && missingFields.length > 0);
+          const shouldIncludeCompletion = isSchoolView || (parentsWillFillMissing && missingFields.length > 0);
           const completionUrl = shouldIncludeCompletion ? await createCompletionUrl(created.id) : null;
+          if (shouldIncludeCompletion && !completionUrl) {
+            await supabase.from('school_contracts').update({ signing_status: 'draft', sent_at: null }).eq('id', created.id);
+            setToast({ message: 'Nepavyko sukurti saugios sutarties peržiūros nuorodos.', type: 'error' });
+            reload();
+            return false;
+          }
           const ok = await sendEmail({
             type: 'school_contract',
             to: recipient,
             data: {
               schoolName: orgName,
-              schoolEmail: orgEmail,
+              schoolEmail: signingSettings.email || orgEmail,
               studentName: created.student?.full_name || '',
               parentName: contractParentName.trim() || created.student?.payer_name || created.student?.full_name || '',
               recipientName: contractParentName.trim() || created.student?.payer_name || created.student?.full_name || '',
@@ -1020,6 +1151,7 @@ export default function CompanyContracts() {
               childBirthDate: contractChildBirthDate.trim() || undefined,
               address: contractAddress.trim() || undefined,
               missingFields: isSchoolView ? missingFields : (parentsWillFillMissing ? missingFields : []),
+              requiresReview: isSchoolView,
               completionUrl: completionUrl || undefined,
               contractId: created.id,
               contractNumber: created.contract_number || effectiveContractNumber,
@@ -1073,19 +1205,24 @@ export default function CompanyContracts() {
       !(student?.payer_personal_code || '').trim() ? 'Tėvų asmens kodas' : '',
       isSchoolView && !(String((contract as any)?.media_publicity_consent || '').trim()) ? 'Vaiko atvaizdo naudojimo sutikimas' : '',
     ].filter(Boolean);
-    const completionUrl = missingFields.length > 0 ? await createCompletionUrl(contract.id) : null;
+    const completionUrl = isSchoolView || missingFields.length > 0 ? await createCompletionUrl(contract.id) : null;
+    if (isSchoolView && !completionUrl) {
+      setToast({ message: 'Nepavyko sukurti saugios sutarties peržiūros nuorodos.', type: 'error' });
+      return false;
+    }
     return await sendEmail({
       type: 'school_contract',
       to: recipient,
       data: {
         schoolName: orgName,
-        schoolEmail: orgEmail,
+        schoolEmail: signingSettings.email || orgEmail,
         studentName: student?.full_name || '',
         parentName: student?.payer_name || student?.full_name || '',
         recipientName: student?.payer_name || student?.full_name || '',
         parentPhone: student?.payer_phone || undefined,
         parentPersonalCode: student?.payer_personal_code || undefined,
         missingFields,
+        requiresReview: isSchoolView,
         completionUrl: completionUrl || undefined,
         contractId: contract.id,
         childBirthDate: student?.child_birth_date || undefined,
@@ -1335,9 +1472,17 @@ export default function CompanyContracts() {
   // GoSign: directorė initiates her (in-app) signature, then is redirected to
   // the GoSign signing page. Only shown for contracts in 'awaiting_school_signature'.
   const signAsSchool = async (contract: Contract) => {
+    const signingWindow = window.open('', `tutlio-contract-sign-${contract.id}`, 'popup,width=1100,height=820');
+    if (!signingWindow) {
+      setToast({ message: 'Naršyklė užblokavo pasirašymo langą. Leiskite iššokančius langus ir bandykite dar kartą.', type: 'error' });
+      return;
+    }
+    signingWindow.document.title = 'Ruošiamas GoSign pasirašymas';
+    signingWindow.document.body.innerHTML = '<p style="font-family:system-ui;padding:24px">Ruošiamas saugus pasirašymo langas…</p>';
     try {
       const hdrs = await authHeaders();
       if (!hdrs.Authorization) {
+        signingWindow.close();
         setToast({ message: 'Turite būti prisijungę.', type: 'error' });
         return;
       }
@@ -1349,11 +1494,13 @@ export default function CompanyContracts() {
       });
       const j = (await res.json().catch(() => ({}))) as { signingUrl?: string; error?: string };
       if (res.ok && j.signingUrl) {
-        window.location.href = j.signingUrl;
+        signingWindow.location.href = j.signingUrl;
         return;
       }
+      signingWindow.close();
       setToast({ message: j.error || 'Nepavyko pradėti pasirašymo.', type: 'error' });
     } catch (e: any) {
+      signingWindow.close();
       setToast({ message: e?.message || 'Klaida pradedant pasirašymą.', type: 'error' });
     } finally {
       setSaving(false);
@@ -1366,7 +1513,7 @@ export default function CompanyContracts() {
       sent: { label: tr('school.sentStatus'), cls: 'bg-amber-50 text-amber-700' },
       awaiting_school_signature: { label: 'Laukia mokyklos parašo', cls: 'bg-indigo-50 text-indigo-700' },
       signed_by_school: { label: 'Pasirašyta mokyklos', cls: 'bg-blue-50 text-blue-700' },
-      signed: { label: tr('school.signedStatus'), cls: 'bg-green-50 text-green-700' },
+      signed: { label: eSignEnabled ? 'Pasirašyta abiejų šalių' : tr('school.signedStatus'), cls: 'bg-green-50 text-green-700' },
     };
     const { label, cls } = map[s];
     return <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${cls}`}>{label}</span>;
@@ -1397,6 +1544,69 @@ export default function CompanyContracts() {
             )}
           </div>
         </div>
+
+        {isSchoolView && (
+          <section className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4">
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Settings className="h-4 w-4 text-indigo-700" />
+                  <h2 className="font-semibold text-gray-900">El. pasirašymo nustatymai</h2>
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${eSignEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-200 text-gray-600'}`}>
+                    {eSignEnabled ? 'GoSign aktyvus' : 'GoSign neaktyvus'}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-gray-600">
+                  Šis el. paštas naudojamas visam sutarčių pasirašymo srautui. Paskirtis, vieta ir kontaktas įrašomi į elektroninio parašo metaduomenis.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                onClick={saveSigningSettings}
+                disabled={savingSigningSettings}
+                className="bg-indigo-600 hover:bg-indigo-700"
+              >
+                <Save className="mr-1.5 h-3.5 w-3.5" />
+                {savingSigningSettings ? 'Saugoma…' : 'Išsaugoti nustatymus'}
+              </Button>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>Sutarčių srauto el. paštas</Label>
+                <Input
+                  type="email"
+                  value={signingSettings.email}
+                  onChange={(event) => setSigningSettings((current) => ({ ...current, email: event.target.value }))}
+                  placeholder={orgEmail || 'sutartys@organizacija.lt'}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>El. parašo paskirtis</Label>
+                <Input
+                  value={signingSettings.reason}
+                  onChange={(event) => setSigningSettings((current) => ({ ...current, reason: event.target.value }))}
+                  placeholder="Ugdymo sutarties pasirašymas"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Pasirašymo vieta</Label>
+                <Input
+                  value={signingSettings.location}
+                  onChange={(event) => setSigningSettings((current) => ({ ...current, location: event.target.value }))}
+                  placeholder="Pvz. Vilnius"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Parašo kontaktas</Label>
+                <Input
+                  value={signingSettings.contact}
+                  onChange={(event) => setSigningSettings((current) => ({ ...current, contact: event.target.value }))}
+                  placeholder={signingSettings.email || orgEmail}
+                />
+              </div>
+            </div>
+          </section>
+        )}
 
         {loading ? (
           <div className="flex items-center justify-center py-20">
@@ -1438,6 +1648,14 @@ export default function CompanyContracts() {
                           </button>
                         </p>
                       )}
+                      {!c.signed_contract_url && c.pdf_url && (
+                        <p className="text-xs text-indigo-700 mt-1">
+                          Naujausia sutarties versija:{' '}
+                          <button type="button" className="underline" onClick={() => openContractFile(c.pdf_url)}>
+                            Atidaryti PDF
+                          </button>
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
                       {c.signing_status === 'draft' && (
@@ -1453,26 +1671,38 @@ export default function CompanyContracts() {
                       {c.signing_status === 'signed_by_school' && (
                         <span className="text-xs text-blue-700 self-center">Laukiama tėvų parašo…</span>
                       )}
-                      {(c.signing_status === 'sent' ||
+                      {!eSignEnabled && (c.signing_status === 'sent' ||
                         c.signing_status === 'awaiting_school_signature' ||
                         c.signing_status === 'signed_by_school') && (
                         <Button size="sm" variant="outline" onClick={() => markSigned(c)} className="text-green-700 border-green-200 hover:bg-green-50">
                           <CheckCircle className="w-3.5 h-3.5 mr-1.5" /> {tr('school.markSigned')}
                         </Button>
                       )}
-                      {c.signing_status !== 'draft' && (
+                      {c.signing_status !== 'draft' && (!eSignEnabled || c.signing_status === 'sent') && (
                         <Button size="sm" variant="outline" onClick={() => resendContract(c)}>
                           <Send className="w-3.5 h-3.5 mr-1.5" /> {tr('school.resend')}
                         </Button>
                       )}
-                      <Button size="sm" variant="outline" onClick={() => pickAndUploadSignedContract(c)} disabled={saving}>
-                        Įkelti pasirašytą
-                      </Button>
+                      {!eSignEnabled && (
+                        <Button size="sm" variant="outline" onClick={() => pickAndUploadSignedContract(c)} disabled={saving}>
+                          Įkelti pasirašytą
+                        </Button>
+                      )}
                       <button onClick={() => deleteContract(c.id)} className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
+                  {eSignEnabled && c.signing_status === 'sent' && (
+                    <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                      Laukiama, kol tėvai peržiūrės sutartį ir patvirtins duomenis Tutlio puslapyje.
+                    </div>
+                  )}
+                  {eSignEnabled && c.signing_status === 'awaiting_school_signature' && c.completion_submitted_at && (
+                    <div className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-900">
+                      Tėvai patvirtino duomenis. Peržiūrėkite naujausią PDF ir pasirašykite naujame GoSign lange.
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -1550,7 +1780,7 @@ export default function CompanyContracts() {
               </div>
             )}
             <div className="space-y-2">
-              <Label>{isSchoolView ? 'Ikelti faila' : tr('school.templatePdf')}</Label>
+              <Label>{isSchoolView ? 'Įkelti DOCX failą' : tr('school.templatePdf')}</Label>
               <div
                 className={`rounded-lg border-2 border-dashed p-4 text-sm transition-colors ${
                   isTemplateDragActive
@@ -1585,7 +1815,16 @@ export default function CompanyContracts() {
                   }
                 }}
               >
-                <p>Nutempkite PDF/DOCX faila cia arba paspauskite pasirinkti faila.</p>
+                <p>
+                  {isSchoolView
+                    ? 'Nutempkite DOCX failą čia arba paspauskite pasirinkti failą.'
+                    : 'Nutempkite PDF/DOCX faila cia arba paspauskite pasirinkti faila.'}
+                </p>
+                {isSchoolView && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Sutartys generuojamos užpildant jūsų DOCX dokumentą, todėl šriftas, paraštės ir išdėstymas išlieka tokie, kokius įkėlėte.
+                  </p>
+                )}
                 {templatePdfFile && (
                   <p className="mt-2 text-xs text-emerald-700">Pasirinktas failas: {templatePdfFile.name}</p>
                 )}
@@ -1593,7 +1832,9 @@ export default function CompanyContracts() {
               <Input
                 ref={templateFileInputRef}
                 type="file"
-                accept="application/pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                accept={isSchoolView
+                  ? '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                  : 'application/pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document'}
                 onChange={(e) => setTemplateFileFromCandidate(e.target.files?.[0] || null)}
                 className="sr-only"
               />
@@ -1648,6 +1889,13 @@ export default function CompanyContracts() {
                     ))}
                   </SelectContent>
                 </Select>
+                {isSchoolView && !templateFileIsDocx(templates.find((t) => t.id === cForm.template_id)?.pdf_url) && (
+                  <p className="text-xs text-amber-700">
+                    {cForm.template_id
+                      ? 'Šis šablonas neturi DOCX failo, todėl sutartis bus sugeneruota supaprastintu Tutlio formatu. Kad sutartis atrodytų kaip jūsų įkeltas dokumentas, šablone įkelkite DOCX failą.'
+                      : 'Nepasirinkus šablono su DOCX failu sutartis bus sugeneruota supaprastintu Tutlio formatu.'}
+                  </p>
+                )}
               </div>
             </div>
             <div className="space-y-2">

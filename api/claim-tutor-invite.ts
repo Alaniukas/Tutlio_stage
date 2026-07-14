@@ -74,9 +74,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('id')
+      .select('id, preferred_locale')
       .eq('id', user.id)
       .maybeSingle();
+
+    // Org tutors default to the organization's UI/email locale (e.g. Pro Klasė → lt).
+    // A locale the tutor already picked themselves is never overwritten.
+    const { data: orgRow } = await supabase
+      .from('organizations')
+      .select('preferred_locale')
+      .eq('id', invite.organization_id)
+      .maybeSingle();
+    const orgLocale = (orgRow?.preferred_locale || '').trim() || null;
 
     const commonProfileFields = {
       email: user.email || null,
@@ -92,13 +101,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     };
 
     if (profile) {
-      await supabase.from('profiles').update(commonProfileFields).eq('id', user.id);
+      const localePatch = orgLocale && !profile.preferred_locale ? { preferred_locale: orgLocale } : {};
+      await supabase.from('profiles').update({ ...commonProfileFields, ...localePatch }).eq('id', user.id);
     } else {
       await supabase.from('profiles').insert({
         id: user.id,
         full_name: String(user.user_metadata?.full_name || ''),
         phone: String(user.user_metadata?.phone || ''),
         ...commonProfileFields,
+        ...(orgLocale ? { preferred_locale: orgLocale } : {}),
       });
     }
 

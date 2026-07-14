@@ -26,7 +26,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (!requireCronAuth(req, res)) return;
 
-  const results: { session?: number; deadline?: any; afterLesson?: any; schoolInstallments?: any } = {};
+  const results: { session?: number; deadline?: any; afterLesson?: any; schoolInstallments?: any; lessonStatusConfirmations?: any } = {};
   let totalSent = 0;
 
   // Cache org features across the session loop (req 7: flexible_invitations gates
@@ -48,7 +48,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data: sessions, error } = await supabase
       .from('sessions')
       .select(`
-        id, start_time, end_time, topic, price, meeting_link, whiteboard_room_id,
+        id, start_time, end_time, topic, price, meeting_link,
         reminder_student_sent, reminder_tutor_sent, reminder_payer_sent,
         student:students(id, full_name, email, payment_payer, payer_email, payer_name, parent_secondary_email, parent_secondary_name),
         tutor:profiles(id, full_name, email, phone, reminder_student_hours, reminder_tutor_hours, organization_id)
@@ -75,12 +75,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const tz = 'Europe/Vilnius';
         const dateStr = startTime.toLocaleDateString('lt-LT', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: tz });
         const timeStr = startTime.toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit', timeZone: tz });
-        const whiteboardLink = (session as any).whiteboard_room_id
-          ? `${API_URL}/whiteboard/${(session as any).whiteboard_room_id}`
-          : null;
         const orgId = (tutor as any)?.organization_id || null;
         // sessionId lets /api/send-email swap the link for a tracked /api/join-session URL (attendance).
-        const baseData = { sessionId: session.id, date: dateStr, time: timeStr, topic: session.topic, duration: durationMinutes, price: session.price, meetingLink: session.meeting_link, whiteboardLink, ...(orgId ? { organizationId: orgId } : {}) };
+        // Whiteboard link intentionally omitted: it pointed at the deployment domain and
+        // recipients (parents/students) often lack board access — it lives in-app only.
+        const baseData = { sessionId: session.id, date: dateStr, time: timeStr, topic: session.topic, duration: durationMinutes, price: session.price, meetingLink: session.meeting_link, ...(orgId ? { organizationId: orgId } : {}) };
 
         if (reminderStudentHours > 0 && !session.reminder_student_sent && diffHours <= reminderStudentHours && diffHours >= 0 && student?.email) {
           try {
@@ -252,6 +251,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       results.schoolInstallments = schoolRes.ok ? await schoolRes.json().catch(() => ({})) : null;
     } catch (e) {
       console.error('[send-reminders] school-installment-reminders error:', e);
+    }
+    try {
+      const statusRes = await fetch(`${API_URL}/api/lesson-status-confirmation-reminders`, { method: 'GET', headers: cronHeaders });
+      results.lessonStatusConfirmations = statusRes.ok ? await statusRes.json().catch(() => ({})) : null;
+    } catch (e) {
+      console.error('[send-reminders] lesson-status-confirmation-reminders error:', e);
     }
 
     return res.status(200).json({

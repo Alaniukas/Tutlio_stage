@@ -247,6 +247,8 @@ export default function StudentSchedule() {
     const [tutorOrgIsSchool, setTutorOrgIsSchool] = useState(false);
     /** Org feature `disable_student_reschedule_cancel`: students/parents cannot move or cancel lessons. */
     const [studentActionsDisabled, setStudentActionsDisabled] = useState(false);
+    /** Org feature `disable_student_booking`: students/parents cannot book lessons themselves. */
+    const [studentBookingDisabled, setStudentBookingDisabled] = useState(false);
     const [tutorOrgFeeProfile, setTutorOrgFeeProfile] = useState<OrgFeeProfile | null>(null);
     const [tutorSoloManualPayments, setTutorSoloManualPayments] = useState(false);
     const [tutorPerlasEnabled, setTutorPerlasEnabled] = useState(false);
@@ -267,8 +269,9 @@ export default function StudentSchedule() {
             perlasEnabled: tutorPerlasEnabled,
             orgIsSchool: tutorOrgIsSchool,
             orgFeeProfile: tutorOrgFeeProfile,
+            studentActionsDisabled,
         };
-    }, [isParentRoute, tutorId, tutorModalContact, cancellationHours, cancellationFeePercent, paymentTiming, paymentDeadlineHours, tutorPerlasEnabled, tutorOrgIsSchool, tutorOrgFeeProfile]);
+    }, [isParentRoute, tutorId, tutorModalContact, cancellationHours, cancellationFeePercent, paymentTiming, paymentDeadlineHours, tutorPerlasEnabled, tutorOrgIsSchool, tutorOrgFeeProfile, studentActionsDisabled]);
 
     const manualPaymentInBookingModal =
         tutorSoloManualPayments || pendingPaymentSession?.tutorSoloManual === true;
@@ -692,6 +695,7 @@ export default function StudentSchedule() {
             const orgId =
                 tutorProfile.data && (tutorProfile.data as { organization_id?: string | null }).organization_id;
             let actionsDisabledResolved = false;
+            let bookingDisabledResolved = false;
             if (orgId) {
                 const { data: oe } = await supabase
                     .from('organizations')
@@ -700,12 +704,14 @@ export default function StudentSchedule() {
                     .maybeSingle();
                 tutorOrgSchoolResolved = oe?.entity_type === 'school';
                 resolvedFeeProfile = orgFeeProfile((oe as { slug?: string | null })?.slug) ?? orgFeeProfile(orgId);
-                actionsDisabledResolved =
-                    ((oe as { features?: Record<string, unknown> | null })?.features)?.disable_student_reschedule_cancel === true;
+                const orgFeatures = (oe as { features?: Record<string, unknown> | null })?.features;
+                actionsDisabledResolved = orgFeatures?.disable_student_reschedule_cancel === true;
+                bookingDisabledResolved = orgFeatures?.disable_student_booking === true;
             }
             setTutorOrgIsSchool(tutorOrgSchoolResolved);
             setTutorOrgFeeProfile(resolvedFeeProfile);
             setStudentActionsDisabled(actionsDisabledResolved);
+            setStudentBookingDisabled(bookingDisabledResolved);
         }
 
         // Filter subjects by student grade
@@ -982,6 +988,9 @@ export default function StudentSchedule() {
             return;
         }
         if (event.isPast) return;
+        // Booking (and waitlisting) is admin-only for orgs with this flag; own
+        // sessions above stay viewable.
+        if (studentBookingDisabled) return;
 
         if (event.occupied && event.sessionId) {
             // Check waitlist info
@@ -998,6 +1007,7 @@ export default function StudentSchedule() {
     };
 
     const handleSelectSlot = ({ start }: { start: Date }) => {
+        if (studentBookingDisabled) return;
         if (isBefore(start, new Date())) return;
 
         // 1. Is start inside any bgEvent (Darbo laikas)?
@@ -1128,7 +1138,7 @@ export default function StudentSchedule() {
     }, [selectedSubjectId, selectedEvent, subjects, bgEvents, events, minBookingHours, breakBetweenLessons]);
 
     const handleBook = async () => {
-        if (!selectedEvent || !selectedTime) return;
+        if (!selectedEvent || !selectedTime || studentBookingDisabled) return;
         setSaving(true);
         const selectedSubject = subjects.find(s => s.id === selectedSubjectId);
         // Find a package whose items include the selected subject with available lessons > 0.
@@ -1585,7 +1595,7 @@ export default function StudentSchedule() {
     };
 
     const handleWaitlist = async () => {
-        if (!selectedEvent || !selectedWaitlistSubjectId) return;
+        if (!selectedEvent || !selectedWaitlistSubjectId || studentBookingDisabled) return;
         // Validate: latest admission time (minBookingHours before session start) must not have passed
         if (selectedEvent.start) {
             const latestAdmission = new Date(selectedEvent.start.getTime() - minBookingHours * 3600000);

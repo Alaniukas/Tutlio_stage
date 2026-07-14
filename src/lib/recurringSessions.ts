@@ -1,7 +1,11 @@
 import { addWeeks, addMonths, parseISO, isBefore } from 'date-fns';
 
-/** When no end date: materialize sessions this far ahead; template stays open (end_date null). */
-export const RECURRING_OPEN_END_HORIZON_WEEKS = 104;
+/**
+ * Open-ended schedules keep only a small rolling calendar window materialized.
+ * A daily server job extends that window, so admins never create hundreds of
+ * session rows and never need to recreate the schedule manually each month.
+ */
+export const RECURRING_OPEN_END_HORIZON_WEEKS = 6;
 
 export function recurringMaterializeEndDate(
   recurringEndDate: string | null | undefined,

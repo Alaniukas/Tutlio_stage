@@ -26,6 +26,11 @@ import {
   getPackagePaymentDeadlineHours,
 } from './_lib/trialReservation.js';
 import { reservePackageSlots, type PackageSlotInput } from './_lib/packageSlots.js';
+import {
+    resolveRecurringPackagePlan,
+    recurringPlanPackageFields,
+    type MonthlyPlanInput,
+} from './_lib/recurringPackagePlan.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -35,6 +40,11 @@ function json(res: VercelResponse, status: number, body: unknown) {
 function getEnv(name: string): string | null {
     const v = process.env[name];
     return v && String(v).trim().length > 0 ? String(v) : null;
+}
+
+function packageExpiryIso(value: string): string {
+    const normalized = /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T23:59:59.999Z` : value;
+    return new Date(normalized).toISOString();
 }
 
 async function postInternalJson(url: string, payload: unknown, timeoutMs = 7000) {
@@ -71,7 +81,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
 
     const auth = await verifyRequestAuth(req);
-    if (!auth?.userId) return json(res, 401, { error: 'Unauthorized' });
+    const internalRecurringPlanId = typeof (req.body as any)?.recurringPlanId === 'string'
+        ? String((req.body as any).recurringPlanId)
+        : '';
+    if (!auth || (!auth.userId && !(auth.isInternal && internalRecurringPlanId))) {
+        return json(res, 401, { error: 'Unauthorized' });
+    }
 
     const market = marketFromRequest(req);
     const currency = chargeCurrency(market);
@@ -91,6 +106,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         attachSalesInvoice?: boolean;
         /** Reservation flow (req 3): pre-book lesson times held until paid by the deadline. */
         slots?: PackageSlotInput[];
+        monthlyPlan?: MonthlyPlanInput;
+        recurringPlanId?: string;
+        billingPeriodStart?: string;
+        billingPeriodEnd?: string;
     };
     const tutorId = body.tutorId;
     const studentId = body.studentId;
@@ -164,6 +183,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return json(res, 400, { error: itemsErr });
         }
         const { totalLessons, totalPriceEur: basePriceEur } = aggregatePackageTotals(resolvedItems);
+        if ((body.monthlyPlan || body.recurringPlanId) && resolvedItems.length !== 1) {
+            return json(res, 400, { error: 'A recurring monthly package must contain exactly one subject.' });
+        }
 
         // 3. Determine which Stripe account to use (org or tutor)
         let stripeAccountId: string | null = null;
@@ -205,6 +227,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // multi-subject packages leave it NULL (items table is the source of truth).
         const primarySubjectId = resolvedItems.length === 1 ? resolvedItems[0]!.subjectId : null;
         const primaryPricePerLesson = resolvedItems.length === 1 ? resolvedItems[0]!.pricePerLesson : null;
+        const { data: recurringPlan, error: recurringPlanError } = await resolveRecurringPackagePlan({
+            supabase,
+            organizationId: tutor.organization_id || null,
+            createdBy: auth.userId,
+            tutorId,
+            studentId,
+            subjectId: primarySubjectId,
+            paymentMethod: 'stripe',
+            attachSalesInvoice: shouldAttachSf,
+            monthlyPlan: body.monthlyPlan,
+            recurringPlanId: body.recurringPlanId,
+            billingPeriodStart: body.billingPeriodStart,
+            billingPeriodEnd: body.billingPeriodEnd,
+        });
+        if (recurringPlanError || !recurringPlan) {
+            return json(res, 400, { error: recurringPlanError || 'Failed to resolve monthly package plan.' });
+        }
+        const effectiveExpiresAt = expiresAt || recurringPlan.billingPeriodEnd;
 
         // 5. Always create a NEW package record (will be activated after payment)
         // Multiple packages can exist for same student/subject - they'll be used in order
@@ -224,7 +264,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 payment_status: 'pending',
                 active: false,
                 payment_method: 'stripe',
-                ...(expiresAt ? { expires_at: new Date(expiresAt).toISOString() } : {}),
+                ...recurringPlanPackageFields(recurringPlan),
+                ...(effectiveExpiresAt ? { expires_at: packageExpiryIso(effectiveExpiresAt) } : {}),
             })
             .select()
             .single();
@@ -380,7 +421,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let invoiceNumber: string | null = null;
         if (shouldAttachSf) {
             try {
-                const issuedByUserId = auth.userId!;
+                const issuedByUserId = recurringPlan.planCreatedBy || auth.userId!;
                 const invRes = await postInternalJson(
                     resolveApiUrl(req, '/api/generate-invoice'),
                     {
@@ -467,6 +508,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             packageId: lessonPackage.id,
             checkoutUrl: checkoutSession.url,
             emailSent,
+            recurringPlanId: recurringPlan.planId,
         });
     } catch (err: any) {
         console.error('create-package-checkout error:', err);

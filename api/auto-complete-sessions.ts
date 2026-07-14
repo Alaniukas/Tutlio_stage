@@ -12,6 +12,10 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { syncSessionToGoogle } from './_lib/google-calendar.js';
 import { requireCronAuth } from './_lib/cronAuth.js';
+import {
+  partitionByStatusConfirmation,
+  movePackageCountersToCompleted,
+} from './_lib/sessionStatusConfirmation.js';
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL!,
@@ -52,7 +56,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ success: true, updated: 0 });
     }
 
-    const idsToComplete = sessions.map((s: any) => s.id);
+    // Orgs with tutor_lesson_status_confirmation: their lessons stay 'active'
+    // until the tutor explicitly confirms the outcome (/api/confirm-session-status).
+    const { autoCompletable, awaitingConfirmation } = await partitionByStatusConfirmation(
+      supabase,
+      sessions as any[],
+    );
+    if (autoCompletable.length === 0) {
+      return res.status(200).json({
+        success: true,
+        updated: 0,
+        awaitingTutorConfirmation: awaitingConfirmation.length,
+      });
+    }
+    const completableSessions = autoCompletable as any[];
+
+    const idsToComplete = completableSessions.map((s: any) => s.id);
 
     const { error: updateErr } = await supabase
       .from('sessions')
@@ -66,7 +85,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Sync completed sessions to Google Calendar (background, best-effort)
     const tutorSessionMap = new Map<string, string[]>();
-    for (const s of sessions) {
+    for (const s of completableSessions) {
       const tutorId = (s as any).tutor_id as string;
       if (!tutorId) continue;
       const arr = tutorSessionMap.get(tutorId) || [];
@@ -83,61 +102,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Update lesson packages: move from reserved to completed (batch optimized).
     // For multi-subject packages, the per-subject item counters are also moved.
-    const sessionsWithPackages = (sessions as any[]).filter((s) => s.lesson_package_id);
-    const packageIds = [...new Set(sessionsWithPackages.map((s) => s.lesson_package_id))] as string[];
-
-    if (packageIds.length > 0) {
-      // 1. Update per-subject items first
-      const { data: items } = await supabase
-        .from('lesson_package_items')
-        .select('id, package_id, subject_id, reserved_lessons, completed_lessons')
-        .in('package_id', packageIds);
-
-      if (items && items.length > 0) {
-        for (const it of items as any[]) {
-          const completedCount = sessionsWithPackages.filter(
-            (s) => s.lesson_package_id === it.package_id && s.subject_id === it.subject_id,
-          ).length;
-          if (completedCount > 0) {
-            await supabase
-              .from('lesson_package_items')
-              .update({
-                reserved_lessons: Math.max(0, Number(it.reserved_lessons || 0) - completedCount),
-                completed_lessons: Number(it.completed_lessons || 0) + completedCount,
-              })
-              .eq('id', it.id);
-          }
-        }
-      }
-
-      // 2. Update parent package aggregates
-      const { data: packages } = await supabase
-        .from('lesson_packages')
-        .select('id, reserved_lessons, completed_lessons')
-        .in('id', packageIds);
-
-      if (packages && packages.length > 0) {
-        const updates = packages.map(pkg => {
-          const completedCount = sessionsWithPackages.filter((s) => s.lesson_package_id === pkg.id).length;
-          return {
-            id: pkg.id,
-            reserved_lessons: Math.max(0, pkg.reserved_lessons - completedCount),
-            completed_lessons: pkg.completed_lessons + completedCount,
-          };
-        });
-
-        for (const update of updates) {
-          await supabase
-            .from('lesson_packages')
-            .update({
-              reserved_lessons: update.reserved_lessons,
-              completed_lessons: update.completed_lessons,
-            })
-            .eq('id', update.id);
-        }
-
-        console.log(`[auto-complete-sessions] Batch updated ${updates.length} packages + items`);
-      }
+    const packagesUpdated = await movePackageCountersToCompleted(supabase, completableSessions);
+    if (packagesUpdated > 0) {
+      console.log(`[auto-complete-sessions] Batch updated ${packagesUpdated} packages + items`);
     }
 
     // Remove waitlist entries for completed sessions
@@ -170,7 +137,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({
       success: true,
       updated: idsToComplete.length,
-      packagesUpdated: packageIds.length,
+      awaitingTutorConfirmation: awaitingConfirmation.length,
+      packagesUpdated,
       waitlistEntriesRemoved: (waitlistDeleted || 0) + (oldWaitlistDeleted || 0)
     });
   } catch (err: any) {

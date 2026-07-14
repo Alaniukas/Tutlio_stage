@@ -4,13 +4,14 @@
  * Lithuanian-only.
  */
 import { useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 
 type Phase = 'polling' | 'signed' | 'canceled' | 'expired' | 'error';
 
 export default function SchoolSignReturn() {
+  const { token: pathToken } = useParams<{ token?: string }>();
   const [params] = useSearchParams();
-  const token = params.get('token') || '';
+  const token = pathToken || params.get('token') || '';
   const [phase, setPhase] = useState<Phase>('polling');
   const [allSigned, setAllSigned] = useState(false);
   const active = useRef(true);
@@ -34,6 +35,14 @@ export default function SchoolSignReturn() {
         if (j.status === 'signed') {
           setAllSigned(Boolean(j.done));
           setPhase('signed');
+          const event = { type: 'tutlio:school-contract-updated', contractId: j.contractId || null };
+          try {
+            window.localStorage.setItem('tutlio:school-contract-updated', JSON.stringify({ ...event, at: Date.now() }));
+          } catch {
+            // Storage may be unavailable in privacy mode; postMessage still works when an opener exists.
+          }
+          if (window.opener) window.opener.postMessage(event, window.location.origin);
+          if (j.role === 'school' && window.opener) window.setTimeout(() => window.close(), 1800);
           return;
         }
         if (j.status === 'canceled') return setPhase('canceled');

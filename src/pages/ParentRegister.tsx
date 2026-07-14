@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { fetchParentInvitePreviewByCode, fetchParentInvitePreviewByToken } from '@/lib/parentInvitePreview';
+import { supabase } from '@/lib/supabase';
 import { useTranslation } from '@/lib/i18n';
 import { Check, Eye, EyeOff, Users } from 'lucide-react';
 
@@ -158,6 +159,19 @@ export default function ParentRegister() {
         return;
       }
 
+      // Sign in right away so activation lands in the portal without a second
+      // manual login; the "done" card stays as fallback if sign-in fails.
+      const loginEmail = (invite?.parent_email || manualEmail).trim().toLowerCase();
+      if (loginEmail) {
+        const { error: signInErr } = await supabase.auth.signInWithPassword({
+          email: loginEmail,
+          password,
+        });
+        if (!signInErr) {
+          navigate('/parent', { replace: true });
+          return;
+        }
+      }
       setDone(true);
     } catch {
       setError(t('common.error'));

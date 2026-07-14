@@ -9,6 +9,7 @@
  *      status leaves "InProgress"; on "Signed" the signed PDF comes back inline.
  */
 import {
+  ONESIGN_NS,
   buildInitOneSignEnvelope,
   buildTransactionEnvelope,
   parseInitOneSignResponse,
@@ -19,6 +20,15 @@ import {
   type SigningResultResponse,
 } from './gosign.js';
 import { getGoSignConfig, goSignNotConfiguredMessage } from './gosignConfig.js';
+
+/**
+ * SOAPAction header value — RC's WSDL defines a DISTINCT action per operation
+ * (…/InitSigning, …/SigningResult, …/SigningCancel). `GOSIGN_SOAP_ACTION`, if
+ * set, overrides for all operations (rarely needed).
+ */
+function soapActionFor(operation: string, override: string): string {
+  return override || `${ONESIGN_NS}/${operation}`;
+}
 
 /** InitOneSign params with clientId/locale/position supplied from config. */
 export type InitOneSignInput = Omit<InitOneSignParams, 'clientId'>;
@@ -69,7 +79,7 @@ export async function initOneSign(input: InitOneSignInput): Promise<InitOneSignR
     position: input.position ?? cfg.signaturePosition,
   };
   const xml = buildInitOneSignEnvelope(params, cfg.privateKeyPem);
-  const respXml = await postSoap(cfg.onesignEndpoint, cfg.soapAction, xml);
+  const respXml = await postSoap(cfg.onesignEndpoint, soapActionFor('InitSigning', cfg.soapAction), xml);
   if (!cfg.responsePublicKeyPem) {
     console.warn('[gosign] response verification skipped — GOSIGN_RESPONSE_PUBLIC_KEY not set');
   }
@@ -81,7 +91,7 @@ export async function getSigningResult(transactionId: string | number): Promise<
   const cfg = getGoSignConfig();
   if (!cfg) throw new GoSignError(goSignNotConfiguredMessage());
   const xml = buildTransactionEnvelope('SigningResult', { clientId: cfg.clientId, transactionId }, cfg.privateKeyPem);
-  const respXml = await postSoap(cfg.onesignEndpoint, cfg.soapAction, xml);
+  const respXml = await postSoap(cfg.onesignEndpoint, soapActionFor('SigningResult', cfg.soapAction), xml);
   return parseSigningResultResponse(respXml, cfg.responsePublicKeyPem);
 }
 
@@ -108,5 +118,5 @@ export async function cancelSigning(transactionId: string | number): Promise<voi
   const cfg = getGoSignConfig();
   if (!cfg) throw new GoSignError(goSignNotConfiguredMessage());
   const xml = buildTransactionEnvelope('SigningCancel', { clientId: cfg.clientId, transactionId }, cfg.privateKeyPem);
-  await postSoap(cfg.onesignEndpoint, cfg.soapAction, xml);
+  await postSoap(cfg.onesignEndpoint, soapActionFor('SigningCancel', cfg.soapAction), xml);
 }

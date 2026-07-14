@@ -106,16 +106,20 @@ export async function applyMonthlyPackageExpiry(
 
   const firstStart = (firstSession as { start_time?: string } | null)?.start_time;
   let expiresAt: string;
-  if (firstStart) {
+  const { data: pkg } = await supabase
+    .from('lesson_packages')
+    .select('paid_at, billing_period_end')
+    .eq('id', packageId)
+    .maybeSingle();
+  const billingPeriodEnd = (pkg as { billing_period_end?: string | null } | null)?.billing_period_end;
+  if (billingPeriodEnd) {
+    // Recurring monthly plans always keep the package inside its named month.
+    expiresAt = endOfMonthIso(new Date(`${billingPeriodEnd}T12:00:00.000Z`));
+  } else if (firstStart) {
     // Pre-booked lessons: valid for the first lesson's calendar month.
     expiresAt = endOfMonthIso(new Date(firstStart));
   } else {
     // No assigned times: guarantee at least one month from payment.
-    const { data: pkg } = await supabase
-      .from('lesson_packages')
-      .select('paid_at')
-      .eq('id', packageId)
-      .maybeSingle();
     const paidAtRaw = (pkg as { paid_at?: string | null } | null)?.paid_at;
     const paidAt = paidAtRaw ? new Date(paidAtRaw) : null;
     const anchor = paidAt && !Number.isNaN(paidAt.getTime()) ? paidAt : opts.now ?? new Date();

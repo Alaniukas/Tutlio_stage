@@ -4,6 +4,7 @@ import { dedupeAuthGetUser } from '@/lib/preload';
 import { User } from '@supabase/supabase-js';
 import { buildPlatformPath } from '@/lib/platform';
 import { clearOrgBrandingCache } from '@/contexts/OrgBrandingContext';
+import ProfileLocaleSync from '@/components/ProfileLocaleSync';
 
 interface UserProfile {
   id: string;
@@ -276,6 +277,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
 
   return (
     <UserContext.Provider value={{ user, profile, loading, refetchProfile }}>
+      <ProfileLocaleSync />
       {children}
     </UserContext.Provider>
   );

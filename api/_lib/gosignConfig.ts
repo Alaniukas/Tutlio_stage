@@ -1,3 +1,5 @@
+import { createPrivateKey } from 'node:crypto';
+
 /**
  * GoSign.lt environment configuration.
  *
@@ -24,8 +26,47 @@ export interface GoSignConfig {
   soapAction: string;
 }
 
-function normalizePem(raw: string | undefined): string {
-  return (raw || '').replace(/\\n/g, '\n').trim();
+/**
+ * Registru centras publishes this production response-verification key in the
+ * official GoSign integration documentation. It is public (not a credential)
+ * and is pinned here so production never silently accepts an unverified SOAP
+ * response when an environment override is absent.
+ *
+ * Source: https://github.com/registrucentras/gosign-api-integration/blob/master/docs/keys/php_prod.key
+ */
+export const GOSIGN_OFFICIAL_PROD_RESPONSE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA9l+OCK6T9jnn4e/kNQVP
+oyePlH+GhK6Ik1gEW+OH71gpdXbjWatw9pBE2eeSOovQkSmjlsbh5WzSzkr5ywK/
+BEoco+ns6fugIwjypAmRc2JJo1CUW2GGQnEF+ociysjNbpGLDqweawL+UzK+JL+M
+nxOyRBw9JJZDj+fQvErpVk0mec3TUTEUlbjJd5WbwbtRXE4DooZFVgccbamg10la
+0E4b9/DgSUJXRliOw5Cn1rXC/nn9aYSjsx89DeTRHZmKqPWCsmI6k+WTzhh/Kpdw
+5xfPcgj3T7Hav0xXBTM2QR3XSyGg/EfYqvsV2FLTxDaDvVEBMc1pMX00ihsBTgoh
+dQIDAQAB
+-----END PUBLIC KEY-----`;
+
+export function normalizePem(raw: string | undefined): string {
+  const normalized = (raw || '').replace(/\\n/g, '\n').trim();
+  const completePem = normalized.match(
+    /-----BEGIN ([A-Z ]+KEY)-----[\s\S]*?-----END \1-----/,
+  );
+  if (completePem?.[0]) return completePem[0].trim();
+
+  const compactBase64 = normalized.replace(/\s/g, '');
+  if (compactBase64 && /^[A-Za-z0-9+/]+={0,2}$/.test(compactBase64)) {
+    const der = Buffer.from(compactBase64, 'base64');
+    for (const type of ['pkcs1', 'pkcs8'] as const) {
+      try {
+        return createPrivateKey({ key: der, format: 'der', type })
+          .export({ format: 'pem', type: 'pkcs1' })
+          .toString()
+          .trim();
+      } catch {
+        // Try the other common RSA private-key container.
+      }
+    }
+  }
+
+  return normalized;
 }
 
 function envStr(name: string): string | undefined {
@@ -47,7 +88,8 @@ export function getGoSignConfig(): GoSignConfig | null {
     clientId,
     privateKeyPem,
     onesignEndpoint,
-    responsePublicKeyPem: normalizePem(process.env.GOSIGN_RESPONSE_PUBLIC_KEY) || undefined,
+    responsePublicKeyPem:
+      normalizePem(process.env.GOSIGN_RESPONSE_PUBLIC_KEY) || GOSIGN_OFFICIAL_PROD_RESPONSE_PUBLIC_KEY,
     locale: envStr('GOSIGN_LOCALE') || 'lt',
     // Last page, horizontally centred, near the bottom, 8cm × 3cm. Override once
     // the school confirms where signature blocks live in their template.

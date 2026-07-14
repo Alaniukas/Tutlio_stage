@@ -10,6 +10,9 @@ interface TimeSpinnerProps {
 
 const ITEM_HEIGHT = 36;
 const VISIBLE_EXTRA = 2;
+const WHEEL_STEP_THRESHOLD_PX = 80;
+const WHEEL_STEP_COOLDOWN_MS = 120;
+const WHEEL_GESTURE_RESET_MS = 180;
 
 function SpinnerColumn({
   items,
@@ -27,25 +30,64 @@ function SpinnerColumn({
   const isDragging = useRef(false);
   const startY = useRef(0);
   const startIndex = useRef(0);
+  const selectedIndexRef = useRef(selectedIndex);
+  const wheelDelta = useRef(0);
+  const lastWheelStepAt = useRef(Number.NEGATIVE_INFINITY);
+  const wheelResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [inputVal, setInputVal] = useState('');
+
+  useEffect(() => {
+    selectedIndexRef.current = selectedIndex;
+  }, [selectedIndex]);
 
   const handleWheel = useCallback(
     (e: WheelEvent) => {
       e.preventDefault();
-      const delta = e.deltaY > 0 ? 1 : -1;
-      let newIndex = (selectedIndex + delta) % items.length;
+
+      const normalizedDelta = e.deltaY * (
+        e.deltaMode === e.DOM_DELTA_LINE
+          ? 16
+          : e.deltaMode === e.DOM_DELTA_PAGE
+            ? ITEM_HEIGHT
+            : 1
+      );
+      if (normalizedDelta === 0) return;
+
+      wheelDelta.current += normalizedDelta;
+      if (wheelResetTimer.current) clearTimeout(wheelResetTimer.current);
+      wheelResetTimer.current = setTimeout(() => {
+        wheelDelta.current = 0;
+      }, WHEEL_GESTURE_RESET_MS);
+
+      const now = Date.now();
+      if (
+        Math.abs(wheelDelta.current) < WHEEL_STEP_THRESHOLD_PX ||
+        now - lastWheelStepAt.current < WHEEL_STEP_COOLDOWN_MS
+      ) {
+        return;
+      }
+
+      const delta = wheelDelta.current > 0 ? 1 : -1;
+      wheelDelta.current = 0;
+      lastWheelStepAt.current = now;
+
+      let newIndex = (selectedIndexRef.current + delta) % items.length;
       if (newIndex < 0) newIndex += items.length;
+      selectedIndexRef.current = newIndex;
       onIndexChange(newIndex);
     },
-    [selectedIndex, items.length, onIndexChange]
+    [items.length, onIndexChange]
   );
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     el.addEventListener('wheel', handleWheel, { passive: false });
-    return () => el.removeEventListener('wheel', handleWheel);
+    return () => {
+      el.removeEventListener('wheel', handleWheel);
+      if (wheelResetTimer.current) clearTimeout(wheelResetTimer.current);
+    };
   }, [handleWheel]);
 
   const handlePointerDown = (e: React.PointerEvent) => {

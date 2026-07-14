@@ -19,13 +19,16 @@ type Meta = {
   ok: boolean;
   token: string | null;
   contractId: string;
+  contractNumber?: string;
+  studentName?: string;
+  schoolName?: string;
+  pdfUrl?: string | null;
   missing: { address: boolean; birthDate: boolean; parentCode: boolean; mediaPublicity?: boolean };
 };
 
 export default function SchoolContractComplete() {
   const [params] = useSearchParams();
   const token = (params.get('token') || '').trim();
-  const contractIdFromUrl = (params.get('contractId') || '').trim();
 
   const [loading, setLoading] = useState(true);
   const [meta, setMeta] = useState<Meta | null>(null);
@@ -45,18 +48,18 @@ export default function SchoolContractComplete() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [reviewConfirmed, setReviewConfirmed] = useState(false);
 
   const today = new Date().toISOString().slice(0, 10);
 
   useEffect(() => {
-    if (!token && !contractIdFromUrl) {
+    if (!token) {
       setLoadError('Nenurodytas pakvietimo nuorodos parametras.');
       setLoading(false);
       return;
     }
     const q = new URLSearchParams();
-    if (token) q.set('token', token);
-    if (contractIdFromUrl) q.set('contractId', contractIdFromUrl);
+    q.set('token', token);
     q.set('format', 'json');
     let cancelled = false;
     (async () => {
@@ -85,16 +88,20 @@ export default function SchoolContractComplete() {
     return () => {
       cancelled = true;
     };
-  }, [token, contractIdFromUrl]);
+  }, [token]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!meta) return;
+    if (!reviewConfirmed) {
+      setSubmitError('Patvirtinkite, kad sutartį peržiūrėjote ir pateikti duomenys yra teisingi.');
+      return;
+    }
     setSubmitError(null);
     setSubmitting(true);
     try {
       const payload: Record<string, string | undefined> = {
-        contractId: meta.contractId,
+        review_confirmed: 'true',
         parent_personal_code: parentPersonalCode,
         student_address: studentAddress,
         student_city: studentCity,
@@ -106,7 +113,7 @@ export default function SchoolContractComplete() {
         parent2_personal_code: parent2PersonalCode,
         parent2_address: parent2Address,
       };
-      if (token) payload.token = token;
+      payload.token = token;
       Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
       const res = await fetch('/api/school-contract-complete', {
         method: 'POST',
@@ -151,7 +158,7 @@ export default function SchoolContractComplete() {
         <div className="max-w-lg w-full rounded-2xl border border-gray-200 bg-white p-8 shadow-xl">
           <h1 className="text-xl font-bold text-gray-900 mb-3">Ačiū! Duomenys pateikti.</h1>
           <p className="text-gray-700">
-            Atnaujinta sutartis išsiųsta jūsų el. paštu. Patikrinkite pašto dėžutę.
+            Mokykla peržiūrės sutartį ir ją pasirašys. Asmeninę pasirašymo nuorodą gausite el. paštu vėliau.
           </p>
         </div>
       </div>
@@ -171,20 +178,37 @@ export default function SchoolContractComplete() {
         <div className="text-center mb-4">
           <div className="inline-block text-3xl font-black text-indigo-600 tracking-tight">Tutlio 🎓</div>
         </div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">Papildykite sutarties duomenis</h1>
+        <h1 className="text-2xl font-bold text-gray-900 mb-2">Peržiūrėkite ir patvirtinkite sutartį</h1>
         <p className="text-gray-600 text-sm mb-4">
-          Patvirtinus duomenis, iš karto sugeneruosime atnaujintą sutartį ir atsiųsime ją jūsų el. paštu.
+          Peržiūrėkite sutartį, papildykite trūkstamus duomenis ir patvirtinkite jų teisingumą. Mokykla pasirašys pirmoji.
         </p>
 
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 mb-5 text-amber-950">
-          <p className="font-bold text-sm mb-2">Prašome papildyti trūkstamus duomenis:</p>
-          <ul className="list-disc pl-5 text-sm space-y-0.5 mb-2">
-            {missingList.length > 0 ? missingList.map((x) => <li key={x}>{x}</li>) : <li>Trūkstamų laukų nerasta.</li>}
-          </ul>
-          <p className="text-sm font-bold">
-            Svarbu: sutartį pasirašyti galėsite tik po to, kai užpildysite šiuos trūkstamus duomenis.
-          </p>
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 mb-4 text-sm text-gray-700">
+          {meta.studentName && <p><span className="font-semibold">Mokinys:</span> {meta.studentName}</p>}
+          {meta.contractNumber && <p><span className="font-semibold">Sutarties Nr.:</span> {meta.contractNumber}</p>}
+          {meta.pdfUrl && (
+            <button
+              type="button"
+              onClick={() => window.open(meta.pdfUrl || '', '_blank', 'noopener,noreferrer')}
+              className="mt-3 font-semibold text-indigo-700 hover:underline"
+            >
+              Atidaryti ir peržiūrėti sutarties PDF
+            </button>
+          )}
         </div>
+
+        {missingList.length > 0 ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 mb-5 text-amber-950">
+            <p className="font-bold text-sm mb-2">Prašome papildyti trūkstamus duomenis:</p>
+            <ul className="list-disc pl-5 text-sm space-y-0.5 mb-2">
+              {missingList.map((x) => <li key={x}>{x}</li>)}
+            </ul>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 mb-5 text-emerald-900 text-sm">
+            Trūkstamų duomenų nėra. Patvirtinkite, kad sutartį peržiūrėjote ir duomenys yra teisingi.
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-3">
           {missing.mediaPublicity && (
@@ -287,10 +311,20 @@ export default function SchoolContractComplete() {
             <Input value={parent2Address} onChange={(e) => setParent2Address(e.target.value)} placeholder="Antro tėvo adresas" className="rounded-xl" />
           </div>
 
+          <label className="flex items-start gap-3 rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-950">
+            <input
+              type="checkbox"
+              checked={reviewConfirmed}
+              onChange={(event) => setReviewConfirmed(event.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-indigo-300 text-indigo-600"
+            />
+            <span>Patvirtinu, kad sutartį peržiūrėjau ir pateikti duomenys yra teisingi.</span>
+          </label>
+
           {submitError && <p className="text-sm text-red-600">{submitError}</p>}
 
-          <Button type="submit" disabled={submitting} className="w-full rounded-xl bg-blue-600 hover:bg-blue-700">
-            {submitting ? 'Generuojama sutartis…' : 'Patvirtinti'}
+          <Button type="submit" disabled={submitting || !reviewConfirmed} className="w-full rounded-xl bg-blue-600 hover:bg-blue-700">
+            {submitting ? 'Saugoma…' : 'Patvirtinti ir perduoti mokyklai'}
           </Button>
         </form>
       </div>

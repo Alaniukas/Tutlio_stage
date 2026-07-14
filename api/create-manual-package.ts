@@ -21,6 +21,11 @@ import {
   getPackagePaymentDeadlineHours,
 } from './_lib/trialReservation.js';
 import { reservePackageSlots, type PackageSlotInput } from './_lib/packageSlots.js';
+import {
+    resolveRecurringPackagePlan,
+    recurringPlanPackageFields,
+    type MonthlyPlanInput,
+} from './_lib/recurringPackagePlan.js';
 
 function isSafeHttpUrl(raw: string): boolean {
     try {
@@ -39,6 +44,11 @@ function json(res: VercelResponse, status: number, body: unknown) {
 function getEnv(name: string): string | null {
     const v = process.env[name];
     return v && String(v).trim().length > 0 ? String(v) : null;
+}
+
+function packageExpiryIso(value: string): string {
+    const normalized = /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T23:59:59.999Z` : value;
+    return new Date(normalized).toISOString();
 }
 
 async function postJsonWithTimeout(url: string, payload: unknown, timeoutMs = 7000) {
@@ -85,6 +95,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         attachSalesInvoice?: boolean;
         /** Reservation flow (req 3): pre-book lesson times held until paid by the deadline. */
         slots?: PackageSlotInput[];
+        monthlyPlan?: MonthlyPlanInput;
+        recurringPlanId?: string;
+        billingPeriodStart?: string;
+        billingPeriodEnd?: string;
     };
     const tutorId = body.tutorId;
     const studentId = body.studentId;
@@ -102,10 +116,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     try {
         const auth = await verifyRequestAuth(req);
-        if (!auth?.userId || auth.isInternal) {
+        if (!auth || (!auth.userId && !(auth.isInternal && body.recurringPlanId))) {
             return json(res, 401, { error: 'Unauthorized' });
         }
-        const callerId = auth.userId;
 
         const supabaseUrl = getEnv('SUPABASE_URL') || getEnv('VITE_SUPABASE_URL');
         const supabaseServiceRoleKey = getEnv('SUPABASE_SERVICE_ROLE_KEY');
@@ -118,6 +131,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
+
+        let callerId = auth.userId;
+        if (auth.isInternal && body.recurringPlanId) {
+            const { data: planCreator } = await supabase
+                .from('recurring_monthly_package_plans')
+                .select('created_by')
+                .eq('id', body.recurringPlanId)
+                .eq('active', true)
+                .maybeSingle();
+            callerId = planCreator?.created_by || null;
+        }
+        if (!callerId) return json(res, 401, { error: 'Unauthorized recurring package plan.' });
 
         const { data: tutor, error: tutorErr } = await supabase
             .from('profiles')
@@ -199,8 +224,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return json(res, 400, { error: itemsErr });
         }
         const { totalLessons, totalPriceEur: totalPrice } = aggregatePackageTotals(resolvedItems);
+        if ((body.monthlyPlan || body.recurringPlanId) && resolvedItems.length !== 1) {
+            return json(res, 400, { error: 'A recurring monthly package must contain exactly one subject.' });
+        }
         const primarySubjectId = resolvedItems.length === 1 ? resolvedItems[0]!.subjectId : null;
         const primaryPricePerLesson = resolvedItems.length === 1 ? resolvedItems[0]!.pricePerLesson : null;
+        const { data: recurringPlan, error: recurringPlanError } = await resolveRecurringPackagePlan({
+            supabase,
+            organizationId: tutor.organization_id || null,
+            createdBy: callerId,
+            tutorId,
+            studentId,
+            subjectId: primarySubjectId,
+            paymentMethod: 'manual',
+            attachSalesInvoice: shouldAttachSf,
+            monthlyPlan: body.monthlyPlan,
+            recurringPlanId: body.recurringPlanId,
+            billingPeriodStart: body.billingPeriodStart,
+            billingPeriodEnd: body.billingPeriodEnd,
+        });
+        if (recurringPlanError || !recurringPlan) {
+            return json(res, 400, { error: recurringPlanError || 'Failed to resolve monthly package plan.' });
+        }
+        const effectiveExpiresAt = expiresAt || recurringPlan.billingPeriodEnd;
 
         const { data: lessonPackage, error: packageErr } = await supabase
             .from('lesson_packages')
@@ -218,7 +264,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 payment_status: 'pending',
                 active: true,
                 payment_method: 'manual',
-                ...(expiresAt ? { expires_at: new Date(expiresAt).toISOString() } : {}),
+                ...recurringPlanPackageFields(recurringPlan),
+                ...(effectiveExpiresAt ? { expires_at: packageExpiryIso(effectiveExpiresAt) } : {}),
             })
             .select()
             .single();
@@ -362,6 +409,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             packageId: lessonPackage.id,
             emailSent,
             ...(manualPaymentUrl ? { paymentUrl: manualPaymentUrl } : {}),
+            recurringPlanId: recurringPlan.planId,
         });
     } catch (err: any) {
         console.error('create-manual-package error:', err);

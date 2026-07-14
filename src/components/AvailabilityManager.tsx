@@ -70,14 +70,11 @@ export default function AvailabilityManager() {
   ], [t]);
 
   const [slots, setSlots] = useState<AvailabilitySlot[]>([]);
-  const [subjects, setSubjects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
   const [stripeConnected, setStripeConnected] = useState(false);
   const [isOrgTutor, setIsOrgTutor] = useState(false);
-
-  const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
 
   const [dayOfWeek, setDayOfWeek] = useState<string>('1');
   const [recurringStart, setRecurringStart] = useState('09:00');
@@ -114,10 +111,10 @@ export default function AvailabilityManager() {
   };
 
   useEffect(() => {
-    fetchAvailabilityAndSubjects();
+    fetchAvailability();
   }, []);
 
-  const fetchAvailabilityAndSubjects = async () => {
+  const fetchAvailability = async () => {
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -133,9 +130,6 @@ export default function AvailabilityManager() {
     setStripeConnected(!!profileData?.stripe_account_id || manualOk);
     setIsOrgTutor(!!profileData?.organization_id);
 
-    const { data: subs } = await supabase.from('subjects').select('id, name, grade_min, grade_max, is_group, max_students').eq('tutor_id', user.id);
-    setSubjects(subs || []);
-
     const { data, error } = await supabase
       .from('availability')
       .select('*')
@@ -145,12 +139,6 @@ export default function AvailabilityManager() {
     if (error) console.error('Error fetching availability:', error);
     else setSlots(data as AvailabilitySlot[] || []);
     setLoading(false);
-  };
-
-  const seatLabel = (count: number) => {
-    if (count === 1) return t('avail.seat');
-    if (count < 10) return t('avail.seats');
-    return t('avail.seatsMany');
   };
 
   const addRecurringSlot = async () => {
@@ -198,7 +186,7 @@ export default function AvailabilityManager() {
         end_time: recurringEnd,
         is_recurring: true,
         end_date: recurringEndDate || null,
-        subject_ids: selectedSubjects,
+        subject_ids: [],
       },
     ]);
 
@@ -207,8 +195,7 @@ export default function AvailabilityManager() {
       setToastMessage({ message: t('avail.addFailed'), type: 'error' });
     } else {
       await syncAvailabilityToGoogle(user.id);
-      await fetchAvailabilityAndSubjects();
-      setSelectedSubjects([]);
+      await fetchAvailability();
       setToastMessage({ message: t('avail.addSuccess'), type: 'success' });
     }
     setSaving(false);
@@ -257,7 +244,7 @@ export default function AvailabilityManager() {
         start_time: specificStart,
         end_time: specificEnd,
         is_recurring: false,
-        subject_ids: selectedSubjects,
+        subject_ids: [],
       },
     ]);
 
@@ -266,8 +253,7 @@ export default function AvailabilityManager() {
       setToastMessage({ message: t('avail.addFailed'), type: 'error' });
     } else {
       await syncAvailabilityToGoogle(user.id);
-      await fetchAvailabilityAndSubjects();
-      setSelectedSubjects([]);
+      await fetchAvailability();
       setToastMessage({ message: t('avail.addSuccess'), type: 'success' });
     }
     setSaving(false);
@@ -327,7 +313,7 @@ export default function AvailabilityManager() {
       setToastMessage({ message: t('avail.deleteFailed'), type: 'error' });
     } else {
       await syncAvailabilityToGoogle(user.id);
-      await fetchAvailabilityAndSubjects();
+      await fetchAvailability();
       setToastMessage({ message: t('avail.deleteSuccess'), type: 'success' });
     }
   };
@@ -410,27 +396,11 @@ export default function AvailabilityManager() {
     } else {
       await syncAvailabilityToGoogle(user.id);
       setEditingSlotId(null);
-      await fetchAvailabilityAndSubjects();
+      await fetchAvailability();
       setToastMessage({ message: t('avail.updateSuccess'), type: 'success' });
     }
     setSaving(false);
   };
-
-  const subjectBadge = (s: any) => (
-    <span>
-      {s.name}
-      {s.is_group && s.max_students && (
-        <span className="text-xs text-violet-600 font-semibold ml-1">
-          ({t('avail.groupLabel')} - {s.max_students} {seatLabel(s.max_students)})
-        </span>
-      )}
-      {s.grade_min && s.grade_max && (
-        <span className="text-xs text-emerald-600 ml-1">
-          ({s.grade_min}-{s.grade_max === 13 ? 'Studentas' : `${s.grade_max} kl`})
-        </span>
-      )}
-    </span>
-  );
 
   return (
     <div className="space-y-6 pt-2">
@@ -493,29 +463,6 @@ export default function AvailabilityManager() {
                 />
                 <p className="text-xs text-gray-400">{t('avail.leaveEmptyForever')}</p>
               </div>
-
-              {subjects.length > 0 && (
-                <div className="space-y-2 pt-2 border-t border-gray-100">
-                  <Label>{t('avail.whichSubjects')}</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {subjects.map(s => (
-                      <label key={s.id} className="flex items-center gap-2 text-sm border p-2 rounded-xl cursor-pointer hover:bg-gray-50">
-                        <input
-                          type="checkbox"
-                          checked={selectedSubjects.includes(s.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) setSelectedSubjects([...selectedSubjects, s.id]);
-                            else setSelectedSubjects(selectedSubjects.filter(id => id !== s.id));
-                          }}
-                          className="rounded text-indigo-600 focus:ring-indigo-500"
-                        />
-                        {subjectBadge(s)}
-                      </label>
-                    ))}
-                  </div>
-                  <p className="text-xs text-gray-400">{t('avail.noSubjectMeansAll')}</p>
-                </div>
-              )}
 
               <button
                 type="button"
@@ -602,11 +549,6 @@ export default function AvailabilityManager() {
                                   {t('avail.until')} {slot.end_date}
                                 </span>
                               )}
-                              {slot.subject_ids && slot.subject_ids.length > 0 && (
-                                <span className="text-[10px] text-gray-400">
-                                  {slot.subject_ids.length} {t('avail.subjects')}
-                                </span>
-                              )}
                             </div>
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
@@ -664,29 +606,6 @@ export default function AvailabilityManager() {
                   </div>
                 </div>
               </div>
-
-              {subjects.length > 0 && (
-                <div className="space-y-2 pt-2 border-t border-gray-100">
-                  <Label>{t('avail.whichSubjects')}</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {subjects.map(s => (
-                      <label key={s.id} className="flex items-center gap-2 text-sm border p-2 rounded-xl cursor-pointer hover:bg-gray-50">
-                        <input
-                          type="checkbox"
-                          checked={selectedSubjects.includes(s.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) setSelectedSubjects([...selectedSubjects, s.id]);
-                            else setSelectedSubjects(selectedSubjects.filter(id => id !== s.id));
-                          }}
-                          className="rounded text-indigo-600 focus:ring-indigo-500"
-                        />
-                        {subjectBadge(s)}
-                      </label>
-                    ))}
-                  </div>
-                  <p className="text-xs text-gray-400">{t('avail.noSubjectMeansAll')}</p>
-                </div>
-              )}
 
               <button
                 type="button"
@@ -754,11 +673,6 @@ export default function AvailabilityManager() {
                               <span className="text-xs text-gray-500 bg-gray-50 px-2 py-0.5 rounded-lg">
                                 {slot.start_time.slice(0, 5)} – {slot.end_time.slice(0, 5)}
                               </span>
-                              {slot.subject_ids && slot.subject_ids.length > 0 && (
-                                <span className="text-[10px] text-gray-400">
-                                  {slot.subject_ids.length} {t('avail.subjects')}
-                                </span>
-                              )}
                             </div>
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">

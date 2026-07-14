@@ -55,7 +55,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!adminRow) return json(res, 403, { error: 'Forbidden' });
 
   const status = String((contract as any).signing_status || '');
-  if (!['sent', 'awaiting_school_signature'].includes(status)) {
+  // Parent review/confirmation is mandatory, even when no fields were missing.
+  // Only the completion endpoint advances the contract to this state.
+  if (status !== 'awaiting_school_signature') {
     return json(res, 409, { error: `Contract not ready for school signature (status: ${status})` });
   }
   if (!String((contract as any).pdf_url || '').trim()) {

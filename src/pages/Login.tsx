@@ -133,7 +133,7 @@ export default function Login() {
   // Tutor / student login form
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMeState] = useState(false);
+  const [rememberMe, setRememberMeState] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

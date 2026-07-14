@@ -31,7 +31,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: contract, error: contractErr } = await supabase
     .from('school_contracts')
     .select(
-      'id, organization_id, student_id, signing_status, signed_at, org:organizations(name), student:students(id, full_name, email, invite_code, payer_email, payer_name, parent_secondary_email, parent_secondary_name)',
+      'id, organization_id, student_id, signing_status, signed_at, org:organizations(name, features), student:students(id, full_name, email, invite_code, payer_email, payer_name, parent_secondary_email, parent_secondary_name)',
     )
     .eq('id', contractId)
     .maybeSingle();
@@ -48,6 +48,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .eq('organization_id', orgId)
     .maybeSingle();
   if (!adminRow) return json(res, 403, { error: 'Forbidden' });
+
+  if ((contract as any).org?.features?.school_contract_esign === true) {
+    return json(res, 409, { error: 'Šios organizacijos sutartys pasirašomos tik per Tutlio GoSign srautą.' });
+  }
 
   // Mark signed (idempotent).
   const updatePayload: Record<string, unknown> = { signing_status: 'signed' };
@@ -72,4 +76,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     alreadySigned: (contract as any).signing_status === 'signed',
   });
 }
-

@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2 } from 'lucide-react';
+import { CheckCircle2, Loader2 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { supabase } from '@/lib/supabase';
 import { useTranslation } from '@/lib/i18n';
@@ -36,7 +36,7 @@ interface FindLessonBookDialogProps {
   studentId: string;
   onClose: () => void;
   /** Called after a lesson is successfully created. */
-  onBooked: () => void;
+  onBooked: (booking: { tutorId: string; startIso: string; endIso: string }) => void;
 }
 
 type SubjectRow = {
@@ -64,6 +64,8 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
   const [meetingLink, setMeetingLink] = useState('');
   const [isPaid, setIsPaid] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [createdIntervals, setCreatedIntervals] = useState<Array<{ start: number; end: number }>>([]);
+  const [successMessage, setSuccessMessage] = useState('');
 
   useEffect(() => {
     if (!pick) {
@@ -93,6 +95,8 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
       setMeetingLink(String((subj as { meeting_link?: string | null } | null)?.meeting_link || ''));
       setIsPaid(false);
       setSelectedSlot('');
+      setCreatedIntervals([]);
+      setSuccessMessage('');
     })();
     return () => {
       cancelled = true;
@@ -121,8 +125,12 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
         endIso: slotEnd.toISOString(),
       });
     }
-    return slots;
-  }, [pick, subject]);
+    return slots.filter((slot) => {
+      const start = new Date(slot.startIso).getTime();
+      const end = new Date(slot.endIso).getTime();
+      return createdIntervals.every((created) => end <= created.start || start >= created.end);
+    });
+  }, [pick, subject, createdIntervals]);
 
   useEffect(() => {
     if (subSlots.length === 0) {
@@ -169,8 +177,18 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
           },
         ],
         individualPricing: [],
+        suppressSuccessAlert: true,
       });
-      onBooked();
+      setCreatedIntervals((current) => [
+        ...current,
+        { start: new Date(slot.startIso).getTime(), end: new Date(slot.endIso).getTime() },
+      ]);
+      setSuccessMessage(t('findLesson.lessonCreatedKeepOpen'));
+      onBooked({
+        tutorId: pick.tutorId,
+        startIso: slot.startIso,
+        endIso: slot.endIso,
+      });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       alert(t('compSch.errorGeneric', { msg }));
@@ -208,9 +226,15 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
         </DialogHeader>
         {pick && (
           <div className="space-y-3">
+            {successMessage && (
+              <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{successMessage}</span>
+              </div>
+            )}
             {subSlots.length === 0 ? (
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
-                {t('findLesson.noSubSlots')}
+                {createdIntervals.length > 0 ? t('findLesson.windowFullyBooked') : t('findLesson.noSubSlots')}
               </div>
             ) : (
               <div className="space-y-1.5">
@@ -284,7 +308,7 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
                 {t('compSch.creating')}
               </>
             ) : (
-              t('compSch.createLesson')
+              createdIntervals.length > 0 ? t('findLesson.createAnotherLesson') : t('compSch.createLesson')
             )}
           </Button>
         </DialogFooter>

@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { useTranslation } from '@/lib/i18n';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
+import { fetchSelfBookingDisabledMap } from '@/lib/studentBookingPolicy';
 
 interface ParsedNotes {
     start_time?: string;
@@ -103,6 +104,16 @@ export default function StudentWaitlist() {
             }
             if (!st) { setLoading(false); return; }
             studentIdForWaitlists = st.id;
+        }
+
+        // Org feature disable_student_booking: the waitlist is part of self-booking —
+        // the nav item is hidden, and direct URLs bounce back into the app.
+        if (studentIdForWaitlists) {
+            const disabledMap = await fetchSelfBookingDisabledMap([studentIdForWaitlists]);
+            if (disabledMap[studentIdForWaitlists]) {
+                navigate(parentWaitlistStudentId ? '/parent' : '/student', { replace: true });
+                return;
+            }
         }
 
         if (!studentIdForWaitlists) {

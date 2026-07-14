@@ -158,8 +158,9 @@ export function initOneSignSignableFields(p: InitOneSignParams): SignedField[] {
     { name: 'backgroundImageUrl', value: p.backgroundImageUrl },
     { name: 'mobileSigningText', value: p.mobileSigningText },
     { name: 'signingType', value: p.signingType },
-    // File: fileId + fileDigest + fileName are signed; content is NOT.
-    { name: 'fileId', value: p.file.fileId },
+    // OneSign signs fileDigest + fileName only — NOT fileId and NOT content.
+    // (Confirmed against RC's live server-side canonicalization; fileId is a
+    // MultiSign-only signed field.)
     { name: 'fileDigest', value: p.file.fileDigest },
     { name: 'fileName', value: p.file.fileName },
   );

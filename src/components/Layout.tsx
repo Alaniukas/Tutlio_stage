@@ -142,7 +142,8 @@ export default function Layout({ children }: LayoutProps) {
           'flex border-b border-gray-100',
           sidebarExpanded ? 'items-center justify-between p-4' : 'flex-col items-center gap-2 py-3 px-2'
         )}>
-          <Link to="/" className="flex items-center gap-2 min-w-0">
+          {/* Logged-in logo click stays in the app (first sidebar tab), not the marketing landing. */}
+          <Link to="/dashboard" className="flex items-center gap-2 min-w-0">
             <BrandedLogo size="md" showName={sidebarExpanded} />
           </Link>
           <button
@@ -256,7 +257,7 @@ export default function Layout({ children }: LayoutProps) {
           <div className="fixed inset-0 bg-black/50" onClick={() => setMobileOpen(false)} />
           <aside className="relative z-50 flex h-full w-72 max-w-[85vw] flex-col border-r border-gray-100 bg-white">
             <div className="flex items-center justify-between border-b border-gray-100 p-4">
-              <Link to="/" className="flex items-center gap-2" onClick={() => setMobileOpen(false)}>
+              <Link to="/dashboard" className="flex items-center gap-2" onClick={() => setMobileOpen(false)}>
                 <BrandedLogo size="md" />
               </Link>
               <button

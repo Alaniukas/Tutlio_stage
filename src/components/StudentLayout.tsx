@@ -12,6 +12,7 @@ import OrgSuspendedBanner from '@/components/OrgSuspendedBanner';
 import PwaInstallPrompt from '@/components/PwaInstallPrompt';
 import BrandedLogo from '@/components/BrandedLogo';
 import { clearOrgBrandingCache } from '@/contexts/OrgBrandingContext';
+import { isSelfBookingDisabledForStudent } from '@/lib/studentBookingPolicy';
 import { useTranslation } from '@/lib/i18n';
 import { useTotalChatUnread } from '@/hooks/useChat';
 import { usePushSubscription } from '@/hooks/usePushSubscription';
@@ -58,6 +59,9 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
         []
     );
 
+    /** Org feature disable_student_booking — booking (and its waitlist) is admin-only. */
+    const [bookingDisabled, setBookingDisabled] = useState(false);
+
     const navItems = [
         { href: '/student', label: t('studentNav.home'), icon: LayoutDashboard },
         { href: '/student/sessions', label: t('studentNav.sessions'), icon: BookOpen },
@@ -65,7 +69,9 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
         { href: '/student/messages', label: t('studentNav.messages'), icon: MessageSquare },
         { href: '/student/waitlist', label: t('studentNav.queue'), icon: Clock },
         { href: '/student/settings', label: t('studentNav.settings'), icon: Settings },
-    ];
+    ].filter((item) => !(bookingDisabled && (item.href === '/student/schedule' || item.href === '/student/waitlist')));
+    const navGridClass =
+        navItems.length <= 4 ? 'grid-cols-4' : navItems.length === 5 ? 'grid-cols-5' : 'grid-cols-6';
 
     useEffect(() => {
         const load = async () => {
@@ -96,6 +102,7 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                 }
 
                 if (selectedStudentData) {
+                    void isSelfBookingDisabledForStudent(selectedStudentData.id).then(setBookingDisabled);
                     const name = selectedStudentData.full_name || '';
                     setStudentName(name);
 
@@ -210,7 +217,8 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
 
             <header className="bg-white/80 backdrop-blur-md border-b border-gray-100 px-3 sm:px-4 py-3 flex items-center justify-between gap-2 sticky top-0 z-40 min-w-0">
                 <div className="flex items-center gap-2 sm:gap-4 min-w-0 flex-1">
-                    <Link to="/" className="flex items-center gap-2 flex-shrink-0">
+                    {/* Logged-in logo click stays in the app (student home), not the marketing landing. */}
+                    <Link to="/student" className="flex items-center gap-2 flex-shrink-0">
                         <BrandedLogo size="sm" nameClassName="hidden sm:block" />
                     </Link>
 
@@ -285,7 +293,7 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                 className="fixed bottom-0 inset-x-0 bg-white border-t border-gray-100 z-50 max-w-[100vw] overflow-x-hidden"
                 style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
             >
-                <div className="grid grid-cols-6 gap-0 px-0.5 sm:px-1 pt-2 pb-1 w-full">
+                <div className={`grid ${navGridClass} gap-0 px-0.5 sm:px-1 pt-2 pb-1 w-full`}>
                     {navItems.map((item) => {
                         const Icon = item.icon;
                         const active = location.pathname === item.href;

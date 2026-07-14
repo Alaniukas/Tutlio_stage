@@ -92,6 +92,11 @@ import StatusBadge from '@/components/StatusBadge';
 import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
 import FindTutorModal from '@/components/FindTutorModal';
 import { buildNoShowSessionPatch, noShowWhenLabelLt, type NoShowWhen } from '@/lib/noShowWhen';
+import {
+  contractedLessonsPerWeek,
+  resolveOrganizationLessonPrice,
+  type OrganizationDynamicPricingRule,
+} from '@/lib/organizationDynamicPricing';
 
 const locales = { lt, en: enUS };
 const localizer = dateFnsLocalizer({
@@ -253,6 +258,7 @@ interface Subject {
   color: string;
   tutor_id: string;
   is_group?: boolean | null;
+  is_trial?: boolean | null;
   max_students?: number | null;
   meeting_link?: string | null;
   grade_min?: number | null;
@@ -265,6 +271,8 @@ interface Student {
   tutor_id: string;
   email?: string;
   personal_meeting_link?: string | null;
+  grade?: string | null;
+  pricing_lessons_per_week?: number | null;
 }
 
 /** Kaip Calendar: mokinys → korepetitorius → dalykas */
@@ -318,6 +326,7 @@ export default function CompanyTvarkarastis() {
     subjects: Subject[];
     students: Student[];
     individualPricing: Array<{ student_id: string; subject_id: string; price: number }>;
+    dynamicPricingRules?: OrganizationDynamicPricingRule[];
     orgUsesLicenses?: boolean;
   }>('company_tvarkarastis');
 
@@ -329,6 +338,9 @@ export default function CompanyTvarkarastis() {
   const [availability, setAvailability] = useState<Availability[]>(tc?.availability ?? []);
   const [subjects, setSubjects] = useState<Subject[]>(tc?.subjects ?? []);
   const [students, setStudents] = useState<Student[]>(tc?.students ?? []);
+  const [dynamicPricingRules, setDynamicPricingRules] = useState<OrganizationDynamicPricingRule[]>(
+    tc?.dynamicPricingRules ?? [],
+  );
 
   // Filter state
   const [selectedTutorIds, setSelectedTutorIds] = useState<string[]>(
@@ -378,6 +390,7 @@ export default function CompanyTvarkarastis() {
   const [availEditDayOfWeek, setAvailEditDayOfWeek] = useState('1');
   const [availEditSpecificDate, setAvailEditSpecificDate] = useState('');
   const [availEditEndDate, setAvailEditEndDate] = useState('');
+  // The selector is no longer shown, but preserve legacy restrictions when editing old rows.
   const [availEditSubjectIds, setAvailEditSubjectIds] = useState<string[]>([]);
   const [availEditSaving, setAvailEditSaving] = useState(false);
 
@@ -390,7 +403,6 @@ export default function CompanyTvarkarastis() {
   const [createAvailEndDate, setCreateAvailEndDate] = useState('');
   const [createAvailStart, setCreateAvailStart] = useState('09:00');
   const [createAvailEnd, setCreateAvailEnd] = useState('11:00');
-  const [createAvailSubjectIds, setCreateAvailSubjectIds] = useState<string[]>([]);
   const [createAvailSaving, setCreateAvailSaving] = useState(false);
 
   // Create session from availability slot
@@ -405,6 +417,8 @@ export default function CompanyTvarkarastis() {
   const [createFromAvailIsPaid, setCreateFromAvailIsPaid] = useState(false);
   const [createFromAvailMeetingLink, setCreateFromAvailMeetingLink] = useState('');
   const [createFromAvailTutorMeetingLink, setCreateFromAvailTutorMeetingLink] = useState('');
+  const [createFromAvailCreatedIntervals, setCreateFromAvailCreatedIntervals] = useState<Array<{ start: number; end: number }>>([]);
+  const [createFromAvailSuccess, setCreateFromAvailSuccess] = useState(false);
 
   // Create session form
   const [createTutorId, setCreateTutorId] = useState('');
@@ -423,6 +437,15 @@ export default function CompanyTvarkarastis() {
   const [createRecurringFrequency, setCreateRecurringFrequency] = useState<'weekly' | 'biweekly' | 'monthly'>('weekly');
   const [createRecurringWeekdays, setCreateRecurringWeekdays] = useState<number[]>([]);
   const [createIsPaid, setCreateIsPaid] = useState(false);
+  const [createIsTrial, setCreateIsTrial] = useState(false);
+  /** Org trial-lesson defaults (topic/duration/price) for the trial toggle and auto-trial. */
+  const [trialDefaults, setTrialDefaults] = useState<{ topic: string; durationMinutes: number; priceEur: number }>({
+    topic: '',
+    durationMinutes: 60,
+    priceEur: 0,
+  });
+  /** Student whose empty history auto-enabled the trial toggle (org feature auto_trial_first_lesson). */
+  const [autoTrialStudentId, setAutoTrialStudentId] = useState<string | null>(null);
   const [createPrice, setCreatePrice] = useState(0);
   const [createTutorComment, setCreateTutorComment] = useState('');
   const [createShowCommentToStudent, setCreateShowCommentToStudent] = useState(false);
@@ -454,12 +477,83 @@ export default function CompanyTvarkarastis() {
   const [findLessonBookMeetingLink, setFindLessonBookMeetingLink] = useState('');
   const [findLessonBookTutorMeetingLink, setFindLessonBookTutorMeetingLink] = useState('');
   const [findLessonBookTrialSending, setFindLessonBookTrialSending] = useState(false);
+  const [findLessonBookCreatedIntervals, setFindLessonBookCreatedIntervals] = useState<Array<{ start: number; end: number }>>([]);
+  const [findLessonBookSuccess, setFindLessonBookSuccess] = useState(false);
 
   useEffect(() => {
     if (!featuresLoading && organizationId) {
       fetchData();
     }
   }, [featuresLoading, organizationId]);
+
+  // Org trial defaults (same source as CompanyStudents / create-trial-package).
+  useEffect(() => {
+    if (!organizationId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('organizations')
+        .select('features')
+        .eq('id', organizationId)
+        .maybeSingle();
+      if (cancelled) return;
+      const feat = (data as any)?.features;
+      const featObj = feat && typeof feat === 'object' && !Array.isArray(feat) ? (feat as Record<string, unknown>) : {};
+      setTrialDefaults({
+        topic: typeof featObj.trial_lesson_topic === 'string' && featObj.trial_lesson_topic.trim()
+          ? featObj.trial_lesson_topic.trim()
+          : '',
+        durationMinutes: typeof featObj.trial_lesson_duration_minutes === 'number' && Number.isFinite(featObj.trial_lesson_duration_minutes)
+          ? Math.max(15, Math.round(featObj.trial_lesson_duration_minutes))
+          : 60,
+        priceEur: typeof featObj.trial_lesson_price_eur === 'number' && Number.isFinite(featObj.trial_lesson_price_eur)
+          ? Math.max(0, featObj.trial_lesson_price_eur)
+          : 0,
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [organizationId]);
+
+  // Org feature auto_trial_first_lesson (feedback item 10): a student's first
+  // lesson defaults to a trial with the org trial topic/duration/price — all
+  // still editable in the dialog before saving.
+  useEffect(() => {
+    if (featuresLoading || !hasFeature('auto_trial_first_lesson')) return;
+    if (!createStudentId) return;
+    let cancelled = false;
+    (async () => {
+      const { count, error } = await supabase
+        .from('sessions')
+        .select('id', { count: 'exact', head: true })
+        .eq('student_id', createStudentId);
+      if (cancelled || error) return;
+      if ((count ?? 0) === 0) {
+        setAutoTrialStudentId(createStudentId);
+        setCreateIsTrial(true);
+        setCreateIsRecurring(false);
+        setCreateRecurringEndDate('');
+        setCreateRecurringWeekdays([]);
+        setCreatePrice(trialDefaults.priceEur);
+        setCreateTopic((prev) => (prev.trim() ? prev : trialDefaults.topic));
+        setCreateEndTime((prevEnd) => {
+          if (!createStartTime) return prevEnd;
+          const start = new Date(createStartTime);
+          if (Number.isNaN(start.getTime())) return prevEnd;
+          return format(new Date(start.getTime() + trialDefaults.durationMinutes * 60000), "yyyy-MM-dd'T'HH:mm");
+        });
+      } else {
+        setAutoTrialStudentId(null);
+        // Only undo trial that this feature turned on; a manual toggle stays.
+        setCreateIsTrial((prev) => (prev && autoTrialStudentId ? false : prev));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [createStudentId, featuresLoading, trialDefaults]);
 
   const fetchData = async () => {
     if (!organizationId) return;
@@ -516,7 +610,7 @@ export default function CompanyTvarkarastis() {
       // Visi org mokiniai (kad admin galėtų užimti laiką pas bet kurį korepetitorių)
       let studentsQuery = supabase
         .from('students')
-        .select('id, full_name, tutor_id, email, personal_meeting_link');
+        .select('id, full_name, tutor_id, email, personal_meeting_link, grade, pricing_lessons_per_week');
       if (organizationId) {
         studentsQuery = studentsQuery.eq('organization_id', organizationId);
       } else {
@@ -539,6 +633,7 @@ export default function CompanyTvarkarastis() {
       setTutorSubjectPrices(tspData || []);
 
       let nextOrgUsesLicenses = false;
+      let nextDynamicPricingRules: OrganizationDynamicPricingRule[] = [];
       if (organizationId) {
         const { data: orgRow } = await supabase
           .from('organizations')
@@ -552,6 +647,19 @@ export default function CompanyTvarkarastis() {
         if (Array.isArray(tpl)) {
           setOrgSubjectTemplates(tpl.filter((t: any) => t?.id && t?.name).map((t: any) => ({ id: t.id, name: String(t.name).trim() })));
         }
+
+        const { data: dynamicRows } = await supabase
+          .from('organization_dynamic_pricing')
+          .select('id, organization_id, grade_min, grade_max, lessons_per_week, price')
+          .eq('organization_id', organizationId);
+        nextDynamicPricingRules = (dynamicRows ?? []).map((row) => ({
+          ...row,
+          grade_min: Number(row.grade_min),
+          grade_max: Number(row.grade_max),
+          lessons_per_week: Number(row.lessons_per_week),
+          price: Number(row.price),
+        }));
+        setDynamicPricingRules(nextDynamicPricingRules);
       }
 
       setCache('company_tvarkarastis', {
@@ -561,6 +669,7 @@ export default function CompanyTvarkarastis() {
         subjects: subjectsData || [],
         students: studentsData || [],
         individualPricing: pricingData || [],
+        dynamicPricingRules: nextDynamicPricingRules,
         orgUsesLicenses: nextOrgUsesLicenses,
       });
     } catch (error) {
@@ -789,8 +898,12 @@ export default function CompanyTvarkarastis() {
       });
     }
 
-    return slots;
-  }, [editingAvailability, createFromAvailBaseDate, availEditStart, availEditEnd, createFromAvailSubjectId, subjects]);
+    return slots.filter((slot) => {
+      const startMs = new Date(slot.startIso).getTime();
+      const endMs = new Date(slot.endIso).getTime();
+      return createFromAvailCreatedIntervals.every((created) => endMs <= created.start || startMs >= created.end);
+    });
+  }, [editingAvailability, createFromAvailBaseDate, availEditStart, availEditEnd, createFromAvailSubjectId, subjects, createFromAvailCreatedIntervals]);
 
   /** „Rasti pamoką“: 60 min pamoka 09–11 lange → keli galimi startai (kaip createFromAvailSlots) */
   const findLessonBookSlots = useMemo(() => {
@@ -816,8 +929,12 @@ export default function CompanyTvarkarastis() {
         endIso: slotEnd.toISOString(),
       });
     }
-    return slots;
-  }, [findLessonBook, subjects]);
+    return slots.filter((slot) => {
+      const start = new Date(slot.startIso).getTime();
+      const end = new Date(slot.endIso).getTime();
+      return findLessonBookCreatedIntervals.every((created) => end <= created.start || start >= created.end);
+    });
+  }, [findLessonBook, subjects, findLessonBookCreatedIntervals]);
 
   useEffect(() => {
     if (!findLessonBook) {
@@ -858,6 +975,8 @@ export default function CompanyTvarkarastis() {
   useEffect(() => {
     if (!createFromAvailOpen || !editingAvailability) {
       setCreateFromAvailTutorMeetingLink('');
+      setCreateFromAvailCreatedIntervals([]);
+      setCreateFromAvailSuccess(false);
       return;
     }
     let cancelled = false;
@@ -1024,14 +1143,25 @@ export default function CompanyTvarkarastis() {
       ? tutorSubjectPrices.find(p => p.tutor_id === createTutorId && p.org_subject_template_id === matchedTpl.id)
       : undefined;
 
-    let price = tsp?.price ?? subj.price ?? 0;
+    const fallbackPrice = tsp?.price ?? subj.price ?? 0;
+    let price = fallbackPrice;
     if (createStudentId) {
       const pricing = individualPricing.find(
         p => p.student_id === createStudentId && p.subject_id === subjectId,
       );
-      if (pricing && typeof pricing.price === 'number') {
-        price = pricing.price;
-      }
+      const student = students.find((row) => row.id === createStudentId);
+      const frequency = contractedLessonsPerWeek(
+        createIsRecurring,
+        createRecurringWeekdays,
+        student?.pricing_lessons_per_week,
+      );
+      price = resolveOrganizationLessonPrice({
+        rules: subj.is_group || subj.is_trial ? [] : dynamicPricingRules,
+        student,
+        lessonsPerWeek: frequency,
+        individualPrice: pricing?.price,
+        fallbackPrice,
+      });
     }
 
     setCreatePrice(price);
@@ -1050,6 +1180,52 @@ export default function CompanyTvarkarastis() {
       }
     }
   };
+
+  useEffect(() => {
+    if (!createSubjectId || !createStudentId) return;
+    const subject = subjects.find((row) => row.id === createSubjectId);
+    if (!subject) return;
+    const matchedTemplate = orgSubjectTemplates.find(
+      (row) => row.name.toLowerCase() === (subject.name || '').toLowerCase(),
+    );
+    const tutorPrice = matchedTemplate
+      ? tutorSubjectPrices.find(
+          (row) =>
+            row.tutor_id === createTutorId &&
+            row.org_subject_template_id === matchedTemplate.id,
+        )
+      : undefined;
+    const individualPrice = individualPricing.find(
+      (row) => row.student_id === createStudentId && row.subject_id === createSubjectId,
+    )?.price;
+    const student = students.find((row) => row.id === createStudentId);
+    const frequency = contractedLessonsPerWeek(
+      createIsRecurring,
+      createRecurringWeekdays,
+      student?.pricing_lessons_per_week,
+    );
+    setCreatePrice(
+      resolveOrganizationLessonPrice({
+        rules: subject.is_group || subject.is_trial ? [] : dynamicPricingRules,
+        student,
+        lessonsPerWeek: frequency,
+        individualPrice,
+        fallbackPrice: tutorPrice?.price ?? subject.price ?? 0,
+      }),
+    );
+  }, [
+    createIsRecurring,
+    createRecurringWeekdays,
+    createStudentId,
+    createSubjectId,
+    createTutorId,
+    dynamicPricingRules,
+    individualPricing,
+    orgSubjectTemplates,
+    students,
+    subjects,
+    tutorSubjectPrices,
+  ]);
 
   const handleCreateStartTimeChange = (newVal: string) => {
     setCreateStartTime(newVal);
@@ -1611,7 +1787,7 @@ export default function CompanyTvarkarastis() {
         tutor_id: createAvailTutorId,
         start_time: createAvailStart,
         end_time: createAvailEnd,
-        subject_ids: createAvailSubjectIds,
+        subject_ids: [],
         is_recurring: createAvailIsRecurring,
         created_by_role: 'org_admin',
       };
@@ -1633,7 +1809,6 @@ export default function CompanyTvarkarastis() {
       void emailOrgTutorAvailabilityNotice(createAvailTutorId, 'created', schedHtmlCr);
       setIsCreateAvailabilityOpen(false);
       setCreateAvailTutorId('');
-      setCreateAvailSubjectIds([]);
       setCreateAvailStart('09:00');
       setCreateAvailEnd('11:00');
       fetchData();
@@ -1671,7 +1846,13 @@ export default function CompanyTvarkarastis() {
         const pricing = individualPricing.find(
           p => p.student_id === studentId && p.subject_id === createFromAvailSubjectId,
         );
-        const studentPrice = pricing?.price ?? availTsp?.price ?? subj?.price ?? null;
+        const student = students.find((row) => row.id === studentId);
+        const studentPrice = resolveOrganizationLessonPrice({
+          rules: subj?.is_group || subj?.is_trial ? [] : dynamicPricingRules,
+          student,
+          individualPrice: pricing?.price,
+          fallbackPrice: availTsp?.price ?? subj?.price ?? 0,
+        });
 
         return {
           tutor_id: editingAvailability.tutor_id,
@@ -1697,15 +1878,11 @@ export default function CompanyTvarkarastis() {
       const { error } = await supabase.from('sessions').insert(sessionRows);
       if (error) throw new Error(error.message);
 
-      setCreateFromAvailOpen(false);
-      setCreateFromAvailStudentId('');
-      setCreateFromAvailStudentIds([]);
-      setCreateFromAvailSubjectId('');
-      setCreateFromAvailTopic('');
-      setCreateFromAvailSelectedSlot('');
-      setCreateFromAvailIsPaid(false);
-      setCreateFromAvailMeetingLink('');
-      setIsAvailabilityEditOpen(false);
+      setCreateFromAvailCreatedIntervals((current) => [
+        ...current,
+        { start: new Date(selectedSlot.startIso).getTime(), end: new Date(selectedSlot.endIso).getTime() },
+      ]);
+      setCreateFromAvailSuccess(true);
       fetchData();
     } catch (err: any) {
       alert(t('compSch.errorGeneric', { msg: err.message }));
@@ -1756,7 +1933,13 @@ export default function CompanyTvarkarastis() {
       const bookPricing = individualPricing.find(
         p => p.student_id === priceStudentId && p.subject_id === findLessonBook.subjectId,
       );
-      const bookPrice = bookPricing?.price ?? bookTsp?.price ?? subj?.price ?? 0;
+      const bookStudent = students.find((row) => row.id === priceStudentId);
+      const bookPrice = resolveOrganizationLessonPrice({
+        rules: subj?.is_group || subj?.is_trial ? [] : dynamicPricingRules,
+        student: bookStudent,
+        individualPrice: bookPricing?.price,
+        fallbackPrice: bookTsp?.price ?? subj?.price ?? 0,
+      });
 
       await runOrgAdminCreateSession({
         supabase,
@@ -1778,16 +1961,15 @@ export default function CompanyTvarkarastis() {
         individualPricing,
         tutorSubjectPrices,
         orgSubjectTemplateId: matchedTpl?.id,
+        dynamicPricingRules,
+        suppressSuccessAlert: true,
       });
 
-      setFindLessonBook(null);
-      setFindLessonBookStudentId('');
-      setFindLessonBookStudentIds([]);
-      setFindLessonBookTopic('');
-      setFindLessonBookSelectedSlot('');
-      setFindLessonBookIsPaid(false);
-      setFindLessonBookMeetingLink('');
-      setFindLessonBookTutorMeetingLink('');
+      setFindLessonBookCreatedIntervals((current) => [
+        ...current,
+        { start: new Date(selectedSlot.startIso).getTime(), end: new Date(selectedSlot.endIso).getTime() },
+      ]);
+      setFindLessonBookSuccess(true);
       fetchData();
     } catch (err: any) {
       alert(t('compSch.errorGeneric', { msg: err.message }));
@@ -1889,12 +2071,14 @@ export default function CompanyTvarkarastis() {
         createRecurringWeekdays,
         createIsPaid,
         createPrice,
+        createIsTrial,
         createTutorComment,
         createShowCommentToStudent,
         subjects,
         individualPricing,
         tutorSubjectPrices,
         orgSubjectTemplateId: matchedTemplate?.id,
+        dynamicPricingRules,
       });
       setIsCreateSessionOpen(false);
       resetCreateForm();
@@ -1921,6 +2105,8 @@ export default function CompanyTvarkarastis() {
     setCreateRecurringFrequency('weekly');
     setCreateRecurringWeekdays([]);
     setCreateIsPaid(false);
+    setCreateIsTrial(false);
+    setAutoTrialStudentId(null);
     setCreatePrice(0);
     setCreateTutorComment('');
     setCreateShowCommentToStudent(false);
@@ -2552,6 +2738,7 @@ export default function CompanyTvarkarastis() {
               <div className="space-y-2">
                 <Label>{t('compSch.price')}</Label>
                 <Input type="number" value={createPrice} onChange={(e) => setCreatePrice(Number(e.target.value))} className="rounded-xl" />
+                {createIsTrial && <p className="text-xs text-amber-700">{t('compSch.trialPriceNote')}</p>}
               </div>
               <div className="border border-green-100 rounded-xl p-3 sm:p-4 bg-green-50/50 flex flex-col justify-center min-h-[4.5rem]">
                 <button type="button" onClick={() => setCreateIsPaid(!createIsPaid)} className="flex items-center justify-between gap-3 w-full text-left">
@@ -2565,6 +2752,39 @@ export default function CompanyTvarkarastis() {
                 </button>
               </div>
             </div>
+
+            {!subjects.find(s => s.id === createSubjectId)?.is_group && (
+              <div className="border border-amber-100 rounded-xl p-3 sm:p-4 bg-amber-50/50">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !createIsTrial;
+                    setCreateIsTrial(next);
+                    if (next) {
+                      setCreateIsRecurring(false);
+                      setCreateRecurringEndDate('');
+                      setCreateRecurringWeekdays([]);
+                      setCreatePrice(trialDefaults.priceEur);
+                      setCreateTopic((prev) => (prev.trim() ? prev : trialDefaults.topic));
+                    } else {
+                      setAutoTrialStudentId(null);
+                    }
+                  }}
+                  className="flex items-center justify-between gap-3 w-full text-left"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-amber-900">{t('compSch.trialLesson')}</p>
+                    <p className="text-xs text-amber-800/80 hidden sm:block">{t('compSch.trialLessonDesc')}</p>
+                  </div>
+                  <div className={`relative inline-flex h-6 w-11 items-center rounded-full flex-shrink-0 ${createIsTrial ? 'bg-amber-500' : 'bg-gray-300'}`}>
+                    <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${createIsTrial ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </div>
+                </button>
+                {createIsTrial && autoTrialStudentId === createStudentId && (
+                  <p className="mt-2 text-xs text-amber-800">{t('compSch.firstLessonAutoTrial')}</p>
+                )}
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label>{t('compSch.commentOptional')}</Label>
@@ -2585,6 +2805,7 @@ export default function CompanyTvarkarastis() {
               </label>
             </div>
 
+            {!createIsTrial && (
             <div className="border border-gray-100 rounded-xl p-3 sm:p-4 space-y-3 bg-gray-50">
               <button
                 type="button"
@@ -2686,13 +2907,14 @@ export default function CompanyTvarkarastis() {
                     />
                     {!createRecurringEndDate && (
                       <p className="text-xs text-gray-500">
-                        Tuščia = pamokos kartojasi nuolat (sugeneruojamos į priekį ~2 metus).
+                        Tuščia = grafikas kartojasi nuolat. Sistema automatiškai palaiko artimiausių pamokų kalendorių.
                       </p>
                     )}
                   </div>
                 </div>
               )}
             </div>
+            )}
             </div>
 
             {showDaySummaryAside && (
@@ -3373,31 +3595,6 @@ export default function CompanyTvarkarastis() {
               </div>
             </div>
 
-            <div className="space-y-1.5">
-              <Label>{t('compSch.subjectsOptional')}</Label>
-              <div className="border rounded-xl p-3 max-h-32 overflow-y-auto space-y-2">
-                {subjects
-                  .filter(s => s.tutor_id === editingAvailability?.tutor_id)
-                  .map(s => (
-                    <label key={s.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                      <Checkbox
-                        checked={availEditSubjectIds.includes(s.id)}
-                        onChange={(e) => {
-                          const next = e.target.checked
-                            ? Array.from(new Set([...availEditSubjectIds, s.id]))
-                            : availEditSubjectIds.filter(id => id !== s.id);
-                          setAvailEditSubjectIds(next);
-                        }}
-                      />
-                      <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
-                      <span>{s.name}</span>
-                    </label>
-                  ))}
-                {subjects.filter(s => s.tutor_id === editingAvailability?.tutor_id).length === 0 && (
-                  <p className="text-xs text-gray-400">{t('compSch.tutorNoSubjects')}</p>
-                )}
-              </div>
-            </div>
           </div>
             {/* Create session from this slot */}
             <div className="border-t border-gray-100 pt-4">
@@ -3419,6 +3616,12 @@ export default function CompanyTvarkarastis() {
               </div>
               {createFromAvailOpen && (
                 <div className="space-y-3 p-3 bg-indigo-50 border border-indigo-100 rounded-xl">
+                  {createFromAvailSuccess && (
+                    <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                      <CheckCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>{t('findLesson.lessonCreatedKeepOpen')}</span>
+                    </div>
+                  )}
                   <div className="space-y-1.5">
                     <Label className="text-xs">{t('compSch.subject')}</Label>
                     <Select value={createFromAvailSubjectId || 'none'} onValueChange={(v) => setCreateFromAvailSubjectId(v === 'none' ? '' : v)}>
@@ -3539,7 +3742,11 @@ export default function CompanyTvarkarastis() {
                     onClick={handleCreateSessionFromAvailability}
                     disabled={createFromAvailSaving || createFromAvailSlots.length === 0}
                   >
-                    {createFromAvailSaving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{t('compSch.creating')}</> : t('compSch.createLesson')}
+                    {createFromAvailSaving
+                      ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{t('compSch.creating')}</>
+                      : createFromAvailCreatedIntervals.length > 0
+                        ? t('findLesson.createAnotherLesson')
+                        : t('compSch.createLesson')}
                   </Button>
                 </div>
               )}
@@ -3643,32 +3850,6 @@ export default function CompanyTvarkarastis() {
               </div>
             </div>
 
-            {createAvailTutorId && (
-              <div className="space-y-1.5">
-                <Label>{t('compSch.subjectsOptional')}</Label>
-                <div className="border rounded-xl p-3 max-h-32 overflow-y-auto space-y-2">
-                  {subjects.filter(s => s.tutor_id === createAvailTutorId).map(s => (
-                    <label key={s.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={createAvailSubjectIds.includes(s.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) setCreateAvailSubjectIds(prev => [...prev, s.id]);
-                          else setCreateAvailSubjectIds(prev => prev.filter(id => id !== s.id));
-                        }}
-                        className="w-4 h-4 rounded border-gray-300 text-indigo-600"
-                      />
-                      <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
-                      <span className="flex-1">{s.name}</span>
-                      <span className="text-gray-400 text-xs ml-auto">{t('compSch.classAbbr', { price: String(s.price) })}{s.grade_min ? ` · ${s.grade_min}–${s.grade_max ?? s.grade_min} kl.` : ''}</span>
-                    </label>
-                  ))}
-                  {subjects.filter(s => s.tutor_id === createAvailTutorId).length === 0 && (
-                    <p className="text-xs text-gray-400">{t('compSch.tutorNoSubjects')}</p>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsCreateAvailabilityOpen(false)}>{t('compSch.cancel')}</Button>
@@ -3742,6 +3923,8 @@ export default function CompanyTvarkarastis() {
             setFindLessonBookIsPaid(false);
             setFindLessonBookMeetingLink('');
             setFindLessonBookTutorMeetingLink('');
+            setFindLessonBookCreatedIntervals([]);
+            setFindLessonBookSuccess(false);
           }
         }}
       >
@@ -3767,6 +3950,12 @@ export default function CompanyTvarkarastis() {
           </DialogHeader>
           {findLessonBook && (
             <div className="space-y-3">
+              {findLessonBookSuccess && (
+                <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                  <CheckCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{t('findLesson.lessonCreatedKeepOpen')}</span>
+                </div>
+              )}
               {findLessonBookCrossTutor && (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
                   {t('findLesson.crossTutorHint')}
@@ -3774,7 +3963,7 @@ export default function CompanyTvarkarastis() {
               )}
               {findLessonBookSlots.length === 0 ? (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
-                  {t('findLesson.noSubSlots')}
+                  {findLessonBookCreatedIntervals.length > 0 ? t('findLesson.windowFullyBooked') : t('findLesson.noSubSlots')}
                 </div>
               ) : (
                 <div className="space-y-1.5">
@@ -3889,6 +4078,8 @@ export default function CompanyTvarkarastis() {
                 setFindLessonBookIsPaid(false);
                 setFindLessonBookMeetingLink('');
                 setFindLessonBookTutorMeetingLink('');
+                setFindLessonBookCreatedIntervals([]);
+                setFindLessonBookSuccess(false);
               }}
             >
               {t('compSch.cancel')}
@@ -3926,7 +4117,9 @@ export default function CompanyTvarkarastis() {
                   {t('compSch.creating')}
                 </>
               ) : (
-                t('compSch.createLesson')
+                findLessonBookCreatedIntervals.length > 0
+                  ? t('findLesson.createAnotherLesson')
+                  : t('compSch.createLesson')
               )}
             </Button>
           </DialogFooter>
@@ -3955,6 +4148,8 @@ export default function CompanyTvarkarastis() {
           setFindLessonBookIsPaid(false);
           setFindLessonBookMeetingLink('');
           setFindLessonBookTutorMeetingLink('');
+          setFindLessonBookCreatedIntervals([]);
+          setFindLessonBookSuccess(false);
         }}
       />
     </>

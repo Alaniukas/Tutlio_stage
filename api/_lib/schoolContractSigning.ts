@@ -21,14 +21,40 @@ import {
 export const SIGNATURE_TOKEN_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
 export const CONTRACT_SIGN_SELECT =
-  'id, organization_id, student_id, signing_status, pdf_url, signed_contract_url, contract_number, require_second_parent, ' +
-  'organizations(name, features), ' +
-  'student:students(id, full_name, payer_name, payer_email, parent_secondary_name, parent_secondary_email)';
+  'id, organization_id, student_id, signing_status, pdf_url, signed_contract_url, contract_number, require_second_parent, annual_fee, additional_fee_amount, additional_fee_purpose, ' +
+  'organizations(name, email, features), ' +
+  'student:students(id, full_name, payer_name, payer_email, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_personal_code)';
 
 export const ROLE_ORDER: Record<SignerRole, number> = { school: 0, parent_primary: 1, parent_secondary: 2 };
 
 export function randomSignToken(): string {
   return `${crypto.randomUUID().replace(/-/g, '')}${crypto.randomUUID().replace(/-/g, '')}`;
+}
+
+export interface ContractSigningSettings {
+  email: string;
+  reason: string;
+  location: string;
+  contact: string;
+}
+
+function stringSetting(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+/** Organization-controlled data used in signing emails and GoSign metadata. */
+export function contractSigningSettings(contract: any): ContractSigningSettings {
+  const org = contract?.organizations || {};
+  const features = org.features && typeof org.features === 'object' && !Array.isArray(org.features)
+    ? org.features as Record<string, unknown>
+    : {};
+  const email = stringSetting(features.school_contract_signing_email) || stringSetting(org.email);
+  return {
+    email,
+    reason: stringSetting(features.school_contract_signature_reason) || 'Ugdymo sutarties pasirašymas',
+    location: stringSetting(features.school_contract_signature_location),
+    contact: stringSetting(features.school_contract_signature_contact) || email,
+  };
 }
 
 function contractPdfFileName(contract: any): string {
@@ -59,6 +85,17 @@ export async function uploadSignedPdf(
     });
   if (error) throw new Error(`Could not store signed PDF: ${error.message}`);
   return path;
+}
+
+async function createContractSignedUrl(
+  supabase: SupabaseClient,
+  path: string,
+): Promise<string | null> {
+  const { data, error } = await supabase.storage
+    .from(SCHOOL_CONTRACTS_BUCKET)
+    .createSignedUrl(extractSchoolContractStoragePath(path), SIGNATURE_TOKEN_TTL_MS / 1000);
+  if (error || !data?.signedUrl) return null;
+  return data.signedUrl;
 }
 
 async function fetchSignatureRows(supabase: SupabaseClient, contractId: string): Promise<any[]> {
@@ -96,7 +133,8 @@ export async function beginGoSignForRow(
   const bytes = await downloadPdfBytes(supabase, inputPath);
   const content = bytes.toString('base64');
   const fileDigest = fileDigestBase64(bytes);
-  const responseUrl = `${appOrigin.replace(/\/$/, '')}/school-sign/return?token=${encodeURIComponent(row.token)}`;
+  const settings = contractSigningSettings(contract);
+  const responseUrl = `${appOrigin.replace(/\/$/, '')}/pasirasymas/sutarties/per/go-sign/${encodeURIComponent(row.token)}/rezultatas`;
 
   const result = await initOneSign({
     responseUrl,
@@ -104,6 +142,10 @@ export async function beginGoSignForRow(
     locale: 'lt',
     position: signaturePositionForRole(row.role as SignerRole),
     signerPersonalCode: row.signer_personal_code || undefined,
+    reason: settings.reason || undefined,
+    location: settings.location || undefined,
+    contact: settings.contact || undefined,
+    displayValidity: true,
     mobileSigningText: 'Tutlio: ugdymo sutarties pasirašymas',
     file: {
       fileId: `${contract.id}:${row.role}`.slice(0, 128),
@@ -153,7 +195,10 @@ export async function ensureSignatureRow(
       signer_personal_code: params.signerPersonalCode ?? null,
       status: 'pending',
       token,
-      token_expires_at: new Date(Date.now() + SIGNATURE_TOKEN_TTL_MS).toISOString(),
+      // The school signs from an authenticated admin page and may take longer
+      // than the parent-link TTL. Parent links remain time-limited.
+      token_expires_at:
+        params.role === 'school' ? null : new Date(Date.now() + SIGNATURE_TOKEN_TTL_MS).toISOString(),
     })
     .select('*')
     .single();
@@ -165,31 +210,45 @@ export async function ensureSignatureRow(
 async function sendInternalEmail(
   appOrigin: string,
   type: string,
-  to: string,
+  to: string | string[],
   data: Record<string, unknown>,
-): Promise<void> {
+): Promise<boolean> {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!serviceKey || !to) return;
+  const recipients = Array.isArray(to) ? to.filter(Boolean) : [to].filter(Boolean);
+  if (!serviceKey || recipients.length === 0) return false;
   try {
-    await fetch(`${appOrigin.replace(/\/$/, '')}/api/send-email`, {
+    const response = await fetch(`${appOrigin.replace(/\/$/, '')}/api/send-email`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-internal-key': serviceKey },
-      body: JSON.stringify({ type, to, data }),
+      body: JSON.stringify({ type, to: recipients, data, locale: 'lt' }),
     });
+    if (!response.ok) {
+      console.error('[schoolContractSigning] email send failed:', type, response.status, await response.text().catch(() => ''));
+      return false;
+    }
+    return true;
   } catch (e) {
     console.error('[schoolContractSigning] email send failed:', (e as Error)?.message);
+    return false;
   }
 }
 
 function parentSignUrl(appOrigin: string, token: string): string {
-  return `${appOrigin.replace(/\/$/, '')}/school-sign?token=${encodeURIComponent(token)}`;
+  return `${appOrigin.replace(/\/$/, '')}/pasirasymas/sutarties/per/go-sign/${encodeURIComponent(token)}`;
 }
 
 export interface ReturnResult {
   status: 'pending' | 'in_progress' | 'signed' | 'canceled' | 'expired' | 'not_found';
   role?: SignerRole;
+  contractId?: string;
   contractStatus?: string;
   done?: boolean;
+}
+
+export interface PollAndAdvanceOptions {
+  /** Browser return pages retry briefly; server reconciliation needs one cheap check per scheduled run. */
+  attempts?: number;
+  delayMs?: number;
 }
 
 /**
@@ -201,6 +260,7 @@ export async function pollAndAdvance(
   supabase: SupabaseClient,
   token: string,
   appOrigin: string,
+  options: PollAndAdvanceOptions = {},
 ): Promise<ReturnResult> {
   const { data: row } = await supabase
     .from('school_contract_signatures')
@@ -215,25 +275,36 @@ export async function pollAndAdvance(
     .eq('id', row.contract_id)
     .maybeSingle();
   if (!contract) return { status: 'not_found' };
+  const contractId = String((contract as any).id);
 
   if (row.status === 'signed') {
-    return { status: 'signed', role: row.role, contractStatus: (contract as any).signing_status };
-  }
-  if (row.token_expires_at && new Date(row.token_expires_at).getTime() < Date.now()) {
-    return { status: 'expired', role: row.role };
+    const contractStatus = String((contract as any).signing_status || '');
+    return {
+      status: 'signed',
+      role: row.role,
+      contractId,
+      contractStatus,
+      done: contractStatus === 'signed',
+    };
   }
   if (!row.gosign_transaction_id) {
-    return { status: 'pending', role: row.role, contractStatus: (contract as any).signing_status };
+    if (row.token_expires_at && new Date(row.token_expires_at).getTime() < Date.now()) {
+      return { status: 'expired', role: row.role, contractId };
+    }
+    return { status: 'pending', role: row.role, contractId, contractStatus: (contract as any).signing_status };
   }
 
-  const result = await pollSigningResult(row.gosign_transaction_id);
-  if (result.status === 'InProgress') return { status: 'in_progress', role: row.role };
+  const result = await pollSigningResult(row.gosign_transaction_id, {
+    attempts: options.attempts ?? 6,
+    delayMs: options.delayMs ?? 1500,
+  });
+  if (result.status === 'InProgress') return { status: 'in_progress', role: row.role, contractId };
   if (result.status === 'Canceled') {
     await supabase
       .from('school_contract_signatures')
       .update({ status: 'canceled', updated_at: new Date().toISOString() })
       .eq('id', row.id);
-    return { status: 'canceled', role: row.role };
+    return { status: 'canceled', role: row.role, contractId };
   }
 
   // Signed — persist the returned PDF and record signer details.
@@ -245,7 +316,7 @@ export async function pollAndAdvance(
     role: row.role,
     bytes: signedBytes,
   });
-  await supabase
+  const { data: claimedRows, error: claimError } = await supabase
     .from('school_contract_signatures')
     .update({
       status: 'signed',
@@ -255,10 +326,22 @@ export async function pollAndAdvance(
       signer_certificate_trusted: result.signerCertificateTrusted ?? null,
       updated_at: new Date().toISOString(),
     })
-    .eq('id', row.id);
+    .eq('id', row.id)
+    .eq('status', row.status)
+    .select('id');
+  if (claimError) throw new Error(`Could not record signed contract: ${claimError.message}`);
+  if (!claimedRows || claimedRows.length === 0) {
+    return {
+      status: 'signed',
+      role: row.role,
+      contractId,
+      contractStatus: String((contract as any).signing_status || ''),
+      done: String((contract as any).signing_status || '') === 'signed',
+    };
+  }
 
   const st = (contract as any).student || {};
-  const contractId = String((contract as any).id);
+  const settings = contractSigningSettings(contract);
 
   if (row.role === 'school') {
     await supabase
@@ -271,16 +354,19 @@ export async function pollAndAdvance(
       role: 'parent_primary',
       signerName: st.payer_name,
       signerEmail: st.payer_email,
+      signerPersonalCode: st.payer_personal_code,
     });
+    const schoolSignedPdfUrl = await createContractSignedUrl(supabase, signedPath);
     await sendInternalEmail(appOrigin, 'school_contract_sign_request', String(st.payer_email || ''), {
       parentName: st.payer_name || '',
       studentName: st.full_name || '',
       schoolName: (contract as any).organizations?.name || '',
+      schoolEmail: settings.email,
       signUrl: parentSignUrl(appOrigin, parentRow.token),
-      locale: 'lt',
+      pdfUrl: schoolSignedPdfUrl || undefined,
       organizationId: (contract as any).organization_id,
     });
-    return { status: 'signed', role: row.role, contractStatus: 'signed_by_school' };
+    return { status: 'signed', role: row.role, contractId, contractStatus: 'signed_by_school' };
   }
 
   if (row.role === 'parent_primary') {
@@ -292,24 +378,64 @@ export async function pollAndAdvance(
         role: 'parent_secondary',
         signerName: st.parent_secondary_name,
         signerEmail: st.parent_secondary_email,
+        signerPersonalCode: st.parent_secondary_personal_code,
       });
+      const primarySignedPdfUrl = await createContractSignedUrl(supabase, signedPath);
       await sendInternalEmail(appOrigin, 'school_contract_sign_request', String(st.parent_secondary_email || ''), {
         parentName: st.parent_secondary_name || '',
         studentName: st.full_name || '',
         schoolName: (contract as any).organizations?.name || '',
+        schoolEmail: settings.email,
         signUrl: parentSignUrl(appOrigin, p2.token),
-        locale: 'lt',
+        pdfUrl: primarySignedPdfUrl || undefined,
         organizationId: (contract as any).organization_id,
       });
-      return { status: 'signed', role: row.role, contractStatus: 'signed_by_school' };
+      return { status: 'signed', role: row.role, contractId, contractStatus: 'signed_by_school' };
     }
     await finalizeContract(supabase, contract, signedPath, appOrigin);
-    return { status: 'signed', role: row.role, contractStatus: 'signed', done: true };
+    return { status: 'signed', role: row.role, contractId, contractStatus: 'signed', done: true };
   }
 
   // parent_secondary
   await finalizeContract(supabase, contract, signedPath, appOrigin);
-  return { status: 'signed', role: row.role, contractStatus: 'signed', done: true };
+  return { status: 'signed', role: row.role, contractId, contractStatus: 'signed', done: true };
+}
+
+async function sendFirstPendingInstallmentEmail(
+  supabase: SupabaseClient,
+  contract: any,
+  appOrigin: string,
+): Promise<void> {
+  const st = contract.student || {};
+  const recipient = stringSetting(st.payer_email);
+  if (!recipient) return;
+  const { data: installments, error } = await supabase
+    .from('school_payment_installments')
+    .select('id, installment_number, amount, due_date, payment_status')
+    .eq('contract_id', contract.id)
+    .order('installment_number', { ascending: true });
+  if (error || !installments || installments.length === 0) return;
+  const pending = installments.find((item: any) => item.payment_status !== 'paid') || installments[0];
+  const settings = contractSigningSettings(contract);
+  await sendInternalEmail(appOrigin, 'school_installment_request', recipient, {
+    schoolName: contract.organizations?.name || '',
+    schoolEmail: settings.email,
+    contactEmail: settings.email,
+    studentName: st.full_name || '',
+    parentName: st.payer_name || st.full_name || '',
+    recipientName: st.payer_name || st.full_name || '',
+    installmentNumber: pending.installment_number,
+    totalInstallments: installments.length,
+    amount: Number(pending.amount || 0).toFixed(2),
+    dueDate: pending.due_date ? new Date(pending.due_date).toLocaleDateString('lt-LT') : '—',
+    additionalFeeAmount: Number(contract.additional_fee_amount || 0) > 0
+      ? Number(contract.additional_fee_amount).toFixed(2)
+      : undefined,
+    additionalFeePurpose: contract.additional_fee_purpose || undefined,
+    annualFee: Number(contract.annual_fee || 0).toFixed(2),
+    installmentId: pending.id,
+    organizationId: contract.organization_id,
+  });
 }
 
 async function finalizeContract(
@@ -330,11 +456,27 @@ async function finalizeContract(
     .eq('id', contract.id);
 
   const st = contract.student || {};
-  await sendInternalEmail(appOrigin, 'school_contract_fully_signed', String(st.payer_email || ''), {
-    parentName: st.payer_name || '',
-    studentName: st.full_name || '',
-    schoolName: contract.organizations?.name || '',
-    locale: 'lt',
-    organizationId: contract.organization_id,
-  });
+  const settings = contractSigningSettings(contract);
+  const pdfUrl = await createContractSignedUrl(supabase, finalSignedPath);
+  const contractsUrl = `${appOrigin.replace(/\/$/, '')}/school/contracts`;
+  await Promise.all([
+    sendInternalEmail(appOrigin, 'school_contract_fully_signed', String(st.payer_email || ''), {
+      parentName: st.payer_name || '',
+      studentName: st.full_name || '',
+      schoolName: contract.organizations?.name || '',
+      schoolEmail: settings.email,
+      pdfUrl: pdfUrl || undefined,
+      organizationId: contract.organization_id,
+    }),
+    sendInternalEmail(appOrigin, 'school_contract_parent_signed_admin', settings.email, {
+      parentName: st.payer_name || '',
+      studentName: st.full_name || '',
+      schoolName: contract.organizations?.name || '',
+      contractNumber: contract.contract_number || '',
+      contractsUrl,
+      pdfUrl: pdfUrl || undefined,
+      organizationId: contract.organization_id,
+    }),
+  ]);
+  await sendFirstPendingInstallmentEmail(supabase, contract, appOrigin);
 }

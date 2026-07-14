@@ -10,3 +10,4 @@ coverage/
 .vercel
 Tutlio-main-compare/
 .env*.local
+.gosign-keys/
