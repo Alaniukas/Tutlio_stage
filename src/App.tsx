@@ -62,7 +62,8 @@ const CompanyContracts = lazy(() => import('@/pages/company/CompanyContracts'));
 const CompanyFinanceHub = lazy(() => import('@/pages/company/CompanyFinanceHub'));
 const CompanyInstructions = lazy(() => import('@/pages/company/CompanyInstructions'));
 const CompanyDynamicPricing = lazy(() => import('@/pages/company/CompanyDynamicPricing'));
-const PreviewAssignStudentModal = lazy(() => import('@/pages/dev/PreviewAssignStudentModal'));
+const CompanyMessages = lazy(() => import('@/pages/company/CompanyMessages'));
+import PreviewAssignStudentModal from '@/pages/dev/PreviewAssignStudentModal';
 const ParentDashboard = lazy(() => import('@/pages/ParentDashboard'));
 const ParentSessions = lazy(() => import('@/pages/ParentSessions'));
 const ParentInvoices = lazy(() => import('@/pages/ParentInvoices'));
@@ -177,6 +178,19 @@ export default function App({ basename }: { basename: string }) {
       <ThemeColorManager />
       <Suspense fallback={<RouteLoadingFallback />}>
       <Routes>
+        <Route
+          path="/preview/assign-student-modal"
+          element={
+            <StaticLocaleProvider locale="lt">
+              <PreviewAssignStudentModal />
+            </StaticLocaleProvider>
+          }
+        />
+        <Route
+          path="/dev/preview-assign-student-modal"
+          element={<Navigate to="/preview/assign-student-modal" replace />}
+        />
+
         {/* Public Landing Pages - NO UserProvider wrapper */}
         <Route path="/" element={<Landing />} />
         <Route path="/:locale" element={<Landing />} />
@@ -230,16 +244,7 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/package-cancelled" element={<PackagePaymentCancelled />} />
         <Route path="/school-payment-success" element={<SchoolPaymentSuccess />} />
 
-        <Route
-          path="/dev/preview-assign-student-modal"
-          element={
-            <StaticLocaleProvider locale="lt">
-              <PreviewAssignStudentModal />
-            </StaticLocaleProvider>
-          }
-        />
-
-        {/* Whiteboard - any authenticated user (auth checked inside component) */}
+        {/* Public Landing Pages - NO UserProvider wrapper */}
         <Route
           path="/whiteboard/:roomId"
           element={
