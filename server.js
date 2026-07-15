@@ -11,17 +11,39 @@ const app = express();
 
 app.use(express.json({ limit: '20mb' }));
 
+/** Isolated LO profile avoids stale layout state between conversions. */
+const LO_USER_PROFILE = path.join(os.tmpdir(), 'tutlio-lo-profile');
+
+/**
+ * Writer PDF export tuned for Word school-contract fidelity (fonts, margins, tables).
+ * Generic `--convert-to pdf` uses looser defaults and often reflows annex tables.
+ */
+const PDF_EXPORT_FILTER = [
+  'pdf:writer_pdf_Export',
+  JSON.stringify({
+    SelectPdfVersion: { type: 'long', value: '1' },
+    Quality: { type: 'long', value: '100' },
+    EmbedStandardFonts: { type: 'boolean', value: 'true' },
+    ReduceImageResolution: { type: 'boolean', value: 'false' },
+    MaxImageResolution: { type: 'long', value: '300' },
+    UseTaggedPDF: { type: 'boolean', value: 'false' },
+    ExportFormFields: { type: 'boolean', value: 'false' },
+    IsSkipEmptyPages: { type: 'boolean', value: 'false' },
+    ExportBookmarks: { type: 'boolean', value: 'false' },
+  }),
+].join(':');
+
 function sofficeCandidates() {
   const fromEnv = process.env.LIBREOFFICE_PATH ? [process.env.LIBREOFFICE_PATH] : [];
   return [
     ...fromEnv,
     'soffice',
     'soffice.bin',
-    'soffice.exe',
     '/usr/bin/soffice',
     '/usr/lib/libreoffice/program/soffice',
+    'soffice.exe',
     'C:\\Program Files\\LibreOffice\\program\\soffice.exe',
-    'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe'
+    'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe',
   ];
 }
 
@@ -49,7 +71,7 @@ function checkConvertApiKey(req) {
     return {
       allowed: false,
       status: 503,
-      error: 'DOCX_CONVERTER_API_KEY is not configured on the server'
+      error: 'DOCX_CONVERTER_API_KEY is not configured on the server',
     };
   }
   const provided = getProvidedApiKey(req);
@@ -59,21 +81,39 @@ function checkConvertApiKey(req) {
   return { allowed: true };
 }
 
+async function ensureLoProfile() {
+  await fs.mkdir(LO_USER_PROFILE, { recursive: true });
+}
+
 async function convertWithLibreOffice(docxBuffer) {
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tutlio-docx-'));
   const inputPath = path.join(workDir, 'contract.docx');
   const outputPath = path.join(workDir, 'contract.pdf');
   await fs.writeFile(inputPath, docxBuffer);
+  await ensureLoProfile();
+
+  const profileUrl = `file://${LO_USER_PROFILE.replace(/\\/g, '/')}`;
+  const convertArgs = [
+    `-env:UserInstallation=${profileUrl}`,
+    '--headless',
+    '--nologo',
+    '--nodefault',
+    '--nofirststartwizard',
+    '--nolockcheck',
+    '--norestore',
+    '--infilter=MS Word 2007 XML',
+    '--convert-to',
+    PDF_EXPORT_FILTER,
+    '--outdir',
+    workDir,
+    inputPath,
+  ];
 
   let lastError = null;
   try {
     for (const bin of sofficeCandidates()) {
       try {
-        await execFileAsync(
-          bin,
-          ['--headless', '--convert-to', 'pdf', '--outdir', workDir, inputPath],
-          { timeout: 120000, windowsHide: true }
-        );
+        await execFileAsync(bin, convertArgs, { timeout: 120000, windowsHide: true });
         const pdf = await fs.readFile(outputPath);
         if (pdf.length > 0) return pdf;
       } catch (error) {
@@ -86,12 +126,34 @@ async function convertWithLibreOffice(docxBuffer) {
   }
 }
 
-app.get('/health', (_req, res) => {
-  res.status(200).json({ ok: true });
+async function probeFont(requestedFamily) {
+  try {
+    const { stdout } = await execFileAsync('fc-match', [requestedFamily], { timeout: 5000 });
+    return stdout.trim().split('\n')[0] || null;
+  } catch {
+    return null;
+  }
+}
+
+app.get('/health', async (_req, res) => {
+  const [timesNewRoman, liberationSerif, dejaVuSerif] = await Promise.all([
+    probeFont('Times New Roman'),
+    probeFont('Liberation Serif'),
+    probeFont('DejaVu Serif'),
+  ]);
+  res.status(200).json({
+    ok: true,
+    fonts: {
+      timesNewRoman,
+      liberationSerif,
+      dejaVuSerif,
+      timesResolved: /times new roman|liberation serif/i.test(timesNewRoman || ''),
+    },
+  });
 });
 
 app.get('/', (_req, res) => {
-  res.status(200).json({ ok: true, service: 'tutlio-docx-converter' });
+  res.status(200).json({ ok: true, service: 'tutlio-docx-converter', version: '1.1.0' });
 });
 
 app.post('/convert-docx-to-pdf', async (req, res) => {
@@ -111,7 +173,7 @@ app.post('/convert-docx-to-pdf', async (req, res) => {
     return res.status(200).json({ pdfBase64: pdfBuffer.toString('base64') });
   } catch (error) {
     return res.status(500).json({
-      error: error instanceof Error ? error.message : 'DOCX to PDF conversion failed'
+      error: error instanceof Error ? error.message : 'DOCX to PDF conversion failed',
     });
   }
 });

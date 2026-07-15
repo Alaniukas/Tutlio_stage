@@ -21,6 +21,9 @@ RUN sed -i 's/Components: main/Components: main contrib/' /etc/apt/sources.list.
   && fc-cache -f \
   && rm -rf /var/lib/apt/lists/*
 
+COPY fontconfig/99-tutlio-school-contracts.conf /etc/fonts/conf.d/99-tutlio-school-contracts.conf
+RUN fc-cache -f
+
 WORKDIR /app
 
 COPY package*.json ./

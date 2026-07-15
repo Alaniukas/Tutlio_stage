@@ -2,6 +2,13 @@
 
 Standalone microservice for converting `DOCX -> PDF` with LibreOffice.
 
+## Fidelity notes (school contracts)
+
+- Installs **Times New Roman** (MS core fonts) + **Liberation Serif** fallback so LibreOffice does not substitute DejaVu (which reflows text and changes page count).
+- Uses **Writer PDF export filter** (`writer_pdf_Export`) with embedded standard fonts instead of generic `--convert-to pdf`.
+- **fontconfig** aliases map Times New Roman → Liberation Serif before DejaVu.
+- `GET /health` reports which font `fc-match` resolves for Times New Roman (verify after deploy).
+
 ## API
 
 - `GET /health` -> `{ ok: true }`
