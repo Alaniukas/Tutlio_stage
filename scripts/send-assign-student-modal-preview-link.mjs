@@ -42,12 +42,8 @@ const to = process.argv[2] || 'alaniukasa@gmail.com';
 const previewUrl =
   process.argv[3] || 'https://tutlio.pl/dev/preview-assign-student-modal';
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const resendKey = process.env.RESEND_API_KEY || process.env.RESEND_API_KEY_STAGE;
 const appUrl = (process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.pl').replace(/\/$/, '');
-
-if (!serviceKey) {
-  console.error('Missing SUPABASE_SERVICE_ROLE_KEY in .env');
-  process.exit(1);
-}
 
 const bodyHtml = `<p style="font-size:15px;line-height:1.6;color:#374151;margin:0 0 16px;">
   Peržiūrėkite pataisytą „Pridėti mokinį į laisvą laiką“ modalą (fake duomenys):
@@ -56,28 +52,60 @@ const bodyHtml = `<p style="font-size:15px;line-height:1.6;color:#374151;margin:
   <a href="${previewUrl}" style="font-size:16px;font-weight:600;color:#4f46e5;">${previewUrl}</a>
 </p>`;
 
-const res = await fetch(`${appUrl}/api/send-email`, {
+if (serviceKey) {
+  const res = await fetch(`${appUrl}/api/send-email`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-internal-key': serviceKey,
+    },
+    body: JSON.stringify({
+      type: 'custom_html_announcement',
+      to,
+      locale: 'lt',
+      data: {
+        subject: 'Tutlio: assign-student modal peržiūra',
+        bodyHtml,
+      },
+    }),
+  });
+
+  const text = await res.text();
+  if (!res.ok) {
+    console.error('send-email failed', res.status, text);
+    process.exit(1);
+  }
+
+  console.log(`Sent preview link to ${to}: ${previewUrl}`);
+  console.log(text);
+  process.exit(0);
+}
+
+if (!resendKey) {
+  console.error('Missing SUPABASE_SERVICE_ROLE_KEY and RESEND_API_KEY(_STAGE) in .env');
+  process.exit(1);
+}
+
+const from = process.env.FROM_EMAIL || 'Tutlio <onboarding@tutlio.lt>';
+const res = await fetch('https://api.resend.com/emails', {
   method: 'POST',
   headers: {
+    Authorization: `Bearer ${resendKey}`,
     'Content-Type': 'application/json',
-    'x-internal-key': serviceKey,
   },
   body: JSON.stringify({
-    type: 'custom_html_announcement',
+    from,
     to,
-    locale: 'lt',
-    data: {
-      subject: 'Tutlio: assign-student modal peržiūra',
-      bodyHtml,
-    },
+    subject: 'Tutlio: assign-student modal peržiūra',
+    html: bodyHtml,
   }),
 });
 
 const text = await res.text();
 if (!res.ok) {
-  console.error('send-email failed', res.status, text);
+  console.error('Resend failed', res.status, text);
   process.exit(1);
 }
 
-console.log(`Sent preview link to ${to}: ${previewUrl}`);
+console.log(`Sent preview link to ${to} via Resend: ${previewUrl}`);
 console.log(text);
