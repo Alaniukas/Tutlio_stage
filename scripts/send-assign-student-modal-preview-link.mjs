@@ -40,7 +40,7 @@ loadEnv();
 
 const to = process.argv[2] || 'alaniukasa@gmail.com';
 const previewUrl =
-  process.argv[3] || 'https://tutlio.pl/dev/preview-assign-student-modal';
+  process.argv[3] || 'https://www.tutlio.pl/preview-assign-student-modal.html';
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const resendKey = process.env.RESEND_API_KEY || process.env.RESEND_API_KEY_STAGE;
 const appUrl = (process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.pl').replace(/\/$/, '');

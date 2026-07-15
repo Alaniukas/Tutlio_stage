@@ -42,7 +42,7 @@ export const APP_ROUTES = new Set([
   'school', 'parent-register', 'tutor-subscribe', 'registration', 'book',
   'school-contract-complete', 'stripe-success', 'perlas-success',
   'package-success', 'package-cancelled', 'school-payment-success',
-  'enterprise', 'whiteboard',
+  'enterprise', 'whiteboard', 'preview', 'dev',
 ]);
 
 function isExcludedPath(pathname: string): boolean {
