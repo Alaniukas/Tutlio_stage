@@ -5,33 +5,36 @@ import os from 'os';
 import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import PizZip from 'pizzip';
 
 const execFileAsync = promisify(execFile);
 const app = express();
 
 app.use(express.json({ limit: '20mb' }));
 
-/** Isolated LO profile avoids stale layout state between conversions. */
 const LO_USER_PROFILE = path.join(os.tmpdir(), 'tutlio-lo-profile');
 
 /**
- * Writer PDF export tuned for Word school-contract fidelity (fonts, margins, tables).
- * Generic `--convert-to pdf` uses looser defaults and often reflows annex tables.
+ * Word school templates use floating table anchors (tblpPr / negative tblInd) that
+ * LibreOffice mis-renders after section page breaks — table shifts left, empty right margin.
+ * Inline the tables before conversion so LO uses normal page margins.
  */
-const PDF_EXPORT_FILTER = [
-  'pdf:writer_pdf_Export',
-  JSON.stringify({
-    SelectPdfVersion: { type: 'long', value: '1' },
-    Quality: { type: 'long', value: '100' },
-    EmbedStandardFonts: { type: 'boolean', value: 'true' },
-    ReduceImageResolution: { type: 'boolean', value: 'false' },
-    MaxImageResolution: { type: 'long', value: '300' },
-    UseTaggedPDF: { type: 'boolean', value: 'false' },
-    ExportFormFields: { type: 'boolean', value: 'false' },
-    IsSkipEmptyPages: { type: 'boolean', value: 'false' },
-    ExportBookmarks: { type: 'boolean', value: 'false' },
-  }),
-].join(':');
+function normalizeDocxForLibreOffice(docxBuffer) {
+  const zip = new PizZip(docxBuffer);
+  const docPath = 'word/document.xml';
+  const file = zip.file(docPath);
+  if (!file) return docxBuffer;
+
+  let xml = file.asText();
+  const before = xml;
+  xml = xml.replace(/<w:tblpPr[^>]*\/>/g, '');
+  xml = xml.replace(/<w:tblpPr[\s\S]*?<\/w:tblpPr>/g, '');
+  xml = xml.replace(/<w:tblInd w:w="-[^"]*" w:type="dxa"\/>/g, '<w:tblInd w:w="0" w:type="dxa"/>');
+  if (xml === before) return docxBuffer;
+
+  zip.file(docPath, xml);
+  return zip.generate({ type: 'nodebuffer' });
+}
 
 function sofficeCandidates() {
   const fromEnv = process.env.LIBREOFFICE_PATH ? [process.env.LIBREOFFICE_PATH] : [];
@@ -64,7 +67,6 @@ function getProvidedApiKey(req) {
   return '';
 }
 
-/** Requires DOCX_CONVERTER_API_KEY to be set; rejects when missing or mismatch. */
 function checkConvertApiKey(req) {
   const expected = (process.env.DOCX_CONVERTER_API_KEY || '').trim();
   if (!expected) {
@@ -86,10 +88,11 @@ async function ensureLoProfile() {
 }
 
 async function convertWithLibreOffice(docxBuffer) {
+  const normalized = normalizeDocxForLibreOffice(docxBuffer);
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tutlio-docx-'));
   const inputPath = path.join(workDir, 'contract.docx');
   const outputPath = path.join(workDir, 'contract.pdf');
-  await fs.writeFile(inputPath, docxBuffer);
+  await fs.writeFile(inputPath, normalized);
   await ensureLoProfile();
 
   const profileUrl = `file://${LO_USER_PROFILE.replace(/\\/g, '/')}`;
@@ -101,9 +104,8 @@ async function convertWithLibreOffice(docxBuffer) {
     '--nofirststartwizard',
     '--nolockcheck',
     '--norestore',
-    '--infilter=MS Word 2007 XML',
     '--convert-to',
-    PDF_EXPORT_FILTER,
+    'pdf',
     '--outdir',
     workDir,
     inputPath,
@@ -143,6 +145,7 @@ app.get('/health', async (_req, res) => {
   ]);
   res.status(200).json({
     ok: true,
+    version: '1.2.0',
     fonts: {
       timesNewRoman,
       liberationSerif,
@@ -153,7 +156,7 @@ app.get('/health', async (_req, res) => {
 });
 
 app.get('/', (_req, res) => {
-  res.status(200).json({ ok: true, service: 'tutlio-docx-converter', version: '1.1.0' });
+  res.status(200).json({ ok: true, service: 'tutlio-docx-converter', version: '1.2.0' });
 });
 
 app.post('/convert-docx-to-pdf', async (req, res) => {
