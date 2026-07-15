@@ -13,40 +13,66 @@ const app = express();
 app.use(express.json({ limit: '20mb' }));
 
 const LO_USER_PROFILE = path.join(os.tmpdir(), 'tutlio-lo-profile');
+const SERVICE_VERSION = '1.4.0';
+
+const PDF_EXPORT_FILTER =
+  'pdf:writer_pdf_Export:{"SelectPdfVersion":{"type":"long","value":"1"},"EmbedStandardFonts":{"type":"boolean","value":"true"},"UseTaggedPDF":{"type":"boolean","value":"false"}}';
 
 /**
  * Word school templates use layout tricks LibreOffice mis-renders:
- * - Floating table anchors (tblpPr / negative tblInd) after section breaks
- * - Negative paragraph indents (e.g. w:left="-567") paired with asymmetric pgMar
- *   to visually center headers; LO ignores pgMar offset and shifts body ~28pt left.
+ * - Floating table anchors (tblpPr) and negative tblInd (e.g. -809)
+ * - Negative paragraph indents (w:left="-567") paired with asymmetric pgMar
+ * - docDefaults still point at Calibri 11pt even when runs use Times New Roman
  */
 function normalizeDocxForLibreOffice(docxBuffer) {
   const zip = new PizZip(docxBuffer);
-  const docPath = 'word/document.xml';
-  const file = zip.file(docPath);
-  if (!file) return docxBuffer;
+  let changed = false;
 
-  let xml = file.asText();
-  const before = xml;
+  const docFile = zip.file('word/document.xml');
+  if (docFile) {
+    let xml = docFile.asText();
+    const before = xml;
 
-  xml = xml.replace(/<w:pgMar([^/]*)\/>/g, (match) =>
-    match.replace(/w:(top|bottom|left|right|header|footer)="([^"]+)"/g, (_, attr, val) => {
-      const n = Math.round(parseFloat(val));
-      return Number.isFinite(n) ? `w:${attr}="${n}"` : `w:${attr}="${val}"`;
-    }),
-  );
+    xml = xml.replace(/<w:pgMar([^/]*)\/>/g, (match) =>
+      match.replace(/w:(top|bottom|left|right|header|footer)="([^"]+)"/g, (_, attr, val) => {
+        const n = Math.round(parseFloat(val));
+        return Number.isFinite(n) ? `w:${attr}="${n}"` : `w:${attr}="${val}"`;
+      }),
+    );
 
-  xml = xml.replace(/w:left="-\d+"/g, 'w:left="0"');
-  xml = xml.replace(/w:right="-\d+"/g, 'w:right="0"');
+    xml = xml.replace(/w:left="-[\d.]+"/g, 'w:left="0"');
+    xml = xml.replace(/w:right="-[\d.]+"/g, 'w:right="0"');
 
-  xml = xml.replace(/<w:tblpPr[^>]*\/>/g, '');
-  xml = xml.replace(/<w:tblpPr[\s\S]*?<\/w:tblpPr>/g, '');
-  xml = xml.replace(/<w:tblInd w:w="-[^"]*" w:type="dxa"\/>/g, '<w:tblInd w:w="0" w:type="dxa"/>');
+    xml = xml.replace(/<w:tblpPr[^>]*\/>/g, '');
+    xml = xml.replace(/<w:tblpPr[\s\S]*?<\/w:tblpPr>/g, '');
 
-  if (xml === before) return docxBuffer;
+    xml = xml.replace(/<w:tblInd\b[^>]*w:w="-[\d.]+"[^>]*\/>/g, '<w:tblInd w:w="0" w:type="dxa"/>');
+    xml = xml.replace(/<w:tblInd\b[^>]*w:w="-[\d.]+"[^>]*>[\s\S]*?<\/w:tblInd>/g, '<w:tblInd w:w="0" w:type="dxa"/>');
 
-  zip.file(docPath, xml);
-  return zip.generate({ type: 'nodebuffer' });
+    if (xml !== before) {
+      zip.file('word/document.xml', xml);
+      changed = true;
+    }
+  }
+
+  const stylesFile = zip.file('word/styles.xml');
+  if (stylesFile) {
+    let styles = stylesFile.asText();
+    const before = styles;
+    styles = styles.replace(
+      /<w:rFonts w:ascii="Calibri" w:cs="Calibri" w:eastAsia="Calibri" w:hAnsi="Calibri"\/>/g,
+      '<w:rFonts w:ascii="Times New Roman" w:cs="Times New Roman" w:eastAsia="Times New Roman" w:hAnsi="Times New Roman"/>',
+    );
+    styles = styles.replace(/<w:sz w:val="22"\/>/g, '<w:sz w:val="24"/>');
+    styles = styles.replace(/<w:szCs w:val="22"\/>/g, '<w:szCs w:val="24"/>');
+    if (styles !== before) {
+      zip.file('word/styles.xml', styles);
+      changed = true;
+    }
+  }
+
+  if (!changed) return { buffer: docxBuffer, normalized: false };
+  return { buffer: zip.generate({ type: 'nodebuffer' }), normalized: true };
 }
 
 function sofficeCandidates() {
@@ -101,7 +127,7 @@ async function ensureLoProfile() {
 }
 
 async function convertWithLibreOffice(docxBuffer) {
-  const normalized = normalizeDocxForLibreOffice(docxBuffer);
+  const { buffer: normalized, normalized: didNormalize } = normalizeDocxForLibreOffice(docxBuffer);
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tutlio-docx-'));
   const inputPath = path.join(workDir, 'contract.docx');
   const outputPath = path.join(workDir, 'contract.pdf');
@@ -117,8 +143,9 @@ async function convertWithLibreOffice(docxBuffer) {
     '--nofirststartwizard',
     '--nolockcheck',
     '--norestore',
+    '--infilter=MS Word 2007 XML',
     '--convert-to',
-    'pdf',
+    PDF_EXPORT_FILTER,
     '--outdir',
     workDir,
     inputPath,
@@ -130,7 +157,7 @@ async function convertWithLibreOffice(docxBuffer) {
       try {
         await execFileAsync(bin, convertArgs, { timeout: 120000, windowsHide: true });
         const pdf = await fs.readFile(outputPath);
-        if (pdf.length > 0) return pdf;
+        if (pdf.length > 0) return { pdf, normalized: didNormalize };
       } catch (error) {
         lastError = error;
       }
@@ -158,7 +185,8 @@ app.get('/health', async (_req, res) => {
   ]);
   res.status(200).json({
     ok: true,
-    version: '1.3.0',
+    version: SERVICE_VERSION,
+    exportFilter: 'writer_pdf_Export',
     fonts: {
       timesNewRoman,
       liberationSerif,
@@ -169,7 +197,7 @@ app.get('/health', async (_req, res) => {
 });
 
 app.get('/', (_req, res) => {
-  res.status(200).json({ ok: true, service: 'tutlio-docx-converter', version: '1.3.0' });
+  res.status(200).json({ ok: true, service: 'tutlio-docx-converter', version: SERVICE_VERSION });
 });
 
 app.post('/convert-docx-to-pdf', async (req, res) => {
@@ -185,8 +213,11 @@ app.post('/convert-docx-to-pdf', async (req, res) => {
 
   try {
     const docxBuffer = Buffer.from(fileBase64, 'base64');
-    const pdfBuffer = await convertWithLibreOffice(docxBuffer);
-    return res.status(200).json({ pdfBase64: pdfBuffer.toString('base64') });
+    const { pdf, normalized } = await convertWithLibreOffice(docxBuffer);
+    return res.status(200).json({
+      pdfBase64: pdf.toString('base64'),
+      meta: { version: SERVICE_VERSION, normalized, pdfBytes: pdf.length },
+    });
   } catch (error) {
     return res.status(500).json({
       error: error instanceof Error ? error.message : 'DOCX to PDF conversion failed',
