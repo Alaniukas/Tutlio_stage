@@ -16,7 +16,7 @@ const LO_USER_PROFILE = path.join(os.tmpdir(), 'tutlio-lo-profile');
 const SERVICE_VERSION = '1.6.0';
 
 /** Calibrated on Railway Linux LO vs Word Save-as-PDF for annex table "Dalykas" x=120. */
-const FLOATING_TABLE_TBL_IND = Number(process.env.FLOATING_TABLE_TBL_IND || 640);
+const FLOATING_TABLE_TBL_IND = Number(process.env.FLOATING_TABLE_TBL_IND || -580);
 
 /**
  * Word annex tables use w:tblpPr floating anchors. Linux LibreOffice ignores the anchor
