@@ -64,6 +64,7 @@ import { DateInput } from '@/components/ui/date-input';
 import { Checkbox } from '@/components/ui/checkbox';
 import TimeSpinner, { DateTimeSpinner } from '@/components/TimeSpinner';
 import { cn } from '@/lib/utils';
+import AssignStudentFreeSlotDialog from '@/components/AssignStudentFreeSlotDialog';
 import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import {
@@ -3911,7 +3912,7 @@ export default function CompanyTvarkarastis() {
         </DialogContent>
       </Dialog>
 
-      <Dialog
+      <AssignStudentFreeSlotDialog
         open={findLessonBook !== null}
         onOpenChange={(open) => {
           if (!open) {
@@ -3927,204 +3928,46 @@ export default function CompanyTvarkarastis() {
             setFindLessonBookSuccess(false);
           }
         }}
-      >
-        <DialogContent className="w-[95vw] sm:max-w-[440px] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{t('findLesson.bookDialogTitle')}</DialogTitle>
-            <DialogDescription className="text-left space-y-2">
-              {findLessonBook && (
-                <>
-                  <span className="block">
-                    <span className="font-semibold text-gray-900">{findLessonBook.tutorName}</span>
-                    {' · '}
-                    <span>{findLessonBook.subjectName}</span>
-                  </span>
-                  <span className="block text-sm text-gray-600 tabular-nums">
-                    {t('findLesson.freeWindowSummary')}: {format(parseISO(findLessonBook.startIso), 'yyyy-MM-dd HH:mm')} –{' '}
-                    {format(parseISO(findLessonBook.endIso), 'HH:mm')}
-                  </span>
-                  <span className="block text-xs text-gray-500">{t('findLesson.bookDialogIntro')}</span>
-                </>
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          {findLessonBook && (
-            <div className="space-y-3">
-              {findLessonBookSuccess && (
-                <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-                  <CheckCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>{t('findLesson.lessonCreatedKeepOpen')}</span>
-                </div>
-              )}
-              {findLessonBookCrossTutor && (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
-                  {t('findLesson.crossTutorHint')}
-                </div>
-              )}
-              {findLessonBookSlots.length === 0 ? (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
-                  {findLessonBookCreatedIntervals.length > 0 ? t('findLesson.windowFullyBooked') : t('findLesson.noSubSlots')}
-                </div>
-              ) : (
-                <div className="space-y-1.5">
-                  <Label className="text-xs">{t('compSch.time')}</Label>
-                  <Select value={findLessonBookSelectedSlot || ''} onValueChange={setFindLessonBookSelectedSlot}>
-                    <SelectTrigger className="rounded-xl h-9 text-sm">
-                      <SelectValue placeholder={t('compSch.selectTimePlaceholder')} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {findLessonBookSlots.map((slot) => (
-                        <SelectItem key={slot.startIso} value={slot.startIso}>
-                          {slot.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              {(() => {
-                const selectedSubject = subjects.find(s => s.id === findLessonBook.subjectId);
-                const isGroup = Boolean(selectedSubject?.is_group);
-                return isGroup ? (
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">{t('compSch.studentsGroup')}</Label>
-                    <div className="border border-indigo-200 rounded-lg bg-indigo-50/50 p-2 max-h-36 overflow-y-auto space-y-1.5">
-                      {sortStudentsByFullName(students).map(s => (
-                        <label key={s.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                          <Checkbox
-                            checked={findLessonBookStudentIds.includes(s.id)}
-                            onChange={(e) => {
-                              const checked = (e.target as HTMLInputElement).checked;
-                              if (checked) {
-                                setFindLessonBookStudentIds(prev => Array.from(new Set([...prev, s.id])));
-                              } else {
-                                setFindLessonBookStudentIds(prev => prev.filter(id => id !== s.id));
-                              }
-                            }}
-                          />
-                          <span>{s.full_name}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">{t('compSch.studentRequired')}</Label>
-                    <Select value={findLessonBookStudentId} onValueChange={setFindLessonBookStudentId}>
-                      <SelectTrigger className="rounded-xl h-9 text-sm">
-                        <SelectValue placeholder={t('compSch.selectStudentPlaceholderDots')} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {sortStudentsByFullName(students).map(s => (
-                          <SelectItem key={s.id} value={s.id}>
-                            {s.full_name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                );
-              })()}
-              <div className="space-y-1.5">
-                <Label className="text-xs">{t('compSch.topicOptional')}</Label>
-                <Input
-                  value={findLessonBookTopic}
-                  onChange={e => setFindLessonBookTopic(e.target.value)}
-                  placeholder={t('compSch.lessonTopicPlaceholder')}
-                  className="rounded-xl h-9 text-sm"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">{t('compSch.meetingLink')}</Label>
-                <Input
-                  value={findLessonBookMeetingLink}
-                  onChange={e => setFindLessonBookMeetingLink(e.target.value)}
-                  placeholder="https://..."
-                  className="rounded-xl h-9 text-sm"
-                />
-                <p className="text-[11px] text-gray-500">{t('findLesson.meetingLinkHint')}</p>
-              </div>
-              <div className="border border-green-100 rounded-xl p-3 sm:p-4 bg-green-50/50 flex flex-col justify-center min-h-[4.5rem]">
-                <button
-                  type="button"
-                  onClick={() => setFindLessonBookIsPaid(!findLessonBookIsPaid)}
-                  className="flex items-center justify-between gap-3 w-full text-left"
-                >
-                  <div>
-                    <p className="text-sm font-medium text-green-900">{t('compSch.alreadyPaid')}</p>
-                    <p className="text-xs text-green-800/80 hidden sm:block">{t('compSch.ifStudentPaid')}</p>
-                  </div>
-                  <div
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full flex-shrink-0 ${findLessonBookIsPaid ? 'bg-green-500' : 'bg-gray-300'}`}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${findLessonBookIsPaid ? 'translate-x-6' : 'translate-x-1'}`}
-                    />
-                  </div>
-                </button>
-              </div>
-            </div>
-          )}
-          <DialogFooter className="gap-2">
-            <Button
-              variant="outline"
-              className="rounded-xl"
-              onClick={() => {
-                setFindLessonBook(null);
-                setFindLessonBookStudentId('');
-                setFindLessonBookStudentIds([]);
-                setFindLessonBookTopic('');
-                setFindLessonBookSelectedSlot('');
-                setFindLessonBookIsPaid(false);
-                setFindLessonBookMeetingLink('');
-                setFindLessonBookTutorMeetingLink('');
-                setFindLessonBookCreatedIntervals([]);
-                setFindLessonBookSuccess(false);
-              }}
-            >
-              {t('compSch.cancel')}
-            </Button>
-            {hasFeature('trial_reservation_flow') && (
-              <Button
-                variant="outline"
-                className="rounded-xl border-amber-300 text-amber-700 hover:bg-amber-50"
-                onClick={() => void handleFindLessonBookReserveTrial()}
-                disabled={
-                  findLessonBookTrialSending ||
-                  findLessonBookSaving ||
-                  findLessonBookSlots.length === 0 ||
-                  !findLessonBookStudentId
-                }
-              >
-                {findLessonBookTrialSending ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    {t('compSch.creating')}
-                  </>
-                ) : (
-                  t('findLesson.reserveTrial')
-                )}
-              </Button>
-            )}
-            <Button
-              className="rounded-xl bg-indigo-600 hover:bg-indigo-700"
-              onClick={() => void handleFindLessonBookCreate()}
-              disabled={findLessonBookSaving || findLessonBookTrialSending || findLessonBookSlots.length === 0}
-            >
-              {findLessonBookSaving ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  {t('compSch.creating')}
-                </>
-              ) : (
-                findLessonBookCreatedIntervals.length > 0
-                  ? t('findLesson.createAnotherLesson')
-                  : t('compSch.createLesson')
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        tutorName={findLessonBook?.tutorName ?? ''}
+        subjectName={findLessonBook?.subjectName ?? ''}
+        startIso={findLessonBook?.startIso ?? new Date().toISOString()}
+        endIso={findLessonBook?.endIso ?? new Date().toISOString()}
+        slots={findLessonBookSlots}
+        selectedSlot={findLessonBookSelectedSlot}
+        onSelectedSlotChange={setFindLessonBookSelectedSlot}
+        students={sortStudentsByFullName(students).map((s) => ({ id: s.id, full_name: s.full_name }))}
+        studentId={findLessonBookStudentId}
+        onStudentIdChange={setFindLessonBookStudentId}
+        studentIds={findLessonBookStudentIds}
+        onStudentIdsChange={setFindLessonBookStudentIds}
+        isGroup={Boolean(subjects.find((s) => s.id === findLessonBook?.subjectId)?.is_group)}
+        topic={findLessonBookTopic}
+        onTopicChange={setFindLessonBookTopic}
+        meetingLink={findLessonBookMeetingLink}
+        onMeetingLinkChange={setFindLessonBookMeetingLink}
+        isPaid={findLessonBookIsPaid}
+        onIsPaidChange={setFindLessonBookIsPaid}
+        showSuccess={findLessonBookSuccess}
+        showCrossTutorHint={findLessonBookCrossTutor}
+        showTrialButton={hasFeature('trial_reservation_flow')}
+        saving={findLessonBookSaving}
+        trialSending={findLessonBookTrialSending}
+        createdCount={findLessonBookCreatedIntervals.length}
+        onCancel={() => {
+          setFindLessonBook(null);
+          setFindLessonBookStudentId('');
+          setFindLessonBookStudentIds([]);
+          setFindLessonBookTopic('');
+          setFindLessonBookSelectedSlot('');
+          setFindLessonBookIsPaid(false);
+          setFindLessonBookMeetingLink('');
+          setFindLessonBookTutorMeetingLink('');
+          setFindLessonBookCreatedIntervals([]);
+          setFindLessonBookSuccess(false);
+        }}
+        onCreate={() => void handleFindLessonBookCreate()}
+        onReserveTrial={() => void handleFindLessonBookReserveTrial()}
+      />
 
       <FindTutorModal
         isOpen={findLessonOpen}

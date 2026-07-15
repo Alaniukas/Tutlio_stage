@@ -16,6 +16,7 @@ import { format, parseISO } from 'date-fns';
 import { supabase } from '@/lib/supabase';
 import { useTranslation } from '@/lib/i18n';
 import { runOrgAdminCreateSession } from '@/pages/company/orgAdminSessionCreate';
+import { ASSIGN_STUDENT_FREE_SLOT_DIALOG_CONTENT_CLASS } from '@/components/AssignStudentFreeSlotDialog';
 
 /** A free availability window picked from FindTutorModal, to be narrowed to a lesson slot. */
 export interface FindLessonBookPick {
@@ -204,24 +205,26 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
         if (!open) onClose();
       }}
     >
-      <DialogContent className="w-[95vw] sm:max-w-[440px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className={ASSIGN_STUDENT_FREE_SLOT_DIALOG_CONTENT_CLASS}>
         <DialogHeader>
           <DialogTitle>{t('findLesson.bookDialogTitle')}</DialogTitle>
-          <DialogDescription className="text-left space-y-2">
+          <DialogDescription asChild>
+            <div className="text-left space-y-2 text-sm text-muted-foreground">
             {pick && (
               <>
-                <span className="block">
+                <p>
                   <span className="font-semibold text-gray-900">{pick.tutorName}</span>
                   {' · '}
                   <span>{pick.subjectName}</span>
-                </span>
-                <span className="block text-sm text-gray-600 tabular-nums">
+                </p>
+                <p className="text-sm text-gray-600 tabular-nums">
                   {t('findLesson.freeWindowSummary')}: {format(parseISO(pick.startIso), 'yyyy-MM-dd HH:mm')} –{' '}
                   {format(parseISO(pick.endIso), 'HH:mm')}
-                </span>
-                <span className="block text-xs text-gray-500">{t('findLesson.bookDialogIntro')}</span>
+                </p>
+                <p className="text-xs text-gray-500">{t('findLesson.bookDialogIntro')}</p>
               </>
             )}
+            </div>
           </DialogDescription>
         </DialogHeader>
         {pick && (
@@ -293,12 +296,12 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
             </div>
           </div>
         )}
-        <DialogFooter className="gap-2">
-          <Button variant="outline" className="rounded-xl" onClick={onClose}>
+        <DialogFooter className="!flex !flex-col w-full min-w-0 gap-2 sm:!flex-col sm:space-x-0">
+          <Button variant="outline" className="h-auto min-h-10 w-full rounded-xl py-2" onClick={onClose}>
             {t('compSch.cancel')}
           </Button>
           <Button
-            className="rounded-xl bg-indigo-600 hover:bg-indigo-700"
+            className="h-auto min-h-10 w-full rounded-xl bg-indigo-600 py-2 hover:bg-indigo-700"
             onClick={() => void handleCreate()}
             disabled={saving || subSlots.length === 0}
           >
