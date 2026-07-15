@@ -53,13 +53,10 @@ export function detectLocale(): Locale {
   const langOverride = params.get('lang');
   if (langOverride && isValidLocale(langOverride)) return langOverride;
 
-  // On tutlio.com, default to English. Stored preference only applies on .lt.
-  const domainDefault = defaultLocaleForHost(host);
-  if (domainDefault !== 'lt') return domainDefault;
-
   const stored = getStoredLocale();
   if (stored) return stored;
-  return 'lt';
+
+  return defaultLocaleForHost(host);
 }
 
 /**

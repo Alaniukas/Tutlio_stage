@@ -1488,6 +1488,47 @@ export default function CompanyStudents() {
       : studentEditDraft.parent_secondary_address.trim();
 
     setSavingStudentInfo(true);
+
+    const nextStudentEmail = studentEditDraft.email.trim();
+    const emailChanged =
+      nextStudentEmail.toLowerCase() !== String(selectedStudent.email || '').trim().toLowerCase();
+
+    if (selectedStudent.linked_user_id && emailChanged) {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) {
+        setSavingStudentInfo(false);
+        setToastMessage({ message: t('compStu.errorPrefix', { msg: 'Neprisijungta' }), type: 'error' });
+        return;
+      }
+      const emailResp = await fetch('/api/admin-update-student-email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ studentId: selectedStudent.id, email: nextStudentEmail }),
+      });
+      const emailJson = await emailResp.json().catch(() => ({}));
+      if (!emailResp.ok) {
+        setSavingStudentInfo(false);
+        if (emailJson.error === 'email_matches_org_tutor') {
+          setToastMessage({
+            message: t('compStu.emailMatchesOrgTutor', { name: String(emailJson.tutorName || '') }),
+            type: 'error',
+          });
+        } else if (emailJson.error === 'email_already_used') {
+          setToastMessage({ message: 'El. paštas jau naudojamas kitoje paskyroje.', type: 'error' });
+        } else {
+          setToastMessage({
+            message: t('compStu.errorPrefix', { msg: String(emailJson.error || emailJson.details || emailResp.status) }),
+            type: 'error',
+          });
+        }
+        return;
+      }
+    }
+
     const payload = {
       full_name: studentEditDraft.full_name.trim(),
       email: studentEditDraft.email.trim(),

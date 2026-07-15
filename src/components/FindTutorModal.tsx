@@ -68,7 +68,7 @@ export default function FindTutorModal({
   frequencyEnabled,
   busyIntervals = [],
 }: FindTutorModalProps) {
-  const { t } = useTranslation();
+  const { t, dateFnsLocale } = useTranslation();
   const [subjects, setSubjects] = useState<MatchSubject[]>([]);
   const [subjectCriteria, setSubjectCriteria] = useState<SubjectCriterion[]>([
     { id: 'subject-default', subjectName: '', frequency: 1 },
@@ -239,7 +239,7 @@ export default function FindTutorModal({
       <div>
         {!frequencyEnabled && <p className="text-sm font-medium text-gray-900">{slot.tutorName}</p>}
         <p className="text-xs text-gray-500">
-          {slot.subjectName} &middot; {format(slot.start, 'MMM d, HH:mm')}–{format(slot.end, 'HH:mm')} &middot; {fmtMoney(slot.price)}
+          {slot.subjectName} &middot; {format(slot.start, 'EEE d MMM, HH:mm', { locale: dateFnsLocale })}–{format(slot.end, 'HH:mm')} &middot; {fmtMoney(slot.price)}
         </p>
       </div>
     </button>
