@@ -3934,16 +3934,16 @@ export default function CompanyTvarkarastis() {
             <DialogDescription className="text-left space-y-2">
               {findLessonBook && (
                 <>
-                  <p>
+                  <span className="block">
                     <span className="font-semibold text-gray-900">{findLessonBook.tutorName}</span>
                     {' · '}
                     <span>{findLessonBook.subjectName}</span>
-                  </p>
-                  <p className="text-sm text-gray-600 tabular-nums">
+                  </span>
+                  <span className="block text-sm text-gray-600 tabular-nums">
                     {t('findLesson.freeWindowSummary')}: {format(parseISO(findLessonBook.startIso), 'yyyy-MM-dd HH:mm')} –{' '}
                     {format(parseISO(findLessonBook.endIso), 'HH:mm')}
-                  </p>
-                  <p className="text-xs text-gray-500">{t('findLesson.bookDialogIntro')}</p>
+                  </span>
+                  <span className="block text-xs text-gray-500">{t('findLesson.bookDialogIntro')}</span>
                 </>
               )}
             </DialogDescription>
