@@ -15,9 +15,10 @@ app.use(express.json({ limit: '20mb' }));
 const LO_USER_PROFILE = path.join(os.tmpdir(), 'tutlio-lo-profile');
 
 /**
- * Word school templates use floating table anchors (tblpPr / negative tblInd) that
- * LibreOffice mis-renders after section page breaks — table shifts left, empty right margin.
- * Inline the tables before conversion so LO uses normal page margins.
+ * Word school templates use layout tricks LibreOffice mis-renders:
+ * - Floating table anchors (tblpPr / negative tblInd) after section breaks
+ * - Negative paragraph indents (e.g. w:left="-567") paired with asymmetric pgMar
+ *   to visually center headers; LO ignores pgMar offset and shifts body ~28pt left.
  */
 function normalizeDocxForLibreOffice(docxBuffer) {
   const zip = new PizZip(docxBuffer);
@@ -27,9 +28,21 @@ function normalizeDocxForLibreOffice(docxBuffer) {
 
   let xml = file.asText();
   const before = xml;
+
+  xml = xml.replace(/<w:pgMar([^/]*)\/>/g, (match) =>
+    match.replace(/w:(top|bottom|left|right|header|footer)="([^"]+)"/g, (_, attr, val) => {
+      const n = Math.round(parseFloat(val));
+      return Number.isFinite(n) ? `w:${attr}="${n}"` : `w:${attr}="${val}"`;
+    }),
+  );
+
+  xml = xml.replace(/w:left="-\d+"/g, 'w:left="0"');
+  xml = xml.replace(/w:right="-\d+"/g, 'w:right="0"');
+
   xml = xml.replace(/<w:tblpPr[^>]*\/>/g, '');
   xml = xml.replace(/<w:tblpPr[\s\S]*?<\/w:tblpPr>/g, '');
   xml = xml.replace(/<w:tblInd w:w="-[^"]*" w:type="dxa"\/>/g, '<w:tblInd w:w="0" w:type="dxa"/>');
+
   if (xml === before) return docxBuffer;
 
   zip.file(docPath, xml);
@@ -145,7 +158,7 @@ app.get('/health', async (_req, res) => {
   ]);
   res.status(200).json({
     ok: true,
-    version: '1.2.0',
+    version: '1.3.0',
     fonts: {
       timesNewRoman,
       liberationSerif,
@@ -156,7 +169,7 @@ app.get('/health', async (_req, res) => {
 });
 
 app.get('/', (_req, res) => {
-  res.status(200).json({ ok: true, service: 'tutlio-docx-converter', version: '1.2.0' });
+  res.status(200).json({ ok: true, service: 'tutlio-docx-converter', version: '1.3.0' });
 });
 
 app.post('/convert-docx-to-pdf', async (req, res) => {
