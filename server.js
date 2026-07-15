@@ -5,6 +5,7 @@ import os from 'os';
 import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import PizZip from 'pizzip';
 
 const execFileAsync = promisify(execFile);
 const app = express();
@@ -12,14 +13,44 @@ const app = express();
 app.use(express.json({ limit: '20mb' }));
 
 const LO_USER_PROFILE = path.join(os.tmpdir(), 'tutlio-lo-profile');
-const SERVICE_VERSION = '1.5.0';
+const SERVICE_VERSION = '1.6.0';
+
+/** Calibrated on Railway Linux LO vs Word Save-as-PDF for annex table "Dalykas" x=120. */
+const FLOATING_TABLE_TBL_IND = Number(process.env.FLOATING_TABLE_TBL_IND || 640);
 
 /**
- * Pass DOCX through unchanged. Word school templates rely on asymmetric margins,
- * negative paragraph indents, and floating table anchors that LibreOffice only
- * renders correctly when left intact (verified against Word "Save as PDF").
- * Prior normalisation (v1.3–v1.4) shifted body text 28pt right and broke annex tables.
+ * Word annex tables use w:tblpPr floating anchors. Linux LibreOffice ignores the anchor
+ * and renders ~29pt too far right. Inline the table with a fixed tblInd so the static
+ * schedule table matches Word. Paragraph indents / margins are left untouched.
  */
+function fixFloatingTablesForLinux(docxBuffer) {
+  const zip = new PizZip(docxBuffer);
+  const docPath = 'word/document.xml';
+  const file = zip.file(docPath);
+  if (!file) return { buffer: docxBuffer, floatingTablesFixed: 0 };
+
+  let xml = file.asText();
+  let fixed = 0;
+
+  xml = xml.replace(/<w:tbl>[\s\S]*?<\/w:tbl>/g, (tableXml) => {
+    if (!tableXml.includes('tblpPr')) return tableXml;
+    fixed += 1;
+    let t = tableXml;
+    t = t.replace(/<w:tblpPr[^>]*\/>/g, '');
+    t = t.replace(/<w:tblpPr[\s\S]*?<\/w:tblpPr>/g, '');
+    t = t.replace(/<w:tblInd\b[^>]*\/>/g, '');
+    t = t.replace(/<w:tblInd\b[^>]*>[\s\S]*?<\/w:tblInd>/g, '');
+    if (!/<w:tblInd\b/.test(t)) {
+      t = t.replace('</w:tblPr>', `<w:tblInd w:w="${FLOATING_TABLE_TBL_IND}" w:type="dxa"/></w:tblPr>`);
+    }
+    return t;
+  });
+
+  if (fixed === 0) return { buffer: docxBuffer, floatingTablesFixed: 0 };
+  zip.file(docPath, xml);
+  return { buffer: zip.generate({ type: 'nodebuffer' }), floatingTablesFixed: fixed };
+}
+
 function sofficeCandidates() {
   const fromEnv = process.env.LIBREOFFICE_PATH ? [process.env.LIBREOFFICE_PATH] : [];
   return [
@@ -72,10 +103,11 @@ async function ensureLoProfile() {
 }
 
 async function convertWithLibreOffice(docxBuffer) {
+  const { buffer: prepared, floatingTablesFixed } = fixFloatingTablesForLinux(docxBuffer);
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tutlio-docx-'));
   const inputPath = path.join(workDir, 'contract.docx');
   const outputPath = path.join(workDir, 'contract.pdf');
-  await fs.writeFile(inputPath, docxBuffer);
+  await fs.writeFile(inputPath, prepared);
   await ensureLoProfile();
 
   const profileUrl = `file://${LO_USER_PROFILE.replace(/\\/g, '/')}`;
@@ -100,7 +132,7 @@ async function convertWithLibreOffice(docxBuffer) {
       try {
         await execFileAsync(bin, convertArgs, { timeout: 120000, windowsHide: true });
         const pdf = await fs.readFile(outputPath);
-        if (pdf.length > 0) return pdf;
+        if (pdf.length > 0) return { pdf, floatingTablesFixed };
       } catch (error) {
         lastError = error;
       }
@@ -130,7 +162,7 @@ app.get('/health', async (_req, res) => {
     ok: true,
     version: SERVICE_VERSION,
     exportFilter: 'simple',
-    normalizeDocx: false,
+    floatingTableTblInd: FLOATING_TABLE_TBL_IND,
     fonts: {
       timesNewRoman,
       liberationSerif,
@@ -157,10 +189,15 @@ app.post('/convert-docx-to-pdf', async (req, res) => {
 
   try {
     const docxBuffer = Buffer.from(fileBase64, 'base64');
-    const pdf = await convertWithLibreOffice(docxBuffer);
+    const { pdf, floatingTablesFixed } = await convertWithLibreOffice(docxBuffer);
     return res.status(200).json({
       pdfBase64: pdf.toString('base64'),
-      meta: { version: SERVICE_VERSION, normalizeDocx: false, pdfBytes: pdf.length },
+      meta: {
+        version: SERVICE_VERSION,
+        floatingTablesFixed,
+        floatingTableTblInd: FLOATING_TABLE_TBL_IND,
+        pdfBytes: pdf.length,
+      },
     });
   } catch (error) {
     return res.status(500).json({
