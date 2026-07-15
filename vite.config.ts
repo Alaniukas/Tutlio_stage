@@ -28,11 +28,13 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // Keep index.html network-fresh: precaching HTML pins stale hashed /assets/main-*.js
+        // references after deploy (white screen on tutlio.com until SW/cache clears).
+        globPatterns: ['**/*.{js,css,ico,png,svg,woff2}'],
         maximumFileSizeToCacheInBytes: 7 * 1024 * 1024,
         navigateFallback: 'index.html',
         // SEO/crawler files must never be answered with the SPA shell from the SW.
-        navigateFallbackDenylist: [/^\/api\//, /^\/(robots\.txt|sitemap\.xml|llms(-full)?\.txt)$/, /\/blog\/rss\.xml$/],
+        navigateFallbackDenylist: [/^\/api\//, /^\/(robots\.txt|sitemap\.xml|llms(-full)?\.txt)$/, /\/blog\/rss\.xml$/, /^\/preview-assign-student-modal\.html$/],
         importScripts: ['/push-sw.js'],
         runtimeCaching: [
           // Storage object GET/POST must not be served stale from SW during whiteboard collaboration.
@@ -79,5 +81,11 @@ export default defineConfig({
     // Vercelyje dideli chunk map failai (~10 MB+) lėtina build ir gali baigtis OOM.
     sourcemap: !process.env.VERCEL,
     reportCompressedSize: false,
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        previewAssignStudentModal: path.resolve(__dirname, 'preview-assign-student-modal.html'),
+      },
+    },
   },
 });

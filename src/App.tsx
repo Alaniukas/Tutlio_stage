@@ -63,7 +63,7 @@ const CompanyFinanceHub = lazy(() => import('@/pages/company/CompanyFinanceHub')
 const CompanyInstructions = lazy(() => import('@/pages/company/CompanyInstructions'));
 const CompanyDynamicPricing = lazy(() => import('@/pages/company/CompanyDynamicPricing'));
 const CompanyMessages = lazy(() => import('@/pages/company/CompanyMessages'));
-import PreviewAssignStudentModal from '@/pages/dev/PreviewAssignStudentModal';
+const PreviewAssignStudentModal = lazy(() => import('@/pages/dev/PreviewAssignStudentModal'));
 const ParentDashboard = lazy(() => import('@/pages/ParentDashboard'));
 const ParentSessions = lazy(() => import('@/pages/ParentSessions'));
 const ParentInvoices = lazy(() => import('@/pages/ParentInvoices'));
