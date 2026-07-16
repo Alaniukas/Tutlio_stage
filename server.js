@@ -13,7 +13,7 @@ const app = express();
 app.use(express.json({ limit: '20mb' }));
 
 const LO_USER_PROFILE = path.join(os.tmpdir(), 'tutlio-lo-profile');
-const SERVICE_VERSION = '1.7.0';
+const SERVICE_VERSION = '1.7.1';
 
 /** Calibrated on Railway Linux LO vs Word Save-as-PDF for annex table "Dalykas" x=120. */
 const FLOATING_TABLE_TBL_IND = Number(process.env.FLOATING_TABLE_TBL_IND || -580);
@@ -27,7 +27,9 @@ const TIMES_RFONTS =
  * 2) List numbering fonts (Arial in numbering.xml) → Times New Roman (numbers otherwise
  *    render as Carlito/Arial while body is Times)
  * 3) styles.xml docDefaults Calibri → Times (page numbers / fallbacks)
- * 4) Page break before "2 priedas" so annex I and II never share a page
+ * 4) Page break before the annex-2 header block (date + "Ugdymo šeimoje sutarties Nr."
+ *    + "2 priedas"), matching Word Save-as-PDF — not only before "2 priedas", otherwise
+ *    the contract number stays on the previous page under the signature.
  */
 function prepareDocxForLibreOffice(docxBuffer) {
   const zip = new PizZip(docxBuffer);
@@ -56,19 +58,70 @@ function prepareDocxForLibreOffice(docxBuffer) {
       return t;
     });
 
-    // Force page break before annex 2 (static schedule). Template has no break between
-    // "1 priedas" and "2 priedas", so filled contracts put both on the same page.
-    if (/2\s*priedas/i.test(xml) && !/pageBreakBefore[\s\S]{0,400}2\s*priedas/i.test(xml)) {
-      const before = xml;
-      xml = xml.replace(/<w:p\b([^>]*)>([\s\S]*?)<\/w:p>/g, (para, attrs, body) => {
-        if (!/2\s*priedas/i.test(body)) return para;
-        if (/<w:pageBreakBefore\b/.test(body)) return para;
-        if (/<w:pPr>/.test(body)) {
-          return `<w:p${attrs}>${body.replace('<w:pPr>', '<w:pPr><w:pageBreakBefore/>')}</w:p>`;
+    // Word template structure before annex 2:
+    //   {{date}}
+    //   Ugdymo šeimoje sutarties Nr. {{contract_number}}
+    //   2 priedas
+    // Page break must start at the date line so the contract number appears at the top
+    // of the new page (as in Word Save-as-PDF), not under the annex-1 signature.
+    if (/2\s*priedas/i.test(xml)) {
+      const paras = [];
+      const paraRe = /<w:p\b[^>]*>[\s\S]*?<\/w:p>/g;
+      let m;
+      while ((m = paraRe.exec(xml)) !== null) {
+        paras.push({ start: m.index, end: m.index + m[0].length, xml: m[0] });
+      }
+
+      const annex2Idx = paras.findIndex((p) => /2\s*priedas/i.test(p.xml));
+      if (annex2Idx >= 0) {
+        let headerStart = annex2Idx;
+        for (let i = annex2Idx - 1; i >= Math.max(0, annex2Idx - 4); i--) {
+          const text = [...paras[i].xml.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)]
+            .map((t) => t[1])
+            .join('');
+          const isContractLine =
+            /Ugdymo\s+šeimoje\s+sutarties\s+Nr/i.test(text) || /\{\{\s*contract_number\s*\}\}/i.test(text);
+          const isDateLine =
+            /\{\{\s*date\s*\}\}/i.test(text) ||
+            /^\s*\d{4}[-./]\d{1,2}[-./]\d{1,2}\s*$/.test(text.trim()) ||
+            /^\s*\d{1,2}[-./]\d{1,2}[-./]\d{4}\s*$/.test(text.trim());
+          if (isContractLine || isDateLine) {
+            headerStart = i;
+            continue;
+          }
+          break;
         }
-        return `<w:p${attrs}><w:pPr><w:pageBreakBefore/></w:pPr>${body}</w:p>`;
-      });
-      if (xml !== before) meta.annexPageBreakInserted = true;
+
+        const withBreak = (pXml) => {
+          if (/<w:pageBreakBefore\b/.test(pXml)) return pXml;
+          if (/<w:pPr>/.test(pXml)) return pXml.replace('<w:pPr>', '<w:pPr><w:pageBreakBefore/>');
+          return pXml.replace(/^(<w:p\b[^>]*>)/, '$1<w:pPr><w:pageBreakBefore/></w:pPr>');
+        };
+        const stripBreak = (pXml) =>
+          pXml
+            .replace(/<w:pageBreakBefore\s*\/>/g, '')
+            .replace(/<w:pageBreakBefore[^>]*>[\s\S]*?<\/w:pageBreakBefore>/g, '');
+
+        // Apply from right to left so earlier offsets stay valid.
+        const edits = [];
+        if (headerStart !== annex2Idx) {
+          const stripped = stripBreak(paras[annex2Idx].xml);
+          if (stripped !== paras[annex2Idx].xml) {
+            edits.push({ start: paras[annex2Idx].start, end: paras[annex2Idx].end, xml: stripped });
+          }
+        }
+        const headerXml = withBreak(paras[headerStart].xml);
+        if (headerXml !== paras[headerStart].xml) {
+          edits.push({ start: paras[headerStart].start, end: paras[headerStart].end, xml: headerXml });
+        }
+        edits.sort((a, b) => b.start - a.start);
+        if (edits.length) {
+          for (const edit of edits) {
+            xml = xml.slice(0, edit.start) + edit.xml + xml.slice(edit.end);
+          }
+          meta.annexPageBreakInserted = true;
+        }
+      }
     }
 
     zip.file('word/document.xml', xml);
