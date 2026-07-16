@@ -13,42 +13,107 @@ const app = express();
 app.use(express.json({ limit: '20mb' }));
 
 const LO_USER_PROFILE = path.join(os.tmpdir(), 'tutlio-lo-profile');
-const SERVICE_VERSION = '1.6.0';
+const SERVICE_VERSION = '1.7.0';
 
 /** Calibrated on Railway Linux LO vs Word Save-as-PDF for annex table "Dalykas" x=120. */
 const FLOATING_TABLE_TBL_IND = Number(process.env.FLOATING_TABLE_TBL_IND || -580);
 
+const TIMES_RFONTS =
+  '<w:rFonts w:ascii="Times New Roman" w:cs="Times New Roman" w:eastAsia="Times New Roman" w:hAnsi="Times New Roman"/>';
+
 /**
- * Word annex tables use w:tblpPr floating anchors. Linux LibreOffice ignores the anchor
- * and renders ~29pt too far right. Inline the table with a fixed tblInd so the static
- * schedule table matches Word. Paragraph indents / margins are left untouched.
+ * School contract DOCX prep for LibreOffice:
+ * 1) Floating annex tables (tblpPr) → fixed tblInd so Linux LO matches Word X position
+ * 2) List numbering fonts (Arial in numbering.xml) → Times New Roman (numbers otherwise
+ *    render as Carlito/Arial while body is Times)
+ * 3) styles.xml docDefaults Calibri → Times (page numbers / fallbacks)
+ * 4) Page break before "2 priedas" so annex I and II never share a page
  */
-function fixFloatingTablesForLinux(docxBuffer) {
+function prepareDocxForLibreOffice(docxBuffer) {
   const zip = new PizZip(docxBuffer);
-  const docPath = 'word/document.xml';
-  const file = zip.file(docPath);
-  if (!file) return { buffer: docxBuffer, floatingTablesFixed: 0 };
+  const meta = {
+    floatingTablesFixed: 0,
+    numberingFontsFixed: 0,
+    stylesFontsFixed: 0,
+    annexPageBreakInserted: false,
+  };
 
-  let xml = file.asText();
-  let fixed = 0;
+  const docFile = zip.file('word/document.xml');
+  if (docFile) {
+    let xml = docFile.asText();
 
-  xml = xml.replace(/<w:tbl>[\s\S]*?<\/w:tbl>/g, (tableXml) => {
-    if (!tableXml.includes('tblpPr')) return tableXml;
-    fixed += 1;
-    let t = tableXml;
-    t = t.replace(/<w:tblpPr[^>]*\/>/g, '');
-    t = t.replace(/<w:tblpPr[\s\S]*?<\/w:tblpPr>/g, '');
-    t = t.replace(/<w:tblInd\b[^>]*\/>/g, '');
-    t = t.replace(/<w:tblInd\b[^>]*>[\s\S]*?<\/w:tblInd>/g, '');
-    if (!/<w:tblInd\b/.test(t)) {
-      t = t.replace('</w:tblPr>', `<w:tblInd w:w="${FLOATING_TABLE_TBL_IND}" w:type="dxa"/></w:tblPr>`);
+    xml = xml.replace(/<w:tbl>[\s\S]*?<\/w:tbl>/g, (tableXml) => {
+      if (!tableXml.includes('tblpPr')) return tableXml;
+      meta.floatingTablesFixed += 1;
+      let t = tableXml;
+      t = t.replace(/<w:tblpPr[^>]*\/>/g, '');
+      t = t.replace(/<w:tblpPr[\s\S]*?<\/w:tblpPr>/g, '');
+      t = t.replace(/<w:tblInd\b[^>]*\/>/g, '');
+      t = t.replace(/<w:tblInd\b[^>]*>[\s\S]*?<\/w:tblInd>/g, '');
+      if (!/<w:tblInd\b/.test(t)) {
+        t = t.replace('</w:tblPr>', `<w:tblInd w:w="${FLOATING_TABLE_TBL_IND}" w:type="dxa"/></w:tblPr>`);
+      }
+      return t;
+    });
+
+    // Force page break before annex 2 (static schedule). Template has no break between
+    // "1 priedas" and "2 priedas", so filled contracts put both on the same page.
+    if (/2\s*priedas/i.test(xml) && !/pageBreakBefore[\s\S]{0,400}2\s*priedas/i.test(xml)) {
+      const before = xml;
+      xml = xml.replace(/<w:p\b([^>]*)>([\s\S]*?)<\/w:p>/g, (para, attrs, body) => {
+        if (!/2\s*priedas/i.test(body)) return para;
+        if (/<w:pageBreakBefore\b/.test(body)) return para;
+        if (/<w:pPr>/.test(body)) {
+          return `<w:p${attrs}>${body.replace('<w:pPr>', '<w:pPr><w:pageBreakBefore/>')}</w:p>`;
+        }
+        return `<w:p${attrs}><w:pPr><w:pageBreakBefore/></w:pPr>${body}</w:p>`;
+      });
+      if (xml !== before) meta.annexPageBreakInserted = true;
     }
-    return t;
-  });
 
-  if (fixed === 0) return { buffer: docxBuffer, floatingTablesFixed: 0 };
-  zip.file(docPath, xml);
-  return { buffer: zip.generate({ type: 'nodebuffer' }), floatingTablesFixed: fixed };
+    zip.file('word/document.xml', xml);
+  }
+
+  const numberingFile = zip.file('word/numbering.xml');
+  if (numberingFile) {
+    let numbering = numberingFile.asText();
+    const before = numbering;
+    numbering = numbering.replace(
+      /w:(ascii|hAnsi|cs|eastAsia)="(?:Arial(?: Unicode MS)?|Calibri|Carlito|Helvetica|sans-serif)"/gi,
+      'w:$1="Times New Roman"',
+    );
+    // Ensure every list level rPr has Times New Roman (Word often omits rFonts and LO falls back)
+    numbering = numbering.replace(/<w:lvl\b[\s\S]*?<\/w:lvl>/g, (lvl) => {
+      if (/w:ascii="Times New Roman"/.test(lvl)) return lvl;
+      if (/<w:rPr>/.test(lvl)) {
+        return lvl.replace(/<w:rPr>/, `<w:rPr>${TIMES_RFONTS}`);
+      }
+      if (/<\/w:pPr>/.test(lvl)) {
+        return lvl.replace(/<\/w:pPr>/, `</w:pPr><w:rPr>${TIMES_RFONTS}</w:rPr>`);
+      }
+      return lvl.replace(/(<w:lvl\b[^>]*>)/, `$1<w:rPr>${TIMES_RFONTS}</w:rPr>`);
+    });
+    if (numbering !== before) {
+      meta.numberingFontsFixed = 1;
+      zip.file('word/numbering.xml', numbering);
+    }
+  }
+
+  const stylesFile = zip.file('word/styles.xml');
+  if (stylesFile) {
+    let styles = stylesFile.asText();
+    const before = styles;
+    styles = styles.replace(
+      /w:(ascii|hAnsi|cs|eastAsia)="(?:Arial(?: Unicode MS)?|Calibri|Carlito|Helvetica)"/gi,
+      'w:$1="Times New Roman"',
+    );
+    if (styles !== before) {
+      meta.stylesFontsFixed = 1;
+      zip.file('word/styles.xml', styles);
+    }
+  }
+
+  return { buffer: zip.generate({ type: 'nodebuffer' }), meta };
 }
 
 function sofficeCandidates() {
@@ -103,7 +168,7 @@ async function ensureLoProfile() {
 }
 
 async function convertWithLibreOffice(docxBuffer) {
-  const { buffer: prepared, floatingTablesFixed } = fixFloatingTablesForLinux(docxBuffer);
+  const { buffer: prepared, meta } = prepareDocxForLibreOffice(docxBuffer);
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tutlio-docx-'));
   const inputPath = path.join(workDir, 'contract.docx');
   const outputPath = path.join(workDir, 'contract.pdf');
@@ -132,7 +197,7 @@ async function convertWithLibreOffice(docxBuffer) {
       try {
         await execFileAsync(bin, convertArgs, { timeout: 120000, windowsHide: true });
         const pdf = await fs.readFile(outputPath);
-        if (pdf.length > 0) return { pdf, floatingTablesFixed };
+        if (pdf.length > 0) return { pdf, meta };
       } catch (error) {
         lastError = error;
       }
@@ -189,12 +254,12 @@ app.post('/convert-docx-to-pdf', async (req, res) => {
 
   try {
     const docxBuffer = Buffer.from(fileBase64, 'base64');
-    const { pdf, floatingTablesFixed } = await convertWithLibreOffice(docxBuffer);
+    const { pdf, meta } = await convertWithLibreOffice(docxBuffer);
     return res.status(200).json({
       pdfBase64: pdf.toString('base64'),
       meta: {
         version: SERVICE_VERSION,
-        floatingTablesFixed,
+        ...meta,
         floatingTableTblInd: FLOATING_TABLE_TBL_IND,
         pdfBytes: pdf.length,
       },
