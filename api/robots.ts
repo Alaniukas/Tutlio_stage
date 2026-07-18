@@ -61,6 +61,8 @@ export const DISALLOW_PATHS = [
   '/school-payment-success',
   '/enterprise/',
   '/whiteboard/',
+  '/preview/',
+  '/dev/',
   '/api/',
 ];
 
