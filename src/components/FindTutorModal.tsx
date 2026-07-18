@@ -37,6 +37,10 @@ interface FindTutorModalProps {
   frequencyEnabled?: boolean;
   /** Lessons created while this modal remains mounted, removed immediately from visible results. */
   busyIntervals?: BusyInterval[];
+  /** Hides slot prices from the admin (org feature flag hide_admin_lesson_prices). */
+  hidePrices?: boolean;
+  /** Student's saved availability — seeds the preferred day/time windows on open. */
+  initialPreferredWindows?: Array<{ dayOfWeek: number; startTime: string; endTime: string }>;
 }
 
 type PreferredWindow = {
@@ -67,6 +71,8 @@ export default function FindTutorModal({
   primaryTutorId,
   frequencyEnabled,
   busyIntervals = [],
+  hidePrices,
+  initialPreferredWindows,
 }: FindTutorModalProps) {
   const { t, dateFnsLocale } = useTranslation();
   const [subjects, setSubjects] = useState<MatchSubject[]>([]);
@@ -92,6 +98,23 @@ export default function FindTutorModal({
     setResults([]);
     setSearched(false);
     setLoading(false);
+  }, [isOpen]);
+
+  // Seed the day/time filters from the student's saved availability each time
+  // the modal opens; deliberately keyed on isOpen only so parent re-renders
+  // (new array identity) never clobber the admin's in-dialog edits.
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!initialPreferredWindows || initialPreferredWindows.length === 0) return;
+    setPreferredWindows(initialPreferredWindows.map((window) => ({
+      id: windowId(window.dayOfWeek),
+      dayOfWeek: window.dayOfWeek,
+      startTime: window.startTime,
+      endTime: window.endTime,
+    })));
+    setResults([]);
+    setSearched(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
   useEffect(() => {
@@ -237,9 +260,9 @@ export default function FindTutorModal({
       )}
     >
       <div>
-        {!frequencyEnabled && <p className="text-sm font-medium text-gray-900">{slot.tutorName}</p>}
         <p className="text-xs text-gray-500">
-          {slot.subjectName} &middot; {format(slot.start, 'EEE d MMM, HH:mm', { locale: dateFnsLocale })}–{format(slot.end, 'HH:mm')} &middot; {fmtMoney(slot.price)}
+          {slot.subjectName} &middot; {format(slot.start, 'EEE d MMM, HH:mm', { locale: dateFnsLocale })}–{format(slot.end, 'HH:mm')}
+          {!hidePrices && <> &middot; {fmtMoney(slot.price)}</>}
         </p>
       </div>
     </button>
@@ -437,8 +460,10 @@ export default function FindTutorModal({
             </p>
           )}
 
-          {/* Frequency mode: results grouped + ranked by tutor */}
-          {frequencyEnabled && results.length > 0 && (
+          {/* Results are always grouped per tutor (one card per tutor) so the
+              same tutor never repeats per slot; the coverage badge is
+              frequency-search chrome only. */}
+          {results.length > 0 && (
             <div className="space-y-3 max-h-[320px] overflow-y-auto">
               {groups.map((group) => (
                 <div key={group.tutorId} className="border border-gray-200 rounded-xl p-2.5">
@@ -452,29 +477,24 @@ export default function FindTutorModal({
                         </span>
                       )}
                     </div>
-                    <span
-                      className={cn(
-                        'text-[10px] font-medium px-1.5 py-0.5 rounded whitespace-nowrap',
-                        group.coversFrequency ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700',
-                      )}
-                    >
-                      {group.coversFrequency
-                        ? t('findLesson.coversFrequency', { count: group.weeklyCoverage })
-                        : t('findLesson.partialCoverage', { count: group.weeklyCoverage })}
-                    </span>
+                    {frequencyEnabled && (
+                      <span
+                        className={cn(
+                          'text-[10px] font-medium px-1.5 py-0.5 rounded whitespace-nowrap',
+                          group.coversFrequency ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700',
+                        )}
+                      >
+                        {group.coversFrequency
+                          ? t('findLesson.coversFrequency', { count: group.weeklyCoverage })
+                          : t('findLesson.partialCoverage', { count: group.weeklyCoverage })}
+                      </span>
+                    )}
                   </div>
                   <div className="space-y-1.5">
                     {group.slots.map(renderSlotButton)}
                   </div>
                 </div>
               ))}
-            </div>
-          )}
-
-          {/* Default mode: flat slot list */}
-          {!frequencyEnabled && results.length > 0 && (
-            <div className="space-y-2 max-h-[300px] overflow-y-auto">
-              {results.map(renderSlotButton)}
             </div>
           )}
         </div>

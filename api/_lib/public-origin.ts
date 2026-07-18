@@ -73,6 +73,36 @@ export function isAllowedRedirectUrl(redirectTo: string, requestOrigin?: string)
   return false;
 }
 
+/**
+ * Canonical public origin for an org's preferred_locale (lt → www.tutlio.lt).
+ * Mirrors middleware.ts CANONICAL_ORIGINS; null for unknown locales.
+ */
+export function canonicalOriginForOrgLocale(orgLocale: string | null | undefined): string | null {
+  const locale = (orgLocale || '').trim().toLowerCase();
+  if (locale === 'lt') return 'https://www.tutlio.lt';
+  if (locale === 'pl') return 'https://www.tutlio.pl';
+  if (locale === 'en') return 'https://www.tutlio.com';
+  return null;
+}
+
+/**
+ * Org-aware origin for links in emails: the org's canonical market domain wins
+ * over whatever domain the request happened to arrive on — but only when the
+ * request itself came from a production tutlio.* host, so preview deployments
+ * and localhost keep testable links.
+ */
+export function orgAwareOrigin(orgLocale: string | null | undefined, fallbackOrigin: string): string {
+  const canonical = canonicalOriginForOrgLocale(orgLocale);
+  if (!canonical) return fallbackOrigin;
+  try {
+    const host = new URL(fallbackOrigin).hostname.toLowerCase();
+    const isProdTutlio = TRUSTED_REDIRECT_HOSTS.some((t) => host === t || host === `www.${t}`);
+    return isProdTutlio ? canonical : fallbackOrigin;
+  } catch {
+    return canonical;
+  }
+}
+
 export function defaultLocaleForOrigin(origin: string): string {
   try {
     const host = new URL(origin).hostname.toLowerCase().replace(/^www\./, '');

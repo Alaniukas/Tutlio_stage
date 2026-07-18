@@ -120,8 +120,12 @@ export default function StudentOnboarding() {
 
     const [age, setAge] = useState('');
     const [grade, setGrade] = useState('');
+    /** Admin already set the class — skip the grade step entirely. */
+    const [gradePrefilled, setGradePrefilled] = useState(false);
     const [subjectId, setSubjectId] = useState('');
     const [subjects, setSubjects] = useState<Subject[]>([]);
+    /** Org whitelabel branding (logo) for the registration header; null = default Tutlio. */
+    const [orgBranding, setOrgBranding] = useState<{ name: string; logo_url: string | null } | null>(null);
 
     const [payerType, setPayerType] = useState<'self' | 'parent'>('self');
     const [payerName, setPayerName] = useState('');
@@ -201,6 +205,29 @@ export default function StudentOnboarding() {
             setEmail(data.email || '');
             setPhone(data.phone || '');
             setIsSchoolInvite(isSchoolOrg);
+
+            // Admin-set class skips the grade step at registration.
+            const adminGrade = String((data as { grade?: string | null }).grade || '').trim();
+            if (adminGrade) {
+                setGrade(adminGrade);
+                setGradePrefilled(true);
+            }
+
+            // Org logo in the header (public endpoint; 404 when whitelabel off →
+            // default Tutlio header stays). Fire-and-forget so it never blocks.
+            const brandingOrgId =
+                (data as { resolved_organization_id?: string | null }).resolved_organization_id ||
+                data.organization_id;
+            if (brandingOrgId) {
+                void fetch(`/api/org-branding?id=${encodeURIComponent(String(brandingOrgId))}`)
+                    .then(async (resp) => (resp.ok ? resp.json() : null))
+                    .then((branding) => {
+                        if (branding?.name) {
+                            setOrgBranding({ name: String(branding.name), logo_url: branding.logo_url ?? null });
+                        }
+                    })
+                    .catch(() => { /* default header */ });
+            }
             setPayerType(isSchoolOrg ? 'parent' : 'self');
             setPayerName(isSchoolOrg ? (data.payer_name || '') : '');
             setPayerEmail(isSchoolOrg ? (data.payer_email || '') : '');
@@ -381,9 +408,20 @@ export default function StudentOnboarding() {
 
             <div className="relative w-full max-w-md">
                 <div className="text-center mb-6">
-                    <img src="/logo-icon.png" alt="Tutlio" className="w-14 h-14 rounded-2xl mx-auto mb-3" />
+                    {orgBranding?.logo_url ? (
+                        <img
+                            src={orgBranding.logo_url}
+                            alt={orgBranding.name}
+                            className="max-h-14 max-w-[180px] mx-auto mb-3 rounded-xl bg-white/90 p-1.5"
+                        />
+                    ) : (
+                        <img src="/logo-icon.png" alt="Tutlio" className="w-14 h-14 rounded-2xl mx-auto mb-3" />
+                    )}
                     <div className="text-center mb-8">
-                        <h1 className="text-2xl font-bold text-white">Tutlio</h1>
+                        <h1 className="text-2xl font-bold text-white">{orgBranding?.name || 'Tutlio'}</h1>
+                        {orgBranding && (
+                            <p className="text-violet-300/80 text-xs mt-1">powered by Tutlio</p>
+                        )}
                         <p className="text-indigo-200 mt-2">{t('onboard.joinTutor')}</p>
                     </div>
                     {step !== 'done' && (
@@ -462,27 +500,30 @@ export default function StudentOnboarding() {
                                 />
                             </div>
 
-                            <div>
-                                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
-                                    {t('onboard.gradeLabel')} <span className="text-red-500">*</span>
-                                </label>
-                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                                    {GRADES_LT.map((g, idx) => (
-                                        <button
-                                            key={g}
-                                            type="button"
-                                            onClick={() => { setGrade(g); setError(null); }}
-                                            className={`py-2 px-2 rounded-xl text-xs font-medium border transition-all ${grade === g
-                                                    ? 'bg-violet-600 border-violet-600 text-white'
-                                                    : (error && !grade ? 'bg-red-50 border-red-300 text-gray-700 hover:border-violet-300' : 'bg-gray-50 border-gray-200 text-gray-700 hover:border-violet-300')
-                                                }`}
-                                        >
-                                            {idx < 12 ? t('onboard.gradeN', { n: idx + 1 }) : idx === 12 ? t('lessonSet.gradeUniversity') : t('onboard.gradeOther')}
-                                        </button>
-                                    ))}
+                            {/* Admin-set class skips the grade step entirely. */}
+                            {!gradePrefilled && (
+                                <div>
+                                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+                                        {t('onboard.gradeLabel')} <span className="text-red-500">*</span>
+                                    </label>
+                                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                        {GRADES_LT.map((g, idx) => (
+                                            <button
+                                                key={g}
+                                                type="button"
+                                                onClick={() => { setGrade(g); setError(null); }}
+                                                className={`py-2 px-2 rounded-xl text-xs font-medium border transition-all ${grade === g
+                                                        ? 'bg-violet-600 border-violet-600 text-white'
+                                                        : (error && !grade ? 'bg-red-50 border-red-300 text-gray-700 hover:border-violet-300' : 'bg-gray-50 border-gray-200 text-gray-700 hover:border-violet-300')
+                                                    }`}
+                                            >
+                                                {idx < 12 ? t('onboard.gradeN', { n: idx + 1 }) : idx === 12 ? t('lessonSet.gradeUniversity') : t('onboard.gradeOther')}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    {error && !grade && <p className="text-xs text-red-500 mt-1">{t('onboard.selectGrade')}</p>}
                                 </div>
-                                {error && !grade && <p className="text-xs text-red-500 mt-1">{t('onboard.selectGrade')}</p>}
-                            </div>
+                            )}
 
                             <div>
                                 {!isSchoolInvite && (

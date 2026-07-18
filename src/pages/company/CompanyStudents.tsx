@@ -24,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, Trash2, User, Mail, Phone, GraduationCap, CheckCircle, XCircle, Sparkles, Package, Loader2, FileText, Search, Euro, Clock, MessageSquare, Archive, ArchiveRestore, Download, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, User, Mail, Phone, GraduationCap, CheckCircle, XCircle, Sparkles, Package, Loader2, FileText, Search, Euro, Clock, MessageSquare, Archive, ArchiveRestore, Download, AlertCircle, Ban } from 'lucide-react';
 import { sendEmail } from '@/lib/email';
 import Toast from '@/components/Toast';
 import { useTranslation } from '@/lib/i18n';
@@ -45,6 +45,14 @@ import StudentPaymentModelSection from '@/components/StudentPaymentModelSection'
 import SendInvoiceModal from '@/components/SendInvoiceModal';
 import FindTutorModal from '@/components/FindTutorModal';
 import FindLessonBookDialog, { type FindLessonBookPick } from '@/components/FindLessonBookDialog';
+import StudentAvailabilityEditor from '@/components/company/StudentAvailabilityEditor';
+import StudentScheduleSummary from '@/components/company/StudentScheduleSummary';
+import {
+  pickGroupPreferredAvailability,
+  toFindTutorWindows,
+  type StudentPreferredWindow,
+} from '@/lib/studentAvailability';
+import { orgCanonicalOrigin } from '@/lib/orgPublicOrigin';
 import type { BusyInterval } from '@/lib/tutorMatching';
 import PackageItemsEditor, { type PackageEditorItem, type PackageEditorSubject } from '@/components/PackageItemsEditor';
 import { pickStudentContactsForTutorEmail, shouldShowPayerContactSection } from '@/lib/orgContactVisibility';
@@ -91,6 +99,7 @@ interface Student {
   admin_comment_visible_to_tutor?: boolean;
   personal_meeting_link?: string | null;
   detached_at?: string | null;
+  preferred_availability?: unknown;
   tutor?: {
     full_name: string;
   };
@@ -236,6 +245,8 @@ export default function CompanyStudents() {
   const { fmt } = useMarketMoney();
   const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
   const orgUsesManualPackages = !orgFeaturesLoading && hasFeature('manual_payments');
+  /** Full contact editing: schools always; other orgs behind full_student_edit (email only until registered). */
+  const canFullEditStudent = isSchoolView || (!orgFeaturesLoading && hasFeature('full_student_edit'));
   const stc = getCached<any>('company_students');
   const [students, setStudents] = useState<Student[]>(stc?.students ?? []);
   const [tutors, setTutors] = useState<Tutor[]>(stc?.tutors ?? []);
@@ -248,6 +259,8 @@ export default function CompanyStudents() {
   const [saving, setSaving] = useState(false);
   const [orgId, setOrgId] = useState<string | null>(null);
   const [baseUrl, setBaseUrl] = useState('');
+  /** Org preferred_locale — invite links use the org's canonical domain (.lt for Pro Klasė). */
+  const [orgPreferredLocale, setOrgPreferredLocale] = useState<string | null>(null);
   const [newStudent, setNewStudent] = useState({
     full_name: '',
     email: '',
@@ -285,6 +298,7 @@ export default function CompanyStudents() {
   const [modalRecentSessions, setModalRecentSessions] = useState<Session[]>([]);
   const [loadingModalSessions, setLoadingModalSessions] = useState(false);
   const [modalSessionsRefreshKey, setModalSessionsRefreshKey] = useState(0);
+  const [savingAvailability, setSavingAvailability] = useState(false);
 
   // Book a lesson from the student card (req 4, gated by student_card_booking)
   const [findLessonOpen, setFindLessonOpen] = useState(false);
@@ -331,6 +345,11 @@ export default function CompanyStudents() {
 
   // Package state (student modal)
   const [studentPackages, setStudentPackages] = useState<any[]>([]);
+  /** Active auto (post-trial) monthly package plans for the selected identity group. */
+  const [studentAutoPlans, setStudentAutoPlans] = useState<any[]>([]);
+  const [annullingPackageId, setAnnullingPackageId] = useState<string | null>(null);
+  const [resendingPackageId, setResendingPackageId] = useState<string | null>(null);
+  const [stoppingPlanId, setStoppingPlanId] = useState<string | null>(null);
   const [packageSubjects, setPackageSubjects] = useState<any[]>([]);
   const [loadingPackages, setLoadingPackages] = useState(false);
   const [sendPackageOpen, setSendPackageOpen] = useState(false);
@@ -523,10 +542,11 @@ export default function CompanyStudents() {
       setTrialDefaultsLoading(true);
       const { data } = await supabase
         .from('organizations')
-        .select('features')
+        .select('features, preferred_locale')
         .eq('id', orgId)
         .maybeSingle();
       if (cancelled) return;
+      setOrgPreferredLocale(((data as any)?.preferred_locale as string | null) ?? null);
       const feat = (data as any)?.features;
       const featObj = feat && typeof feat === 'object' && !Array.isArray(feat) ? (feat as Record<string, unknown>) : {};
       const topic = typeof featObj.trial_lesson_topic === 'string' && featObj.trial_lesson_topic.trim()
@@ -619,6 +639,36 @@ export default function CompanyStudents() {
     })();
     return () => { cancelled = true; };
   }, [selectedStudent, isStudentModalOpen, orgId, monthlyPackageMode]);
+
+  // Auto (post-trial) monthly package plans across the identity group.
+  useEffect(() => {
+    if (!selectedStudent || !isStudentModalOpen) {
+      setStudentAutoPlans([]);
+      return;
+    }
+    const groupIds = selectedStudentGroup.length > 0
+      ? selectedStudentGroup.map((row) => row.id)
+      : [selectedStudent.id];
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('recurring_monthly_package_plans')
+        .select('id, tutor_id, student_id, next_generation_date, payment_method, auto_from_schedule, active, tutor:profiles!recurring_monthly_package_plans_tutor_id_fkey(full_name)')
+        .in('student_id', groupIds)
+        .eq('active', true)
+        .eq('auto_from_schedule', true);
+      if (!cancelled) {
+        setStudentAutoPlans(
+          ((data || []) as any[]).map((plan) => ({
+            ...plan,
+            tutor: Array.isArray(plan.tutor) ? plan.tutor[0] ?? null : plan.tutor ?? null,
+          })),
+        );
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedStudent?.id, isStudentModalOpen, selectedStudentGroup.length, modalSessionsRefreshKey]);
 
   useEffect(() => {
     if (!monthlyPackageMode || !sendPackageOpen || pkgItems.length === 0) return;
@@ -1037,6 +1087,17 @@ export default function CompanyStudents() {
     ]);
   };
 
+  const reloadStudentPackages = async () => {
+    if (!selectedStudent) return;
+    const { data } = await supabase
+      .from('lesson_packages')
+      .select('*, subject:subjects(name, color), lesson_package_items(subject_id, total_lessons, available_lessons, total_price, position, subjects!inner(name, color))')
+      .eq('student_id', selectedStudent.id)
+      .or('active.eq.true,payment_status.eq.pending')
+      .order('created_at', { ascending: false });
+    setStudentPackages(data || []);
+  };
+
   const handleDeactivatePackage = async (packageId: string) => {
     if (!selectedStudent) return;
     setDeactivatingPackageId(packageId);
@@ -1046,18 +1107,96 @@ export default function CompanyStudents() {
         .update({ active: false })
         .eq('id', packageId);
       if (error) throw error;
-      const { data } = await supabase
-        .from('lesson_packages')
-        .select('*, subject:subjects(name, color), lesson_package_items(subject_id, total_lessons, available_lessons, total_price, position, subjects!inner(name, color))')
-        .eq('student_id', selectedStudent.id)
-        .or('active.eq.true,payment_status.eq.pending')
-        .order('created_at', { ascending: false });
-      setStudentPackages(data || []);
+      await reloadStudentPackages();
       setToastMessage({ message: t('compStu.packageHidden'), type: 'success' });
     } catch (e: any) {
       setToastMessage({ message: e?.message || t('compStu.hidePackageFailed'), type: 'error' });
     }
     setDeactivatingPackageId(null);
+  };
+
+  /** Annul a pending package: old pay links stop working; unpaid linked lessons are released back to "pending". */
+  const handleAnnulPackage = async (pkg: any) => {
+    if (!selectedStudent) return;
+    if (!window.confirm(t('compStu.pkgAnnulConfirm'))) return;
+    setAnnullingPackageId(pkg.id);
+    try {
+      const { data: linkedSessions } = await supabase
+        .from('sessions')
+        .select('id, paid, payment_status, status')
+        .eq('lesson_package_id', pkg.id);
+      const linked = linkedSessions || [];
+      if (linked.some((s: any) => s.paid === true)) {
+        throw new Error(t('compStu.pkgAnnulHasPaidSessions'));
+      }
+      // Reservation holds die with the package; regular scheduled lessons are
+      // just unlinked and become billable again.
+      const reservedIds = linked.filter((s: any) => s.payment_status === 'reserved').map((s: any) => s.id);
+      const otherIds = linked.filter((s: any) => s.payment_status !== 'reserved').map((s: any) => s.id);
+      if (reservedIds.length > 0) {
+        await supabase
+          .from('sessions')
+          .update({ status: 'cancelled', lesson_package_id: null, payment_status: 'pending' })
+          .in('id', reservedIds);
+      }
+      if (otherIds.length > 0) {
+        await supabase
+          .from('sessions')
+          .update({ lesson_package_id: null, payment_status: 'pending' })
+          .in('id', otherIds);
+      }
+      const { error } = await supabase
+        .from('lesson_packages')
+        .update({
+          active: false,
+          payment_status: 'cancelled',
+          cancelled_at: new Date().toISOString(),
+        })
+        .eq('id', pkg.id)
+        .eq('paid', false);
+      if (error) throw error;
+      await reloadStudentPackages();
+      setToastMessage({ message: t('compStu.pkgAnnulled'), type: 'success' });
+    } catch (e: any) {
+      setToastMessage({ message: t('compStu.errorPrefix', { msg: e?.message || String(e) }), type: 'error' });
+    }
+    setAnnullingPackageId(null);
+  };
+
+  /** Re-send the payment email for a pending package (stable pay link). */
+  const handleResendPackageEmail = async (packageId: string) => {
+    setResendingPackageId(packageId);
+    try {
+      const resp = await fetch('/api/resend-package-email', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ packageId }),
+      });
+      const result = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error((result as any).error || String(resp.status));
+      setToastMessage({ message: t('compStu.pkgResent'), type: 'success' });
+    } catch (e: any) {
+      setToastMessage({ message: t('compStu.errorPrefix', { msg: e?.message || String(e) }), type: 'error' });
+    }
+    setResendingPackageId(null);
+  };
+
+  /** Stop the automatic monthly package plan (no further months are generated). */
+  const handleStopAutoPlan = async (planId: string) => {
+    if (!window.confirm(t('compStu.autoPlanStopConfirm'))) return;
+    setStoppingPlanId(planId);
+    try {
+      const { error } = await supabase
+        .from('recurring_monthly_package_plans')
+        .update({ active: false, updated_at: new Date().toISOString() })
+        .eq('id', planId);
+      if (error) throw error;
+      setStudentAutoPlans((prev) => prev.filter((plan) => plan.id !== planId));
+      setToastMessage({ message: t('compStu.autoPlanStopped'), type: 'success' });
+    } catch (e: any) {
+      setToastMessage({ message: t('compStu.errorPrefix', { msg: e?.message || String(e) }), type: 'error' });
+    }
+    setStoppingPlanId(null);
   };
 
   const generateInviteCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -1321,13 +1460,14 @@ export default function CompanyStudents() {
 
     const shouldSendInviteOnCreate = !isSchoolView;
     if (shouldSendInviteOnCreate && newStudent.email?.trim()) {
+      const inviteBaseUrl = orgCanonicalOrigin(orgPreferredLocale) ?? baseUrl;
       for (const row of inserted) {
         const tutor = tutors.find((t) => t.id === row.tutor_id);
-        const bookingUrl = `${baseUrl}/book/${row.invite_code}`;
+        const bookingUrl = `${inviteBaseUrl}/book/${row.invite_code}`;
         const ok = await sendEmail({
           type: 'invite_email',
           to: newStudent.email.trim(),
-          locale,
+          locale: orgPreferredLocale || locale,
           data: {
             studentName: newStudent.full_name,
             tutorName: tutor?.full_name || t('compStu.tutorFallback'),
@@ -1488,11 +1628,12 @@ export default function CompanyStudents() {
       : studentEditDraft.parent_secondary_address.trim();
 
     setSavingStudentInfo(true);
+    const nextEmail = studentEditDraft.email.trim();
+    const previousEmail = String(selectedStudent.email || '').trim();
+    const emailChanged = nextEmail.toLowerCase() !== previousEmail.toLowerCase();
 
-    const nextStudentEmail = studentEditDraft.email.trim();
-    const emailChanged =
-      nextStudentEmail.toLowerCase() !== String(selectedStudent.email || '').trim().toLowerCase();
-
+    // Registered students: email changes go through the server first (syncs the
+    // auth account + runs duplicate / org-tutor checks) before the row update.
     if (selectedStudent.linked_user_id && emailChanged) {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
@@ -1507,7 +1648,7 @@ export default function CompanyStudents() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ studentId: selectedStudent.id, email: nextStudentEmail }),
+        body: JSON.stringify({ studentId: selectedStudent.id, email: nextEmail }),
       });
       const emailJson = await emailResp.json().catch(() => ({}));
       if (!emailResp.ok) {
@@ -1528,10 +1669,9 @@ export default function CompanyStudents() {
         return;
       }
     }
-
     const payload = {
       full_name: studentEditDraft.full_name.trim(),
-      email: studentEditDraft.email.trim(),
+      email: nextEmail,
       phone: studentEditDraft.phone.trim() || null,
       payer_name: contactParent.name || null,
       payer_email: contactParent.email || null,
@@ -1548,17 +1688,57 @@ export default function CompanyStudents() {
       child_birth_date: studentEditDraft.child_birth_date || null,
     };
 
-    const { error } = await supabase.from('students').update(payload).eq('id', selectedStudent.id);
+    // Contact data describes the student identity — keep every duplicate row
+    // of the group (one per tutor pairing) in sync.
+    const groupIds = selectedStudentGroup.length > 0
+      ? selectedStudentGroup.map((row) => row.id)
+      : [selectedStudent.id];
+    const { error } = await supabase.from('students').update(payload).in('id', groupIds);
     setSavingStudentInfo(false);
     if (error) {
       setToastMessage({ message: t('compStu.errorPrefix', { msg: error.message }), type: 'error' });
       return;
     }
     setSelectedStudent((s) => (s ? { ...s, ...payload } : s));
-    setStudents((prev) => prev.map((s) => (s.id === selectedStudent.id ? { ...s, ...payload } : s)));
+    setSelectedStudentGroup((prev) => prev.map((s) => ({ ...s, ...payload })));
+    setStudents((prev) => prev.map((s) => (groupIds.includes(s.id) ? { ...s, ...payload } : s)));
     setToastMessage({ message: t('compStu.commentSaved'), type: 'success' });
     invalidateCache('company_contracts');
     fetchData();
+
+    // Email changed while the student is still unregistered → offer to resend
+    // the full invitation to the new address right away.
+    if (emailChanged && nextEmail && !selectedStudent.linked_user_id) {
+      if (window.confirm(t('compStu.resendInviteAfterEmailChange'))) {
+        void sendInviteEmailFor({ ...selectedStudent, ...payload });
+      }
+    }
+  };
+
+  /** Availability windows live on every row of the identity group (kept in sync). */
+  const handleSaveStudentAvailability = async (next: StudentPreferredWindow[]) => {
+    if (!selectedStudent) return;
+    setSavingAvailability(true);
+    try {
+      const ids = selectedStudentGroup.length > 0
+        ? selectedStudentGroup.map((row) => row.id)
+        : [selectedStudent.id];
+      const { error } = await supabase
+        .from('students')
+        .update({ preferred_availability: next })
+        .in('id', ids);
+      if (error) throw new Error(error.message);
+      setSelectedStudent((current) => (current ? { ...current, preferred_availability: next } : current));
+      setSelectedStudentGroup((current) => current.map((row) => ({ ...row, preferred_availability: next })));
+      setStudents((current) => current.map((row) => (ids.includes(row.id) ? { ...row, preferred_availability: next } : row)));
+      invalidateCache('company_students');
+      setToastMessage({ message: t('compStu.availabilitySaved'), type: 'success' });
+    } catch (err: any) {
+      console.error('[CompanyStudents] availability save failed:', err);
+      setToastMessage({ message: t('compStu.errorPrefix', { msg: err?.message || String(err) }), type: 'error' });
+    } finally {
+      setSavingAvailability(false);
+    }
   };
 
   const handleUpdateStudentGrade = async (grade: string) => {
@@ -1703,27 +1883,27 @@ export default function CompanyStudents() {
     }
   };
 
-  const handleSendInviteNow = async () => {
-    if (!selectedStudent) return;
-    const recipient = (selectedStudent.email || '').trim() || (selectedStudent.payer_email || '').trim();
+  /** Takes the row explicitly so callers with freshly-saved data avoid stale state. */
+  const sendInviteEmailFor = async (student: Student) => {
+    const recipient = (student.email || '').trim() || (student.payer_email || '').trim();
     if (!recipient) {
       setToastMessage({ message: t('compStu.noInviteRecipient'), type: 'error' });
       return;
     }
-    if (!selectedStudent.invite_code) {
+    if (!student.invite_code) {
       setToastMessage({ message: t('compStu.inviteMissingCode'), type: 'error' });
       return;
     }
     setSendingInviteNow(true);
-    const bookingUrl = `${baseUrl}/book/${selectedStudent.invite_code}`;
+    const bookingUrl = `${orgCanonicalOrigin(orgPreferredLocale) ?? baseUrl}/book/${student.invite_code}`;
     const ok = await sendEmail({
       type: 'invite_email',
       to: recipient,
-      locale,
+      locale: orgPreferredLocale || locale,
       data: {
-        studentName: selectedStudent.full_name,
-        tutorName: selectedStudent.tutor?.full_name || t('compStu.tutorFallback'),
-        inviteCode: selectedStudent.invite_code,
+        studentName: student.full_name,
+        tutorName: student.tutor?.full_name || t('compStu.tutorFallback'),
+        inviteCode: student.invite_code,
         bookingUrl,
         ...(orgId ? { organizationId: orgId } : {}),
       },
@@ -1733,6 +1913,11 @@ export default function CompanyStudents() {
       message: ok ? t('compStu.inviteSentNowSuccess') : t('compStu.inviteSentNowFailed'),
       type: ok ? 'success' : 'error',
     });
+  };
+
+  const handleSendInviteNow = async () => {
+    if (!selectedStudent) return;
+    await sendInviteEmailFor(selectedStudent);
   };
 
   if (loading) {
@@ -2808,7 +2993,7 @@ export default function CompanyStudents() {
                         t={t}
                       />
                     )}
-                    {isSchoolView && (
+                    {canFullEditStudent && (
                       <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-3">
                         <div className="flex items-center justify-between gap-2">
                           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Redaguoti mokinio duomenis</p>
@@ -2821,7 +3006,14 @@ export default function CompanyStudents() {
                           <>
                           <div className="grid sm:grid-cols-2 gap-2">
                             <Input value={studentEditDraft.full_name} onChange={(e) => setStudentEditDraft((p) => ({ ...p, full_name: e.target.value }))} placeholder={t('compStu.fullNameRequired')} className="rounded-xl bg-white" />
-                            <Input type="email" value={studentEditDraft.email} onChange={(e) => setStudentEditDraft((p) => ({ ...p, email: e.target.value }))} placeholder={t('compStu.emailLabel')} className="rounded-xl bg-white" />
+                            {/* Registered students' email edits go through /api/admin-update-student-email (auth + row sync). */}
+                            <Input
+                              type="email"
+                              value={studentEditDraft.email}
+                              onChange={(e) => setStudentEditDraft((p) => ({ ...p, email: e.target.value }))}
+                              placeholder={t('compStu.emailLabel')}
+                              className="rounded-xl bg-white"
+                            />
                             <Input value={studentEditDraft.phone} onChange={(e) => setStudentEditDraft((p) => ({ ...p, phone: formatLithuanianPhone(e.target.value) }))} placeholder={t('compStu.phoneLabel')} className="rounded-xl bg-white" />
                             <DateInput value={studentEditDraft.child_birth_date} onChange={(e) => setStudentEditDraft((p) => ({ ...p, child_birth_date: e.target.value }))} />
                             <Input value={studentEditDraft.student_address} onChange={(e) => setStudentEditDraft((p) => ({ ...p, student_address: e.target.value }))} placeholder="Adresas" className="rounded-xl bg-white" />
@@ -2968,6 +3160,23 @@ export default function CompanyStudents() {
                       </button>
                     </div>
                   </div>
+
+                  {/* Recurring schedule + move/cancel counters (near the edit button). */}
+                  {selectedStudent && !orgFeaturesLoading && hasFeature('student_schedule_overview') && (
+                    <StudentScheduleSummary
+                      studentRowIds={(selectedStudentGroup.length > 0 ? selectedStudentGroup : [selectedStudent]).map((row) => row.id)}
+                      refreshKey={modalSessionsRefreshKey}
+                    />
+                  )}
+
+                  {/* Weekly availability that suits the student (prefills tutor search). */}
+                  {selectedStudent && !orgFeaturesLoading && hasFeature('student_availability_profile') && (
+                    <StudentAvailabilityEditor
+                      value={pickGroupPreferredAvailability(selectedStudentGroup.length > 0 ? selectedStudentGroup : [selectedStudent])}
+                      saving={savingAvailability}
+                      onSave={handleSaveStudentAvailability}
+                    />
+                  )}
                 </div>
 
                 {editTutorsOpen && (
@@ -3298,7 +3507,8 @@ export default function CompanyStudents() {
                                 {studentIndividualPricing.map((pricing) => (
                                   <div
                                     key={pricing.id}
-                                    className="bg-amber-50 border border-amber-100 rounded-xl p-3 flex items-center justify-between gap-3"
+                                    className="bg-amber-50 border border-amber-100 border-l-4 rounded-xl p-3 flex items-center justify-between gap-3"
+                                    style={{ borderLeftColor: pricing.subject?.color || '#6366f1' }}
                                   >
                                     <div className="flex-1 min-w-0">
                                       <div className="flex items-center gap-2 mb-1">
@@ -3360,7 +3570,13 @@ export default function CompanyStudents() {
                                     <SelectContent>
                                       {tutorPricingSubjects.map((s) => (
                                         <SelectItem key={s.id} value={s.id}>
-                                          {s.name}
+                                          <div className="flex items-center gap-2">
+                                            <span
+                                              className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                                              style={{ backgroundColor: s.color || '#6366f1' }}
+                                            />
+                                            {s.name}
+                                          </div>
                                         </SelectItem>
                                       ))}
                                     </SelectContent>
@@ -3498,7 +3714,8 @@ export default function CompanyStudents() {
                 )}
 
                 {/* Trial lesson offer (only for brand new students with 0 sessions) */}
-                {selectedStudent && (selectedStudentSessionCount ?? 0) === 0 && !selectedStudent.trial_offer_disabled && (
+                {selectedStudent && (selectedStudentSessionCount ?? 0) === 0 && !selectedStudent.trial_offer_disabled &&
+                  !(!orgFeaturesLoading && hasFeature('hide_trial_offer_button')) && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       <Button
@@ -3778,6 +3995,32 @@ export default function CompanyStudents() {
                     </div>
                   )}
 
+                  {studentAutoPlans.length > 0 && (
+                    <div className="space-y-1.5 mb-2">
+                      {studentAutoPlans.map((plan: any) => (
+                        <div key={plan.id} className="flex items-center justify-between gap-2 p-2.5 rounded-xl border border-indigo-100 bg-indigo-50/60 text-xs">
+                          <div className="min-w-0">
+                            <p className="font-semibold text-indigo-900">{t('compStu.autoPlanActive')}</p>
+                            <p className="text-indigo-700/80 truncate">
+                              {plan.tutor?.full_name ? `${plan.tutor.full_name} · ` : ''}
+                              {t('compStu.autoPlanNextGen', { date: String(plan.next_generation_date || '—') })}
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2.5 text-[11px] rounded-lg border-indigo-200 text-indigo-700 hover:bg-indigo-100 shrink-0"
+                            disabled={stoppingPlanId === plan.id}
+                            onClick={() => void handleStopAutoPlan(plan.id)}
+                          >
+                            {stoppingPlanId === plan.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : t('compStu.autoPlanStop')}
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {loadingPackages ? (
                     <div className="text-center py-3"><Loader2 className="w-5 h-5 animate-spin mx-auto text-gray-400" /></div>
                   ) : studentPackages.length === 0 ? (
@@ -3811,6 +4054,38 @@ export default function CompanyStudents() {
                             <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${pkg.payment_status === 'paid' ? 'bg-green-50 text-green-700' : pkg.payment_status === 'expired' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>
                               {pkg.payment_status === 'paid' ? t('compStu.paid') : pkg.payment_status === 'expired' ? t('package.expired') : t('compStu.pendingStatus')}
                             </span>
+                            {pkg.payment_status === 'pending' && !pkg.paid && (
+                              <>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 px-2 text-xs rounded-lg text-gray-500 hover:text-indigo-700 hover:bg-indigo-50"
+                                  disabled={resendingPackageId === pkg.id}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void handleResendPackageEmail(pkg.id);
+                                  }}
+                                  title={t('compStu.pkgResend')}
+                                >
+                                  {resendingPackageId === pkg.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 px-2 text-xs rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50"
+                                  disabled={annullingPackageId === pkg.id}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void handleAnnulPackage(pkg);
+                                  }}
+                                  title={t('compStu.pkgAnnul')}
+                                >
+                                  {annullingPackageId === pkg.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Ban className="w-3.5 h-3.5" />}
+                                </Button>
+                              </>
+                            )}
                             {Number(pkg.available_lessons || 0) === 0 && pkg.active !== false && (
                               <Button
                                 type="button"
@@ -3929,6 +4204,12 @@ export default function CompanyStudents() {
               orgId={orgId}
               primaryTutorId={selectedStudent?.tutor_id ?? null}
               frequencyEnabled={hasFeature('tutor_frequency_search')}
+              hidePrices={hasFeature('hide_admin_lesson_prices')}
+              initialPreferredWindows={toFindTutorWindows(
+                pickGroupPreferredAvailability(
+                  selectedStudentGroup.length > 0 ? selectedStudentGroup : (selectedStudent ? [selectedStudent] : []),
+                ),
+              )}
               busyIntervals={findLessonBookedIntervals}
               onPickSlot={(slot) => {
                 setFindLessonPick({

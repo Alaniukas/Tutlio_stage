@@ -10,7 +10,7 @@ import {
 import { findActivePackageForBooking } from '../src/lib/lessonPackageBooking.js';
 import { defaultSessionPaymentStatusForStudent } from '../src/lib/studentPaymentModel.js';
 
-const HORIZON_DAYS = 42;
+const HORIZON_DAYS = 60;
 
 type RecurringTemplate = {
   id: string;
@@ -71,7 +71,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const [{ data: studentRows }, { data: subjectRows }] = await Promise.all([
     supabase
       .from('students')
-      .select('id, payment_model')
+      .select('id, payment_model, detached_at')
       .in('id', studentIds),
     subjectIds.length > 0
       ? supabase.from('subjects').select('id, is_group').in('id', subjectIds)
@@ -79,6 +79,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   ]);
   const paymentModelByStudent = new Map(
     (studentRows || []).map((student: any) => [student.id as string, student.payment_model as string | null]),
+  );
+  const detachedStudentIds = new Set(
+    (studentRows || []).filter((student: any) => student.detached_at != null).map((student: any) => student.id as string),
   );
   const groupSubjectIds = new Set(
     (subjectRows || []).filter((subject: any) => subject.is_group === true).map((subject: any) => subject.id as string),
@@ -88,6 +91,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let skipped = 0;
 
   for (const template of templates) {
+    // Archived (detached) students no longer get new lessons — for anyone.
+    if (detachedStudentIds.has(template.student_id)) {
+      skipped += 1;
+      continue;
+    }
     const durationMs = recurringDurationMs(template.start_time, template.end_time);
     if (durationMs <= 0) {
       skipped += 1;

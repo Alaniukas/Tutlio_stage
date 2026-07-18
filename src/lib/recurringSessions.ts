@@ -1,11 +1,12 @@
-import { addWeeks, addMonths, parseISO, isBefore } from 'date-fns';
+import { addDays, addWeeks, addMonths, parseISO, isBefore } from 'date-fns';
 
 /**
- * Open-ended schedules keep only a small rolling calendar window materialized.
- * A daily server job extends that window, so admins never create hundreds of
- * session rows and never need to recreate the schedule manually each month.
+ * Open-ended schedules keep only a small rolling calendar window materialized
+ * (~2 months). A daily server job extends that window while the student is not
+ * archived, so admins never create hundreds of session rows and never need to
+ * recreate the schedule manually each month.
  */
-export const RECURRING_OPEN_END_HORIZON_WEEKS = 6;
+export const RECURRING_OPEN_END_HORIZON_DAYS = 60;
 
 export function recurringMaterializeEndDate(
   recurringEndDate: string | null | undefined,
@@ -15,7 +16,7 @@ export function recurringMaterializeEndDate(
   if (trimmed) {
     return parseISO(trimmed);
   }
-  return addWeeks(seriesStart, RECURRING_OPEN_END_HORIZON_WEEKS);
+  return addDays(seriesStart, RECURRING_OPEN_END_HORIZON_DAYS);
 }
 
 export function isRecurringEndDateOpen(recurringEndDate: string | null | undefined): boolean {

@@ -55,16 +55,20 @@ export async function resolveRecurringPackagePlan(args: ResolveArgs): Promise<{
     }
     const { data: plan, error } = await supabase
       .from('recurring_monthly_package_plans')
-      .select('id, created_by, tutor_id, student_id, subject_id, payment_method, active')
+      .select('id, created_by, tutor_id, student_id, subject_id, payment_method, active, auto_from_schedule')
       .eq('id', recurringPlanId)
       .maybeSingle();
     if (error || !plan || plan.active !== true) {
       return { data: null, error: error?.message || 'Recurring package plan not found.' };
     }
+    // Auto (schedule-derived) plans are multi-subject: subject_id is NULL and
+    // items are rebuilt from the recurring templates each period — skip the
+    // single-subject equality check for them.
+    const subjectMatches = plan.auto_from_schedule === true || plan.subject_id === subjectId;
     if (
       plan.tutor_id !== tutorId ||
       plan.student_id !== studentId ||
-      plan.subject_id !== subjectId ||
+      !subjectMatches ||
       plan.payment_method !== paymentMethod
     ) {
       return { data: null, error: 'Recurring package plan does not match this package.' };

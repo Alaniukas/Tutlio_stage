@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { insertParentInviteAndSendEmail } from './_lib/parentInvite.js';
-import { inviteEmailLocale, publicOriginFromRequest } from './_lib/public-origin.js';
+import { inviteEmailLocale, orgAwareOrigin, publicOriginFromRequest } from './_lib/public-origin.js';
 
 /** Raw Node response — avoids Express-style helpers missing under `vercel dev`. */
 function json(res: VercelResponse, status: number, body: unknown) {
@@ -140,7 +140,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const results: { email: string; ok: boolean; error?: string; code?: string }[] = [];
 
-    const appOrigin = publicOriginFromRequest(req);
+    const appOrigin = orgAwareOrigin(orgLocale, publicOriginFromRequest(req));
     const explicitLocale = typeof body.locale === 'string' ? body.locale : undefined;
     const emailLocale = inviteEmailLocale(
       explicitLocale || orgLocale || undefined,

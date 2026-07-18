@@ -186,6 +186,55 @@ export function getStudentSessions(
   );
 }
 
+export interface SessionAttributionRow {
+  status?: string | null;
+  cancelled_by?: string | null;
+  rescheduled_at?: string | null;
+  reschedule_reason?: string | null;
+  reschedule_requested_by?: string | null;
+}
+
+/**
+ * Who a reschedule is attributed to. Prefers the explicit
+ * reschedule_requested_by column; legacy rows fall back on the fact that
+ * reschedule_reason is written only by tutor/org-admin moves, while
+ * student-initiated self-service moves never set it.
+ */
+export function rescheduleAttribution(row: SessionAttributionRow): 'student' | 'tutor' | null {
+  if (!row.rescheduled_at) return null;
+  if (row.reschedule_requested_by === 'student' || row.reschedule_requested_by === 'tutor') {
+    return row.reschedule_requested_by;
+  }
+  return row.reschedule_reason && row.reschedule_reason.trim().length > 0 ? 'tutor' : 'student';
+}
+
+export interface StudentSessionCounters {
+  cancelledByStudent: number;
+  cancelledByTutor: number;
+  movedByStudent: number;
+  movedByTutor: number;
+}
+
+/** Move/cancel counters for the org student card, split by who initiated. */
+export function countStudentSessionStats(rows: SessionAttributionRow[]): StudentSessionCounters {
+  const counters: StudentSessionCounters = {
+    cancelledByStudent: 0,
+    cancelledByTutor: 0,
+    movedByStudent: 0,
+    movedByTutor: 0,
+  };
+  for (const row of rows) {
+    if (row.status === 'cancelled') {
+      if (row.cancelled_by === 'student') counters.cancelledByStudent += 1;
+      else if (row.cancelled_by === 'tutor') counters.cancelledByTutor += 1;
+    }
+    const moved = rescheduleAttribution(row);
+    if (moved === 'student') counters.movedByStudent += 1;
+    else if (moved === 'tutor') counters.movedByTutor += 1;
+  }
+  return counters;
+}
+
 /**
  * Org admin student modal: past "occurred" (incl. no_show) + cancelled sessions,
  * newest by end_time first, capped for a short history list.

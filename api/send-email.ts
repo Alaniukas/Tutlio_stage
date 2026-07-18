@@ -20,6 +20,7 @@ import { buildTrackedJoinUrl, type JoinRole } from './_lib/joinLink.js';
 import { isInternalRequest } from './_lib/auth.js';
 import { isCronAuthorized } from './_lib/cronAuth.js';
 import { markdownToEmailHtml } from './_lib/blogMarkdownEmail.js';
+import { canonicalOriginForOrgLocale } from './_lib/public-origin.js';
 
 
 function randomToken() {
@@ -2658,11 +2659,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const sb = createClient(supabaseUrl, serviceKey, supabaseServiceRoleClientOptions() as any) as any;
           const { data: org } = await sb
             .from('organizations')
-            .select('name, logo_url, brand_color, brand_color_secondary, features, entity_type')
+            .select('name, logo_url, brand_color, brand_color_secondary, features, entity_type, preferred_locale')
             .eq('id', orgIdForBrandingLookup)
             .maybeSingle();
           if (org) {
             isSchoolOrg = String((org as { entity_type?: string }).entity_type || '').trim().toLowerCase() === 'school';
+            // Invite links must land on the org's canonical market domain
+            // (Pro Klasė → tutlio.lt) regardless of which domain the admin used.
+            // Only prod tutlio.* links are rewritten — preview/localhost links
+            // stay testable.
+            if (type === 'invite_email') {
+              const orgOrigin = canonicalOriginForOrgLocale((org as { preferred_locale?: string | null }).preferred_locale);
+              const currentUrl = String((data as any)?.bookingUrl || '');
+              if (orgOrigin && currentUrl) {
+                try {
+                  const parsed = new URL(currentUrl);
+                  const host = parsed.hostname.toLowerCase();
+                  const isProdTutlio = ['tutlio.lt', 'tutlio.com', 'tutlio.pl'].some(
+                    (d) => host === d || host === `www.${d}`,
+                  );
+                  if (isProdTutlio) {
+                    (data as any).bookingUrl = `${orgOrigin}${parsed.pathname}${parsed.search}`;
+                  }
+                } catch {
+                  /* leave the caller-provided URL untouched */
+                }
+              }
+            }
             const features = (org.features && typeof org.features === 'object' ? org.features : {}) as Record<string, unknown>;
             // Optional per-org "questions" contact address (e.g. irminta@) shown in
             // school emails. Signed contracts still go to the org email (schoolEmail).

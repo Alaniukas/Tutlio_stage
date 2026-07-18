@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,7 +12,7 @@ import {
   anyOrgLessonEdit,
   type OrgLessonEditScope,
 } from '@/lib/orgTutorLessonEdit';
-import { subjectPresetKey, subjectTutorLessonKey, tutorSubjectsContainLessonDuplicate } from '@/lib/subjectPresetDedupe';
+import { subjectGroupKey, subjectPresetKey, subjectTutorLessonKey, tutorSubjectsContainLessonDuplicate } from '@/lib/subjectPresetDedupe';
 import { removeOrgSubjectTemplatesMatchingPreset } from '@/lib/orgSubjectTemplateCleanup';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import {
@@ -96,6 +96,8 @@ export default function CompanySettings() {
   const [subjects, setSubjects] = useState<Subject[]>(sc?.subjects ?? []);
   const [isSubjectDialogOpen, setIsSubjectDialogOpen] = useState(false);
   const [editingSubject, setEditingSubject] = useState<Subject | null>(null);
+  /** Group edit: identical-condition rows of several tutors edited as one subject. */
+  const [editingGroupRows, setEditingGroupRows] = useState<Subject[] | null>(null);
   const [newSubject, setNewSubject] = useState({
     name: '', duration_minutes: 60, price: 25, color: '#6366f1',
     meeting_link: '', grade_min: null as number | null, grade_max: null as number | null,
@@ -354,14 +356,77 @@ export default function CompanySettings() {
     setLoading(false);
   };
 
+  /**
+   * Same conditions ⇒ one subject: real rows grouped by full identity
+   * (name/duration/price/colour/grades/group size), templates stay singletons.
+   */
+  const groupedSubjectCards = useMemo(() => {
+    const templates = subjects.filter((s) => s.isOrgTemplate);
+    const byKey = new Map<string, Subject[]>();
+    for (const row of subjects) {
+      if (row.isOrgTemplate) continue;
+      const key = subjectGroupKey(row);
+      const arr = byKey.get(key) ?? [];
+      arr.push(row);
+      byKey.set(key, arr);
+    }
+    return { templates, groups: [...byKey.values()] };
+  }, [subjects]);
+
   const openAddSubjectDialog = () => {
     setEditingSubject(null);
+    setEditingGroupRows(null);
     setNewSubject({ name: '', duration_minutes: 60, price: 25, color: '#6366f1', meeting_link: '', grade_min: null, grade_max: null, is_group: false, max_students: null });
     setSelectedTutorIds([]);
     setIsSubjectDialogOpen(true);
   };
 
+  /** Edit a grouped subject: one form, changes propagate to every member tutor's row. */
+  const openEditSubjectGroup = (rows: Subject[]) => {
+    if (rows.length === 0) return;
+    const sample = rows[0];
+    setEditingSubject(null);
+    setEditingGroupRows(rows);
+    setNewSubject({
+      name: sample.name,
+      duration_minutes: sample.duration_minutes,
+      price: sample.price,
+      color: sample.color,
+      meeting_link: sample.meeting_link || '',
+      grade_min: sample.grade_min ?? null,
+      grade_max: sample.grade_max ?? null,
+      is_group: sample.is_group || false,
+      max_students: sample.max_students || null,
+    });
+    setSelectedTutorIds(rows.map((row) => row.tutor_id));
+    setIsSubjectDialogOpen(true);
+  };
+
+  /** Detach one tutor from a grouped subject (deletes only that tutor's row). */
+  const handleRemoveTutorFromGroup = async (row: Subject) => {
+    if (!confirm(t('compSet.subjectRemoveTutorConfirm', { tutor: row.tutor_name || '' }))) return;
+    const { error } = await supabase.from('subjects').delete().eq('id', row.id);
+    if (error) {
+      alert(t('compSet.errorDeleting', { msg: error.message }));
+      return;
+    }
+    fetchSettings();
+  };
+
+  /** Delete a grouped subject for every member tutor. */
+  const handleDeleteSubjectGroup = async (rows: Subject[]) => {
+    if (rows.length === 0) return;
+    if (!confirm(t('compSet.confirmDelete'))) return;
+    const { error } = await supabase.from('subjects').delete().in('id', rows.map((row) => row.id));
+    if (error) {
+      alert(t('compSet.errorDeleting', { msg: error.message }));
+      return;
+    }
+    fetchSettings();
+  };
+
   const openEditSubjectDialog = (subject: Subject) => {
+    setEditingGroupRows(null);
     if (subject.isOrgTemplate) {
       setEditingSubject(subject);
       setNewSubject({
@@ -461,6 +526,73 @@ export default function CompanySettings() {
           return;
         }
       }
+      setIsSubjectDialogOpen(false);
+      fetchSettings();
+      setSavingSubject(false);
+      return;
+    }
+
+    // Grouped subject edit: propagate the update to every member row and apply
+    // the tutor diff (chips added → insert rows, removed → delete rows).
+    if (editingGroupRows && editingGroupRows.length > 0) {
+      if (selectedTutorIds.length === 0) {
+        alert(t('compSet.subjectEditNeedOneTutor'));
+        setSavingSubject(false);
+        return;
+      }
+      const memberIdSet = new Set(editingGroupRows.map((row) => row.id));
+      const memberTutorIds = new Set(editingGroupRows.map((row) => row.tutor_id));
+      const addedTutorIds = selectedTutorIds.filter((tid) => !memberTutorIds.has(tid));
+      const removedRows = editingGroupRows.filter((row) => !selectedTutorIds.includes(row.tutor_id));
+      const keptRows = editingGroupRows.filter((row) => selectedTutorIds.includes(row.tutor_id));
+
+      // Per-tutor duplicate check against subjects OUTSIDE this group.
+      for (const tid of [...new Set([...addedTutorIds, ...keptRows.map((row) => row.tutor_id)])]) {
+        const peers = subjects.filter(
+          (s) => !s.isOrgTemplate && s.tutor_id === tid && !memberIdSet.has(s.id),
+        );
+        if (tutorSubjectsContainLessonDuplicate(peers, subjectData)) {
+          alert(t('compSet.subjectDuplicateForTutor'));
+          setSavingSubject(false);
+          return;
+        }
+      }
+
+      if (keptRows.length > 0) {
+        const { error: updErr } = await supabase
+          .from('subjects')
+          .update(subjectData)
+          .in('id', keptRows.map((row) => row.id));
+        if (updErr) {
+          alert(t('compSet.errorPrefix', { msg: updErr.message }));
+          setSavingSubject(false);
+          return;
+        }
+      }
+      if (addedTutorIds.length > 0) {
+        const { error: insErr } = await supabase
+          .from('subjects')
+          .insert(addedTutorIds.map((tutorId) => ({ ...subjectData, tutor_id: tutorId })));
+        if (insErr) {
+          alert(t('compSet.errorPrefix', { msg: insErr.message }));
+          setSavingSubject(false);
+          return;
+        }
+      }
+      if (removedRows.length > 0) {
+        const { error: delErr } = await supabase
+          .from('subjects')
+          .delete()
+          .in('id', removedRows.map((row) => row.id));
+        if (delErr) {
+          alert(t('compSet.errorDeleting', { msg: delErr.message }));
+          setSavingSubject(false);
+          return;
+        }
+      }
+
+      if (orgId) await removeOrgSubjectTemplatesMatchingPreset(orgId, subjectData);
+      setEditingGroupRows(null);
       setIsSubjectDialogOpen(false);
       fetchSettings();
       setSavingSubject(false);
@@ -571,8 +703,20 @@ export default function CompanySettings() {
     setSaving(true);
     const anyLessonEdit = anyOrgLessonEdit(lessonEditScope);
 
+    // Merge onto the freshest features JSONB, not the (possibly cached) mount
+    // snapshot — flags toggled elsewhere (e.g. AdminPanel) must survive a save.
+    let baseFeatures: Record<string, unknown> = orgFeaturesSnapshot;
+    const { data: freshOrg } = await supabase
+      .from('organizations')
+      .select('features')
+      .eq('id', orgId)
+      .single();
+    if (freshOrg?.features && typeof freshOrg.features === 'object' && !Array.isArray(freshOrg.features)) {
+      baseFeatures = freshOrg.features as Record<string, unknown>;
+    }
+
     const mergedFeatures: Record<string, unknown> = {
-      ...orgFeaturesSnapshot,
+      ...baseFeatures,
       contact_tutor_student_email: contactTutorStudentEmail,
       contact_tutor_student_phone: contactTutorStudentPhone,
       contact_student_tutor_email: contactStudentTutorEmail,
@@ -683,6 +827,7 @@ export default function CompanySettings() {
       notifyTutorsOnAssign,
       enableManualStudentPayments,
       contactEmail,
+      publicName,
       orgLocale,
       orgTutors,
       subjects,
@@ -994,7 +1139,8 @@ export default function CompanySettings() {
               </div>
             ) : (
               <div className="divide-y divide-gray-50">
-                {subjects.map(subject => (
+                {/* Org templates (no tutor yet) — one row each, unchanged behavior. */}
+                {groupedSubjectCards.templates.map(subject => (
                   <div key={subject.id} className="flex items-center justify-between py-3 gap-3">
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                       <div className="w-4 h-4 rounded-full flex-shrink-0" style={{ backgroundColor: subject.color }} />
@@ -1030,6 +1176,67 @@ export default function CompanySettings() {
                     </div>
                   </div>
                 ))}
+                {/* Identical-condition subjects render once, with tutor chips. */}
+                {groupedSubjectCards.groups.map(rows => {
+                  const subject = rows[0];
+                  return (
+                    <div key={`grp-${subject.id}`} className="py-3 space-y-1.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <div className="w-4 h-4 rounded-full flex-shrink-0" style={{ backgroundColor: subject.color }} />
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-medium text-sm text-gray-900">{subject.name}</span>
+                              {subject.is_group && (
+                                <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200">
+                                  <Users className="w-3 h-3" /> {t('compSet.groupLesson', { count: String(subject.max_students) })}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3 mt-0.5 text-xs text-gray-500 flex-wrap">
+                              <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{subject.duration_minutes} min</span>
+                              <span className="flex items-center gap-1"><Euro className="w-3 h-3" />{subject.price}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <button
+                            onClick={() => openEditSubjectGroup(rows)}
+                            className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => void handleDeleteSubjectGroup(rows)}
+                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 pl-7">
+                        {rows.map(row => (
+                          <span
+                            key={row.id}
+                            className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-gray-50 text-gray-700 border border-gray-200"
+                          >
+                            {row.tutor_name || '—'}
+                            {rows.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => void handleRemoveTutorFromGroup(row)}
+                                className="text-gray-400 hover:text-red-600"
+                                aria-label={t('common.remove')}
+                              >
+                                ×
+                              </button>
+                            )}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1264,10 +1471,19 @@ export default function CompanySettings() {
         </div>
       </div>
       {/* Subject Dialog */}
-      <Dialog open={isSubjectDialogOpen} onOpenChange={setIsSubjectDialogOpen}>
+      <Dialog
+        open={isSubjectDialogOpen}
+        onOpenChange={(open) => {
+          setIsSubjectDialogOpen(open);
+          if (!open) setEditingGroupRows(null);
+        }}
+      >
         <DialogContent className="w-[95vw] sm:max-w-[480px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editingSubject ? t('compSet.editSubject') : t('compSet.addNewSubject')}</DialogTitle>
+            <DialogTitle>{editingSubject || editingGroupRows ? t('compSet.editSubject') : t('compSet.addNewSubject')}</DialogTitle>
+            {editingGroupRows && editingGroupRows.length > 0 && (
+              <p className="text-xs text-gray-500">{t('compSet.subjectGroupEditHint')}</p>
+            )}
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="space-y-2">
@@ -1436,7 +1652,7 @@ export default function CompanySettings() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsSubjectDialogOpen(false)}>{t('compSet.cancelBtn')}</Button>
             <Button onClick={handleSaveSubject} disabled={savingSubject || !newSubject.name.trim()}>
-              {savingSubject ? t('compSet.saving') : editingSubject ? t('compSet.saveBtn') : t('compSet.createBtn')}
+              {savingSubject ? t('compSet.saving') : (editingSubject || editingGroupRows) ? t('compSet.saveBtn') : t('compSet.createBtn')}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -67,6 +67,7 @@ import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
 import { buildSameSlotPeerIdMap, hasOverlapWithExclusions } from '@/lib/calendarSessionOverlap';
 import TimeSpinner, { DateTimeSpinner } from '@/components/TimeSpinner';
 import AvailabilityManager from '@/components/AvailabilityManager';
+import RecurrenceFields from '@/components/RecurrenceFields';
 import SessionFiles from '@/components/SessionFiles';
 import WhiteboardButton from '@/components/WhiteboardButton';
 import {
@@ -313,6 +314,8 @@ export default function CalendarPage() {
   const [price, setPrice] = useState<number>(25);
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
+  /** True once the tutor manually set a duration/end in the create modal — subject/start changes stop overwriting it. */
+  const [createDurationTouched, setCreateDurationTouched] = useState(false);
   const [saving, setSaving] = useState(false);
   const [noShowSavingId, setNoShowSavingId] = useState<string | null>(null);
   const [newSessionId, setNewSessionId] = useState<string | null>(null);
@@ -333,6 +336,8 @@ export default function CalendarPage() {
   const [isEditingSession, setIsEditingSession] = useState(false);
   const [editNewStartTime, setEditNewStartTime] = useState('');
   const [rescheduleReason, setRescheduleReason] = useState('');
+  /** "Kieno prašymu perkelta?" — required whenever the start time moves. */
+  const [rescheduleRequestedBy, setRescheduleRequestedBy] = useState<'' | 'student' | 'tutor'>('');
   const [editDurationMinutes, setEditDurationMinutes] = useState<number>(60);
   const [editTopic, setEditTopic] = useState('');
   const [editMeetingLink, setEditMeetingLink] = useState('');
@@ -1002,6 +1007,7 @@ export default function CalendarPage() {
       setSelectedSlot({ start, end });
       setStartTime(format(start, "yyyy-MM-dd'T'HH:mm"));
       setEndTime(format(end, "yyyy-MM-dd'T'HH:mm"));
+      setCreateDurationTouched(false);
       setSelectedStudentId('');
       setSelectedSubjectId('');
       setMeetingLink('');
@@ -1029,6 +1035,7 @@ export default function CalendarPage() {
     setSelectedSlot(pendingSlot);
     setStartTime(format(pendingSlot.start, "yyyy-MM-dd'T'HH:mm"));
     setEndTime(format(pendingSlot.end, "yyyy-MM-dd'T'HH:mm"));
+    setCreateDurationTouched(false);
     setSelectedStudentId('');
     setSelectedSubjectId('');
     setMeetingLink('');
@@ -1094,6 +1101,9 @@ export default function CalendarPage() {
       return;
     }
 
+    // Student-specific pricing legitimately re-defaults the duration.
+    setCreateDurationTouched(false);
+
     // Check if there's individual pricing for this student and subject
     const pricing = individualPricing.find(
       (p) => p.student_id === studentId && p.subject_id === selectedSubjectId,
@@ -1125,6 +1135,7 @@ export default function CalendarPage() {
   // When subject changes, autofill topic and price
   const handleSubjectChange = (subjectId: string) => {
     setSelectedSubjectId(subjectId);
+    setCreateDurationTouched(false);
     const subj = subjects.find((s) => s.id === subjectId);
 
     // Clear student selection when switching between group/individual
@@ -1273,10 +1284,18 @@ export default function CalendarPage() {
   }, [assignSubjectId, assignFilteredSubjects]);
 
   const handleStartTimeChange = (newVal: string) => {
+    const previousStart = new Date(startTime);
+    const previousEnd = new Date(endTime);
     setStartTime(newVal);
     const newStart = new Date(newVal);
     if (!isNaN(newStart.getTime())) {
-      const durationMs = getSubjectDuration() * 60 * 1000;
+      // A manually set duration survives start-time changes; otherwise the
+      // subject/pricing duration keeps driving the end time.
+      const manualDurationMs =
+        createDurationTouched && !isNaN(previousStart.getTime()) && !isNaN(previousEnd.getTime())
+          ? previousEnd.getTime() - previousStart.getTime()
+          : 0;
+      const durationMs = manualDurationMs > 0 ? manualDurationMs : getSubjectDuration() * 60 * 1000;
       const newEnd = new Date(newStart.getTime() + durationMs);
       setEndTime(format(newEnd, "yyyy-MM-dd'T'HH:mm"));
     }
@@ -1455,6 +1474,44 @@ export default function CalendarPage() {
       }
 
       if (sessions.length > 0) {
+        // Conflict check BEFORE inserting: every occurrence is compared against
+        // the tutor's existing lessons; on conflict the just-created templates
+        // are rolled back so nothing half-exists.
+        const uniqueSlots = new Map<string, { start: Date; end: Date }>();
+        for (const row of sessions) {
+          const key = `${row.start_time}_${row.end_time}`;
+          if (!uniqueSlots.has(key)) {
+            uniqueSlots.set(key, { start: new Date(row.start_time), end: new Date(row.end_time) });
+          }
+        }
+        const slotList = [...uniqueSlots.values()];
+        const earliest = new Date(Math.min(...slotList.map((s) => s.start.getTime())));
+        const latest = new Date(Math.max(...slotList.map((s) => s.end.getTime())));
+        const { data: existingBusy } = await supabase
+          .from('sessions')
+          .select('id, start_time, end_time')
+          .eq('tutor_id', user.id)
+          .neq('status', 'cancelled')
+          .lt('start_time', latest.toISOString())
+          .gt('end_time', earliest.toISOString());
+        const conflictSlots = slotList.filter((slot) =>
+          hasOverlapWithExclusions(slot.start, slot.end, existingBusy ?? [], new Set()),
+        );
+        if (conflictSlots.length > 0) {
+          const tplIds = recurringTemplates.map((tpl: any) => tpl.id).filter(Boolean);
+          if (tplIds.length > 0) {
+            await supabase.from('recurring_individual_sessions').delete().in('id', tplIds);
+          }
+          alert(t('cal.createOverlapDates', {
+            dates: conflictSlots
+              .slice(0, 5)
+              .map((slot) => format(slot.start, 'MM-dd HH:mm'))
+              .join(', '),
+          }));
+          setSaving(false);
+          return;
+        }
+
         const { data: createdSessions, error } = await supabase.from('sessions').insert(sessions).select();
         if (error) {
           console.error('Error creating recurring sessions:', error);
@@ -1786,6 +1843,22 @@ export default function CalendarPage() {
           show_comment_to_student: newShowCommentToStudent,
           available_spots: subject?.is_group ? subject.max_students : null,
         });
+      }
+
+      // Conflict check before inserting: warn instead of silently double-booking.
+      {
+        const { data: existingBusy } = await supabase
+          .from('sessions')
+          .select('id, start_time, end_time')
+          .eq('tutor_id', user.id)
+          .neq('status', 'cancelled')
+          .lt('start_time', endDate.toISOString())
+          .gt('end_time', startDate.toISOString());
+        if (hasOverlapWithExclusions(startDate, endDate, existingBusy ?? [], new Set())) {
+          alert(t('cal.duplicateTime'));
+          setSaving(false);
+          return;
+        }
       }
 
       const { data: created, error } = await supabase.from('sessions').insert(sessionsToInsert).select();
@@ -2765,6 +2838,11 @@ export default function CalendarPage() {
         setSaving(false);
         return;
       }
+      if (timeChanged && !rescheduleRequestedBy) {
+        alert(t('cal.rescheduleRequestedByRequired'));
+        setSaving(false);
+        return;
+      }
 
       /** Same calendar slot = same wall-clock start/end (group lesson: one row per student). */
       const groupPeerIdSet =
@@ -2896,7 +2974,10 @@ export default function CalendarPage() {
             if (!error && timeChanged && futureList.length > 0) {
               await supabase
                 .from('sessions')
-                .update({ reschedule_reason: rescheduleReason.trim() })
+                .update({
+                  reschedule_reason: rescheduleReason.trim(),
+                  reschedule_requested_by: rescheduleRequestedBy || null,
+                })
                 .in('id', futureList.map((s) => s.id))
                 .then(({ error: reschedErr }) => {
                   if (reschedErr) console.warn('[Calendar] reschedule tracking columns not available:', reschedErr.message);
@@ -2917,6 +2998,7 @@ export default function CalendarPage() {
             original_start_time: (selectedEvent as any).original_start_time ?? oldStart.toISOString(),
             rescheduled_at: new Date().toISOString(),
             reschedule_reason: rescheduleReason.trim(),
+            reschedule_requested_by: rescheduleRequestedBy || null,
           }).eq('id', selectedEvent.id)
             .then(({ error: reschedErr }) => {
               if (reschedErr) console.warn('[Calendar] reschedule tracking columns not available:', reschedErr.message);
@@ -4223,8 +4305,38 @@ export default function CalendarPage() {
               <Label>{t('cal.endTimeRequired')}</Label>
               <DateTimeSpinner
                 value={endTime}
-                onChange={setEndTime}
+                onChange={(value) => {
+                  setEndTime(value);
+                  setCreateDurationTouched(true);
+                }}
               />
+            </div>
+
+            {/* Duration (min) — the tutor can size the lesson directly */}
+            <div className="space-y-2">
+              <Label>{t('cal.durationLabel')}</Label>
+              <Input
+                type="number"
+                min={15}
+                max={240}
+                step={5}
+                value={(() => {
+                  const start = new Date(startTime);
+                  const end = new Date(endTime);
+                  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return '';
+                  const minutes = Math.round((end.getTime() - start.getTime()) / 60000);
+                  return minutes > 0 ? minutes : '';
+                })()}
+                onChange={(e) => {
+                  const minutes = Number(e.target.value);
+                  const start = new Date(startTime);
+                  if (!Number.isFinite(minutes) || minutes <= 0 || Number.isNaN(start.getTime())) return;
+                  setCreateDurationTouched(true);
+                  setEndTime(format(new Date(start.getTime() + minutes * 60000), "yyyy-MM-dd'T'HH:mm"));
+                }}
+                className="rounded-xl"
+              />
+              <p className="text-xs text-gray-500">{t('cal.durationHint')}</p>
             </div>
 
             {/* Topic */}
@@ -4303,119 +4415,18 @@ export default function CalendarPage() {
             </div>
 
             {/* Recurring toggle */}
-            <div className="border border-gray-100 rounded-xl p-4 space-y-3 bg-gray-50">
-              <button
-                type="button"
-                onClick={() => {
-                  const next = !isRecurring;
-                  setIsRecurring(next);
-                  setRecurringEndDate('');
-                  setRecurringFrequency('weekly');
-                  if (next && startTime) {
-                    setSelectedWeekdays([new Date(startTime).getDay()]);
-                  } else {
-                    setSelectedWeekdays([]);
-                  }
-                }}
-                className="flex items-center justify-between w-full"
-              >
-                <div>
-                  <p className="text-sm font-medium text-gray-900 text-left">{t('cal.recurringLesson')}</p>
-                  <p className="text-xs text-gray-500 text-left mt-0.5">{t('cal.recurringDesc')}</p>
-                </div>
-                <div className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 flex-shrink-0 ml-4 ${isRecurring ? 'bg-indigo-500' : 'bg-gray-300'}`}>
-                  <span className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${isRecurring ? 'translate-x-6' : 'translate-x-1'}`} />
-                </div>
-              </button>
-
-              {isRecurring && (
-                <div className="space-y-3 pt-1 border-t border-gray-200">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">{t('cal.recurringFrequencyLabel')}</Label>
-                    <select
-                      value={recurringFrequency}
-                      onChange={(e) => setRecurringFrequency(e.target.value as 'weekly' | 'biweekly' | 'monthly')}
-                      className="w-full rounded-xl text-sm border border-gray-300 px-3 py-2 bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    >
-                      <option value="weekly">{t('cal.freqWeekly')}</option>
-                      <option value="biweekly">{t('cal.freqBiweekly')}</option>
-                      <option value="monthly">{t('cal.freqMonthly')}</option>
-                    </select>
-                  </div>
-                  {recurringFrequency !== 'monthly' && (
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">{t('cal.weekdaysLabel')}</Label>
-                      <div className="flex gap-1.5 flex-wrap">
-                        {[1, 2, 3, 4, 5, 6, 0].map((day) => {
-                          const labels = [t('cal.wdSun'), t('cal.wdMon'), t('cal.wdTue'), t('cal.wdWed'), t('cal.wdThu'), t('cal.wdFri'), t('cal.wdSat')];
-                          const isSelected = selectedWeekdays.includes(day);
-                          return (
-                            <button
-                              key={day}
-                              type="button"
-                              onClick={() => {
-                                setSelectedWeekdays(prev =>
-                                  isSelected
-                                    ? prev.filter(d => d !== day)
-                                    : [...prev, day]
-                                );
-                              }}
-                              className={cn(
-                                'px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors border',
-                                isSelected
-                                  ? 'bg-indigo-500 text-white border-indigo-500'
-                                  : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300',
-                              )}
-                            >
-                              {labels[day]}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      {selectedWeekdays.length === 0 && (
-                        <p className="text-xs text-amber-600">{t('cal.selectAtLeastOneDay')}</p>
-                      )}
-                    </div>
-                  )}
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Kartotis iki (neprivaloma)</Label>
-                    <DateInput
-                      value={recurringEndDate}
-                      onChange={(e) => setRecurringEndDate(e.target.value)}
-                      min={startTime ? format(addWeeks(new Date(startTime), 1), 'yyyy-MM-dd') : undefined}
-                      className="rounded-xl text-sm"
-                    />
-                    {!recurringEndDate && (
-                      <p className="text-xs text-gray-500">
-                        {t('cal.recurringNoEndHint')}
-                      </p>
-                    )}
-                    {recurringEndDate && startTime && (() => {
-                      const startMs = new Date(startTime).getTime();
-                      const endMs = parseISO(recurringEndDate).getTime();
-                      const diffMs = endMs - startMs;
-                      let countPerDay: number;
-                      if (recurringFrequency === 'monthly') {
-                        const s = new Date(startTime);
-                        const e = parseISO(recurringEndDate);
-                        countPerDay = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth()) + 1;
-                      } else {
-                        const weekInterval = recurringFrequency === 'biweekly' ? 2 : 1;
-                        countPerDay = Math.floor(diffMs / (weekInterval * 7 * 24 * 60 * 60 * 1000)) + 1;
-                      }
-                      const daysCount = (recurringFrequency !== 'monthly' && selectedWeekdays.length > 0) ? selectedWeekdays.length : 1;
-                      const count = countPerDay * daysCount;
-                      return (
-                        <p className="text-xs text-indigo-600 font-medium">
-                          Bus sukurta ≈{count} pamok{count === 1 ? 'a' : 'os'}
-                          {daysCount > 1 && ` (${daysCount} d/sav × ≈${countPerDay})`}
-                        </p>
-                      );
-                    })()}
-                  </div>
-                </div>
-              )}
-            </div>
+            <RecurrenceFields
+              enabled={isRecurring}
+              onEnabledChange={setIsRecurring}
+              frequency={recurringFrequency}
+              onFrequencyChange={setRecurringFrequency}
+              weekdays={selectedWeekdays}
+              onWeekdaysChange={setSelectedWeekdays}
+              endDate={recurringEndDate}
+              onEndDateChange={setRecurringEndDate}
+              startTime={startTime}
+              showEstimate
+            />
           </div>
 
           {newSessionId ? (
@@ -4472,6 +4483,7 @@ export default function CalendarPage() {
                   setEditTutorComment(selectedEvent.tutor_comment || '');
                   setEditShowCommentToStudent(selectedEvent.show_comment_to_student || false);
                   setRescheduleReason('');
+                  setRescheduleRequestedBy('');
                   setIsEditingSession(true);
                 }} className="text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 h-8 px-2 flex-shrink-0">
                   <Edit2 className="w-3.5 h-3.5 mr-1" /> <span className="hidden sm:inline">{t('cal.editBtn')}</span>
@@ -4518,6 +4530,23 @@ export default function CalendarPage() {
                   {rescheduleReason.length > 0 && rescheduleReason.trim().length < 5 && (
                     <p className="text-xs text-red-500">{t('dash.minChars', { min: '5', current: String(rescheduleReason.trim().length) })}</p>
                   )}
+                  <Label>{t('cal.rescheduleRequestedByLabel')}</Label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setRescheduleRequestedBy('student')}
+                      className={`flex-1 text-xs py-1.5 px-3 rounded-lg border font-medium transition-colors ${rescheduleRequestedBy === 'student' ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}
+                    >
+                      {t('cal.requestedByStudent')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRescheduleRequestedBy('tutor')}
+                      className={`flex-1 text-xs py-1.5 px-3 rounded-lg border font-medium transition-colors ${rescheduleRequestedBy === 'tutor' ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}
+                    >
+                      {t('cal.requestedByTutor')}
+                    </button>
+                  </div>
                 </div>
               )}
               <label className="flex items-start gap-2 cursor-pointer">
@@ -5420,6 +5449,7 @@ export default function CalendarPage() {
                   setEditTutorComment(selectedEvent.tutor_comment || '');
                   setEditShowCommentToStudent(selectedEvent.show_comment_to_student || false);
                   setRescheduleReason('');
+                  setRescheduleRequestedBy('');
                   setIsEditingSession(true);
                 }
               }}

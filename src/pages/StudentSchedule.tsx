@@ -34,6 +34,7 @@ import { fetchStudentActiveLessonPackagesDeduped } from '@/lib/studentLessonPack
 import { rpcGetStudentProfilesDeduped } from '@/lib/preload';
 import { useUser } from '@/contexts/UserContext';
 import { tutorUsesManualStudentPayments, trimManualPaymentBankDetails } from '@/lib/subscription';
+import { useStudentPolicy } from '@/contexts/StudentPolicyContext';
 
 // BigCalendar Setup
 const locales = { lt: lt };
@@ -245,11 +246,25 @@ export default function StudentSchedule() {
     const [creditBalance, setCreditBalance] = useState(0);
     const [activePackages, setActivePackages] = useState<LessonPackageSummary[]>([]);
     const [tutorOrgIsSchool, setTutorOrgIsSchool] = useState(false);
-    /** Org feature `disable_student_reschedule_cancel`: students/parents cannot move or cancel lessons. */
-    const [studentActionsDisabled, setStudentActionsDisabled] = useState(false);
+    /** Org feature `disable_student_reschedule_cancel`: students/parents cannot move or cancel lessons.
+     * Seeded from the pre-mount StudentPolicyProvider (unresolved default in the
+     * parent-embed mode, where the page's own fetch keeps governing). */
+    const portalPolicy = useStudentPolicy();
+    const [studentActionsDisabled, setStudentActionsDisabled] = useState(portalPolicy.actionsDisabled);
     /** Org feature `disable_student_booking`: students/parents cannot book lessons themselves. */
-    const [studentBookingDisabled, setStudentBookingDisabled] = useState(false);
+    const [studentBookingDisabled, setStudentBookingDisabled] = useState(portalPolicy.bookingDisabled);
+    useEffect(() => {
+        if (!portalPolicy.resolved || isParentRoute) return;
+        if (portalPolicy.actionsDisabled) setStudentActionsDisabled(true);
+        if (portalPolicy.bookingDisabled) setStudentBookingDisabled(true);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [portalPolicy.resolved, portalPolicy.actionsDisabled, portalPolicy.bookingDisabled]);
     const [tutorOrgFeeProfile, setTutorOrgFeeProfile] = useState<OrgFeeProfile | null>(null);
+    /** Org/tutor Finance toggles — govern whether per-lesson payment UI shows at all. */
+    const [tutorPaymentFlags, setTutorPaymentFlags] = useState<{ enable_per_lesson: boolean; enable_monthly_billing: boolean }>({
+        enable_per_lesson: true,
+        enable_monthly_billing: false,
+    });
     const [tutorSoloManualPayments, setTutorSoloManualPayments] = useState(false);
     const [tutorPerlasEnabled, setTutorPerlasEnabled] = useState(false);
     const [perlasLoading, setPerlasLoading] = useState(false);
@@ -627,7 +642,7 @@ export default function StudentSchedule() {
         const studentGrade = parseStudentGrade(st.grade);
 
         const [tutorProfile, subs, individualPricing, availabilityRes, sessionsRes] = await Promise.all([
-            supabase.from('profiles').select('full_name, email, phone, cancellation_hours, cancellation_fee_percent, min_booking_hours, break_between_lessons, payment_timing, payment_deadline_hours, organization_id, has_active_license, personal_meeting_link, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, perlas_finance_enabled').eq('id', st.tutor_id).single(),
+            supabase.from('profiles').select('full_name, email, phone, cancellation_hours, cancellation_fee_percent, min_booking_hours, break_between_lessons, payment_timing, payment_deadline_hours, organization_id, has_active_license, personal_meeting_link, subscription_plan, manual_subscription_exempt, enable_manual_student_payments, perlas_finance_enabled, enable_per_lesson, enable_monthly_billing').eq('id', st.tutor_id).single(),
             supabase.from('subjects').select('*').eq('tutor_id', st.tutor_id).order('name'),
             supabase
                 .from('student_individual_pricing')
@@ -692,14 +707,20 @@ export default function StudentSchedule() {
                 String((st as { tutor_organization_entity_type?: string }).tutor_organization_entity_type ?? '')
                     .trim() === 'school';
             let resolvedFeeProfile: OrgFeeProfile | null = null;
-            const orgId =
-                tutorProfile.data && (tutorProfile.data as { organization_id?: string | null }).organization_id;
+            const tutorProfileRow = tutorProfile.data as {
+                organization_id?: string | null;
+                enable_per_lesson?: boolean | null;
+                enable_monthly_billing?: boolean | null;
+            } | null;
+            const orgId = tutorProfileRow?.organization_id;
             let actionsDisabledResolved = false;
             let bookingDisabledResolved = false;
+            let enablePerLessonResolved = tutorProfileRow?.enable_per_lesson ?? true;
+            let enableMonthlyBillingResolved = !!tutorProfileRow?.enable_monthly_billing;
             if (orgId) {
                 const { data: oe } = await supabase
                     .from('organizations')
-                    .select('entity_type, slug, features')
+                    .select('entity_type, slug, features, enable_per_lesson, enable_monthly_billing')
                     .eq('id', orgId)
                     .maybeSingle();
                 tutorOrgSchoolResolved = oe?.entity_type === 'school';
@@ -707,11 +728,19 @@ export default function StudentSchedule() {
                 const orgFeatures = (oe as { features?: Record<string, unknown> | null })?.features;
                 actionsDisabledResolved = orgFeatures?.disable_student_reschedule_cancel === true;
                 bookingDisabledResolved = orgFeatures?.disable_student_booking === true;
+                if (oe) {
+                    enablePerLessonResolved = (oe as { enable_per_lesson?: boolean | null }).enable_per_lesson ?? enablePerLessonResolved;
+                    enableMonthlyBillingResolved = !!(oe as { enable_monthly_billing?: boolean | null }).enable_monthly_billing;
+                }
             }
             setTutorOrgIsSchool(tutorOrgSchoolResolved);
             setTutorOrgFeeProfile(resolvedFeeProfile);
             setStudentActionsDisabled(actionsDisabledResolved);
             setStudentBookingDisabled(bookingDisabledResolved);
+            setTutorPaymentFlags({
+                enable_per_lesson: enablePerLessonResolved,
+                enable_monthly_billing: enableMonthlyBillingResolved,
+            });
         }
 
         // Filter subjects by student grade
@@ -1312,6 +1341,7 @@ export default function StudentSchedule() {
             const requiresImmediatePayment = shouldRequestPerLessonCheckout(
                 studentPaymentModel,
                 studentPaymentOverrideActive,
+                tutorPaymentFlags,
             );
             setPendingPaymentSession({
                 id: sessionData.id,
@@ -1532,7 +1562,7 @@ export default function StudentSchedule() {
     };
 
     const handleGoToStripe = async (sessionId: string) => {
-        if (!shouldRequestPerLessonCheckout(studentPaymentModel, studentPaymentOverrideActive)) {
+        if (!shouldRequestPerLessonCheckout(studentPaymentModel, studentPaymentOverrideActive, tutorPaymentFlags)) {
             alert(t('stuSched.manualMonthlyAlert'));
             return;
         }
@@ -1714,6 +1744,7 @@ export default function StudentSchedule() {
     const showPerLessonPayment = shouldShowPerLessonPaymentUi(
         studentPaymentModel,
         studentPaymentOverrideActive,
+        tutorPaymentFlags,
     );
 
     return (

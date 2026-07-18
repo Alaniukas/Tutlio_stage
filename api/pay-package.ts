@@ -54,6 +54,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return res.status(200).send(errorPage('Paketas jau apmokėtas ✓', 'Šis paketas jau buvo apmokėtas. Jokių papildomų veiksmų nereikia.'));
         }
 
+        // Annulled by the org admin — old email links must not collect payment.
+        if (pkg.payment_status === 'cancelled') {
+            return res.status(200).send(errorPage('Paketas atšauktas', 'Šis paketas buvo atšauktas. Jei tai netikėta, susisiekite su administracija.'));
+        }
+
         const tutor = pkg.profiles as any;
         const student = pkg.students as any;
 

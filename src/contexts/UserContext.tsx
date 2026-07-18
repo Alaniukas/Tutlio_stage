@@ -4,6 +4,7 @@ import { dedupeAuthGetUser } from '@/lib/preload';
 import { User } from '@supabase/supabase-js';
 import { buildPlatformPath } from '@/lib/platform';
 import { clearOrgBrandingCache } from '@/contexts/OrgBrandingContext';
+import { clearStudentPolicyCache } from '@/contexts/StudentPolicyContext';
 import ProfileLocaleSync from '@/components/ProfileLocaleSync';
 
 interface UserProfile {
@@ -243,6 +244,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
           setProfile(null);
           sessionStorage.removeItem('tutlio_logout_intent');
           clearOrgBrandingCache();
+          clearStudentPolicyCache();
 
           // Clear any parent-profile caches so a future user does not
           // accidentally inherit a stale "is-parent" verdict.

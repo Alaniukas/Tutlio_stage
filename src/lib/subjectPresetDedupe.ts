@@ -25,6 +25,27 @@ export function tutorSubjectsContainLessonDuplicate<
   return false;
 }
 
+/**
+ * Full-identity key for grouping org subject rows across tutors: identical
+ * conditions (name, duration, price, colour, grades, group size) render as
+ * ONE subject with tutor chips instead of a row per tutor.
+ */
+export function subjectGroupKey(p: {
+  name: string;
+  duration_minutes: number;
+  price: unknown;
+  color?: string | null;
+  grade_min?: number | null;
+  grade_max?: number | null;
+  is_group?: boolean | null;
+  max_students?: number | null;
+}): string {
+  const color = (p.color || '#6366f1').toLowerCase();
+  const grades = `${p.grade_min ?? ''}-${p.grade_max ?? ''}`;
+  const group = p.is_group ? `g${Number(p.max_students) || 0}` : 'i';
+  return `${String(p.name).trim().toLowerCase()}|${Number(p.duration_minutes)}|${Number(p.price)}|${color}|${grades}|${group}`;
+}
+
 /** Canonical key for a subject (invitations, UI, DB) — colour always lowercase, numbers normalised. */
 
 export function subjectPresetKey(p: {

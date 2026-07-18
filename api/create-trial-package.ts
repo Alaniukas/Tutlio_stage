@@ -37,7 +37,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return json(res, 401, { error: 'Unauthorized' });
   }
 
-  const { studentId, tutorId, topic, durationMinutes, priceEur, startIso, endIso } = req.body as {
+  const { studentId, tutorId, topic, durationMinutes, priceEur, startIso, endIso, sessionId } = req.body as {
     studentId?: string;
     tutorId?: string;
     topic?: string;
@@ -46,6 +46,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     /** Reservation flow: when provided (and the org has trial_reservation_flow on), the slot is held pending payment. */
     startIso?: string;
     endIso?: string;
+    /** Already-created trial lesson to attach the payment package to (creation-time payment email flow). */
+    sessionId?: string;
   };
   if (!studentId || !tutorId) {
     return json(res, 400, { error: 'Missing studentId or tutorId' });
@@ -113,8 +115,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return json(res, 404, { error: 'Mokinys nerastas', details: studentErr?.message });
     }
 
-    if (student.trial_offer_disabled) {
+    // trial_offer_disabled only mutes the student-card OFFER; an explicit
+    // admin-created trial lesson (sessionId flow) still gets its payment email.
+    if (student.trial_offer_disabled && !sessionId) {
       return json(res, 400, { error: 'Trial lesson is disabled for this student' });
+    }
+
+    let linkedSession: { id: string; paid: boolean | null } | null = null;
+    if (sessionId) {
+      const { data: sessionRow, error: sessionErr } = await supabase
+        .from('sessions')
+        .select('id, tutor_id, student_id, status, paid')
+        .eq('id', sessionId)
+        .maybeSingle();
+      if (sessionErr || !sessionRow) {
+        return json(res, 404, { error: 'Pamoka nerasta', details: sessionErr?.message });
+      }
+      if (sessionRow.tutor_id !== tutorId || sessionRow.student_id !== studentId || sessionRow.status !== 'active') {
+        return json(res, 400, { error: 'Pamoka neatitinka mokinio ar korepetitoriaus' });
+      }
+      linkedSession = { id: sessionRow.id, paid: sessionRow.paid };
     }
 
     const { data: tutor, error: tutorErr } = await supabase
@@ -233,10 +253,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return json(res, 500, { error: 'Nepavyko sukurti bandomosios pamokos paketo punkto', details: trialItemErr.message });
     }
 
+    if (linkedSession) {
+      // Creation-time flow: the trial lesson already exists — attach it to the
+      // package so the Stripe webhook marks it paid on payment, and move the
+      // trial credit available -> reserved to mirror the scheduled slot.
+      const { error: linkErr } = await supabase
+        .from('sessions')
+        .update({ lesson_package_id: lessonPackage.id, price: trialPriceEur })
+        .eq('id', linkedSession.id);
+      if (linkErr) {
+        await supabase.from('lesson_packages').delete().eq('id', lessonPackage.id);
+        return json(res, 500, { error: 'Nepavyko susieti pamokos su paketu', details: linkErr.message });
+      }
+      await supabase.from('lesson_packages').update({ available_lessons: 0, reserved_lessons: 1 }).eq('id', lessonPackage.id);
+      await supabase.from('lesson_package_items').update({ available_lessons: 0, reserved_lessons: 1 }).eq('package_id', lessonPackage.id);
+    }
+
     // Reservation flow: when enabled and a slot is provided, hold the slot now
     // (status='active' so it blocks the calendar; payment_status='reserved' until
     // paid). An unpaid hold auto-releases after the org's deadline via cron.
-    if (isTrialReservationFlowEnabled(features) && startIso && endIso) {
+    if (!linkedSession && isTrialReservationFlowEnabled(features) && startIso && endIso) {
       const start = new Date(startIso);
       const end = new Date(endIso);
       if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end.getTime() <= start.getTime()) {

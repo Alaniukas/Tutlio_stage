@@ -224,7 +224,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return json(res, 400, { error: itemsErr });
         }
         const { totalLessons, totalPriceEur: totalPrice } = aggregatePackageTotals(resolvedItems);
-        if ((body.monthlyPlan || body.recurringPlanId) && resolvedItems.length !== 1) {
+        // Auto (schedule-derived) plans are multi-subject by design.
+        let recurringPlanIsAuto = false;
+        if (body.recurringPlanId) {
+            const { data: planMeta } = await supabase
+                .from('recurring_monthly_package_plans')
+                .select('auto_from_schedule')
+                .eq('id', body.recurringPlanId)
+                .maybeSingle();
+            recurringPlanIsAuto = (planMeta as { auto_from_schedule?: boolean } | null)?.auto_from_schedule === true;
+        }
+        if ((body.monthlyPlan || (body.recurringPlanId && !recurringPlanIsAuto)) && resolvedItems.length !== 1) {
             return json(res, 400, { error: 'A recurring monthly package must contain exactly one subject.' });
         }
         const primarySubjectId = resolvedItems.length === 1 ? resolvedItems[0]!.subjectId : null;

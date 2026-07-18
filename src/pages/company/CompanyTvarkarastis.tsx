@@ -8,7 +8,7 @@
  * - org_admin_calendar_full_control: Full control (create/edit/delete availability + sessions)
  */
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { Calendar as BigCalendar, dateFnsLocalizer, Views } from 'react-big-calendar';
 import type { View } from 'react-big-calendar';
 import {
@@ -92,6 +92,7 @@ import {
 import StatusBadge from '@/components/StatusBadge';
 import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
 import FindTutorModal from '@/components/FindTutorModal';
+import RecurrenceFields from '@/components/RecurrenceFields';
 import { buildNoShowSessionPatch, noShowWhenLabelLt, type NoShowWhen } from '@/lib/noShowWhen';
 import {
   contractedLessonsPerWeek,
@@ -299,6 +300,7 @@ export default function CompanyTvarkarastis() {
   // Feature flags
   const canView = hasFeature('org_admin_calendar_view') || hasFeature('org_admin_calendar_full_control');
   const canFullControl = hasFeature('org_admin_calendar_full_control');
+  const hideAdminPrices = hasFeature('hide_admin_lesson_prices');
 
   const assertTutorLicensed = async (tutorId: string) => {
     const { data: tutorProf } = await supabase
@@ -381,6 +383,8 @@ export default function CompanyTvarkarastis() {
   const [leaveFreeTimeOnCancel, setLeaveFreeTimeOnCancel] = useState(false);
   const [leaveFreeTimeOnReschedule, setLeaveFreeTimeOnReschedule] = useState(false);
   const [rescheduleReason, setRescheduleReason] = useState('');
+  /** "Kieno prašymu perkelta?" — required whenever the start time moves. */
+  const [rescheduleRequestedBy, setRescheduleRequestedBy] = useState<'' | 'student' | 'tutor'>('');
   const [isDeleteRecurringDialogOpen, setIsDeleteRecurringDialogOpen] = useState(false);
 
   // Availability edit state
@@ -439,6 +443,10 @@ export default function CompanyTvarkarastis() {
   const [createRecurringWeekdays, setCreateRecurringWeekdays] = useState<number[]>([]);
   const [createIsPaid, setCreateIsPaid] = useState(false);
   const [createIsTrial, setCreateIsTrial] = useState(false);
+  /** Set when the create modal was opened from an availability block (keeps the marked time). */
+  const [createFromAvailabilityBlock, setCreateFromAvailabilityBlock] = useState<{ availabilityId: string; tutorId: string } | null>(null);
+  /** One click can fire both onSelectSlot and onSelectEvent for the same block. */
+  const availabilityClickGuardRef = useRef<{ id: string; at: number } | null>(null);
   /** Org trial-lesson defaults (topic/duration/price) for the trial toggle and auto-trial. */
   const [trialDefaults, setTrialDefaults] = useState<{ topic: string; durationMinutes: number; priceEur: number }>({
     topic: '',
@@ -759,6 +767,12 @@ export default function CompanyTvarkarastis() {
     return blocks;
   }, [filteredAvailability, currentDate, showOnlySessions]);
 
+  /** Trial (bandomoji) lessons get a distinct highlight in the calendar. */
+  const trialSubjectIds = useMemo(
+    () => new Set(subjects.filter((s: any) => s.is_trial === true).map((s: any) => s.id as string)),
+    [subjects],
+  );
+
   // Calendar events
   const calendarEvents = useMemo(() => {
     const events: any[] = [];
@@ -775,7 +789,7 @@ export default function CompanyTvarkarastis() {
     if (!showOnlyAvailability) {
       events.push(...filteredSessions.map(session => ({
         id: session.id,
-        title: `${session.student?.full_name || 'Mokinys'} - ${session.tutor?.full_name || 'Tutorius'}`,
+        title: `${session.subject_id && trialSubjectIds.has(session.subject_id) ? '★ ' : ''}${session.student?.full_name || 'Mokinys'} - ${session.tutor?.full_name || 'Tutorius'}`,
         start: session.start_time,
         end: session.end_time,
         resource: {
@@ -786,7 +800,7 @@ export default function CompanyTvarkarastis() {
     }
 
     return events;
-  }, [filteredSessions, availabilityBlocks, showOnlySessions, showOnlyAvailability]);
+  }, [filteredSessions, availabilityBlocks, showOnlySessions, showOnlyAvailability, trialSubjectIds]);
 
   const filteredOrgTutorsForList = useMemo(() => {
     const q = tutorSearchQuery.trim().toLowerCase();
@@ -1125,15 +1139,18 @@ export default function CompanyTvarkarastis() {
       .sort((a, b) => a.start.getTime() - b.start.getTime());
   }, [sessions, createTutorId, createModalDayWindows.datePart]);
 
-  const createSelectionOverlapsBusy = useMemo(() => {
-    if (!createStartTime || !createEndTime) return false;
+  /** Busy sessions that overlap the currently selected time range */
+  const createConflictingSessions = useMemo(() => {
+    if (!createStartTime || !createEndTime) return [];
     const selStart = new Date(createStartTime);
     const selEnd = new Date(createEndTime);
-    if (Number.isNaN(selStart.getTime()) || Number.isNaN(selEnd.getTime())) return false;
-    return createModalDayBusySessions.some(
+    if (Number.isNaN(selStart.getTime()) || Number.isNaN(selEnd.getTime())) return [];
+    return createModalDayBusySessions.filter(
       b => selStart.getTime() < b.end.getTime() && selEnd.getTime() > b.start.getTime(),
     );
   }, [createStartTime, createEndTime, createModalDayBusySessions]);
+
+  const createSelectionOverlapsBusy = createConflictingSessions.length > 0;
 
   const applyCreateSubjectDefaults = (subjectId: string) => {
     const subj = subjects.find(s => s.id === subjectId);
@@ -1297,11 +1314,17 @@ export default function CompanyTvarkarastis() {
     const isMovedLesson =
       hasFeature('monthly_packages') && !!session.original_start_time && !!session.lesson_package_id;
 
+    // Trial highlight: solid amber outline + tint (dashed moved-style wins on border).
+    const isTrialLesson = !!session.subject_id && trialSubjectIds.has(session.subject_id);
+
     return {
       style: {
         backgroundColor: bgColor,
-        borderColor: isMovedLesson ? '#f59e0b' : bgColor,
+        borderColor: isMovedLesson || isTrialLesson ? '#f59e0b' : bgColor,
         color: '#fff',
+        ...(isTrialLesson && !isMovedLesson
+          ? { border: '2px solid #f59e0b', boxShadow: 'inset 0 0 0 9999px rgba(245, 158, 11, 0.18)' }
+          : {}),
         ...(isMovedLesson
           ? { border: '2px dashed #f59e0b', boxShadow: 'inset 0 0 0 9999px rgba(245, 158, 11, 0.18)' }
           : {}),
@@ -1312,8 +1335,10 @@ export default function CompanyTvarkarastis() {
   const handleSelectSlot = (slotInfo: { start: Date; end: Date }) => {
     if (!canView) return;
 
-    // If user clicked an availability block and calendar triggers onSelectSlot too,
-    // prefer opening availability edit (org_admin full control) instead of "create session".
+    // Marking a range that exactly matches an availability block used to divert
+    // to the availability editor and lose the marked time. Now the create-lesson
+    // modal opens prefilled with that time (+ the block's tutor); availability
+    // editing stays one click away via the link inside the modal.
     if (canFullControl && !showOnlySessions) {
       const match = availabilityBlocks.find((b: any) => (
         b.start?.getTime?.() === slotInfo.start.getTime() &&
@@ -1322,13 +1347,14 @@ export default function CompanyTvarkarastis() {
       ));
 
       if (match) {
-        const fakeEvent = {
-          resource: { type: 'availability' },
-          availabilityId: match.availabilityId,
-          tutorId: match.tutorId,
-        };
-        // Reuse the same handler used by onSelectEvent
-        handleSelectEvent(fakeEvent);
+        availabilityClickGuardRef.current = { id: match.availabilityId, at: Date.now() };
+        resetCreateForm();
+        setSelectedSlot(slotInfo);
+        setCreateTutorId(match.tutorId || '');
+        setCreateFromAvailabilityBlock({ availabilityId: match.availabilityId, tutorId: match.tutorId || '' });
+        setCreateStartTime(format(slotInfo.start, "yyyy-MM-dd'T'HH:mm"));
+        setCreateEndTime(format(slotInfo.end, "yyyy-MM-dd'T'HH:mm"));
+        setIsCreateSessionOpen(true);
         return;
       }
     }
@@ -1346,6 +1372,11 @@ export default function CompanyTvarkarastis() {
   const handleSelectEvent = (event: any) => {
     if (event.resource?.type === 'availability') {
       if (!canFullControl) return;
+      // One physical click can fire both onSelectSlot (→ prefilled create
+      // modal) and onSelectEvent for the same block — don't stack the editor
+      // on top of the just-opened create modal.
+      const guard = availabilityClickGuardRef.current;
+      if (guard && guard.id === event.availabilityId && Date.now() - guard.at < 500) return;
       const avail = availability.find(a => a.id === event.availabilityId);
       if (avail) {
         setEditingAvailability(avail);
@@ -1435,6 +1466,9 @@ export default function CompanyTvarkarastis() {
       if (startChangedForReason && rescheduleReason.trim().length < 5) {
         throw new Error(t('cal.rescheduleReasonRequired'));
       }
+      if (startChangedForReason && !rescheduleRequestedBy) {
+        throw new Error(t('cal.rescheduleRequestedByRequired'));
+      }
 
       // Monthly packages (req 6): a package lesson can only be moved within the
       // same calendar month (anchored on its original start). One-off / trial
@@ -1478,7 +1512,10 @@ export default function CompanyTvarkarastis() {
         if (startChangedForReason) {
           await supabase
             .from('sessions')
-            .update({ reschedule_reason: rescheduleReason.trim() })
+            .update({
+              reschedule_reason: rescheduleReason.trim(),
+              reschedule_requested_by: rescheduleRequestedBy || null,
+            })
             .in('id', data.map((row: { id: string }) => row.id))
             .then(({ error: reschedErr }) => {
               if (reschedErr) console.warn('[OrgSchedule] reschedule tracking columns not available:', reschedErr.message);
@@ -1500,7 +1537,12 @@ export default function CompanyTvarkarastis() {
           .update({
             original_start_time: (selectedEvent as any).original_start_time ?? oldStartForMove.toISOString(),
             rescheduled_at: new Date().toISOString(),
-            ...(startChangedForReason ? { reschedule_reason: rescheduleReason.trim() } : {}),
+            ...(startChangedForReason
+              ? {
+                  reschedule_reason: rescheduleReason.trim(),
+                  reschedule_requested_by: rescheduleRequestedBy || null,
+                }
+              : {}),
           })
           .eq('id', selectedEvent.id)
           .then(({ error: reschedErr }) => {
@@ -2056,7 +2098,7 @@ export default function CompanyTvarkarastis() {
         ? orgSubjectTemplates.find(t => t.name.toLowerCase() === (selectedSubj.name || '').toLowerCase())
         : undefined;
 
-      await runOrgAdminCreateSession({
+      const createResult = await runOrgAdminCreateSession({
         supabase,
         createTutorId,
         createSubjectId,
@@ -2081,6 +2123,46 @@ export default function CompanyTvarkarastis() {
         orgSubjectTemplateId: matchedTemplate?.id,
         dynamicPricingRules,
       });
+
+      // Trial payment email on creation: attach a 1-lesson package to the new
+      // trial lesson and email the payer a one-time pay link.
+      if (
+        createIsTrial &&
+        !createIsPaid &&
+        createPrice > 0 &&
+        hasFeature('trial_creation_payment_email') &&
+        createResult.createdSessionIds.length > 0
+      ) {
+        const trialDurationMin = (() => {
+          const start = new Date(createStartTime);
+          const end = new Date(createEndTime);
+          if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return trialDefaults.durationMinutes;
+          return Math.max(15, Math.round((end.getTime() - start.getTime()) / 60000));
+        })();
+        try {
+          const resp = await fetch('/api/create-trial-package', {
+            method: 'POST',
+            headers: await authHeaders(),
+            body: JSON.stringify({
+              studentId: createStudentId,
+              tutorId: createTutorId,
+              sessionId: createResult.createdSessionIds[0],
+              topic: createTopic || trialDefaults.topic || undefined,
+              durationMinutes: trialDurationMin,
+              priceEur: createPrice,
+            }),
+          });
+          if (!resp.ok) {
+            const txt = await resp.text().catch(() => '');
+            console.error('[CompanyTvarkarastis] trial payment email failed:', resp.status, txt);
+            alert(t('compSch.trialPaymentEmailFailed'));
+          }
+        } catch (trialErr) {
+          console.error('[CompanyTvarkarastis] trial payment email failed:', trialErr);
+          alert(t('compSch.trialPaymentEmailFailed'));
+        }
+      }
+
       setIsCreateSessionOpen(false);
       resetCreateForm();
       fetchData();
@@ -2112,6 +2194,7 @@ export default function CompanyTvarkarastis() {
     setCreateTutorComment('');
     setCreateShowCommentToStudent(false);
     setCreateSelectedFreeSlot('');
+    setCreateFromAvailabilityBlock(null);
   };
 
   const toggleTutorFilter = (tutorId: string) => {
@@ -2475,6 +2558,10 @@ export default function CompanyTvarkarastis() {
             <div className="w-4 h-4 rounded" style={{ backgroundColor: '#ef4444', opacity: 0.5 }}></div>
             <span>{t('compSch.cancelledLesson')}</span>
           </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#3b82f6', border: '2px solid #f59e0b' }}></div>
+            <span>{t('compSch.trialLegend')}</span>
+          </div>
         </div>
       </div>
 
@@ -2493,6 +2580,25 @@ export default function CompanyTvarkarastis() {
               {t('compSch.createNewLesson')}
             </DialogTitle>
             <DialogDescription className="text-center">{t('compSch.fillInfoAdmin')}</DialogDescription>
+            {createFromAvailabilityBlock && canFullControl && (
+              <button
+                type="button"
+                className="mx-auto text-xs text-indigo-600 hover:text-indigo-800 underline underline-offset-2"
+                onClick={() => {
+                  const block = createFromAvailabilityBlock;
+                  setIsCreateSessionOpen(false);
+                  resetCreateForm();
+                  availabilityClickGuardRef.current = null;
+                  handleSelectEvent({
+                    resource: { type: 'availability' },
+                    availabilityId: block?.availabilityId,
+                    tutorId: block?.tutorId,
+                  });
+                }}
+              >
+                {t('compSch.editThisFreeTime')}
+              </button>
+            )}
           </DialogHeader>
 
           {(() => {
@@ -2535,13 +2641,10 @@ export default function CompanyTvarkarastis() {
                         placeholder={t('common.search')}
                         className="h-9 rounded-xl"
                       />
-                      {!createTutorSearch && orgTutors.length > 5 && (
-                        <p className="mt-1 text-[11px] text-gray-500">{t('common.searchToSeeMore')}</p>
-                      )}
                     </div>
                     {(createTutorSearch
                       ? orgTutors.filter((tu) => (tu.full_name || '').toLowerCase().includes(createTutorSearch.trim().toLowerCase()))
-                      : orgTutors.slice(0, 5)
+                      : orgTutors
                     ).map(tutor => {
                       const licBlocked = isTutorLicenseBlockedForOrgBooking(tutor.id);
                       return (
@@ -2584,13 +2687,10 @@ export default function CompanyTvarkarastis() {
                           placeholder={t('common.search')}
                           className="h-9 rounded-xl"
                         />
-                        {!createSubjectSearch && subjects.length > 5 && (
-                          <p className="mt-1 text-[11px] text-gray-500">{t('common.searchToSeeMore')}</p>
-                        )}
                       </div>
                       {(createSubjectSearch
                         ? subjects.filter((s) => (s.name || '').toLowerCase().includes(createSubjectSearch.trim().toLowerCase()))
-                        : subjects.slice(0, 5)
+                        : subjects
                       )
                         .filter(s => !createTutorId || s.tutor_id === createTutorId)
                         .map(subj => (
@@ -2603,7 +2703,7 @@ export default function CompanyTvarkarastis() {
                                   {t('compSch.groupMax', { max: String(subj.max_students) })}
                                 </span>
                               )}
-                              · {subj.duration_minutes} min · {fmt(subj.price)}
+                              · {subj.duration_minutes} min{!hideAdminPrices && <> · {fmt(subj.price)}</>}
                             </div>
                           </SelectItem>
                         ))}
@@ -2667,13 +2767,10 @@ export default function CompanyTvarkarastis() {
                           placeholder={t('common.search')}
                           className="h-9 rounded-xl"
                         />
-                        {!createStudentSearch && list.length > 5 && (
-                          <p className="mt-1 text-[11px] text-gray-500">{t('common.searchToSeeMore')}</p>
-                        )}
                       </div>
                       {(createStudentSearch
                         ? list.filter((s) => (s.full_name || '').toLowerCase().includes(createStudentSearch.trim().toLowerCase()))
-                        : list.slice(0, 5)
+                        : list
                       ).map(student => (
                         <SelectItem key={student.id} value={student.id}>{student.full_name}</SelectItem>
                       ))}
@@ -2721,7 +2818,31 @@ export default function CompanyTvarkarastis() {
             </div>
 
             {createSelectionOverlapsBusy && (
-              <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-900" dangerouslySetInnerHTML={{ __html: t('compSch.overlapWarning') }} />
+              <div className="rounded-xl border border-red-200 bg-red-50 p-3 sm:p-4">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-red-900">{t('compSch.overlapWarning')}</p>
+                    <p className="text-xs text-red-800/80 mt-0.5">{t('compSch.overlapHint')}</p>
+                    <ul className="mt-2.5 space-y-1.5">
+                      {createConflictingSessions.map(b => (
+                        <li
+                          key={b.id}
+                          className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-lg border border-red-200/80 bg-white px-2.5 py-1.5 text-xs"
+                        >
+                          <span className="font-semibold tabular-nums text-red-900">
+                            {format(b.start, 'HH:mm')}–{format(b.end, 'HH:mm')}
+                          </span>
+                          <span className="min-w-0 truncate text-red-900/75">
+                            {b.studentName}
+                            {b.topic ? ` · ${b.topic}` : ''}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
             )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
@@ -2735,12 +2856,15 @@ export default function CompanyTvarkarastis() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 items-stretch">
-              <div className="space-y-2">
-                <Label>{t('compSch.price')}</Label>
-                <Input type="number" value={createPrice} onChange={(e) => setCreatePrice(Number(e.target.value))} className="rounded-xl" />
-                {createIsTrial && <p className="text-xs text-amber-700">{t('compSch.trialPriceNote')}</p>}
-              </div>
+            <div className={cn('grid grid-cols-1 gap-3 sm:gap-4 items-stretch', !hideAdminPrices && 'sm:grid-cols-2')}>
+              {/* hide_admin_lesson_prices: the price stays auto-resolved (dynamic pricing) but is not shown. */}
+              {!hideAdminPrices && (
+                <div className="space-y-2">
+                  <Label>{t('compSch.price')}</Label>
+                  <Input type="number" value={createPrice} onChange={(e) => setCreatePrice(Number(e.target.value))} className="rounded-xl" />
+                  {createIsTrial && <p className="text-xs text-amber-700">{t('compSch.trialPriceNote')}</p>}
+                </div>
+              )}
               <div className="border border-green-100 rounded-xl p-3 sm:p-4 bg-green-50/50 flex flex-col justify-center min-h-[4.5rem]">
                 <button type="button" onClick={() => setCreateIsPaid(!createIsPaid)} className="flex items-center justify-between gap-3 w-full text-left">
                   <div>
@@ -2807,114 +2931,17 @@ export default function CompanyTvarkarastis() {
             </div>
 
             {!createIsTrial && (
-            <div className="border border-gray-100 rounded-xl p-3 sm:p-4 space-y-3 bg-gray-50">
-              <button
-                type="button"
-                onClick={() => {
-                  const next = !createIsRecurring;
-                  setCreateIsRecurring(next);
-                  setCreateRecurringEndDate('');
-                  setCreateRecurringFrequency('weekly');
-                  if (next && createStartTime) {
-                    try {
-                      const d = new Date(createStartTime);
-                      if (!Number.isNaN(d.getTime())) setCreateRecurringWeekdays([d.getDay()]);
-                      else setCreateRecurringWeekdays([]);
-                    } catch {
-                      setCreateRecurringWeekdays([]);
-                    }
-                  } else {
-                    setCreateRecurringWeekdays([]);
-                  }
-                }}
-                className="flex items-center justify-between w-full"
-              >
-                <div className="text-left">
-                  <p className="text-sm font-medium text-gray-900">{t('compSch.recurringLesson')}</p>
-                  <p className="text-xs text-gray-500">{t('compSch.recurringDesc')}</p>
-                </div>
-                <div className={`relative inline-flex h-6 w-11 items-center rounded-full flex-shrink-0 ${createIsRecurring ? 'bg-indigo-500' : 'bg-gray-300'}`}>
-                  <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${createIsRecurring ? 'translate-x-6' : 'translate-x-1'}`} />
-                </div>
-              </button>
-              {createIsRecurring && (
-                <div className="space-y-3 pt-1 border-t border-gray-200">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">{t('cal.recurringFrequencyLabel')}</Label>
-                    <select
-                      value={createRecurringFrequency}
-                      onChange={(e) =>
-                        setCreateRecurringFrequency(e.target.value as 'weekly' | 'biweekly' | 'monthly')
-                      }
-                      className="w-full rounded-xl text-sm border border-gray-300 px-3 py-2 bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    >
-                      <option value="weekly">{t('cal.freqWeekly')}</option>
-                      <option value="biweekly">{t('cal.freqBiweekly')}</option>
-                      <option value="monthly">{t('cal.freqMonthly')}</option>
-                    </select>
-                  </div>
-                  {createRecurringFrequency !== 'monthly' && (
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">{t('cal.weekdaysLabel')}</Label>
-                      <div className="flex gap-1.5 flex-wrap">
-                        {[1, 2, 3, 4, 5, 6, 0].map((day) => {
-                          const labels = [
-                            t('cal.wdSun'),
-                            t('cal.wdMon'),
-                            t('cal.wdTue'),
-                            t('cal.wdWed'),
-                            t('cal.wdThu'),
-                            t('cal.wdFri'),
-                            t('cal.wdSat'),
-                          ];
-                          const isSelected = createRecurringWeekdays.includes(day);
-                          return (
-                            <button
-                              key={day}
-                              type="button"
-                              onClick={() => {
-                                setCreateRecurringWeekdays((prev) =>
-                                  isSelected ? prev.filter((d) => d !== day) : [...prev, day],
-                                );
-                              }}
-                              className={cn(
-                                'px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors border',
-                                isSelected
-                                  ? 'bg-indigo-500 text-white border-indigo-500'
-                                  : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300',
-                              )}
-                            >
-                              {labels[day]}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      {createRecurringWeekdays.length === 0 && (
-                        <p className="text-xs text-amber-600">{t('cal.selectAtLeastOneDay')}</p>
-                      )}
-                    </div>
-                  )}
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Kartotis iki (neprivaloma)</Label>
-                    <DateInput
-                      value={createRecurringEndDate}
-                      onChange={(e) => setCreateRecurringEndDate(e.target.value)}
-                      min={
-                        createStartTime
-                          ? format(addWeeks(new Date(createStartTime), 1), 'yyyy-MM-dd')
-                          : undefined
-                      }
-                      className="rounded-xl text-sm"
-                    />
-                    {!createRecurringEndDate && (
-                      <p className="text-xs text-gray-500">
-                        Tuščia = grafikas kartojasi nuolat. Sistema automatiškai palaiko artimiausių pamokų kalendorių.
-                      </p>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
+              <RecurrenceFields
+                enabled={createIsRecurring}
+                onEnabledChange={setCreateIsRecurring}
+                frequency={createRecurringFrequency}
+                onFrequencyChange={setCreateRecurringFrequency}
+                weekdays={createRecurringWeekdays}
+                onWeekdaysChange={setCreateRecurringWeekdays}
+                endDate={createRecurringEndDate}
+                onEndDateChange={setCreateRecurringEndDate}
+                startTime={createStartTime}
+              />
             )}
             </div>
 
@@ -2946,29 +2973,36 @@ export default function CompanyTvarkarastis() {
                   <p className="font-medium text-slate-900">{t('compSch.busyTimes')}</p>
                   {createModalDayBusySessions.length > 0 ? (
                     <ul className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                      {createModalDayBusySessions.map(b => (
-                        <li
-                          key={b.id}
-                          className={cn(
-                            'rounded-lg border px-2.5 py-2 text-xs leading-snug',
-                            createSelectionOverlapsBusy &&
-                              createStartTime &&
-                              createEndTime &&
-                              new Date(createStartTime).getTime() < b.end.getTime() &&
-                              new Date(createEndTime).getTime() > b.start.getTime()
-                              ? 'border-amber-400 bg-amber-50 text-amber-950'
-                              : 'border-slate-200 bg-white text-slate-800',
-                          )}
-                        >
-                          <span className="font-semibold tabular-nums">
-                            {format(b.start, 'HH:mm')}–{format(b.end, 'HH:mm')}
-                          </span>
-                          <span className="block text-slate-600 mt-0.5">
-                            {b.studentName}
-                            {b.topic ? ` · ${b.topic}` : ''}
-                          </span>
-                        </li>
-                      ))}
+                      {createModalDayBusySessions.map(b => {
+                        const isConflict = createConflictingSessions.some(c => c.id === b.id);
+                        return (
+                          <li
+                            key={b.id}
+                            className={cn(
+                              'rounded-lg border px-2.5 py-2 text-xs leading-snug',
+                              isConflict
+                                ? 'border-red-300 bg-red-50 text-red-950'
+                                : 'border-slate-200 bg-white text-slate-800',
+                            )}
+                          >
+                            <span className="flex items-center justify-between gap-2">
+                              <span className="font-semibold tabular-nums">
+                                {format(b.start, 'HH:mm')}–{format(b.end, 'HH:mm')}
+                              </span>
+                              {isConflict && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-700">
+                                  <AlertCircle className="w-3 h-3" />
+                                  {t('compSch.overlapBadge')}
+                                </span>
+                              )}
+                            </span>
+                            <span className={cn('block mt-0.5', isConflict ? 'text-red-800/80' : 'text-slate-600')}>
+                              {b.studentName}
+                              {b.topic ? ` · ${b.topic}` : ''}
+                            </span>
+                          </li>
+                        );
+                      })}
                     </ul>
                   ) : (
                     <p className="text-xs text-slate-600">{t('compSch.noActiveSessionsDay')}</p>
@@ -3076,7 +3110,7 @@ export default function CompanyTvarkarastis() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label className="text-xs text-gray-500">{t('compSess.labelStatus')}</Label>
-                  <div className="mt-1">
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
                     <StatusBadge
                       status={selectedEvent.status}
                       paymentStatus={selectedEvent.payment_status ?? undefined}
@@ -3084,6 +3118,11 @@ export default function CompanyTvarkarastis() {
                       endTime={selectedEvent.end_time}
                       moved={hasFeature('monthly_packages') && !!(selectedEvent as any).original_start_time && !!(selectedEvent as any).lesson_package_id}
                     />
+                    {!!selectedEvent.subject_id && trialSubjectIds.has(selectedEvent.subject_id) && (
+                      <span className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800">
+                        ★ {t('compSch.trialLesson')}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div>
@@ -3249,6 +3288,7 @@ export default function CompanyTvarkarastis() {
                           setEditStatus(selectedEvent.status);
                           setGroupEditChoice('single');
                           setRescheduleReason('');
+                          setRescheduleRequestedBy('');
                           setIsEditingSession(true);
                         }}
                       >
@@ -3352,6 +3392,23 @@ export default function CompanyTvarkarastis() {
                     {rescheduleReason.length > 0 && rescheduleReason.trim().length < 5 && (
                       <p className="text-xs text-red-500">{t('dash.minChars', { min: '5', current: String(rescheduleReason.trim().length) })}</p>
                     )}
+                    <Label className="text-xs">{t('cal.rescheduleRequestedByLabel')}</Label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setRescheduleRequestedBy('student')}
+                        className={`flex-1 text-xs py-1.5 px-3 rounded-lg border font-medium transition-colors ${rescheduleRequestedBy === 'student' ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}
+                      >
+                        {t('cal.requestedByStudent')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRescheduleRequestedBy('tutor')}
+                        className={`flex-1 text-xs py-1.5 px-3 rounded-lg border font-medium transition-colors ${rescheduleRequestedBy === 'tutor' ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}
+                      >
+                        {t('cal.requestedByTutor')}
+                      </button>
+                    </div>
                   </div>
                 )}
                 <label className="flex items-start gap-2 cursor-pointer">
@@ -3502,7 +3559,7 @@ export default function CompanyTvarkarastis() {
                   disabled={saving || (
                     !!editStartTime && !!selectedEvent &&
                     Math.floor(new Date(editStartTime).getTime() / 60000) !== Math.floor(selectedEvent.start_time.getTime() / 60000) &&
-                    rescheduleReason.trim().length < 5
+                    (rescheduleReason.trim().length < 5 || !rescheduleRequestedBy)
                   )}
                 >
                   {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{t('compSch.saving')}</> : t('compSch.save')}
@@ -3974,6 +4031,7 @@ export default function CompanyTvarkarastis() {
         onClose={() => setFindLessonOpen(false)}
         orgId={organizationId}
         frequencyEnabled={hasFeature('tutor_frequency_search')}
+        hidePrices={hideAdminPrices}
         onPickSlot={(slot) => {
           setFindLessonOpen(false);
           setFindLessonBook({

@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { insertParentInviteAndSendEmail, type ParentInviteSource } from './_lib/parentInvite.js';
-import { inviteEmailLocale, publicOriginFromRequest } from './_lib/public-origin.js';
+import { inviteEmailLocale, orgAwareOrigin, publicOriginFromRequest } from './_lib/public-origin.js';
 
 /**
  * Legacy/server-only: use `x-internal-key` (service role) or POST from register-student /
@@ -81,7 +81,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  const appOrigin = publicOriginFromRequest(req);
+  const appOrigin = orgAwareOrigin(orgLocale, publicOriginFromRequest(req));
   const explicitLocale =
     typeof (req.body as { locale?: string })?.locale === 'string'
       ? (req.body as { locale?: string }).locale

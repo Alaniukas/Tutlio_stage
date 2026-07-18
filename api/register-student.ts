@@ -6,7 +6,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { insertParentInviteAndSendEmail } from './_lib/parentInvite.js';
-import { inviteEmailLocale, publicOriginFromRequest } from './_lib/public-origin.js';
+import { inviteEmailLocale, orgAwareOrigin, publicOriginFromRequest } from './_lib/public-origin.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -51,13 +51,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: student, error: studentErr } = await supabase
       .from('students')
-      .select('id, tutor_id, email, linked_user_id')
+      .select('id, tutor_id, email, linked_user_id, organization_id')
       .eq('id', studentId)
       .maybeSingle();
 
     if (studentErr || !student) {
       return res.status(404).json({ error: 'Student record not found' });
     }
+
+    // Parent-invite links should use the org's canonical market domain.
+    let orgLocale: string | null = null;
+    try {
+      let orgIdForLocale: string | null = (student as { organization_id?: string | null }).organization_id ?? null;
+      if (!orgIdForLocale && student.tutor_id) {
+        const { data: tutorRow } = await supabase
+          .from('profiles')
+          .select('organization_id')
+          .eq('id', student.tutor_id)
+          .maybeSingle();
+        orgIdForLocale = (tutorRow as { organization_id?: string | null } | null)?.organization_id ?? null;
+      }
+      if (orgIdForLocale) {
+        const { data: orgRow } = await supabase
+          .from('organizations')
+          .select('preferred_locale')
+          .eq('id', orgIdForLocale)
+          .maybeSingle();
+        orgLocale = (orgRow as { preferred_locale?: string | null } | null)?.preferred_locale ?? null;
+      }
+    } catch {
+      /* locale lookup is best-effort */
+    }
+    const inviteOrigin = orgAwareOrigin(orgLocale, appOrigin);
 
     if (student.linked_user_id) {
       return res.status(409).json({ error: 'Student account already linked' });
@@ -186,14 +211,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ) {
       const inviteRes = await insertParentInviteAndSendEmail({
         supabase,
-        appUrl: appOrigin,
+        appUrl: inviteOrigin,
         parentEmail: String(payerEmail).trim(),
         studentId,
         studentFullName: String(fullName || ''),
         parentName: payerName ? String(payerName).trim() : null,
         source: 'student_self',
         invitedByUserId: authUserId,
-        locale: inviteEmailLocale(typeof locale === 'string' ? locale : undefined, appOrigin),
+        locale: inviteEmailLocale(
+          typeof locale === 'string' ? locale : orgLocale || undefined,
+          inviteOrigin,
+        ),
         uiLocale: typeof locale === 'string' ? locale : undefined,
       });
       if ('error' in inviteRes) {

@@ -31,6 +31,7 @@ import {
     isMonthlyBillingOnlyStudent,
     shouldShowPerLessonPaymentUi,
 } from '@/lib/studentPaymentModel';
+import { useStudentPolicy } from '@/contexts/StudentPolicyContext';
 
 interface Session {
     id: string;
@@ -163,8 +164,13 @@ export default function StudentSessions() {
     const [manualPaymentsOnly, setManualPaymentsOnly] = useState(false);
     const [creditBalance, setCreditBalance] = useState(0);
     const [tutorOrgIsSchool, setTutorOrgIsSchool] = useState(false);
-    /** Org feature `disable_student_reschedule_cancel`: students/parents cannot move or cancel lessons. */
-    const [studentActionsDisabled, setStudentActionsDisabled] = useState(false);
+    /** Org feature `disable_student_reschedule_cancel`: students/parents cannot move or cancel lessons.
+     * Seeded from the pre-mount StudentPolicyProvider (no flash); fetch reconciles. */
+    const portalPolicy = useStudentPolicy();
+    const [studentActionsDisabled, setStudentActionsDisabled] = useState(portalPolicy.actionsDisabled);
+    useEffect(() => {
+        if (portalPolicy.resolved && portalPolicy.actionsDisabled) setStudentActionsDisabled(true);
+    }, [portalPolicy.resolved, portalPolicy.actionsDisabled]);
     // Whether the org reschedule/cancel policy has been resolved for the current fetch.
     // Guards the nav-state flow so a warm session cache can't open the reschedule
     // picker before we know the org forbids it (the RPC would reject it anyway).

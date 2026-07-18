@@ -307,6 +307,140 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     defaultValue: false,
     pricingTier: 'premium',
   },
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Pro Klase feedback round (2026-07-17)
+  // ─────────────────────────────────────────────────────────────────────
+
+  student_availability_profile: {
+    id: 'student_availability_profile',
+    name: 'Mokinio laisvo laiko profilis',
+    nameEn: 'Student availability profile',
+    description:
+      'Mokinio kortelėje galima pažymėti, kuriomis dienomis ir valandomis mokiniui tinka pamokos. Ieškant korepetitoriaus laisvo laiko šie langai užpildomi automatiškai.',
+    descriptionEn:
+      'The student card gets a weekly availability editor (days + hour ranges that suit the student). The free-time tutor search is prefilled from it automatically.',
+    category: 'advanced',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
+
+  student_schedule_overview: {
+    id: 'student_schedule_overview',
+    name: 'Mokinio tvarkaraščio santrauka ir statistika',
+    nameEn: 'Student schedule overview & stats',
+    description:
+      'Mokinio kortelėje rodomas pamokų tvarkaraštis (savaitės dienos, laikai, dalykai, korepetitoriai, kartai/sav.) ir skaitliukai, kiek pamokų perkėlė/atšaukė mokinys ir kiek – korepetitorius.',
+    descriptionEn:
+      'The student card shows the recurring lesson schedule (weekdays, times, subjects, tutors, times/week) and counters of lessons moved/cancelled by the student vs by the tutor.',
+    category: 'analytics',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
+
+  hide_admin_lesson_prices: {
+    id: 'hide_admin_lesson_prices',
+    name: 'Slėpti kainas admin pamokų kūrime',
+    nameEn: 'Hide prices in admin lesson creation',
+    description:
+      'Kuriant pamoką (tvarkaraštyje ar mokinio kortelėje) administratoriui nerodomos dalykų ir laikų kainos. Kainos vis tiek pritaikomos automatiškai pagal dinaminę kainodarą.',
+    descriptionEn:
+      'Hides subject/slot prices from the org admin in lesson-creation flows (schedule + student card). Prices are still applied automatically via dynamic pricing.',
+    category: 'appearance',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
+
+  hide_trial_offer_button: {
+    id: 'hide_trial_offer_button',
+    name: 'Slėpti „Siūlyti bandomąją pamoką" mygtuką',
+    nameEn: 'Hide "Offer trial lesson" button',
+    description:
+      'Mokinio kortelėje neberodomas „Siūlyti bandomąją pamoką" blokas – bandomosios pamokos kuriamos tiesiogiai per pamokų kūrimą.',
+    descriptionEn:
+      'Removes the "Offer trial lesson" block from the student card — trials are created directly through lesson creation instead.',
+    category: 'appearance',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
+
+  full_student_edit: {
+    id: 'full_student_edit',
+    name: 'Pilnas mokinio duomenų redagavimas',
+    nameEn: 'Full student data editing',
+    description:
+      'Org adminas gali redaguoti mokinio kontaktinius duomenis (el. paštą – kol mokinys dar neprisiregistravęs; telefoną ir kitus laukus – visada) ir iš naujo išsiųsti kvietimą.',
+    descriptionEn:
+      'Org admin can edit student contact data (email while the student has not registered yet; phone and other fields always) and re-send the invitation.',
+    category: 'advanced',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
+
+  trial_creation_payment_email: {
+    id: 'trial_creation_payment_email',
+    name: 'Bandomosios pamokos apmokėjimo laiškas kuriant',
+    nameEn: 'Trial payment email on creation',
+    description:
+      'Sukūrus bandomąją pamoką (tvarkaraštyje ar mokinio kortelėje) mokėtojui automatiškai išsiunčiamas vienkartinio apmokėjimo laiškas su nuoroda už tą pamoką.',
+    descriptionEn:
+      'When a trial lesson is created (schedule or student card), the payer automatically receives a one-time payment email with a pay link for that lesson.',
+    category: 'payments',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
+
+  post_trial_auto_package: {
+    id: 'post_trial_auto_package',
+    name: 'Automatinis paketas po bandomosios',
+    nameEn: 'Auto package after trial',
+    description:
+      'Po įvykusios bandomosios pamokos pagal mokinio pasikartojantį tvarkaraštį automatiškai suformuojamas mėnesinis paketas su dinamine kaina ir išsiunčiamas klientui. Administratorius mokinio kortelėje gali paketą anuliuoti, koreguoti ar išsiųsti iš naujo.',
+    descriptionEn:
+      'After a completed trial lesson, a monthly package is auto-built from the student\'s recurring schedule at dynamic pricing and emailed to the client. The admin can annul, edit or resend it from the student card.',
+    category: 'automation',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
+
+  extra_lessons_billing: {
+    id: 'extra_lessons_billing',
+    name: 'Papildomų pamokų sąskaitos',
+    nameEn: 'Extra lessons billing',
+    description:
+      'Mėnesio pabaigoje pamokos, nepatekusios į jokį paketą (padidintas dažnis, vienkartinės ar naujai pridėtas tvarkaraštis), automatiškai apmokestinamos vienetine kaina ir mokėtojui išsiunčiama atskira sąskaita. Nuo kito mėnesio nauji tvarkaraščiai įtraukiami į mėnesinį paketą.',
+    descriptionEn:
+      'At month end, lessons not covered by any package (increased frequency, one-offs, newly added schedules) are billed per-unit and the payer gets a separate invoice. From the next month new schedules fold into the monthly package.',
+    category: 'payments',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
+
+  student_payments_page: {
+    id: 'student_payments_page',
+    name: 'Mokinio „Mokėjimai" puslapis',
+    nameEn: 'Student "Payments" page',
+    description:
+      'Mokinio portale atsiranda „Mokėjimai" skiltis: neapmokėti paketai su apmokėjimo mygtuku ir mokėjimų istorija su sąskaitomis.',
+    descriptionEn:
+      'The student portal gets a "Payments" section: unpaid packages with a pay button and payment history with invoices.',
+    category: 'payments',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
+
+  invoice_detailed_line_items: {
+    id: 'invoice_detailed_line_items',
+    name: 'Detalios sąskaitų eilutės (vaikas, kiekis, datos)',
+    nameEn: 'Detailed invoice line items (child, qty, dates)',
+    description:
+      'Sąskaitos faktūros eilutėse nurodomas vaiko vardas, dalykas, kiekis ir pamokų datos (pvz. „Matematika – Jonas – 4 pam. (07-01, 07-08, ...)").',
+    descriptionEn:
+      'Invoice line items include the child\'s name, subject, quantity and lesson dates (e.g. "Matematika – Jonas – 4 pam. (07-01, 07-08, ...)").',
+    category: 'payments',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
 };
 
 /**

@@ -7,6 +7,7 @@ import {
   nextMonthFirstYmd,
 } from '../src/lib/monthlyPackagePlan.js';
 import { resolveOrganizationLessonPrice } from '../src/lib/organizationDynamicPricing.js';
+import { buildRollingOccurrenceDates } from './_lib/recurringOccurrences.js';
 
 function ymdInVilnius(value = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -40,7 +41,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data, error } = await supabase
     .from('recurring_monthly_package_plans')
-    .select('id, organization_id, tutor_id, student_id, subject_id, grade, lessons_per_week, payment_method, attach_sales_invoice, next_generation_date')
+    .select('id, organization_id, tutor_id, student_id, subject_id, grade, lessons_per_week, payment_method, attach_sales_invoice, next_generation_date, auto_from_schedule')
     .eq('active', true)
     .lte('next_generation_date', today)
     .order('next_generation_date', { ascending: true })
@@ -49,8 +50,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   let generated = 0;
   let advanced = 0;
+  let deactivated = 0;
   const failures: Array<{ planId: string; error: string }> = [];
   const origin = apiOrigin(req);
+
+  const deactivatePlan = async (planId: string) => {
+    await supabase
+      .from('recurring_monthly_package_plans')
+      .update({ active: false, updated_at: new Date().toISOString() })
+      .eq('id', planId);
+    deactivated += 1;
+  };
 
   for (const plan of data || []) {
     const periodStart = String(plan.next_generation_date);
@@ -74,6 +84,138 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })
         .eq('id', plan.id);
       advanced += 1;
+      continue;
+    }
+
+    // Auto (schedule-derived) plans: items are re-derived from the student's
+    // CURRENT active recurring templates each period — that re-derivation IS
+    // the "snapshot at generation" the dynamic-pricing month rules require.
+    if ((plan as { auto_from_schedule?: boolean }).auto_from_schedule === true) {
+      const [{ data: autoStudent }, { data: templates }, { data: autoRules }] = await Promise.all([
+        supabase
+          .from('students')
+          .select('id, grade, pricing_lessons_per_week, detached_at')
+          .eq('id', plan.student_id)
+          .maybeSingle(),
+        supabase
+          .from('recurring_individual_sessions')
+          .select('id, subject_id, start_date, end_date, start_time, end_time, frequency')
+          .eq('tutor_id', plan.tutor_id)
+          .eq('student_id', plan.student_id)
+          .eq('active', true),
+        supabase
+          .from('organization_dynamic_pricing')
+          .select('grade_min, grade_max, lessons_per_week, price')
+          .eq('organization_id', plan.organization_id),
+      ]);
+
+      if (!autoStudent || autoStudent.detached_at) {
+        await deactivatePlan(plan.id);
+        continue;
+      }
+
+      const activeTemplates = (templates || []).filter((tpl: any) =>
+        tpl.subject_id &&
+        String(tpl.start_date) <= periodEnd &&
+        (!tpl.end_date || String(tpl.end_date) >= periodStart),
+      );
+      const countBySubject = new Map<string, number>();
+      for (const tpl of activeTemplates) {
+        const dates = buildRollingOccurrenceDates(tpl as any, periodStart, periodEnd);
+        countBySubject.set(
+          tpl.subject_id as string,
+          (countBySubject.get(tpl.subject_id as string) || 0) + dates.length,
+        );
+      }
+
+      const subjectIds = [...countBySubject.keys()];
+      const [{ data: subjectRows }, { data: indivRows }] = await Promise.all([
+        subjectIds.length > 0
+          ? supabase.from('subjects').select('id, price, is_group, is_trial').in('id', subjectIds)
+          : Promise.resolve({ data: [] as any[] }),
+        subjectIds.length > 0
+          ? supabase
+              .from('student_individual_pricing')
+              .select('subject_id, price')
+              .eq('student_id', plan.student_id)
+              .in('subject_id', subjectIds)
+          : Promise.resolve({ data: [] as any[] }),
+      ]);
+      const subjectById = new Map((subjectRows || []).map((s: any) => [s.id as string, s]));
+      const indivBySubject = new Map((indivRows || []).map((r: any) => [r.subject_id as string, Number(r.price)]));
+      const normalizedAutoRules = (autoRules || []).map((rule: any) => ({
+        ...rule,
+        grade_min: Number(rule.grade_min),
+        grade_max: Number(rule.grade_max),
+        lessons_per_week: Number(rule.lessons_per_week),
+        price: Number(rule.price),
+      }));
+
+      const items: Array<{ subjectId: string; totalLessons: number; pricePerLesson: number }> = [];
+      for (const [subjectId, count] of countBySubject) {
+        if (count <= 0) continue;
+        const subj = subjectById.get(subjectId);
+        if (!subj || subj.is_group || subj.is_trial) continue;
+        const pricePerLesson = resolveOrganizationLessonPrice({
+          rules: normalizedAutoRules,
+          student: {
+            grade: autoStudent.grade == null ? null : String(autoStudent.grade),
+            pricing_lessons_per_week: autoStudent.pricing_lessons_per_week,
+          },
+          lessonsPerWeek: autoStudent.pricing_lessons_per_week ?? undefined,
+          individualPrice: indivBySubject.get(subjectId) ?? null,
+          fallbackPrice: Number(subj.price || 0),
+        });
+        items.push({ subjectId, totalLessons: count, pricePerLesson });
+      }
+
+      if (items.length === 0) {
+        await deactivatePlan(plan.id);
+        continue;
+      }
+
+      const autoEndpoint = plan.payment_method === 'manual'
+        ? '/api/create-manual-package'
+        : '/api/create-package-checkout';
+      try {
+        const response = await fetch(`${origin}${autoEndpoint}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-internal-key': serviceRoleKey,
+          },
+          body: JSON.stringify({
+            tutorId: plan.tutor_id,
+            studentId: plan.student_id,
+            items,
+            expiresAt: periodEnd,
+            attachSalesInvoice: plan.attach_sales_invoice,
+            recurringPlanId: plan.id,
+            billingPeriodStart: periodStart,
+            billingPeriodEnd: periodEnd,
+          }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          failures.push({ planId: plan.id, error: String((result as any).error || response.status) });
+          continue;
+        }
+        await supabase
+          .from('recurring_monthly_package_plans')
+          .update({
+            last_generated_period_start: periodStart,
+            last_generated_period_end: periodEnd,
+            next_generation_date: nextGenerationDate,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', plan.id);
+        generated += 1;
+      } catch (generationError) {
+        failures.push({
+          planId: plan.id,
+          error: generationError instanceof Error ? generationError.message : String(generationError),
+        });
+      }
       continue;
     }
 
@@ -161,6 +303,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     success: failures.length === 0,
     generated,
     advanced,
+    deactivated,
     failures,
   });
 }

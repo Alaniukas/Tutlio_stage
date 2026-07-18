@@ -32,6 +32,14 @@ export default function ParentInvoices() {
   const [searchParams] = useSearchParams();
   const filterStudentId = searchParams.get('studentId')?.trim() || null;
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [pendingPackages, setPendingPackages] = useState<Array<{
+    id: string;
+    totalLessons: number;
+    totalPrice: number | null;
+    paymentMethod: string | null;
+    studentName: string;
+    subjects: string;
+  }>>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -73,6 +81,29 @@ export default function ParentInvoices() {
         setLoading(false);
         return;
       }
+
+      // "Laukia apmokėjimo": unpaid packages of the linked children (pay via the stable link).
+      const { data: pendingRows } = await supabase
+        .from('lesson_packages')
+        .select('id, total_lessons, total_price, payment_status, payment_method, paid, students!inner(full_name), lesson_package_items(subjects(name))')
+        .in('student_id', studentIds)
+        .eq('paid', false)
+        .eq('payment_status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(20);
+      setPendingPackages(
+        ((pendingRows ?? []) as any[]).map((row) => ({
+          id: row.id as string,
+          totalLessons: Number(row.total_lessons) || 0,
+          totalPrice: row.total_price == null ? null : Number(row.total_price),
+          paymentMethod: (row.payment_method as string | null) ?? null,
+          studentName: (Array.isArray(row.students) ? row.students[0]?.full_name : row.students?.full_name) || '',
+          subjects: (Array.isArray(row.lesson_package_items) ? row.lesson_package_items : [])
+            .map((it: any) => (Array.isArray(it.subjects) ? it.subjects[0]?.name : it.subjects?.name))
+            .filter(Boolean)
+            .join(', '),
+        })),
+      );
 
       /**
        * Jei filtro nėra — skaitome sąskaitas tiesiai (RLS `invoices_parent_select` meta tik susijusias).
@@ -246,6 +277,37 @@ export default function ParentInvoices() {
             {t('parent.invoicesLoadError', { message: loadError })}
           </div>
         ) : null}
+        {pendingPackages.length > 0 && (
+          <div className="mb-5 space-y-2">
+            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">{t('parentInv.pendingTitle')}</h2>
+            {pendingPackages.map((pkg) => (
+              <div key={pkg.id} className="rounded-2xl border border-amber-200 bg-amber-50/60 p-4 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">
+                    {pkg.subjects || t('parentInv.packageFallback')}
+                    {pkg.studentName && <span className="text-gray-500 font-normal"> · {pkg.studentName}</span>}
+                  </p>
+                  <p className="text-xs text-gray-600 mt-0.5">
+                    {t('parentInv.lessonsCount', { count: String(pkg.totalLessons) })}
+                    {pkg.totalPrice != null && <> · <span className="font-semibold">€{pkg.totalPrice.toFixed(2)}</span></>}
+                  </p>
+                </div>
+                {pkg.paymentMethod === 'manual' ? (
+                  <span className="text-xs text-gray-600 bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 shrink-0">
+                    {t('parentInv.manualTransfer')}
+                  </span>
+                ) : (
+                  <a
+                    href={`/api/pay-package?package=${pkg.id}`}
+                    className="inline-flex items-center rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 shrink-0"
+                  >
+                    {t('parentInv.payNow')}
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
         <div className="space-y-3">
           {invoices.length === 0 ? (
             <p className="text-gray-500 text-center py-12">{t('parent.noInvoices')}</p>

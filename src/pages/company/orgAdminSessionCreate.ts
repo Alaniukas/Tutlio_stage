@@ -8,6 +8,7 @@ import { sendEmail } from '@/lib/email';
 import { authHeaders } from '@/lib/apiHelpers';
 import { findActivePackageForBooking } from '@/lib/lessonPackageBooking';
 import { defaultSessionPaymentStatusForStudent } from '@/lib/studentPaymentModel';
+import { ensureStudentPairedWithTutor } from '@/lib/orgStudentPairing';
 import {
   contractedLessonsPerWeek,
   resolveOrganizationLessonPrice,
@@ -329,10 +330,15 @@ export interface OrgAdminCreateSessionInput {
   dynamicPricingRules?: OrganizationDynamicPricingRule[];
 }
 
+export interface OrgAdminCreateSessionResult {
+  /** Ids of the sessions inserted by this call, earliest first. */
+  createdSessionIds: string[];
+}
+
 /**
  * Org admin calendar: create one-off or recurring session(s) for an org tutor (same rules as tutor Calendar).
  */
-export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): Promise<void> {
+export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): Promise<OrgAdminCreateSessionResult> {
   const {
     supabase,
     createTutorId,
@@ -450,12 +456,24 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     }
   }
   const isGroupLesson = Boolean(subj.is_group);
-  const studentIdsToCreate = isGroupLesson
+  const requestedStudentIds = isGroupLesson
     ? createStudentIds
     : (createStudentId ? [createStudentId] : []);
-  if (studentIdsToCreate.length === 0) {
+  if (requestedStudentIds.length === 0) {
     throw new Error(isGroupLesson ? 'Select at least one student for a group lesson.' : 'Select a student.');
   }
+
+  // Cross-tutor booking (e.g. free-time search from the student card) must
+  // land on a students row paired with the booked tutor, so the tutor sees the
+  // student on their pages and appears assigned on /students. No-op when the
+  // selected row already belongs to the tutor.
+  const studentIdsToCreate = [
+    ...new Set(
+      await Promise.all(
+        requestedStudentIds.map((sid) => ensureStudentPairedWithTutor(supabase, sid, createTutorId)),
+      ),
+    ),
+  ];
 
   const startDate = new Date(createStartTime);
   const endDate = new Date(createEndTime);
@@ -734,7 +752,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     }
 
     if (!p.suppressSuccessAlert) alert(`Created ${sessionsRows.length} recurring lessons.`);
-    return;
+    return { createdSessionIds: allCreated.map((row) => row.id) };
   }
 
   const sessionsToInsert: Record<string, unknown>[] = [];
@@ -907,4 +925,11 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       alert('Pamoka sukurta!');
     }
   }
+
+  return {
+    createdSessionIds: ((created || []) as Array<{ id: string; start_time: string }>)
+      .slice()
+      .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+      .map((row) => row.id),
+  };
 }

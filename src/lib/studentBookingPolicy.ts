@@ -9,12 +9,32 @@ import { supabase } from '@/lib/supabase';
  * Lookups fail open (booking UI stays visible) — the sessions INSERT policy
  * enforces the flag server-side regardless.
  */
-export async function fetchSelfBookingDisabledMap(
+export interface StudentPortalPolicyEntry {
+  organizationId: string | null;
+  /** Org feature disable_student_booking. */
+  bookingDisabled: boolean;
+  /** Org feature disable_student_reschedule_cancel. */
+  actionsDisabled: boolean;
+  /** Org feature student_payments_page ("Mokėjimai" portal section). */
+  paymentsPageEnabled: boolean;
+}
+
+/**
+ * One lookup for every portal-gating org flag of the given students. Fails
+ * open (all false) — RLS is the enforcement layer.
+ */
+export async function fetchStudentPortalPolicyMap(
   studentIds: Array<string | null | undefined>,
-): Promise<Record<string, boolean>> {
+): Promise<Record<string, StudentPortalPolicyEntry>> {
   const ids = [...new Set(studentIds.filter((id): id is string => !!id))];
-  const result: Record<string, boolean> = {};
+  const result: Record<string, StudentPortalPolicyEntry> = {};
   if (ids.length === 0) return result;
+  const fallback = (): StudentPortalPolicyEntry => ({
+    organizationId: null,
+    bookingDisabled: false,
+    actionsDisabled: false,
+    paymentsPageEnabled: false,
+  });
   try {
     const { data: rows } = await supabase
       .from('students')
@@ -50,23 +70,50 @@ export async function fetchSelfBookingDisabledMap(
     }
 
     const orgIds = [...new Set(Object.values(orgOfStudent).filter((v): v is string => !!v))];
-    const disabledByOrg: Record<string, boolean> = {};
+    const policyByOrg: Record<string, { bookingDisabled: boolean; actionsDisabled: boolean; paymentsPageEnabled: boolean }> = {};
     if (orgIds.length > 0) {
       const { data: orgs } = await supabase
         .from('organizations')
         .select('id, features')
         .in('id', orgIds);
       for (const o of (orgs ?? []) as Array<{ id: string; features: Record<string, unknown> | null }>) {
-        disabledByOrg[o.id] = o.features?.disable_student_booking === true;
+        policyByOrg[o.id] = {
+          bookingDisabled: o.features?.disable_student_booking === true,
+          actionsDisabled: o.features?.disable_student_reschedule_cancel === true,
+          paymentsPageEnabled: o.features?.student_payments_page === true,
+        };
       }
     }
 
     for (const id of ids) {
       const orgId = orgOfStudent[id];
-      result[id] = orgId ? disabledByOrg[orgId] === true : false;
+      const policy = orgId ? policyByOrg[orgId] : undefined;
+      result[id] = {
+        organizationId: orgId ?? null,
+        bookingDisabled: policy?.bookingDisabled === true,
+        actionsDisabled: policy?.actionsDisabled === true,
+        paymentsPageEnabled: policy?.paymentsPageEnabled === true,
+      };
     }
   } catch {
     // fail open — see doc comment
+    for (const id of ids) {
+      if (!result[id]) result[id] = fallback();
+    }
+  }
+  for (const id of ids) {
+    if (!result[id]) result[id] = fallback();
+  }
+  return result;
+}
+
+export async function fetchSelfBookingDisabledMap(
+  studentIds: Array<string | null | undefined>,
+): Promise<Record<string, boolean>> {
+  const map = await fetchStudentPortalPolicyMap(studentIds);
+  const result: Record<string, boolean> = {};
+  for (const [id, entry] of Object.entries(map)) {
+    result[id] = entry.bookingDisabled;
   }
   return result;
 }

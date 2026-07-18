@@ -6,13 +6,13 @@ import {
     fetchStudentActiveLessonPackagesDeduped,
     fetchSubjectNamesByIds,
 } from '@/lib/studentLessonPackagesLight';
-import { LayoutDashboard, BookOpen, CalendarDays, Clock, Settings, Info, Mail, HelpCircle, MessageSquare } from 'lucide-react';
+import { LayoutDashboard, BookOpen, CalendarDays, Clock, Settings, Info, Mail, HelpCircle, MessageSquare, CreditCard } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import OrgSuspendedBanner from '@/components/OrgSuspendedBanner';
 import PwaInstallPrompt from '@/components/PwaInstallPrompt';
 import BrandedLogo from '@/components/BrandedLogo';
 import { clearOrgBrandingCache } from '@/contexts/OrgBrandingContext';
-import { isSelfBookingDisabledForStudent } from '@/lib/studentBookingPolicy';
+import { clearStudentPolicyCache, useStudentPolicy } from '@/contexts/StudentPolicyContext';
 import { useTranslation } from '@/lib/i18n';
 import { useTotalChatUnread } from '@/hooks/useChat';
 import { usePushSubscription } from '@/hooks/usePushSubscription';
@@ -59,8 +59,22 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
         []
     );
 
-    /** Org feature disable_student_booking — booking (and its waitlist) is admin-only. */
-    const [bookingDisabled, setBookingDisabled] = useState(false);
+    /** Org portal flags — resolved pre-mount by StudentPolicyProvider, so the nav is correct on first paint. */
+    const { bookingDisabled, paymentsPageEnabled } = useStudentPolicy();
+
+    /**
+     * Tutor selector shows one entry per distinct tutor. Detach + re-add can
+     * leave two students rows for the same tutor; those must not render as
+     * two switchable "accounts". Prefer the active profile's row per tutor.
+     */
+    const distinctTutorProfiles = useMemo(() => {
+        const byTutor = new Map<string, (typeof studentProfiles)[number]>();
+        for (const sp of studentProfiles) {
+            const key = sp.tutor_id || sp.id;
+            if (!byTutor.has(key) || sp.id === activeStudentProfileId) byTutor.set(key, sp);
+        }
+        return [...byTutor.values()];
+    }, [studentProfiles, activeStudentProfileId]);
 
     const navItems = [
         { href: '/student', label: t('studentNav.home'), icon: LayoutDashboard },
@@ -68,6 +82,9 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
         { href: '/student/schedule', label: t('studentNav.book'), icon: CalendarDays },
         { href: '/student/messages', label: t('studentNav.messages'), icon: MessageSquare },
         { href: '/student/waitlist', label: t('studentNav.queue'), icon: Clock },
+        ...(paymentsPageEnabled
+            ? [{ href: '/student/payments', label: t('studentNav.payments'), icon: CreditCard }]
+            : []),
         { href: '/student/settings', label: t('studentNav.settings'), icon: Settings },
     ].filter((item) => !(bookingDisabled && (item.href === '/student/schedule' || item.href === '/student/waitlist')));
     const navGridClass =
@@ -102,7 +119,6 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                 }
 
                 if (selectedStudentData) {
-                    void isSelfBookingDisabledForStudent(selectedStudentData.id).then(setBookingDisabled);
                     const name = selectedStudentData.full_name || '';
                     setStudentName(name);
 
@@ -192,6 +208,7 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
         if (typeof window !== 'undefined') {
             localStorage.setItem(ACTIVE_STUDENT_PROFILE_KEY, studentProfileId);
             clearOrgBrandingCache();
+            clearStudentPolicyCache();
             window.dispatchEvent(new Event('student-profile-changed'));
             window.location.reload();
         }
@@ -229,13 +246,19 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                                 <p className="text-sm font-bold text-gray-900 truncate max-w-[40vw] sm:max-w-[14rem]">{tutor?.full_name || '—'}</p>
                             </div>
                             <Info className="w-4 h-4 text-[color-mix(in_srgb,var(--org-brand)_45%,#94a3b8)]" onClick={() => setIsTutorModalOpen(true)} />
-                            {studentProfiles.length > 1 && (
+                            {distinctTutorProfiles.length > 1 && (
                                 <select
-                                    value={activeStudentProfileId || studentProfiles[0]?.id || ''}
+                                    value={
+                                        distinctTutorProfiles.some((sp) => sp.id === activeStudentProfileId)
+                                            ? (activeStudentProfileId as string)
+                                            : distinctTutorProfiles[0]?.id || ''
+                                    }
                                     onChange={(e) => handleProfileSwitch(e.target.value)}
+                                    title={t('studentLayout.chooseTutor')}
+                                    aria-label={t('studentLayout.chooseTutor')}
                                     className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white text-gray-700"
                                 >
-                                    {studentProfiles.map((sp) => (
+                                    {distinctTutorProfiles.map((sp) => (
                                         <option key={sp.id} value={sp.id}>
                                             {sp.tutor_full_name || t('common.tutor')}
                                         </option>

@@ -91,6 +91,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
+    // Org feature invoice_detailed_line_items: line items carry the child's
+    // name, per-subject quantity and the lesson dates. Org→payer invoices only
+    // (the tutor→company product keeps its own format).
+    let detailedLineItems = false;
+    if (!isOrgTutor && profile.organization_id) {
+      const { data: orgFeatRow } = await supabase
+        .from('organizations')
+        .select('features')
+        .eq('id', profile.organization_id)
+        .maybeSingle();
+      const feat = (orgFeatRow as { features?: Record<string, unknown> | null } | null)?.features;
+      detailedLineItems =
+        !!feat && typeof feat === 'object' && !Array.isArray(feat) && feat.invoice_detailed_line_items === true;
+    }
+
     // Fetch seller invoice profile
     // When isOrgTutor, the tutor is the seller (billing the org), so use tutorId
     const sellerUserId = isOrgTutor ? tutorId : issuingUserId;
@@ -229,21 +244,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               .slice()
               .sort((a: any, b: any) => Number(a.position || 0) - Number(b.position || 0))
               .map((it: any) => ({
+                subjectId: (it.subject_id as string | null) ?? null,
                 subjectName: (it.subjects?.name as string) || (pkg.subjects?.name as string) || 'Pamoka',
                 totalLessons: Number(it.total_lessons) || 0,
                 totalPrice: Number(it.total_price) || 0,
               }))
           : [{
+              subjectId: (pkg.subject_id as string | null) ?? null,
               subjectName: (pkg.subjects?.name as string) || 'Pamoka',
               totalLessons: Number(pkg.total_lessons) || 0,
               totalPrice: Number(pkg.total_price) || 0,
             }];
-        items.forEach((it: { subjectName: string; totalLessons: number; totalPrice: number }, idx: number) => {
+        items.forEach((it: { subjectId: string | null; subjectName: string; totalLessons: number; totalPrice: number }, idx: number) => {
           pseudoSessions.push({
             id: `${pkg.id}::${idx}`,
             tutor_id: pkg.tutor_id,
             student_id: pkg.student_id,
-            subject_id: pkg.subject_id,
+            subject_id: it.subjectId ?? pkg.subject_id,
             start_time: when,
             price: it.totalPrice,
             students: pkg.students,
@@ -254,6 +271,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             __packageId: pkg.id,
           });
         });
+      }
+
+      // Detailed invoices enumerate the package's lesson dates: sessions linked
+      // to the package (booked/materialized against its credits), per subject.
+      if (detailedLineItems && matchedPackageIds.size > 0) {
+        const { data: linkedRows } = await supabase
+          .from('sessions')
+          .select('lesson_package_id, subject_id, start_time, status')
+          .in('lesson_package_id', [...matchedPackageIds])
+          .neq('status', 'cancelled');
+        const fmtMd = (iso: string) => {
+          const d = new Date(iso);
+          return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        };
+        const datesByPkgSubject = new Map<string, string[]>();
+        for (const row of linkedRows || []) {
+          const key = `${row.lesson_package_id}|${row.subject_id ?? ''}`;
+          const arr = datesByPkgSubject.get(key) ?? [];
+          arr.push(fmtMd(row.start_time));
+          datesByPkgSubject.set(key, arr);
+        }
+        for (const ps of pseudoSessions) {
+          const dates =
+            datesByPkgSubject.get(`${ps.__packageId}|${ps.subject_id ?? ''}`) ??
+            datesByPkgSubject.get(`${ps.__packageId}|`) ??
+            [];
+          ps.__lessonDates = dates.slice().sort();
+        }
       }
 
       if (matchedPackageIds.size < requested.size) {
@@ -372,7 +417,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     for (const group of groups) {
       const orgTutorRateEur = isOrgTutor ? Number((profile as any)?.company_commission_percent) || 0 : null;
-      const lineItems = buildLineItems(group.sessions, groupingType, { orgTutorRateEur });
+      const lineItems = buildLineItems(group.sessions, groupingType, { orgTutorRateEur, detailed: detailedLineItems });
       const totalAmount = lineItems.reduce((sum, li) => sum + li.totalPrice, 0);
 
       const buyer = organizationAsBuyer ?? buildBuyerFromSessions(group.sessions);
@@ -604,9 +649,10 @@ interface LineItemData {
 function buildLineItems(
   sessions: any[],
   groupingType: GroupingType,
-  opts?: { orgTutorRateEur: number | null }
+  opts?: { orgTutorRateEur: number | null; detailed?: boolean }
 ): LineItemData[] {
   const orgTutorPayRate = opts?.orgTutorRateEur ?? null;
+  const detailed = opts?.detailed === true && orgTutorPayRate == null;
   if (orgTutorPayRate != null) {
     const linePay = (s: any) => orgTutorLessonPayEur(orgTutorPayRate, s.price);
 
@@ -668,6 +714,46 @@ function buildLineItems(
         unitPrice: s.price || 0,
         totalPrice: s.price || 0,
         sessionIds: [s.id],
+      };
+    });
+  }
+
+  // Detailed org invoices (invoice_detailed_line_items): one line per
+  // (child, subject) with lesson-count quantity and the lesson dates
+  // enumerated in the description, e.g. "Matematika – Jonas – 4 pam. (07-01, 07-08)".
+  if (detailed) {
+    const fmtMd = (iso: string) => {
+      const d = new Date(iso);
+      return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+    const detailMap = new Map<string, { name: string; studentName: string; sessions: any[] }>();
+    for (const s of sessions) {
+      const subjectName = (s.subjects as any)?.name || 'Pamoka';
+      const studentName = ((s.students as any)?.full_name as string) || '';
+      const key = `${s.student_id ?? ''}|${subjectName}`;
+      if (!detailMap.has(key)) detailMap.set(key, { name: subjectName, studentName, sessions: [] });
+      detailMap.get(key)!.sessions.push(s);
+    }
+    return Array.from(detailMap.values()).map(group => {
+      const real = group.sessions.filter((s: any) => !s.__fromPackage);
+      const pseudo = group.sessions.filter((s: any) => s.__fromPackage);
+      const qty =
+        real.length + pseudo.reduce((n: number, s: any) => n + (Number(s.total_lessons) || 0), 0);
+      const totalPrice = group.sessions.reduce((sum: number, s: any) => sum + (s.price || 0), 0);
+      const dates = [
+        ...real.map((s: any) => fmtMd(s.start_time)),
+        ...pseudo.flatMap((s: any) => (Array.isArray(s.__lessonDates) ? s.__lessonDates : [])),
+      ].sort();
+      const namePart = group.studentName ? ` – ${group.studentName}` : '';
+      const datesPart = dates.length > 0 ? ` (${dates.join(', ')})` : '';
+      return {
+        description: `${group.name}${namePart} – ${qty} pam.${datesPart}`,
+        quantity: Math.max(1, qty),
+        unitPrice: qty > 0 ? Math.round((totalPrice / qty) * 100) / 100 : Math.round(totalPrice * 100) / 100,
+        totalPrice: Math.round(totalPrice * 100) / 100,
+        sessionIds: Array.from(
+          new Set(group.sessions.map((s: any) => s.__packageId || s.id)),
+        ) as string[],
       };
     });
   }

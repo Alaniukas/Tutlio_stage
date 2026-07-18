@@ -151,6 +151,12 @@ export function shouldShowPerLessonPaymentUi(
       tutorFlags.enable_monthly_billing,
     );
   }
+  // No explicit student model: the org/tutor Finance toggle governs. Orgs that
+  // turned per-lesson OFF (packages/monthly only, e.g. Pro Klasė) must not show
+  // pay-per-lesson UI even without the per-student override feature.
+  if (tutorFlags) {
+    return tutorFlags.enable_per_lesson !== false;
+  }
   return true;
 }
 

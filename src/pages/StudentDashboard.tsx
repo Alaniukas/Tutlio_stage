@@ -30,6 +30,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useTranslation } from '@/lib/i18n';
+import { useStudentPolicy } from '@/contexts/StudentPolicyContext';
 
 interface Session { id: string; start_time: string; end_time: string; status: string; paid: boolean; price: number | null; topic: string | null; meeting_link: string | null; payment_status?: string; tutor_comment?: string | null; show_comment_to_student?: boolean; subject_id?: string | null; subjects?: { is_group?: boolean; max_students?: number } | null; }
 interface StudentInfo {
@@ -94,9 +95,17 @@ export default function StudentDashboard() {
         enable_monthly_billing: false,
     });
     // Org feature disable_student_reschedule_cancel — hide self-service reschedule/cancel entry points.
-    const [studentActionsDisabled, setStudentActionsDisabled] = useState(false);
+    // Seeded from the pre-mount StudentPolicyProvider so gated UI never flashes;
+    // the data fetch below still reconciles as a backstop.
+    const portalPolicy = useStudentPolicy();
+    const [studentActionsDisabled, setStudentActionsDisabled] = useState(portalPolicy.actionsDisabled);
     // Org feature disable_student_booking — hide self-service booking entry points.
-    const [studentBookingDisabled, setStudentBookingDisabled] = useState(false);
+    const [studentBookingDisabled, setStudentBookingDisabled] = useState(portalPolicy.bookingDisabled);
+    useEffect(() => {
+        if (!portalPolicy.resolved) return;
+        if (portalPolicy.actionsDisabled) setStudentActionsDisabled(true);
+        if (portalPolicy.bookingDisabled) setStudentBookingDisabled(true);
+    }, [portalPolicy.resolved, portalPolicy.actionsDisabled, portalPolicy.bookingDisabled]);
     const { blocked: paymentBookingBlocked, loading: paymentBlockLoading } = useStudentPaymentBlock(activeStudentId);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
     const now = new Date();

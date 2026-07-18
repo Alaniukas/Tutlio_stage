@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useParams, useLocation } from 'react-router-dom';
 import { UserProvider } from '@/contexts/UserContext';
 import { OrgBrandingProvider } from '@/contexts/OrgBrandingContext';
+import { StudentPolicyProvider, useStudentPolicy } from '@/contexts/StudentPolicyContext';
 import { StaticLocaleProvider } from '@/contexts/LocaleContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import StudentProtectedRoute from '@/components/StudentProtectedRoute';
@@ -45,6 +46,7 @@ const StudentSchedule = lazy(() => import('@/pages/StudentSchedule'));
 const StudentSessions = lazy(() => import('@/pages/StudentSessions'));
 const StudentSettings = lazy(() => import('@/pages/StudentSettings'));
 const StudentWaitlist = lazy(() => import('@/pages/StudentWaitlist'));
+const StudentPayments = lazy(() => import('@/pages/StudentPayments'));
 const StudentMessages = lazy(() => import('@/pages/StudentMessages'));
 const StudentInstructions = lazy(() => import('@/pages/StudentInstructions'));
 const AdminPanel = lazy(() => import('@/pages/AdminPanel'));
@@ -120,10 +122,30 @@ function StudentProtectedWithUser() {
   return (
     <UserProvider>
       <OrgBrandingProvider scope="student">
-        <StudentProtectedRoute />
+        <StudentPolicyProvider>
+          <StudentProtectedRoute />
+        </StudentPolicyProvider>
       </OrgBrandingProvider>
     </UserProvider>
   );
+}
+
+/**
+ * Booking-gated student routes (schedule, waitlist) must not even MOUNT for
+ * orgs with disable_student_booking — no data fetches, no flash. Waits for the
+ * policy to resolve (instant when session-cached), then redirects or renders.
+ */
+function RequireStudentBooking({ children }: { children: React.ReactElement }) {
+  const policy = useStudentPolicy();
+  if (!policy.resolved) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+      </div>
+    );
+  }
+  if (policy.bookingDisabled) return <Navigate to="/student" replace />;
+  return children;
 }
 
 function ParentProtectedWithUser() {
@@ -271,10 +293,11 @@ export default function App({ basename }: { basename: string }) {
         {/* Student routes - WITH UserProvider for caching */}
         <Route element={<StudentProtectedWithUser />}>
           <Route path="/student" element={<StudentDashboard />} />
-          <Route path="/student/schedule" element={<StudentSchedule />} />
+          <Route path="/student/schedule" element={<RequireStudentBooking><StudentSchedule /></RequireStudentBooking>} />
           <Route path="/student/sessions" element={<StudentSessions />} />
           <Route path="/student/messages" element={<StudentMessages />} />
-          <Route path="/student/waitlist" element={<StudentWaitlist />} />
+          <Route path="/student/waitlist" element={<RequireStudentBooking><StudentWaitlist /></RequireStudentBooking>} />
+          <Route path="/student/payments" element={<StudentPayments />} />
           <Route path="/student/instructions" element={<StudentInstructions />} />
           <Route path="/student/settings" element={<StudentSettings />} />
         </Route>
