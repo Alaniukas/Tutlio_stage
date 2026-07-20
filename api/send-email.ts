@@ -2097,7 +2097,7 @@ function schoolInstallmentRequest(d: any, locale: Locale) {
             ${td('Mokinys', esc(d.studentName))}
             ${td('Įmoka', `#${d.installmentNumber || '—'} iš ${d.totalInstallments || '—'}`)}
             ${td('Suma', d.amount ? emailMoney(d.amount, locale) : '—')}
-            ${hasBreakdown ? td('Fiksuotas mokestis', annualFee > 0 ? emailMoney(annualFee, locale) : '—') : ''}
+            ${hasBreakdown ? td('Metinis mokestis', annualFee > 0 ? emailMoney(annualFee, locale) : '—') : ''}
             ${hasBreakdown ? td('Papildomas mokestis', additionalFee > 0 ? `${emailMoney(additionalFee, locale)}${d.additionalFeePurpose ? ` (${esc(d.additionalFeePurpose)})` : ''}` : '—') : ''}
             ${hasBreakdown ? td('Iš viso', totalAmount > 0 ? emailMoney(totalAmount, locale) : '—') : ''}
             ${td('Terminas', d.dueDate || '—', false)}

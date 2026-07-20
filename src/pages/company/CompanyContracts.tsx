@@ -915,7 +915,7 @@ export default function CompanyContracts() {
   const onTemplateSelect = (templateId: string) => {
     const tpl = templates.find((t) => t.id === templateId);
     if (!tpl) return;
-    const nextAnnual = isSchoolView ? '300' : (tpl.annual_fee_default?.toString() || cForm.annual_fee);
+    const nextAnnual = tpl.annual_fee_default?.toString() || cForm.annual_fee;
     setCForm((prev) => ({
       ...prev,
       template_id: templateId,
@@ -965,7 +965,11 @@ export default function CompanyContracts() {
 
   const createContract = async () => {
     if (!orgId || !cForm.student_id || !cForm.annual_fee) return;
-    const effectiveAnnualFee = isSchoolView ? '300' : cForm.annual_fee;
+    if (!(Number(cForm.annual_fee) > 0)) {
+      setToast({ message: 'Metinis mokestis turi būti didesnis nei 0.', type: 'error' });
+      return;
+    }
+    const effectiveAnnualFee = cForm.annual_fee;
     const additionalFeeAmountNum = hasAdditionalFee ? Number(additionalFeeAmount) : 0;
     const effectiveContractNumber = cForm.contract_number.trim() || generateContractNumber();
     if (!contractParentName.trim()) {
@@ -1774,9 +1778,15 @@ export default function CompanyContracts() {
               </>
             )}
             {isSchoolView && (
-              <div className="space-y-2">
-                <Label>{tr('school.templateName')}</Label>
-                <Input value={tForm.name} onChange={(e) => setTForm({ ...tForm, name: e.target.value })} placeholder={tr('school.templateNamePlaceholder')} />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>{tr('school.templateName')}</Label>
+                  <Input value={tForm.name} onChange={(e) => setTForm({ ...tForm, name: e.target.value })} placeholder={tr('school.templateNamePlaceholder')} />
+                </div>
+                <div className="space-y-2">
+                  <Label>{tr('school.templateDefaultFee')}</Label>
+                  <Input type="number" step="0.01" value={tForm.annual_fee_default} onChange={(e) => setTForm({ ...tForm, annual_fee_default: e.target.value })} placeholder="300" />
+                </div>
               </div>
             )}
             <div className="space-y-2">
@@ -1829,6 +1839,11 @@ export default function CompanyContracts() {
                   <p className="mt-2 text-xs text-emerald-700">Pasirinktas failas: {templatePdfFile.name}</p>
                 )}
               </div>
+              {isSchoolView && (
+                <p className="text-xs text-gray-400">
+                  {tr('school.placeholdersHint')} {PLACEHOLDERS.join(', ')}
+                </p>
+              )}
               <Input
                 ref={templateFileInputRef}
                 type="file"
@@ -1935,10 +1950,10 @@ export default function CompanyContracts() {
                 onChange={(e) =>
                   setCForm({
                     ...cForm,
-                    annual_fee: isSchoolView ? '300' : e.target.value,
+                    annual_fee: e.target.value,
                     filled_body: buildFilledBody({
                       contractNumber: cForm.contract_number,
-                      annualFee: isSchoolView ? '300' : e.target.value,
+                      annualFee: e.target.value,
                       studentId: cForm.student_id,
                       parentName: contractParentName,
                       parentEmail: contractParentEmail,
@@ -1949,10 +1964,13 @@ export default function CompanyContracts() {
                     }),
                   })
                 }
-                placeholder="500.00"
-                disabled={isSchoolView}
+                placeholder={isSchoolView ? '300' : '500.00'}
               />
-              {isSchoolView && <p className="text-xs text-gray-500">Fiksuotas metinis mokestis: 300 EUR.</p>}
+              {isSchoolView && (
+                <p className="text-xs text-gray-500">
+                  Numatytoji suma — 300 EUR. Įrašyta suma bus naudojama sutartyje ir mokėjimuose.
+                </p>
+              )}
             </div>
             {isSchoolView && (
               <div className="space-y-3 rounded-xl border border-gray-200 p-3">

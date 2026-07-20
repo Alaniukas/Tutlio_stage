@@ -126,7 +126,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     currency,
                     unit_amount: Math.round(fixedEur * 100),
                     product_data: {
-                        name: `${org?.name || 'Mokykla'} — Fiksuotas mokestis`,
+                        name: `${org?.name || 'Mokykla'} — Metinis mokestis`,
                         description: `Metinio mokesčio įmoka: ${student?.full_name || 'Mokinys'}`,
                     },
                 },
