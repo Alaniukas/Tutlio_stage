@@ -44,6 +44,7 @@ interface Student {
   full_name: string;
   email: string;
   phone?: string | null;
+  grade?: string | null;
   payer_name: string | null;
   payer_email: string | null;
   payer_phone?: string | null;
@@ -91,6 +92,14 @@ interface InstallmentDraft {
   amount: string;
   due_date: string;
 }
+
+/** 20% nuolaida metiniam mokesčiui: įrašoma jau sumažinta suma (sutartis, mokėjimai, įmokų validacija). */
+export const ANNUAL_FEE_DISCOUNT_RATE = 0.2;
+export const discountedAnnualFee = (value: string): string => {
+  const n = Number(value);
+  if (!(n > 0)) return '';
+  return (Math.round(n * (1 - ANNUAL_FEE_DISCOUNT_RATE) * 100) / 100).toFixed(2);
+};
 
 const PLACEHOLDERS = ['{{contract_number}}', '{{student_name}}', '{{student_email}}', '{{student_phone}}', '{{parent_name}}', '{{parent_email}}', '{{parent_phone}}', '{{parent_personal_code}}', '{{parent_address}}', '{{parent2_name}}', '{{parent2_email}}', '{{parent2_phone}}', '{{parent2_personal_code}}', '{{parent2_address}}', '{{parent2_adress}}', '{{parent2_block}}', '{{parent2_inline}}', '{{child_birth_date}}', '{{address}}', '{{annual_fee}}', '{{date}}', '{{school_name}}'];
 
@@ -183,6 +192,7 @@ export default function CompanyContracts() {
   const [hasAdditionalFee, setHasAdditionalFee] = useState(false);
   const [additionalFeePurpose, setAdditionalFeePurpose] = useState('');
   const [additionalFeeAmount, setAdditionalFeeAmount] = useState('');
+  const [applyFeeDiscount, setApplyFeeDiscount] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const [tab, setTab] = useState<'contracts' | 'templates'>('contracts');
@@ -223,7 +233,7 @@ export default function CompanyContracts() {
     const [tRes, cRes, sRes] = await Promise.all([
       supabase.from('school_contract_templates').select('*').eq('organization_id', admin.organization_id).order('created_at', { ascending: false }),
       supabase.from('school_contracts').select(CONTRACTS_SELECT).eq('organization_id', admin.organization_id).is('archived_at', null).order('created_at', { ascending: false }),
-      supabase.from('students').select('id, full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent').eq('organization_id', admin.organization_id).order('full_name'),
+      supabase.from('students').select('id, full_name, email, phone, grade, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent').eq('organization_id', admin.organization_id).order('full_name'),
     ]);
 
     const tData = tRes.data || [];
@@ -494,6 +504,7 @@ export default function CompanyContracts() {
     setHasAdditionalFee(false);
     setAdditionalFeePurpose('');
     setAdditionalFeeAmount('');
+    setApplyFeeDiscount(false);
     setContractOpen(true);
   };
 
@@ -969,7 +980,7 @@ export default function CompanyContracts() {
       setToast({ message: 'Metinis mokestis turi būti didesnis nei 0.', type: 'error' });
       return;
     }
-    const effectiveAnnualFee = cForm.annual_fee;
+    const effectiveAnnualFee = applyFeeDiscount ? discountedAnnualFee(cForm.annual_fee) : cForm.annual_fee;
     const additionalFeeAmountNum = hasAdditionalFee ? Number(additionalFeeAmount) : 0;
     const effectiveContractNumber = cForm.contract_number.trim() || generateContractNumber();
     if (!contractParentName.trim()) {
@@ -980,7 +991,7 @@ export default function CompanyContracts() {
       setToast({ message: tr('compStu.parentEmailRequiredError'), type: 'error' });
       return;
     }
-    if (!contractParentPhone.trim()) {
+    if (!isSchoolView && !contractParentPhone.trim()) {
       setToast({ message: tr('compStu.parentPhoneRequiredError'), type: 'error' });
       return;
     }
@@ -1034,7 +1045,7 @@ export default function CompanyContracts() {
           .update({
             payer_name: contractParentName.trim(),
             payer_email: contractParentEmail.trim(),
-            payer_phone: contractParentPhone.trim(),
+            payer_phone: contractParentPhone.trim() || null,
             payer_personal_code: contractParentPersonalCode.trim() || null,
             child_birth_date: contractChildBirthDate.trim() || null,
           })
@@ -1045,6 +1056,7 @@ export default function CompanyContracts() {
         !contractAddress.trim() ? 'Gyvenamoji vieta' : '',
         !contractChildBirthDate.trim() ? 'Vaiko gimimo data' : '',
         !contractParentPersonalCode.trim() ? 'Tėvų asmens kodas' : '',
+        !contractParentPhone.trim() ? 'Tėvų tel. nr.' : '',
         isSchoolView ? 'Vaiko atvaizdo naudojimo sutikimas' : '',
       ].filter(Boolean);
 
@@ -1207,6 +1219,7 @@ export default function CompanyContracts() {
       !(student?.student_address || '').trim() && !(student?.student_city || '').trim() ? 'Gyvenamoji vieta' : '',
       !(student?.child_birth_date || '').trim() ? 'Vaiko gimimo data' : '',
       !(student?.payer_personal_code || '').trim() ? 'Tėvų asmens kodas' : '',
+      !(student?.payer_phone || '').trim() ? 'Tėvų tel. nr.' : '',
       isSchoolView && !(String((contract as any)?.media_publicity_consent || '').trim()) ? 'Vaiko atvaizdo naudojimo sutikimas' : '',
     ].filter(Boolean);
     const completionUrl = isSchoolView || missingFields.length > 0 ? await createCompletionUrl(contract.id) : null;
@@ -1889,10 +1902,20 @@ export default function CompanyContracts() {
                   <SelectTrigger><SelectValue placeholder={tr('school.selectStudent')} /></SelectTrigger>
                   <SelectContent>
                     {sortStudentsByFullName(students).map((s) => (
-                      <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.full_name}{s.grade?.trim() ? ` — ${s.grade.trim()}` : ''}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {cForm.student_id && (
+                  <p className="text-xs text-gray-500">
+                    {(() => {
+                      const grade = students.find((s) => s.id === cForm.student_id)?.grade?.trim();
+                      return grade ? `Klasė: ${grade}` : 'Klasė nenurodyta (galite priskirti mokinių sąraše).';
+                    })()}
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label>{tr('school.templateLabel')}</Label>
@@ -1969,6 +1992,22 @@ export default function CompanyContracts() {
               {isSchoolView && (
                 <p className="text-xs text-gray-500">
                   Numatytoji suma — 300 EUR. Įrašyta suma bus naudojama sutartyje ir mokėjimuose.
+                </p>
+              )}
+              {isSchoolView && (
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={applyFeeDiscount}
+                    onChange={(e) => setApplyFeeDiscount(e.target.checked)}
+                    className="w-4 h-4 rounded border-gray-300 text-emerald-600"
+                  />
+                  Taikyti 20% nuolaidą
+                </label>
+              )}
+              {isSchoolView && applyFeeDiscount && discountedAnnualFee(cForm.annual_fee) && (
+                <p className="text-xs font-medium text-emerald-700">
+                  Su nuolaida: {discountedAnnualFee(cForm.annual_fee)} EUR — ši suma bus įrašyta sutartyje ir mokėjimuose.
                 </p>
               )}
             </div>
@@ -2060,7 +2099,7 @@ export default function CompanyContracts() {
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div className="space-y-2">
-                <Label>{tr('compStu.parentPhoneRequired')}</Label>
+                <Label>{isSchoolView ? 'Tėvų tel. nr.' : tr('compStu.parentPhoneRequired')}</Label>
                 <Input
                   value={contractParentPhone}
                   onChange={(e) => {

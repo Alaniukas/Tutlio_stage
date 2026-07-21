@@ -23,7 +23,7 @@ type Meta = {
   studentName?: string;
   schoolName?: string;
   pdfUrl?: string | null;
-  missing: { address: boolean; birthDate: boolean; parentCode: boolean; mediaPublicity?: boolean };
+  missing: { address: boolean; birthDate: boolean; parentCode: boolean; parentPhone?: boolean; mediaPublicity?: boolean };
 };
 
 export default function SchoolContractComplete() {
@@ -35,6 +35,7 @@ export default function SchoolContractComplete() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [parentPersonalCode, setParentPersonalCode] = useState('');
+  const [parentPhone, setParentPhone] = useState('');
   const [studentAddress, setStudentAddress] = useState('');
   const [studentCity, setStudentCity] = useState('');
   const [childBirthDate, setChildBirthDate] = useState('');
@@ -103,6 +104,7 @@ export default function SchoolContractComplete() {
       const payload: Record<string, string | undefined> = {
         review_confirmed: 'true',
         parent_personal_code: parentPersonalCode,
+        parent_phone: parentPhone,
         student_address: studentAddress,
         student_city: studentCity,
         child_birth_date: childBirthDate,
@@ -169,6 +171,7 @@ export default function SchoolContractComplete() {
   const missingList: string[] = [];
   if (missing.address) missingList.push('Gyvenamoji vieta');
   if (missing.parentCode) missingList.push('Tėvų asmens kodas');
+  if (missing.parentPhone) missingList.push('Tėvų tel. nr.');
   if (missing.birthDate) missingList.push('Vaiko gimimo data');
   if (missing.mediaPublicity) missingList.push('Vaiko atvaizdo naudojimo sutikimas');
 
@@ -255,6 +258,17 @@ export default function SchoolContractComplete() {
                 onChange={(e) => setParentPersonalCode(e.target.value)}
                 className="mt-1 rounded-xl"
                 placeholder="Tėvų asmens kodas"
+              />
+            </div>
+          )}
+          {missing.parentPhone && (
+            <div>
+              <Label>Tėvų tel. nr.</Label>
+              <Input
+                value={parentPhone}
+                onChange={(e) => setParentPhone(e.target.value)}
+                className="mt-1 rounded-xl"
+                placeholder="+370 600 00000"
               />
             </div>
           )}

@@ -1309,10 +1309,6 @@ export default function CompanyStudents() {
       setToastMessage({ message: t('compStu.parentEmailRequiredError'), type: 'error' });
       return;
     }
-    if (isSchoolView && !newStudent.payer_phone.trim()) {
-      setToastMessage({ message: t('compStu.parentPhoneRequiredError'), type: 'error' });
-      return;
-    }
     const hasSecondParentAny =
       !!newStudent.parent_secondary_name.trim() ||
       !!newStudent.parent_secondary_email.trim() ||
@@ -2266,13 +2262,12 @@ export default function CompanyStudents() {
                           />
                         </div>
                         <div className="space-y-2">
-                        <Label>{t('compStu.parentPhoneRequired')}</Label>
+                        <Label>Tėvų tel. nr.</Label>
                         <Input
                           value={newStudent.payer_phone}
                           onChange={(e) => setNewStudent({ ...newStudent, payer_phone: formatLithuanianPhone(e.target.value) })}
                           placeholder="+370 600 00000"
                           className="rounded-xl"
-                          required
                         />
                       </div>
                         </div>
@@ -3029,7 +3024,7 @@ export default function CompanyStudents() {
                             <div className="grid sm:grid-cols-2 gap-2">
                               <Input value={studentEditDraft.payer_name} onChange={(e) => setStudentEditDraft((p) => ({ ...p, payer_name: e.target.value }))} placeholder={t('compStu.parentFullNameRequired')} className="rounded-xl bg-white" />
                               <Input type="email" value={studentEditDraft.payer_email} onChange={(e) => setStudentEditDraft((p) => ({ ...p, payer_email: e.target.value }))} placeholder={t('compStu.parentEmailRequired')} className="rounded-xl bg-white" />
-                              <Input value={studentEditDraft.payer_phone} onChange={(e) => setStudentEditDraft((p) => ({ ...p, payer_phone: formatLithuanianPhone(e.target.value) }))} placeholder={t('compStu.parentPhoneRequired')} className="rounded-xl bg-white" />
+                              <Input value={studentEditDraft.payer_phone} onChange={(e) => setStudentEditDraft((p) => ({ ...p, payer_phone: formatLithuanianPhone(e.target.value) }))} placeholder={isSchoolView ? 'Tėvų tel. nr.' : t('compStu.parentPhoneRequired')} className="rounded-xl bg-white" />
                               <Input
                                 value={studentEditDraft.payer_personal_code}
                                 onChange={(e) => setStudentEditDraft((p) => ({ ...p, payer_personal_code: e.target.value }))}

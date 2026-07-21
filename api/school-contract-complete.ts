@@ -96,6 +96,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const isAddressMissing = !String(st.student_address || '').trim() && !String(st.student_city || '').trim();
   const isBirthDateMissing = !String(st.child_birth_date || '').trim();
   const isParentCodeMissing = !String(st.payer_personal_code || '').trim();
+  const isParentPhoneMissing = !String(st.payer_phone || '').trim();
   const isMediaConsentMissing = isSchoolOrg && !existingConsent;
 
   if (req.method === 'GET') {
@@ -124,6 +125,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             address: isAddressMissing,
             birthDate: isBirthDateMissing,
             parentCode: isParentCodeMissing,
+            parentPhone: isParentPhoneMissing,
             mediaPublicity: isMediaConsentMissing,
           },
         }),
@@ -140,6 +142,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const fieldSummary = [
       isAddressMissing ? '<li>Gyvenamoji vieta</li>' : '',
       isParentCodeMissing ? '<li>Tėvų asmens kodas</li>' : '',
+      isParentPhoneMissing ? '<li>Tėvų tel. nr.</li>' : '',
       isBirthDateMissing ? '<li>Vaiko gimimo data</li>' : '',
       isMediaConsentMissing ? '<li>Vaiko atvaizdo naudojimo sutikimas</li>' : '',
     ].filter(Boolean).join('');
@@ -147,6 +150,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const fieldsHtml = [
       isParentCodeMissing
         ? '<input id="parent_personal_code" placeholder="Tėvų asmens kodas" style="padding:12px 14px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;" />'
+        : '',
+      isParentPhoneMissing
+        ? '<input id="parent_phone" placeholder="Tėvų tel. nr." style="padding:12px 14px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;" />'
         : '',
       isAddressMissing
         ? '<input id="student_address" placeholder="Adresas" style="padding:12px 14px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;" />'
@@ -221,6 +227,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             token: "${token}",
             review_confirmed: Boolean(document.getElementById('review_confirmed')?.checked),
             parent_personal_code: get('parent_personal_code'),
+            parent_phone: get('parent_phone'),
             student_address: get('student_address'),
             student_city: get('student_city'),
             child_birth_date: get('child_birth_date'),
@@ -253,6 +260,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).send(pageHtml('<h2>Patvirtinkite, kad sutartį peržiūrėjote ir duomenys yra teisingi.</h2>'));
   }
   const submittedParentPersonalCode = String(body.parent_personal_code || '').trim();
+  const submittedParentPhone = String(body.parent_phone || '').trim();
   const studentAddress = String(body.student_address || '').trim();
   const studentCity = String(body.student_city || '').trim();
   const childBirthDate = String(body.child_birth_date || '').trim();
@@ -265,12 +273,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const consentValue = submittedConsent === 'agree' || submittedConsent === 'disagree' ? submittedConsent : '';
 
   if (isParentCodeMissing && !submittedParentPersonalCode) return res.status(400).send(pageHtml('<h2>Įveskite tėvų asmens kodą.</h2>'));
+  if (isParentPhoneMissing && !submittedParentPhone) return res.status(400).send(pageHtml('<h2>Įveskite tėvų tel. nr.</h2>'));
   if (isAddressMissing && !studentAddress && !studentCity) return res.status(400).send(pageHtml('<h2>Įveskite adresą arba miestą.</h2>'));
   if (isBirthDateMissing && !childBirthDate) return res.status(400).send(pageHtml('<h2>Įveskite vaiko gimimo datą.</h2>'));
   if (isMediaConsentMissing && !consentValue) return res.status(400).send(pageHtml('<h2>Pasirinkite: sutinku arba nesutinku dėl vaiko atvaizdo naudojimo.</h2>'));
 
   const studentUpdatePayload = {
     payer_personal_code: isParentCodeMissing ? (submittedParentPersonalCode || null) : st.payer_personal_code || null,
+    payer_phone: isParentPhoneMissing ? (submittedParentPhone || null) : st.payer_phone || null,
     student_address: isAddressMissing ? (studentAddress || null) : st.student_address || null,
     student_city: isAddressMissing ? (studentCity || null) : st.student_city || null,
     child_birth_date: isBirthDateMissing ? (childBirthDate || null) : st.child_birth_date || null,
