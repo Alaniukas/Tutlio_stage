@@ -186,6 +186,7 @@ export default function CompanyContracts() {
   const templateFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [contractOpen, setContractOpen] = useState(false);
+  const [contractStudentSearch, setContractStudentSearch] = useState('');
   const [cForm, setCForm] = useState({ student_id: '', template_id: '', contract_number: '', annual_fee: '', filled_body: '' });
   const [contractParentName, setContractParentName] = useState('');
   const [contractParentEmail, setContractParentEmail] = useState('');
@@ -513,6 +514,7 @@ export default function CompanyContracts() {
     setAdditionalFeePurpose('');
     setAdditionalFeeAmount('');
     setApplyFeeDiscount(false);
+    setContractStudentSearch('');
     setContractOpen(true);
   };
 
@@ -1921,10 +1923,33 @@ export default function CompanyContracts() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>{tr('school.studentName')}</Label>
-                <Select value={cForm.student_id} onValueChange={onStudentSelect}>
+                <Select
+                  value={cForm.student_id}
+                  onValueChange={(studentId) => {
+                    onStudentSelect(studentId);
+                    setContractStudentSearch('');
+                  }}
+                >
                   <SelectTrigger><SelectValue placeholder={tr('school.selectStudent')} /></SelectTrigger>
-                  <SelectContent>
-                    {sortStudentsByFullName(students).map((s) => (
+                  <SelectContent className="max-h-72 overflow-y-auto">
+                    <div
+                      className="sticky top-0 z-10 bg-white p-2 border-b border-gray-100"
+                      onPointerDown={(e) => e.preventDefault()}
+                    >
+                      <Input
+                        value={contractStudentSearch}
+                        onChange={(e) => setContractStudentSearch(e.target.value)}
+                        onKeyDown={(e) => e.stopPropagation()}
+                        placeholder={tr('common.search')}
+                        className="h-9 rounded-xl"
+                      />
+                    </div>
+                    {(contractStudentSearch
+                      ? sortStudentsByFullName(students).filter((s) =>
+                          (s.full_name || '').toLowerCase().includes(contractStudentSearch.trim().toLowerCase()),
+                        )
+                      : sortStudentsByFullName(students)
+                    ).map((s) => (
                       <SelectItem key={s.id} value={s.id}>
                         {s.full_name}{s.grade?.trim() ? ` — ${s.grade.trim()}` : ''}
                       </SelectItem>

@@ -66,6 +66,7 @@ const CompanyInstructions = lazy(() => import('@/pages/company/CompanyInstructio
 const CompanyDynamicPricing = lazy(() => import('@/pages/company/CompanyDynamicPricing'));
 const CompanyMessages = lazy(() => import('@/pages/company/CompanyMessages'));
 const PreviewAssignStudentModal = lazy(() => import('@/pages/dev/PreviewAssignStudentModal'));
+const PreviewCreateContractModal = lazy(() => import('@/pages/dev/PreviewCreateContractModal'));
 const ParentDashboard = lazy(() => import('@/pages/ParentDashboard'));
 const ParentSessions = lazy(() => import('@/pages/ParentSessions'));
 const ParentInvoices = lazy(() => import('@/pages/ParentInvoices'));
@@ -209,8 +210,20 @@ export default function App({ basename }: { basename: string }) {
           }
         />
         <Route
+          path="/preview/create-contract-modal"
+          element={
+            <StaticLocaleProvider locale="lt">
+              <PreviewCreateContractModal />
+            </StaticLocaleProvider>
+          }
+        />
+        <Route
           path="/dev/preview-assign-student-modal"
           element={<Navigate to="/preview/assign-student-modal" replace />}
+        />
+        <Route
+          path="/dev/preview-create-contract-modal"
+          element={<Navigate to="/preview/create-contract-modal" replace />}
         />
 
         {/* Public Landing Pages - NO UserProvider wrapper */}
