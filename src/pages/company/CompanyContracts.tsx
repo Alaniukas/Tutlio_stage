@@ -95,9 +95,17 @@ interface InstallmentDraft {
 
 /** 20% nuolaida metiniam mokesčiui: įrašoma jau sumažinta suma (sutartis, mokėjimai, įmokų validacija). */
 export const ANNUAL_FEE_DISCOUNT_RATE = 0.2;
+
+const parseAnnualFeeInput = (value: string): number | null => {
+  const trimmed = value.trim();
+  if (trimmed === '') return null;
+  const n = Number(trimmed);
+  return Number.isFinite(n) ? n : null;
+};
+
 export const discountedAnnualFee = (value: string): string => {
-  const n = Number(value);
-  if (!(n > 0)) return '';
+  const n = parseAnnualFeeInput(value);
+  if (n == null || n < 0) return '';
   return (Math.round(n * (1 - ANNUAL_FEE_DISCOUNT_RATE) * 100) / 100).toFixed(2);
 };
 
@@ -351,7 +359,7 @@ export default function CompanyContracts() {
       organization_id: orgId,
       name: resolvedTemplateName,
       body: tForm.body,
-      annual_fee_default: tForm.annual_fee_default ? Number(tForm.annual_fee_default) : null,
+      annual_fee_default: tForm.annual_fee_default.trim() !== '' ? Number(tForm.annual_fee_default) : null,
       pdf_url: tForm.pdf_url || null,
     };
 
@@ -636,7 +644,7 @@ export default function CompanyContracts() {
         dueDate: new Date(params.dueDate).toLocaleDateString('lt-LT'),
         additionalFeeAmount: params.additionalFeeAmount ? Number(params.additionalFeeAmount).toFixed(2) : undefined,
         additionalFeePurpose: params.additionalFeePurpose || undefined,
-        annualFee: params.annualFee ? Number(params.annualFee).toFixed(2) : undefined,
+        annualFee: params.annualFee != null && params.annualFee !== '' ? Number(params.annualFee).toFixed(2) : undefined,
         installmentId: params.installmentId,
         ...(orgId ? { organizationId: orgId } : {}),
       },
@@ -975,12 +983,16 @@ export default function CompanyContracts() {
   };
 
   const createContract = async () => {
-    if (!orgId || !cForm.student_id || !cForm.annual_fee) return;
-    if (!(Number(cForm.annual_fee) > 0)) {
-      setToast({ message: 'Metinis mokestis turi būti didesnis nei 0.', type: 'error' });
+    const annualFeeNum = parseAnnualFeeInput(cForm.annual_fee);
+    if (!orgId || !cForm.student_id || annualFeeNum == null) return;
+    if (isSchoolView ? annualFeeNum < 0 : annualFeeNum <= 0) {
+      setToast({
+        message: isSchoolView ? 'Metinis mokestis negali būti neigiamas.' : 'Metinis mokestis turi būti didesnis nei 0.',
+        type: 'error',
+      });
       return;
     }
-    const effectiveAnnualFee = applyFeeDiscount ? discountedAnnualFee(cForm.annual_fee) : cForm.annual_fee;
+    const effectiveAnnualFee = applyFeeDiscount && isSchoolView ? discountedAnnualFee(cForm.annual_fee) : cForm.annual_fee;
     const additionalFeeAmountNum = hasAdditionalFee ? Number(additionalFeeAmount) : 0;
     const effectiveContractNumber = cForm.contract_number.trim() || generateContractNumber();
     if (!contractParentName.trim()) {
@@ -1102,15 +1114,25 @@ export default function CompanyContracts() {
       if (error) { setToast({ message: error.message, type: 'error' }); return; }
 
       if (paymentMode === 'installments' && created) {
-      const schedule = installmentRows.map((r, idx) => ({
+      let schedule = installmentRows.map((r, idx) => ({
         contract_id: created.id,
         installment_number: idx + 1,
         amount: Number(r.amount) + (idx === 0 && hasAdditionalFee ? additionalFeeAmountNum : 0),
         due_date: r.due_date,
       }));
-      const { error: installmentsErr } = await supabase
+      if (schedule.every((row) => row.amount <= 0) && Number(effectiveAnnualFee) === 0 && !hasAdditionalFee) {
+        schedule = [{
+          contract_id: created.id,
+          installment_number: 1,
+          amount: 0,
+          due_date: installmentRows[0]?.due_date || new Date().toISOString().slice(0, 10),
+        }];
+      } else {
+        schedule = schedule.filter((row) => row.amount > 0);
+      }
+      const { error: installmentsErr } = schedule.length > 0 ? await supabase
         .from('school_payment_installments')
-        .insert(schedule);
+        .insert(schedule) : { error: null };
       if (installmentsErr) {
         setToast({ message: installmentsErr.message, type: 'error' });
         reload();
@@ -1120,12 +1142,13 @@ export default function CompanyContracts() {
 
       if (paymentMode === 'full' && created) {
       const dueDate = new Date().toISOString().slice(0, 10);
+      const fullPaymentAmount = Number(effectiveAnnualFee) + (hasAdditionalFee ? additionalFeeAmountNum : 0);
       const { error: oneInstallmentErr } = await supabase
         .from('school_payment_installments')
         .insert({
           contract_id: created.id,
           installment_number: 1,
-          amount: Number(effectiveAnnualFee) + (hasAdditionalFee ? additionalFeeAmountNum : 0),
+          amount: fullPaymentAmount,
           due_date: dueDate,
         });
       if (oneInstallmentErr) {
@@ -1737,7 +1760,7 @@ export default function CompanyContracts() {
                   <div className="min-w-0 flex-1">
                     <p className="font-semibold text-gray-900 break-words">{tpl.name}</p>
                     <p className="text-sm text-gray-500 mt-0.5">
-                      {tr('school.defaultFee')} {tpl.annual_fee_default ? fmtMoney(tpl.annual_fee_default) : tr('school.defaultFeeNotSet')}
+                      {tr('school.defaultFee')} {tpl.annual_fee_default != null ? fmtMoney(tpl.annual_fee_default) : tr('school.defaultFeeNotSet')}
                     </p>
                     {tpl.pdf_url && (
                       <button type="button" className="text-xs text-emerald-700 hover:underline" onClick={() => openContractFile(tpl.pdf_url)}>
@@ -1798,7 +1821,7 @@ export default function CompanyContracts() {
                 </div>
                 <div className="space-y-2">
                   <Label>{tr('school.templateDefaultFee')}</Label>
-                  <Input type="number" step="0.01" value={tForm.annual_fee_default} onChange={(e) => setTForm({ ...tForm, annual_fee_default: e.target.value })} placeholder="300" />
+                  <Input type="number" min="0" step="0.01" value={tForm.annual_fee_default} onChange={(e) => setTForm({ ...tForm, annual_fee_default: e.target.value })} placeholder="300" />
                 </div>
               </div>
             )}
@@ -1968,6 +1991,7 @@ export default function CompanyContracts() {
               <Label>{tr('school.annualFeeStar')}</Label>
               <Input
                 type="number"
+                min={isSchoolView ? '0' : undefined}
                 step="0.01"
                 value={cForm.annual_fee}
                 onChange={(e) =>
@@ -1991,7 +2015,7 @@ export default function CompanyContracts() {
               />
               {isSchoolView && (
                 <p className="text-xs text-gray-500">
-                  Numatytoji suma — 300 EUR. Įrašyta suma bus naudojama sutartyje ir mokėjimuose.
+                  Numatytoji suma — 300 EUR. Galite įrašyti ir 0 EUR. Įrašyta suma bus naudojama sutartyje ir mokėjimuose.
                 </p>
               )}
               {isSchoolView && (
@@ -2270,7 +2294,7 @@ export default function CompanyContracts() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setContractOpen(false)}>{tr('school.cancel')}</Button>
-            <Button onClick={createContract} disabled={saving || !cForm.student_id || !cForm.annual_fee} className="bg-emerald-600 hover:bg-emerald-700">
+            <Button onClick={createContract} disabled={saving || !cForm.student_id || parseAnnualFeeInput(cForm.annual_fee) == null} className="bg-emerald-600 hover:bg-emerald-700">
               {saving ? tr('school.creating') : tr('school.createContract')}
             </Button>
           </DialogFooter>

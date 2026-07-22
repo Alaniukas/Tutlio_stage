@@ -1,8 +1,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
-
-const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
+import { markSchoolInstallmentPaidAndMaybeInvite } from './_lib/schoolBookingInvite.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -50,117 +49,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    const { data: updatedInstallment, error: updateErr } = await supabase
-      .from('school_payment_installments')
-      .update({
-        payment_status: 'paid',
-        paid_at: new Date().toISOString(),
-        stripe_payment_intent_id: (session as any).payment_intent || null,
-      })
-      .eq('id', resolvedInstallmentId)
-      .eq('payment_status', 'pending')
-      .select('id, installment_number, amount, contract_id')
-      .maybeSingle();
+    const result = await markSchoolInstallmentPaidAndMaybeInvite(supabase, resolvedInstallmentId, {
+      serviceRoleKey,
+      stripePaymentIntentId: (session as any).payment_intent || null,
+      studentId: String(session.metadata?.tutlio_student_id || '').trim() || null,
+    });
 
-    if (updateErr) return res.status(500).json({ error: updateErr.message });
-
-    // If already paid, report success as idempotent.
-    const effectiveInstallment = updatedInstallment
-      ? updatedInstallment
-      : (await supabase
-          .from('school_payment_installments')
-          .select('id, installment_number, amount, contract_id')
-          .eq('id', resolvedInstallmentId)
-          .maybeSingle()).data;
-
-    if (!effectiveInstallment) return res.status(404).json({ error: 'Installment not found' });
-
-    // On first paid installment, ensure invite code and send parent invite.
-    const { data: allInstallments } = await supabase
-      .from('school_payment_installments')
-      .select('id, payment_status, installment_number')
-      .eq('contract_id', effectiveInstallment.contract_id)
-      .order('installment_number');
-
-    const paidInstallments = (allInstallments || []).filter((i) => i.payment_status === 'paid');
-    const firstPaid = paidInstallments.length === 1 ? paidInstallments[0] : null;
-    // Send invite only on the first successful pending->paid transition (idempotent).
-    if (updatedInstallment && firstPaid?.id === resolvedInstallmentId) {
-      const studentId = String(session.metadata?.tutlio_student_id || '').trim();
-      if (studentId) {
-        const { data: student } = await supabase
-          .from('students')
-          .select('id, invite_code, full_name, email, payer_email, payer_name, parent_secondary_email, parent_secondary_name')
-          .eq('id', studentId)
-          .maybeSingle();
-
-        if (student) {
-          let inviteCode = student.invite_code;
-          if (!inviteCode) {
-            inviteCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-            await supabase.from('students').update({ invite_code: inviteCode }).eq('id', student.id);
-          }
-          let schoolOrgId: string | null = null;
-          if (effectiveInstallment.contract_id) {
-            const { data: cRow } = await supabase.from('school_contracts').select('organization_id').eq('id', effectiveInstallment.contract_id).maybeSingle();
-            schoolOrgId = (cRow as any)?.organization_id || null;
-          }
-          // Student registration invite — parent portal invite is sent separately by admin.
-          const childEmail = String(student.email || '').trim();
-          type InviteRecipient = { email: string; recipientName: string };
-          const inviteRecipients: InviteRecipient[] = [];
-          if (childEmail.includes('@')) {
-            inviteRecipients.push({
-              email: childEmail,
-              recipientName: String(student.full_name || '').trim() || childEmail,
-            });
-          } else {
-            const pushUnique = (email: string | null | undefined, name: string | null | undefined) => {
-              const em = String(email || '').trim();
-              if (!em.includes('@')) return;
-              if (inviteRecipients.some((r) => r.email.toLowerCase() === em.toLowerCase())) return;
-              inviteRecipients.push({
-                email: em,
-                recipientName: String(name || '').trim() || em,
-              });
-            };
-            pushUnique(student.payer_email, student.payer_name);
-            pushUnique(student.parent_secondary_email, student.parent_secondary_name);
-          }
-
-          if (inviteRecipients.length > 0) {
-            const bookingUrl = `${APP_URL}/book/${inviteCode}`;
-            let schoolName = 'Mokykla';
-            if (schoolOrgId) {
-              const { data: orgRow } = await supabase
-                .from('organizations')
-                .select('name')
-                .eq('id', schoolOrgId)
-                .maybeSingle();
-              if (orgRow?.name) schoolName = String(orgRow.name);
-            }
-            for (const recipient of inviteRecipients) {
-              await fetch(`${APP_URL}/api/send-email`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-internal-key': serviceRoleKey },
-                body: JSON.stringify({
-                  type: 'invite_email',
-                  to: recipient.email,
-                  data: {
-                    context: 'school',
-                    studentName: student.full_name,
-                    recipientName: recipient.recipientName,
-                    tutorName: schoolName,
-                    inviteCode,
-                    bookingUrl,
-                    ...(schoolOrgId ? { organizationId: schoolOrgId } : {}),
-                  },
-                }),
-              }).catch(() => {});
-            }
-          }
-        }
-      }
+    if (!result.success) {
+      return res.status(result.error === 'Installment not found' ? 404 : 500).json({ error: result.error });
     }
 
     return res.status(200).json({ success: true, installmentId: resolvedInstallmentId });

@@ -9,6 +9,7 @@ export default function SchoolPaymentSuccess() {
   const [errorMsg, setErrorMsg] = useState('');
   const success = params.get('success') === '1';
   const cancelled = params.get('cancelled') === '1';
+  const free = params.get('free') === '1';
   const installmentId = params.get('installment') || '';
   const sessionId = params.get('session_id') || '';
 
@@ -22,7 +23,12 @@ export default function SchoolPaymentSuccess() {
       setErrorMsg('Mokėjimo būsena neaiški.');
       return;
     }
-    if (!installmentId || !sessionId) {
+    if (!installmentId) {
+      setStatus('error');
+      setErrorMsg('Trūksta mokėjimo identifikatorių.');
+      return;
+    }
+    if (!free && !sessionId) {
       setStatus('error');
       setErrorMsg('Trūksta mokėjimo identifikatorių.');
       return;
@@ -31,10 +37,10 @@ export default function SchoolPaymentSuccess() {
     let mounted = true;
     (async () => {
       try {
-        const resp = await fetch('/api/confirm-school-installment-payment', {
+        const resp = await fetch(free ? '/api/confirm-school-installment-free' : '/api/confirm-school-installment-payment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ installmentId, sessionId }),
+          body: JSON.stringify(free ? { installmentId } : { installmentId, sessionId }),
         });
         const json = await resp.json().catch(() => ({}));
         if (!resp.ok || !json?.success) {
@@ -52,7 +58,7 @@ export default function SchoolPaymentSuccess() {
       }
     })();
     return () => { mounted = false; };
-  }, [cancelled, success, installmentId, sessionId]);
+  }, [cancelled, success, free, installmentId, sessionId]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-violet-50 via-white to-emerald-50 flex items-center justify-center p-4">
@@ -76,8 +82,10 @@ export default function SchoolPaymentSuccess() {
                 : 'Mokėjimo klaida'}
         </h1>
         <p className="text-sm text-gray-500 mb-8">
-          {status === 'loading' && 'Palaukite, tikriname mokėjimo patvirtinimą...'}
-          {status === 'success' && 'Ačiū! Įmoka gauta. Mokykla jau matys atnaujintą mokėjimo būseną.'}
+          {status === 'loading' && (free ? 'Palaukite, patvirtiname registraciją...' : 'Palaukite, tikriname mokėjimo patvirtinimą...')}
+          {status === 'success' && (free
+            ? 'Ačiū! Registracija patvirtinta. Netrukus gausite el. laišką su prisijungimo informacija.'
+            : 'Ačiū! Įmoka gauta. Mokykla jau matys atnaujintą mokėjimo būseną.')}
           {status === 'cancelled' && 'Jei reikia, galite pakartoti apmokėjimą iš gautos nuorodos el. paštu.'}
           {status === 'error' && (errorMsg || 'Nepavyko patvirtinti mokėjimo. Susisiekite su mokykla.')}
         </p>

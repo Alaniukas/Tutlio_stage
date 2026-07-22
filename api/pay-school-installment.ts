@@ -11,6 +11,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { schoolInstallmentCheckoutCents } from './_lib/schoolInstallmentStripe.js';
+import { schoolInstallmentChargeEur } from './_lib/schoolBookingInvite.js';
 import { marketFromRequest } from './_lib/market.js';
 import { chargeCurrency } from './_lib/marketMoney.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
@@ -73,6 +74,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const student = contract.student;
         const org = contract.org;
+
+        const totalEur = schoolInstallmentChargeEur(installment, contract);
+        if (totalEur <= 0) {
+            return res.redirect(303, `${appOrigin}/school-payment-success?success=1&installment=${installment.id}&free=1`);
+        }
 
         // 2. School must have a connected Stripe (Connect) account to receive funds
         if (!org?.stripe_onboarding_complete || !org.stripe_account_id) {

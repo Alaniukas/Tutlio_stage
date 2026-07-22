@@ -2090,7 +2090,9 @@ function schoolInstallmentRequest(d: any, locale: Locale) {
       <div class="body">
         <p class="greeting">Sveiki, ${esc(d.recipientName || d.parentName || d.studentName)},</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          Atėjo laikas apmokėti <strong>${esc(d.studentName)}</strong> metinio mokesčio įmoką (${esc(d.schoolName)}).
+          ${totalAmount > 0
+            ? `Atėjo laikas apmokėti <strong>${esc(d.studentName)}</strong> metinio mokesčio įmoką (${esc(d.schoolName)}).`
+            : `Prašome patvirtinti <strong>${esc(d.studentName)}</strong> registraciją (${esc(d.schoolName)}), kad galėtumėte gauti prisijungimo informaciją.`}
         </p>
         <div class="info-card">
           <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
@@ -2103,7 +2105,7 @@ function schoolInstallmentRequest(d: any, locale: Locale) {
             ${td('Terminas', d.dueDate || '—', false)}
           </table>
         </div>
-        ${payUrl ? `<div style="text-align:center; margin:24px 0;">${outlookEmailButton(payUrl, 'Apmokėti dabar', '#059669', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}</div>` : ''}
+        ${payUrl ? `<div style="text-align:center; margin:24px 0;">${outlookEmailButton(payUrl, totalAmount > 0 ? 'Apmokėti dabar' : 'Patvirtinti registraciją', '#059669', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}</div>` : ''}
         <p style="color:#6b7280; font-size:13px;">Jei turite klausimų, susisiekite su mokykla: ${esc(d.contactEmail || d.schoolEmail || '')}.</p>
       </div>${footerFor(locale)}`, locale),
   };

@@ -43,9 +43,12 @@ describe('discountedAnnualFee', () => {
     expect(discountedAnnualFee('299.99')).toBe('239.99');
   });
 
+  it('returns 0.00 for zero fee', () => {
+    expect(discountedAnnualFee('0')).toBe('0.00');
+  });
+
   it('returns empty string for missing or invalid amounts', () => {
     expect(discountedAnnualFee('')).toBe('');
-    expect(discountedAnnualFee('0')).toBe('');
     expect(discountedAnnualFee('-5')).toBe('');
     expect(discountedAnnualFee('abc')).toBe('');
   });
