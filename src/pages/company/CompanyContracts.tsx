@@ -647,7 +647,7 @@ export default function CompanyContracts() {
         dueDate: new Date(params.dueDate).toLocaleDateString('lt-LT'),
         additionalFeeAmount: params.additionalFeeAmount ? Number(params.additionalFeeAmount).toFixed(2) : undefined,
         additionalFeePurpose: params.additionalFeePurpose || undefined,
-        annualFee: params.annualFee != null && params.annualFee !== '' ? Number(params.annualFee).toFixed(2) : undefined,
+        annualFee: params.annualFee != null && String(params.annualFee) !== '' ? Number(params.annualFee).toFixed(2) : undefined,
         installmentId: params.installmentId,
         ...(orgId ? { organizationId: orgId } : {}),
       },
@@ -1940,10 +1940,8 @@ export default function CompanyContracts() {
                   }}
                 >
                   <SelectTrigger><SelectValue placeholder={tr('school.selectStudent')} /></SelectTrigger>
-                  <SelectContent
-                    className="max-h-72 overflow-y-auto"
-                    onOpenAutoFocus={(e) => e.preventDefault()}
-                  >
+                  {/* Radix Select has no onOpenAutoFocus; the search input keeps focus via autoFocus + stopPropagation. */}
+                  <SelectContent className="max-h-72 overflow-y-auto">
                     <div className="sticky top-0 z-10 bg-white p-2 border-b border-gray-100">
                       <Input
                         value={contractStudentSearch}
