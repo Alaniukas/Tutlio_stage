@@ -1931,15 +1931,17 @@ export default function CompanyContracts() {
                   }}
                 >
                   <SelectTrigger><SelectValue placeholder={tr('school.selectStudent')} /></SelectTrigger>
-                  <SelectContent className="max-h-72 overflow-y-auto">
-                    <div
-                      className="sticky top-0 z-10 bg-white p-2 border-b border-gray-100"
-                      onPointerDown={(e) => e.preventDefault()}
-                    >
+                  <SelectContent
+                    className="max-h-72 overflow-y-auto"
+                    onOpenAutoFocus={(e) => e.preventDefault()}
+                  >
+                    <div className="sticky top-0 z-10 bg-white p-2 border-b border-gray-100">
                       <Input
                         value={contractStudentSearch}
                         onChange={(e) => setContractStudentSearch(e.target.value)}
                         onKeyDown={(e) => e.stopPropagation()}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        autoFocus
                         placeholder={tr('common.search')}
                         className="h-9 rounded-xl"
                       />

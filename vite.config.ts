@@ -34,7 +34,7 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 7 * 1024 * 1024,
         navigateFallback: 'index.html',
         // SEO/crawler files must never be answered with the SPA shell from the SW.
-        navigateFallbackDenylist: [/^\/api\//, /^\/(robots\.txt|sitemap\.xml|llms(-full)?\.txt)$/, /\/blog\/rss\.xml$/, /^\/preview-assign-student-modal\.html$/, /^\/preview-create-contract-modal\.html$/],
+        navigateFallbackDenylist: [/^\/api\//, /^\/(robots\.txt|sitemap\.xml|llms(-full)?\.txt)$/, /\/blog\/rss\.xml$/, /^\/preview-assign-student-modal\.html$/],
         importScripts: ['/push-sw.js'],
         runtimeCaching: [
           // Storage object GET/POST must not be served stale from SW during whiteboard collaboration.
@@ -85,7 +85,6 @@ export default defineConfig({
       input: {
         main: path.resolve(__dirname, 'index.html'),
         previewAssignStudentModal: path.resolve(__dirname, 'preview-assign-student-modal.html'),
-        previewCreateContractModal: path.resolve(__dirname, 'preview-create-contract-modal.html'),
       },
     },
   },
