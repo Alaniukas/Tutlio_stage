@@ -85,6 +85,7 @@ interface Contract {
   completion_submitted_at?: string | null;
   additional_fee_amount?: number | null;
   additional_fee_purpose?: string | null;
+  signatures?: { role: string; status: string; signed_at?: string | null; gosign_transaction_id?: string | null }[];
   student?: { full_name: string; email: string; phone?: string | null; payer_name: string | null; payer_email: string | null; payer_phone?: string | null; payer_personal_code?: string | null; parent_secondary_name?: string | null; parent_secondary_email?: string | null; parent_secondary_phone?: string | null; parent_secondary_personal_code?: string | null; parent_secondary_address?: string | null; student_address?: string | null; student_city?: string | null; child_birth_date?: string | null };
 }
 
@@ -156,7 +157,7 @@ function templateNameFromFileName(fileName: string): string {
 }
 
 const CONTRACTS_CACHE_KEY = 'company_contracts';
-const CONTRACTS_SELECT = '*, media_publicity_consent, student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent)';
+const CONTRACTS_SELECT = '*, media_publicity_consent, student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent), signatures:school_contract_signatures(role, status, signed_at, gosign_transaction_id)';
 
 export default function CompanyContracts() {
   const { t: tr } = useTranslation();
@@ -1540,7 +1541,10 @@ export default function CompanyContracts() {
         return;
       }
       signingWindow.close();
-      setToast({ message: j.error || 'Nepavyko pradėti pasirašymo.', type: 'error' });
+      const message = /timed out|timeout/i.test(j.error || '')
+        ? 'Registrų centro (GoSign) paslauga šiuo metu atsako lėtai. Palaukite kelias sekundes ir spauskite „Pasirašyti“ dar kartą — pasirašymas nesidubliuos.'
+        : j.error || 'Nepavyko pradėti pasirašymo.';
+      setToast({ message, type: 'error' });
     } catch (e: any) {
       signingWindow.close();
       setToast({ message: e?.message || 'Klaida pradedant pasirašymą.', type: 'error' });
@@ -1698,6 +1702,11 @@ export default function CompanyContracts() {
                           </button>
                         </p>
                       )}
+                      {(c.signatures || []).some((s) => s.role.startsWith('parent') && s.status === 'signed' && !s.gosign_transaction_id) && (
+                        <p className="text-xs text-emerald-700 mt-1">
+                          Tėvų parašas gautas per Smart-ID (Dokobit) — PDF vientisumas ir naujas parašas patikrinti automatiškai.
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
                       {c.signing_status === 'draft' && (
@@ -1706,8 +1715,8 @@ export default function CompanyContracts() {
                         </Button>
                       )}
                       {c.signing_status === 'awaiting_school_signature' && (
-                        <Button size="sm" onClick={() => signAsSchool(c)} className="bg-indigo-600 hover:bg-indigo-700 text-white">
-                          <PenLine className="w-3.5 h-3.5 mr-1.5" /> Pasirašyti (direktorė)
+                        <Button size="sm" onClick={() => signAsSchool(c)} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                          <PenLine className="w-3.5 h-3.5 mr-1.5" /> {saving ? 'Ruošiama…' : 'Pasirašyti (direktorė)'}
                         </Button>
                       )}
                       {c.signing_status === 'signed_by_school' && (

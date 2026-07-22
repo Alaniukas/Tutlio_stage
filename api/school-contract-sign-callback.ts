@@ -34,7 +34,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!token) return json(res, 400, { error: 'Missing token' });
 
   try {
-    const result = await pollAndAdvance(supabase, token, publicOriginFromRequest(req));
+    // The SPA return page re-calls this endpoint every ~3 s for up to 2 min, so
+    // a couple of GoSign checks per request suffice — a long internal poll here
+    // would only risk hitting the function's maxDuration while RC is slow.
+    const result = await pollAndAdvance(supabase, token, publicOriginFromRequest(req), { attempts: 2 });
     if (result.status === 'not_found') return json(res, 404, { error: 'Invalid link' });
     return json(res, 200, result);
   } catch (e: any) {

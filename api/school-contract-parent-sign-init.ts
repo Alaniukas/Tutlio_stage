@@ -9,7 +9,13 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { isGoSignConfigured, goSignNotConfiguredMessage } from './_lib/gosignConfig.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
-import { CONTRACT_SIGN_SELECT, beginGoSignForRow } from './_lib/schoolContractSigning.js';
+import {
+  CONTRACT_SIGN_SELECT,
+  beginGoSignForRow,
+  fetchSignatureRows,
+  inputPdfPathForRole,
+} from './_lib/schoolContractSigning.js';
+import { SCHOOL_CONTRACTS_BUCKET, extractSchoolContractStoragePath } from './_lib/schoolContractPdfPath.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.statusCode = status;
@@ -57,6 +63,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const expired = row.token_expires_at && new Date(row.token_expires_at).getTime() < Date.now();
 
   if (req.method === 'GET') {
+    const ready = String((contract as any).signing_status) === 'signed_by_school';
+    // Download link for the Smart-ID (Dokobit) path: the exact PDF this signer
+    // must sign (the previous signer's output).
+    let pdfUrl: string | undefined;
+    if (ready && row.status !== 'signed' && !expired) {
+      const rows = await fetchSignatureRows(supabase, String((contract as any).id));
+      const inputPath = inputPdfPathForRole(contract, rows, row.role);
+      if (inputPath) {
+        const { data: signed } = await supabase.storage
+          .from(SCHOOL_CONTRACTS_BUCKET)
+          .createSignedUrl(extractSchoolContractStoragePath(inputPath), 60 * 60);
+        pdfUrl = signed?.signedUrl || undefined;
+      }
+    }
     return json(res, 200, {
       studentName: st.full_name || '',
       schoolName: (contract as any).organizations?.name || '',
@@ -64,7 +84,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       status: row.status,
       alreadySigned: row.status === 'signed',
       expired: Boolean(expired),
-      ready: String((contract as any).signing_status) === 'signed_by_school',
+      ready,
+      pdfUrl,
     });
   }
 

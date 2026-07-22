@@ -70,12 +70,17 @@ export async function downloadPdfBytes(supabase: SupabaseClient, storedPathOrUrl
   return Buffer.from(await data.arrayBuffer());
 }
 
+/** Canonical storage path of a signer's resulting PDF (one per contract+role). */
+export function signedPdfPathForRole(organizationId: string, contractId: string, role: SignerRole): string {
+  return `${organizationId}/contracts/${contractId}/signed/${role}.pdf`;
+}
+
 /** Store a signer's resulting PDF; overwrites per (contract, role). */
 export async function uploadSignedPdf(
   supabase: SupabaseClient,
   params: { organizationId: string; contractId: string; role: SignerRole; bytes: Buffer },
 ): Promise<string> {
-  const path = `${params.organizationId}/contracts/${params.contractId}/signed/${params.role}.pdf`;
+  const path = signedPdfPathForRole(params.organizationId, params.contractId, params.role);
   const { error } = await supabase.storage
     .from(SCHOOL_CONTRACTS_BUCKET)
     .upload(path, new Blob([params.bytes], { type: 'application/pdf' }), {
@@ -98,7 +103,7 @@ async function createContractSignedUrl(
   return data.signedUrl;
 }
 
-async function fetchSignatureRows(supabase: SupabaseClient, contractId: string): Promise<any[]> {
+export async function fetchSignatureRows(supabase: SupabaseClient, contractId: string): Promise<any[]> {
   const { data } = await supabase
     .from('school_contract_signatures')
     .select('*')
@@ -107,7 +112,7 @@ async function fetchSignatureRows(supabase: SupabaseClient, contractId: string):
 }
 
 /** Resolve the input PDF a signer must sign (the previous signer's output). */
-function inputPdfPathForRole(contract: any, rows: any[], role: SignerRole): string {
+export function inputPdfPathForRole(contract: any, rows: any[], role: SignerRole): string {
   if (role === 'school') return String(contract.pdf_url || '');
   if (role === 'parent_primary') {
     return String(rows.find((r) => r.role === 'school')?.signed_pdf_path || '');
@@ -136,6 +141,10 @@ export async function beginGoSignForRow(
   const settings = contractSigningSettings(contract);
   const responseUrl = `${appOrigin.replace(/\/$/, '')}/pasirasymas/sutarties/per/go-sign/${encodeURIComponent(row.token)}/rezultatas`;
 
+  // The signature annotation (reason/location/contact) is stamped onto the PDF
+  // per signer. The org-level location/contact describe the SCHOOL — parents
+  // sign from wherever they are and must show their own contact, not info@.
+  const isSchoolSigner = row.role === 'school';
   const result = await initOneSign({
     responseUrl,
     signingType: 'Signature',
@@ -143,8 +152,8 @@ export async function beginGoSignForRow(
     position: signaturePositionForRole(row.role as SignerRole),
     signerPersonalCode: row.signer_personal_code || undefined,
     reason: settings.reason || undefined,
-    location: settings.location || undefined,
-    contact: settings.contact || undefined,
+    location: isSchoolSigner ? (settings.location || undefined) : undefined,
+    contact: isSchoolSigner ? (settings.contact || undefined) : (stringSetting(row.signer_email) || undefined),
     displayValidity: true,
     mobileSigningText: 'Tutlio: ugdymo sutarties pasirašymas',
     file: {
@@ -340,10 +349,33 @@ export async function pollAndAdvance(
     };
   }
 
+  const adv = await advanceAfterRoleSigned(supabase, contract, row.role as SignerRole, signedPath, appOrigin);
+  return {
+    status: 'signed',
+    role: row.role,
+    contractId,
+    contractStatus: adv.contractStatus,
+    done: adv.done || undefined,
+  };
+}
+
+/**
+ * Side effects after a role's signature PDF is persisted: advance the contract,
+ * invite the next signer, or finalize. Shared by the GoSign poll path and the
+ * Smart-ID (Dokobit) upload path — both produce the same evolving PAdES PDF.
+ */
+export async function advanceAfterRoleSigned(
+  supabase: SupabaseClient,
+  contract: any,
+  role: SignerRole,
+  signedPath: string,
+  appOrigin: string,
+): Promise<{ contractStatus: string; done: boolean }> {
+  const contractId = String((contract as any).id);
   const st = (contract as any).student || {};
   const settings = contractSigningSettings(contract);
 
-  if (row.role === 'school') {
+  if (role === 'school') {
     await supabase
       .from('school_contracts')
       .update({ signing_status: 'signed_by_school' })
@@ -366,10 +398,10 @@ export async function pollAndAdvance(
       pdfUrl: schoolSignedPdfUrl || undefined,
       organizationId: (contract as any).organization_id,
     });
-    return { status: 'signed', role: row.role, contractId, contractStatus: 'signed_by_school' };
+    return { contractStatus: 'signed_by_school', done: false };
   }
 
-  if (row.role === 'parent_primary') {
+  if (role === 'parent_primary') {
     const needSecond =
       Boolean((contract as any).require_second_parent) && Boolean(String(st.parent_secondary_email || '').trim());
     if (needSecond) {
@@ -390,15 +422,15 @@ export async function pollAndAdvance(
         pdfUrl: primarySignedPdfUrl || undefined,
         organizationId: (contract as any).organization_id,
       });
-      return { status: 'signed', role: row.role, contractId, contractStatus: 'signed_by_school' };
+      return { contractStatus: 'signed_by_school', done: false };
     }
     await finalizeContract(supabase, contract, signedPath, appOrigin);
-    return { status: 'signed', role: row.role, contractId, contractStatus: 'signed', done: true };
+    return { contractStatus: 'signed', done: true };
   }
 
   // parent_secondary
   await finalizeContract(supabase, contract, signedPath, appOrigin);
-  return { status: 'signed', role: row.role, contractId, contractStatus: 'signed', done: true };
+  return { contractStatus: 'signed', done: true };
 }
 
 async function sendFirstPendingInstallmentEmail(

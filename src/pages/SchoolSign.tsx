@@ -13,16 +13,22 @@ type Info = {
   alreadySigned?: boolean;
   expired?: boolean;
   ready?: boolean;
+  pdfUrl?: string;
 };
 
 export default function SchoolSign() {
   const { token: pathToken } = useParams<{ token?: string }>();
   const [params] = useSearchParams();
   const token = pathToken || params.get('token') || '';
-  const [state, setState] = useState<'loading' | 'ready' | 'signed' | 'notready' | 'error'>('loading');
+  const [state, setState] = useState<'loading' | 'ready' | 'signed' | 'notready' | 'error' | 'uploaded'>('loading');
   const [info, setInfo] = useState<Info>({});
   const [err, setErr] = useState('');
+  const [startErr, setStartErr] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [uploadErr, setUploadErr] = useState('');
+  const [uploadedDone, setUploadedDone] = useState(false);
+  const [uploadedWarning, setUploadedWarning] = useState(false);
 
   useEffect(() => {
     if (!token) {
@@ -55,6 +61,7 @@ export default function SchoolSign() {
 
   const start = async () => {
     setSubmitting(true);
+    setStartErr('');
     try {
       const r = await fetch('/api/school-contract-parent-sign-init', {
         method: 'POST',
@@ -70,13 +77,72 @@ export default function SchoolSign() {
         setState('signed');
         return;
       }
+      // Transient GoSign hiccups (slow RC, gateway errors) must not dead-end the
+      // page — keep the button so the parent can simply try again.
+      const transient = r.status === 502 || r.status === 503 || r.status === 504 || /timed out|timeout/i.test(j.error || '');
+      if (transient) {
+        setStartErr('Registrų centro (GoSign) paslauga šiuo metu atsako lėtai. Palaukite kelias sekundes ir bandykite dar kartą — pasirašymas nesidubliuos.');
+        return;
+      }
       setErr(j.error || 'Nepavyko pradėti pasirašymo. Bandykite dar kartą.');
       setState('error');
     } catch {
-      setErr('Įvyko klaida. Bandykite vėliau.');
-      setState('error');
+      setStartErr('Nepavyko pasiekti serverio. Patikrinkite ryšį ir bandykite dar kartą.');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  /** Smart-ID (Dokobit) path: upload the externally signed PDF for validation. */
+  const uploadSigned = async (file: File) => {
+    setUploadBusy(true);
+    setUploadErr('');
+    try {
+      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      if (!isPdf) {
+        setUploadErr('Įkelkite PDF failą (jei pasirašėte ADOC/ASiC formatu, Dokobit pasirinkite PDF formatą).');
+        return;
+      }
+      const r1 = await fetch('/api/school-contract-parent-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, action: 'upload-url' }),
+      });
+      const j1 = await r1.json().catch(() => ({}));
+      if (!r1.ok || !j1.signedUrl || !j1.path) {
+        setUploadErr(j1.error || 'Nepavyko paruošti įkėlimo. Bandykite dar kartą.');
+        return;
+      }
+      const put = await fetch(j1.signedUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/pdf', 'x-upsert': 'true' },
+        body: file,
+      });
+      if (!put.ok) {
+        setUploadErr('Nepavyko įkelti failo. Patikrinkite ryšį ir bandykite dar kartą.');
+        return;
+      }
+      const r2 = await fetch('/api/school-contract-parent-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, action: 'finalize', path: j1.path }),
+      });
+      const j2 = await r2.json().catch(() => ({}));
+      if (j2.alreadySigned) {
+        setState('signed');
+        return;
+      }
+      if (!r2.ok || !j2.signed) {
+        setUploadErr(j2.error || 'Įkelto failo patikrinti nepavyko. Bandykite dar kartą.');
+        return;
+      }
+      setUploadedDone(Boolean(j2.done));
+      setUploadedWarning(j2.warning === 'advance_incomplete');
+      setState('uploaded');
+    } catch {
+      setUploadErr('Įvyko klaida. Bandykite dar kartą.');
+    } finally {
+      setUploadBusy(false);
     }
   };
 
@@ -112,20 +178,95 @@ export default function SchoolSign() {
           <h1 className="text-xl font-bold text-gray-900 mb-1">Ugdymo sutarties pasirašymas</h1>
           <p className="text-gray-600 mb-4">
             {info.schoolName || 'Mokykla'} pasirašė ugdymo sutartį
-            {info.studentName ? ` dėl ${info.studentName}` : ''}. Kviečiame ją pasirašyti elektroniniu parašu.
+            {info.studentName ? ` dėl ${info.studentName}` : ''}. Pasirinkite pasirašymo būdą.
           </p>
-          <ul className="text-sm text-gray-500 mb-6 list-disc pl-5 space-y-1">
-            <li>Pasirašyti galėsite su Smart-ID, Mobiliuoju parašu arba el. parašo kortele.</li>
-            <li>Būsite nukreipti į Registrų centro GoSign pasirašymo puslapį ir grįšite atgal.</li>
-          </ul>
-          <button
-            onClick={start}
-            disabled={submitting}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-semibold rounded-xl px-5 py-3 transition-colors"
-          >
-            {submitting ? 'Nukreipiama…' : 'Pasirašyti el. parašu'}
-          </button>
+
+          <div className="border border-gray-200 rounded-xl p-4 mb-3">
+            <p className="font-semibold text-gray-900 mb-1">1. Mobiliuoju parašu, LT ID arba kortele</p>
+            <p className="text-sm text-gray-500 mb-3">
+              Būsite nukreipti į Registrų centro GoSign puslapį ir grįšite atgal. Tinka: Mobile-ID, LT ID
+              programėlė, asmens tapatybės kortelė, USB laikmena.
+            </p>
+            {startErr && (
+              <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-3">{startErr}</p>
+            )}
+            <button
+              onClick={start}
+              disabled={submitting || uploadBusy}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-semibold rounded-xl px-5 py-3 transition-colors"
+            >
+              {submitting ? 'Nukreipiama…' : startErr ? 'Bandyti dar kartą' : 'Pasirašyti el. parašu'}
+            </button>
+          </div>
+
+          <div className="border border-gray-200 rounded-xl p-4">
+            <p className="font-semibold text-gray-900 mb-1">2. Smart-ID (per Dokobit)</p>
+            <p className="text-sm text-gray-500 mb-3">
+              GoSign Smart-ID nepalaiko, todėl pasirašoma Dokobit portale, o pasirašytą failą įkelsite čia pat.
+            </p>
+            <ol className="text-sm text-gray-600 mb-3 list-decimal pl-5 space-y-1">
+              <li>
+                {info.pdfUrl ? (
+                  <a className="text-indigo-600 font-medium underline" href={info.pdfUrl} target="_blank" rel="noreferrer">
+                    Atsisiųskite sutartį (PDF)
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    className="text-indigo-600 font-medium underline"
+                    onClick={() => window.location.reload()}
+                  >
+                    Atsisiųskite sutartį (PDF) — perkrauti nuorodą
+                  </button>
+                )}
+              </li>
+              <li>
+                Prisijunkite prie{' '}
+                <a className="text-indigo-600 underline" href="https://www.dokobit.com/lt" target="_blank" rel="noreferrer">
+                  dokobit.com
+                </a>{' '}
+                su Smart-ID ir įkelkite atsisiųstą PDF.
+              </li>
+              <li>
+                <strong>Svarbu:</strong> pasirašydami palikite PDF formatą (ne ADOC / ASiC).
+              </li>
+              <li>Atsisiųskite pasirašytą PDF iš Dokobit ir įkelkite jį čia:</li>
+            </ol>
+            {uploadErr && (
+              <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-3">{uploadErr}</p>
+            )}
+            <label className={`block ${uploadBusy || submitting ? 'opacity-60' : 'cursor-pointer'}`}>
+              <input
+                type="file"
+                accept="application/pdf,.pdf"
+                className="hidden"
+                disabled={uploadBusy || submitting}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void uploadSigned(file);
+                  e.target.value = '';
+                }}
+              />
+              <span className="block w-full text-center border-2 border-indigo-600 text-indigo-700 hover:bg-indigo-50 font-semibold rounded-xl px-5 py-3 transition-colors">
+                {uploadBusy ? 'Įkeliama ir tikrinama…' : 'Įkelti pasirašytą PDF'}
+              </span>
+            </label>
+          </div>
+
           <p className="text-xs text-gray-400 mt-3">Ši nuoroda asmeninė – neperduokite jos kitiems.</p>
+        </>
+      )}
+
+      {state === 'uploaded' && (
+        <>
+          <h1 className="text-xl font-bold text-emerald-700 mb-2">Pasirašyta sėkmingai ✓</h1>
+          <p className="text-gray-600">
+            {uploadedWarning
+              ? 'Jūsų parašas gautas ir patikrintas. Patvirtinimo laiškai gali vėluoti — jei per valandą negausite žinios, susisiekite su mokykla.'
+              : uploadedDone
+                ? 'Sutartis pasirašyta abiejų šalių. Netrukus gausite el. laišką dėl apmokėjimo.'
+                : 'Jūsų parašas gautas ir patikrintas. Kitos šalies pasirašymo kvietimas išsiųstas el. paštu.'}
+          </p>
         </>
       )}
     </Shell>

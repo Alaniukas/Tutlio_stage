@@ -33,11 +33,34 @@ function soapActionFor(operation: string, override: string): string {
 /** InitOneSign params with clientId/locale/position supplied from config. */
 export type InitOneSignInput = Omit<InitOneSignParams, 'clientId'>;
 
-async function postSoap(
+/**
+ * InitSigning carries the whole PDF inline and RC's latency spikes past 30 s at
+ * times (schools saw sporadic "timed out"), so it gets a longer budget than the
+ * small status/cancel calls. Endpoints doing InitSigning must set a Vercel
+ * maxDuration comfortably above RETRY_WINDOW_MS + INIT_SIGNING_TIMEOUT_MS.
+ */
+export const INIT_SIGNING_TIMEOUT_MS = 60_000;
+/** A transient failure is only retried when the first attempt died this fast. */
+export const RETRY_WINDOW_MS = 10_000;
+
+/**
+ * True for failures where the request almost certainly never produced a GoSign
+ * transaction: transport-level errors and empty-bodied HTTP errors (gateway
+ * hiccups). Timeouts are excluded — the transaction may exist AND a retry would
+ * double the caller's wall-clock — as are SOAP faults (RC did answer).
+ */
+export function isTransientGoSignFailure(err: unknown): boolean {
+  if (!(err instanceof GoSignError)) return false;
+  if (err.message.includes('timed out')) return false;
+  if (err.message.startsWith('GoSign request failed:')) return true;
+  return err.message.includes('with empty body');
+}
+
+async function postSoapOnce(
   endpoint: string,
   soapAction: string,
   xml: string,
-  timeoutMs = 30_000,
+  timeoutMs: number,
 ): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -67,6 +90,25 @@ async function postSoap(
   }
 }
 
+async function postSoap(
+  endpoint: string,
+  soapAction: string,
+  xml: string,
+  { timeoutMs = 30_000, retryTransient = false }: { timeoutMs?: number; retryTransient?: boolean } = {},
+): Promise<string> {
+  const startedAt = Date.now();
+  try {
+    return await postSoapOnce(endpoint, soapAction, xml, timeoutMs);
+  } catch (err) {
+    const elapsed = Date.now() - startedAt;
+    if (retryTransient && elapsed < RETRY_WINDOW_MS && isTransientGoSignFailure(err)) {
+      console.warn(`[gosign] transient failure after ${elapsed}ms — retrying once:`, (err as Error).message);
+      return await postSoapOnce(endpoint, soapAction, xml, timeoutMs);
+    }
+    throw err;
+  }
+}
+
 /** Initiate a OneSign transaction and return the signing URL to redirect to. */
 export async function initOneSign(input: InitOneSignInput): Promise<InitOneSignResponse> {
   const cfg = getGoSignConfig();
@@ -79,7 +121,10 @@ export async function initOneSign(input: InitOneSignInput): Promise<InitOneSignR
     position: input.position ?? cfg.signaturePosition,
   };
   const xml = buildInitOneSignEnvelope(params, cfg.privateKeyPem);
-  const respXml = await postSoap(cfg.onesignEndpoint, soapActionFor('InitSigning', cfg.soapAction), xml);
+  const respXml = await postSoap(cfg.onesignEndpoint, soapActionFor('InitSigning', cfg.soapAction), xml, {
+    timeoutMs: INIT_SIGNING_TIMEOUT_MS,
+    retryTransient: true,
+  });
   if (!cfg.responsePublicKeyPem) {
     console.warn('[gosign] response verification skipped — GOSIGN_RESPONSE_PUBLIC_KEY not set');
   }

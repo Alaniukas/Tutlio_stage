@@ -5,8 +5,8 @@
  *   - we sign every outgoing request with OUR RSA private key (RSA-SHA1);
  *   - GoSign signs every response, which we verify with THEIR public key.
  *
- * We use the **OneSign** service (one document per transaction, supports mobile
- * signatures — Smart-ID / Mobile-ID — as well as smart cards). A two-party
+ * We use the **OneSign** service (one document per transaction; GoSign's
+ * methods are Mobile-ID, LT ID, ID card and USB tokens — NO Smart-ID). A two-party
  * contract is signed as two sequential OneSign transactions on the same
  * evolving PDF: the school signs the original, then the parent signs the
  * school-signed PDF.
@@ -116,7 +116,11 @@ export interface InitOneSignParams {
   /** Page the browser returns to after signing (required). */
   responseUrl: string;
   remoteAddress?: string;
-  /** Allowed signing methods. Empty ⇒ any method (Smart-ID / Mobile-ID / card). */
+  /**
+   * Allowed signing methods; empty ⇒ any method GoSign offers. NOTE: GoSign
+   * does NOT support Smart-ID at all — its methods are Mobile-ID (temporarily
+   * extended), LT ID, ID card and USB tokens.
+   */
   acceptableInfrastructure?: GoSignInfrastructure[];
   /** Signature metadata (reason/location/contact). */
   reason?: string;

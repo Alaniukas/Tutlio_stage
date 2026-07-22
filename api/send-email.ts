@@ -1219,7 +1219,7 @@ function schoolContractSignRequest(d: any, _locale: Locale) {
         <p class="greeting">Sveiki${d.parentName ? `, ${d.parentName}` : ''},</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
           ${d.schoolName || 'Mokykla'} pasirašė ugdymo sutartį${d.studentName ? ` dėl ${d.studentName}` : ''}.
-          Kviečiame ją pasirašyti elektroniniu parašu (Smart-ID, Mobiliuoju parašu arba el. parašo kortele).
+          Kviečiame ją pasirašyti elektroniniu parašu — Mobiliuoju parašu, LT ID, asmens tapatybės kortele ar USB laikmena. Naudojate Smart-ID? Nuorodoje rasite pasirašymo per Dokobit instrukciją, o pasirašytą PDF įkelsite ten pat.
         </p>
         <div style="text-align:center; margin-top:24px;">
           ${outlookEmailButton(d.signUrl, 'Pasirašyti sutartį', '#4f46e5', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}

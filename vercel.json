@@ -34,6 +34,18 @@
         },
         "api/school-contract-sign-reconcile.ts": {
             "maxDuration": 60
+        },
+        "api/school-contract-sign-init.ts": {
+            "maxDuration": 90
+        },
+        "api/school-contract-parent-sign-init.ts": {
+            "maxDuration": 90
+        },
+        "api/school-contract-sign-callback.ts": {
+            "maxDuration": 90
+        },
+        "api/school-contract-parent-upload.ts": {
+            "maxDuration": 60
         }
     },
     "headers": [
