@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, FileText, Send, CheckCircle, Edit2, Trash2, PenLine, Settings, Save } from 'lucide-react';
+import { Plus, FileText, Send, CheckCircle, Edit2, Trash2, PenLine, Settings, Save, Search } from 'lucide-react';
 import Toast from '@/components/Toast';
 import { sendEmail } from '@/lib/email';
 import { useTranslation } from '@/lib/i18n';
@@ -206,6 +206,10 @@ export default function CompanyContracts() {
   const [saving, setSaving] = useState(false);
 
   const [tab, setTab] = useState<'contracts' | 'templates'>('contracts');
+
+  // Contract list filter (schools accumulate many contracts — no more scrolling).
+  const [contractFilter, setContractFilter] = useState<'all' | 'unsigned' | 'signed'>('all');
+  const [contractSearch, setContractSearch] = useState('');
 
   useEffect(() => { if (!getCached(CONTRACTS_CACHE_KEY)) load(); }, []);
   useEffect(() => {
@@ -1663,6 +1667,22 @@ export default function CompanyContracts() {
     }
   };
 
+  // Diacritics-insensitive match (Vėgėlė findable as "vegele" and vice versa).
+  const searchable = (value: string) => normalizePdfText(value).toLowerCase();
+  const signedCount = contracts.filter((c) => c.signing_status === 'signed').length;
+  const visibleContracts = contracts.filter((c) => {
+    if (contractFilter === 'signed' && c.signing_status !== 'signed') return false;
+    if (contractFilter === 'unsigned' && c.signing_status === 'signed') return false;
+    const q = searchable(contractSearch.trim());
+    if (!q) return true;
+    const haystack = searchable(
+      [c.student?.full_name, c.student?.payer_name, c.student?.parent_secondary_name, c.contract_number]
+        .filter(Boolean)
+        .join(' '),
+    );
+    return haystack.includes(q);
+  });
+
   const statusBadge = (s: Contract['signing_status']) => {
     const map = {
       draft: { label: tr('school.draft'), cls: 'bg-gray-100 text-gray-600' },
@@ -1775,8 +1795,38 @@ export default function CompanyContracts() {
               <p className="text-gray-500">{tr('school.noContracts')}</p>
             </div>
           ) : (
+            <>
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="bg-gray-100 rounded-lg p-1 flex gap-1">
+                  {([
+                    ['all', tr('school.filterAll'), contracts.length],
+                    ['unsigned', tr('school.filterUnsigned'), contracts.length - signedCount],
+                    ['signed', tr('school.filterSigned'), signedCount],
+                  ] as const).map(([key, label, count]) => (
+                    <button
+                      key={key}
+                      onClick={() => setContractFilter(key)}
+                      className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${contractFilter === key ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                      {label} <span className={contractFilter === key ? 'text-gray-500' : 'text-gray-400'}>({count})</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="relative flex-1 min-w-[220px] max-w-sm">
+                  <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <Input
+                    value={contractSearch}
+                    onChange={(e) => setContractSearch(e.target.value)}
+                    placeholder={tr('school.searchContracts')}
+                    className="pl-9"
+                  />
+                </div>
+              </div>
+              {visibleContracts.length === 0 ? (
+                <p className="text-center text-gray-500 py-12">{tr('school.noContractsFiltered')}</p>
+              ) : (
             <div className="grid gap-3">
-              {contracts.map((c) => (
+              {visibleContracts.map((c) => (
                 <div key={c.id} className="bg-white rounded-xl border border-gray-200 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -1877,6 +1927,8 @@ export default function CompanyContracts() {
                 </div>
               ))}
             </div>
+              )}
+            </>
           )
         ) : (
           templates.length === 0 ? (
