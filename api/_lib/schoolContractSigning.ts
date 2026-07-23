@@ -57,7 +57,7 @@ export function contractSigningSettings(contract: any): ContractSigningSettings 
   };
 }
 
-function contractPdfFileName(contract: any): string {
+export function contractPdfFileName(contract: any): string {
   const slug = sanitizeContractNumberForFilename(contract?.contract_number || '');
   return `${slug ? `Sutartis-${slug}` : 'Sutartis'}.pdf`;
 }
@@ -95,10 +95,15 @@ export async function uploadSignedPdf(
 async function createContractSignedUrl(
   supabase: SupabaseClient,
   path: string,
+  downloadName?: string,
 ): Promise<string | null> {
   const { data, error } = await supabase.storage
     .from(SCHOOL_CONTRACTS_BUCKET)
-    .createSignedUrl(extractSchoolContractStoragePath(path), SIGNATURE_TOKEN_TTL_MS / 1000);
+    .createSignedUrl(extractSchoolContractStoragePath(path), SIGNATURE_TOKEN_TTL_MS / 1000, {
+      // Stored per-role objects are named school.pdf / parent_primary.pdf — force
+      // a human filename so parents don't end up signing a doc called "school".
+      download: downloadName || undefined,
+    });
   if (error || !data?.signedUrl) return null;
   return data.signedUrl;
 }
@@ -109,6 +114,20 @@ export async function fetchSignatureRows(supabase: SupabaseClient, contractId: s
     .select('*')
     .eq('contract_id', contractId);
   return data || [];
+}
+
+/**
+ * First parent role still requiring a signature (order: primary, then the
+ * optional second parent — mirroring advanceAfterRoleSigned); null when none.
+ */
+export function pendingParentRole(contract: any, rows: any[]): SignerRole | null {
+  const st = contract?.student || {};
+  const primarySigned = rows.find((r) => r.role === 'parent_primary')?.status === 'signed';
+  if (!primarySigned) return 'parent_primary';
+  const needSecond =
+    Boolean(contract?.require_second_parent) && Boolean(String(st.parent_secondary_email || '').trim());
+  if (needSecond && rows.find((r) => r.role === 'parent_secondary')?.status !== 'signed') return 'parent_secondary';
+  return null;
 }
 
 /** Resolve the input PDF a signer must sign (the previous signer's output). */
@@ -388,7 +407,7 @@ export async function advanceAfterRoleSigned(
       signerEmail: st.payer_email,
       signerPersonalCode: st.payer_personal_code,
     });
-    const schoolSignedPdfUrl = await createContractSignedUrl(supabase, signedPath);
+    const schoolSignedPdfUrl = await createContractSignedUrl(supabase, signedPath, contractPdfFileName(contract));
     await sendInternalEmail(appOrigin, 'school_contract_sign_request', String(st.payer_email || ''), {
       parentName: st.payer_name || '',
       studentName: st.full_name || '',
@@ -412,7 +431,7 @@ export async function advanceAfterRoleSigned(
         signerEmail: st.parent_secondary_email,
         signerPersonalCode: st.parent_secondary_personal_code,
       });
-      const primarySignedPdfUrl = await createContractSignedUrl(supabase, signedPath);
+      const primarySignedPdfUrl = await createContractSignedUrl(supabase, signedPath, contractPdfFileName(contract));
       await sendInternalEmail(appOrigin, 'school_contract_sign_request', String(st.parent_secondary_email || ''), {
         parentName: st.parent_secondary_name || '',
         studentName: st.full_name || '',
@@ -489,7 +508,7 @@ async function finalizeContract(
 
   const st = contract.student || {};
   const settings = contractSigningSettings(contract);
-  const pdfUrl = await createContractSignedUrl(supabase, finalSignedPath);
+  const pdfUrl = await createContractSignedUrl(supabase, finalSignedPath, contractPdfFileName(contract));
   const contractsUrl = `${appOrigin.replace(/\/$/, '')}/school/contracts`;
   await Promise.all([
     sendInternalEmail(appOrigin, 'school_contract_fully_signed', String(st.payer_email || ''), {

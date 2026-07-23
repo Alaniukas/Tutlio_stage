@@ -85,7 +85,7 @@ interface Contract {
   completion_submitted_at?: string | null;
   additional_fee_amount?: number | null;
   additional_fee_purpose?: string | null;
-  signatures?: { role: string; status: string; signed_at?: string | null; gosign_transaction_id?: string | null }[];
+  signatures?: { role: string; status: string; signed_at?: string | null; gosign_transaction_id?: string | null; manually_marked_at?: string | null }[];
   student?: { full_name: string; email: string; phone?: string | null; payer_name: string | null; payer_email: string | null; payer_phone?: string | null; payer_personal_code?: string | null; parent_secondary_name?: string | null; parent_secondary_email?: string | null; parent_secondary_phone?: string | null; parent_secondary_personal_code?: string | null; parent_secondary_address?: string | null; student_address?: string | null; student_city?: string | null; child_birth_date?: string | null };
 }
 
@@ -157,7 +157,7 @@ function templateNameFromFileName(fileName: string): string {
 }
 
 const CONTRACTS_CACHE_KEY = 'company_contracts';
-const CONTRACTS_SELECT = '*, media_publicity_consent, student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent), signatures:school_contract_signatures(role, status, signed_at, gosign_transaction_id)';
+const CONTRACTS_SELECT = '*, media_publicity_consent, student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent), signatures:school_contract_signatures(role, status, signed_at, gosign_transaction_id, manually_marked_at)';
 
 export default function CompanyContracts() {
   const { t: tr } = useTranslation();
@@ -1407,6 +1407,116 @@ export default function CompanyContracts() {
     }
   };
 
+  // ─── E-sign contracts: manual "signature received" override ────────────────
+  // For parents who signed OUTSIDE the Tutlio flow (own Dokobit account, etc.)
+  // and never uploaded the file back. With a file the parent's real signatures
+  // land in the final contract; without a file only the status advances.
+  const [manualMarkContract, setManualMarkContract] = useState<Contract | null>(null);
+  const [manualMarkBusy, setManualMarkBusy] = useState(false);
+  const [manualMarkErr, setManualMarkErr] = useState('');
+  const [manualMarkNoFileConfirm, setManualMarkNoFileConfirm] = useState(false);
+
+  const openManualMark = (contract: Contract) => {
+    setManualMarkErr('');
+    setManualMarkNoFileConfirm(false);
+    setManualMarkContract(contract);
+  };
+
+  const finishManualMark = (done: boolean, withFile: boolean) => {
+    setManualMarkContract(null);
+    setToast({
+      message: done
+        ? withFile
+          ? 'Parašas patvirtintas iš įkelto failo — sutartis pasirašyta abiejų šalių.'
+          : 'Sutartis pažymėta kaip pasirašyta (be parašo failo).'
+        : 'Parašas užfiksuotas. Laukiama kito pasirašančiojo.',
+      type: 'success',
+    });
+    reload();
+  };
+
+  const manualMarkWithFile = async (file: File) => {
+    const contract = manualMarkContract;
+    if (!contract) return;
+    setManualMarkBusy(true);
+    setManualMarkErr('');
+    try {
+      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      if (!isPdf) {
+        setManualMarkErr('Įkelkite PDF failą (jei pasirašyta ADOC/ASiC formatu, Dokobit pasirinkite PDF formatą).');
+        return;
+      }
+      const hdrs = await authHeaders();
+      const r1 = await fetch('/api/school-contract-esign-mark-signed', {
+        method: 'POST',
+        headers: hdrs,
+        body: JSON.stringify({ contractId: contract.id, action: 'upload-url' }),
+      });
+      const j1 = await r1.json().catch(() => ({}));
+      if (!r1.ok || !j1.signedUrl || !j1.path) {
+        setManualMarkErr(j1.error || 'Nepavyko paruošti įkėlimo. Bandykite dar kartą.');
+        return;
+      }
+      const put = await fetch(j1.signedUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/pdf', 'x-upsert': 'true' },
+        body: file,
+      });
+      if (!put.ok) {
+        setManualMarkErr('Nepavyko įkelti failo. Patikrinkite ryšį ir bandykite dar kartą.');
+        return;
+      }
+      const r2 = await fetch('/api/school-contract-esign-mark-signed', {
+        method: 'POST',
+        headers: hdrs,
+        body: JSON.stringify({ contractId: contract.id, action: 'finalize', path: j1.path }),
+      });
+      const j2 = await r2.json().catch(() => ({}));
+      if (j2.alreadySigned) {
+        finishManualMark(true, true);
+        return;
+      }
+      if (!r2.ok || !j2.ok) {
+        setManualMarkErr(j2.error || 'Įkelto failo patikrinti nepavyko. Bandykite dar kartą.');
+        return;
+      }
+      finishManualMark(Boolean(j2.done), true);
+    } catch {
+      setManualMarkErr('Įvyko klaida. Bandykite dar kartą.');
+    } finally {
+      setManualMarkBusy(false);
+    }
+  };
+
+  const manualMarkWithoutFile = async () => {
+    const contract = manualMarkContract;
+    if (!contract || !manualMarkNoFileConfirm) return;
+    setManualMarkBusy(true);
+    setManualMarkErr('');
+    try {
+      const hdrs = await authHeaders();
+      const res = await fetch('/api/school-contract-esign-mark-signed', {
+        method: 'POST',
+        headers: hdrs,
+        body: JSON.stringify({ contractId: contract.id, action: 'finalize', confirmNoFile: true }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (j.alreadySigned) {
+        finishManualMark(true, false);
+        return;
+      }
+      if (!res.ok || !j.ok) {
+        setManualMarkErr(j.error || 'Nepavyko pažymėti. Bandykite dar kartą.');
+        return;
+      }
+      finishManualMark(Boolean(j.done), false);
+    } catch {
+      setManualMarkErr('Įvyko klaida. Bandykite dar kartą.');
+    } finally {
+      setManualMarkBusy(false);
+    }
+  };
+
   const markSigned = async (contract: Contract) => {
     try {
       const hdrs = await authHeaders();
@@ -1702,9 +1812,14 @@ export default function CompanyContracts() {
                           </button>
                         </p>
                       )}
-                      {(c.signatures || []).some((s) => s.role.startsWith('parent') && s.status === 'signed' && !s.gosign_transaction_id) && (
+                      {(c.signatures || []).some((s) => s.role.startsWith('parent') && s.status === 'signed' && !s.gosign_transaction_id && !s.manually_marked_at) && (
                         <p className="text-xs text-emerald-700 mt-1">
                           Tėvų parašas gautas per Smart-ID (Dokobit) — PDF vientisumas ir naujas parašas patikrinti automatiškai.
+                        </p>
+                      )}
+                      {(c.signatures || []).some((s) => s.role.startsWith('parent') && s.status === 'signed' && s.manually_marked_at) && (
+                        <p className="text-xs text-amber-700 mt-1">
+                          Tėvų parašas pažymėtas administratoriaus ranka — žr. sutarties failą, ar jame matomi visų šalių parašai.
                         </p>
                       )}
                     </div>
@@ -1721,6 +1836,11 @@ export default function CompanyContracts() {
                       )}
                       {c.signing_status === 'signed_by_school' && (
                         <span className="text-xs text-blue-700 self-center">Laukiama tėvų parašo…</span>
+                      )}
+                      {eSignEnabled && c.signing_status === 'signed_by_school' && (
+                        <Button size="sm" variant="outline" onClick={() => openManualMark(c)} className="text-green-700 border-green-200 hover:bg-green-50">
+                          <CheckCircle className="w-3.5 h-3.5 mr-1.5" /> Pažymėti pasirašyta
+                        </Button>
                       )}
                       {!eSignEnabled && (c.signing_status === 'sent' ||
                         c.signing_status === 'awaiting_school_signature' ||
@@ -1793,6 +1913,81 @@ export default function CompanyContracts() {
           )
         )}
       </div>
+
+      <Dialog open={Boolean(manualMarkContract)} onOpenChange={(open) => { if (!open && !manualMarkBusy) setManualMarkContract(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Pažymėti tėvų parašą ranka</DialogTitle>
+          </DialogHeader>
+          {manualMarkContract && (() => {
+            const sigs = manualMarkContract.signatures || [];
+            const primarySigned = sigs.some((s) => s.role === 'parent_primary' && s.status === 'signed');
+            const pendingName = primarySigned
+              ? manualMarkContract.student?.parent_secondary_name || 'antrasis iš tėvų'
+              : manualMarkContract.student?.payer_name || 'tėvas / globėjas';
+            return (
+              <div className="space-y-4">
+                <p className="text-sm text-gray-600">
+                  Naudokite tik tada, kai <span className="font-medium text-gray-900">{pendingName}</span> sutartį
+                  tikrai pasirašė ne per Tutlio nuorodą (pvz., savo Dokobit paskyroje), o sistema vis dar rodo „laukiama tėvų parašo“.
+                </p>
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3">
+                  <p className="text-sm font-semibold text-gray-900 mb-1">Rekomenduojama: įkelti pasirašytą PDF</p>
+                  <p className="text-xs text-gray-600 mb-2">
+                    Įkelkite iš Dokobit (ar kitos sistemos) atsisiųstą pasirašytą PDF. Failas patikrinamas automatiškai,
+                    o galutinėje sutartyje matysis <span className="font-medium">visų šalių parašai</span>.
+                  </p>
+                  <label className={`block ${manualMarkBusy ? 'opacity-60' : 'cursor-pointer'}`}>
+                    <input
+                      type="file"
+                      accept="application/pdf,.pdf"
+                      className="hidden"
+                      disabled={manualMarkBusy}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) void manualMarkWithFile(file);
+                        e.target.value = '';
+                      }}
+                    />
+                    <span className="block w-full text-center border-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 font-semibold rounded-xl px-4 py-2.5 text-sm transition-colors">
+                      {manualMarkBusy ? 'Įkeliama ir tikrinama…' : 'Įkelti pasirašytą PDF'}
+                    </span>
+                  </label>
+                </div>
+                <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+                  <p className="text-sm font-semibold text-gray-900 mb-1">Be failo (kraštutinis atvejis)</p>
+                  <p className="text-xs text-gray-600 mb-2">
+                    Sutartis bus pažymėta pasirašyta, tačiau tėvų parašas <span className="font-medium">nebus matomas
+                    sutarties faile</span> — liks paskutinė Tutlio turima PDF versija (su mokyklos parašu).
+                  </p>
+                  <label className="flex items-start gap-2 text-xs text-gray-700 mb-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={manualMarkNoFileConfirm}
+                      disabled={manualMarkBusy}
+                      onChange={(e) => setManualMarkNoFileConfirm(e.target.checked)}
+                    />
+                    <span>Patvirtinu, kad įsitikinau, jog {pendingName} sutartį pasirašė, ir prisiimu atsakomybę už žymėjimą be parašo failo.</span>
+                  </label>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={manualMarkBusy || !manualMarkNoFileConfirm}
+                    onClick={() => void manualMarkWithoutFile()}
+                    className="w-full text-amber-800 border-amber-300 hover:bg-amber-100"
+                  >
+                    {manualMarkBusy ? 'Žymima…' : 'Pažymėti pasirašyta be failo'}
+                  </Button>
+                </div>
+                {manualMarkErr && (
+                  <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">{manualMarkErr}</p>
+                )}
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={templateOpen} onOpenChange={setTemplateOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">

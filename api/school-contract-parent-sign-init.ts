@@ -12,6 +12,7 @@ import { publicOriginFromRequest } from './_lib/public-origin.js';
 import {
   CONTRACT_SIGN_SELECT,
   beginGoSignForRow,
+  contractPdfFileName,
   fetchSignatureRows,
   inputPdfPathForRole,
 } from './_lib/schoolContractSigning.js';
@@ -73,7 +74,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (inputPath) {
         const { data: signed } = await supabase.storage
           .from(SCHOOL_CONTRACTS_BUCKET)
-          .createSignedUrl(extractSchoolContractStoragePath(inputPath), 60 * 60);
+          // Stored objects are named school.pdf/parent_primary.pdf — download
+          // with the contract's human filename so the Dokobit document the
+          // parent creates isn't titled "school".
+          .createSignedUrl(extractSchoolContractStoragePath(inputPath), 60 * 60, {
+            download: contractPdfFileName(contract),
+          });
         pdfUrl = signed?.signedUrl || undefined;
       }
     }
