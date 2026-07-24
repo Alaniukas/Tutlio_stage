@@ -66,6 +66,10 @@ describe('CompanyContracts list filter', () => {
         signing_status: 'signed',
         contract_number: 'SUT-1',
         student: { full_name: 'Vėgėlė Ąžuolas', email: 'a@example.test', payer_name: 'Brigita Vėgėlė', payer_email: 'b@example.test' },
+        installments: [
+          { installment_number: 2, amount: 150, due_date: '2027-01-15', payment_status: 'pending' },
+          { installment_number: 1, amount: 170, due_date: '2026-09-01', payment_status: 'paid' },
+        ],
       },
       {
         ...contractBase,
@@ -89,6 +93,14 @@ describe('CompanyContracts list filter', () => {
     expect(screen.getByText('Vėgėlė Ąžuolas')).toBeTruthy();
     expect(screen.getByText('Petraitis Jonas')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Visos (2)' })).toBeTruthy();
+
+    // Cards are numbered and show the installment schedule sorted by number,
+    // with paid entries marked.
+    expect(screen.getByText('1.')).toBeTruthy();
+    expect(screen.getByText('2.')).toBeTruthy();
+    expect(screen.getByText('Įmokos:')).toBeTruthy();
+    expect(screen.getByText(/1\) €170\.00 \(2026-09-01\) ✓/)).toBeTruthy();
+    expect(screen.getByText(/2\) €150\.00 \(2027-01-15\)/)).toBeTruthy();
 
     // Unsigned bucket hides the signed contract.
     fireEvent.click(screen.getByRole('button', { name: 'Nepasirašytos (1)' }));

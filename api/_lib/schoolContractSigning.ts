@@ -265,6 +265,35 @@ function parentSignUrl(appOrigin: string, token: string): string {
   return `${appOrigin.replace(/\/$/, '')}/pasirasymas/sutarties/per/go-sign/${encodeURIComponent(token)}`;
 }
 
+export interface InstallmentScheduleItem {
+  number: number;
+  amount: string;
+  dueDate: string;
+  paid: boolean;
+}
+
+/**
+ * Payment schedule for e-mails: the split the admin configured at contract
+ * creation. Schools asked for it to be visible in the signing invitation —
+ * the contract template itself intentionally stays unchanged.
+ */
+export async function fetchInstallmentSchedule(
+  supabase: SupabaseClient,
+  contractId: string,
+): Promise<InstallmentScheduleItem[]> {
+  const { data } = await supabase
+    .from('school_payment_installments')
+    .select('installment_number, amount, due_date, payment_status')
+    .eq('contract_id', contractId)
+    .order('installment_number', { ascending: true });
+  return (data || []).map((row: any) => ({
+    number: Number(row.installment_number),
+    amount: Number(row.amount || 0).toFixed(2),
+    dueDate: row.due_date ? new Date(row.due_date).toLocaleDateString('lt-LT') : '—',
+    paid: row.payment_status === 'paid',
+  }));
+}
+
 export interface ReturnResult {
   status: 'pending' | 'in_progress' | 'signed' | 'canceled' | 'expired' | 'not_found';
   role?: SignerRole;
@@ -408,6 +437,7 @@ export async function advanceAfterRoleSigned(
       signerPersonalCode: st.payer_personal_code,
     });
     const schoolSignedPdfUrl = await createContractSignedUrl(supabase, signedPath, contractPdfFileName(contract));
+    const installments = await fetchInstallmentSchedule(supabase, contractId);
     await sendInternalEmail(appOrigin, 'school_contract_sign_request', String(st.payer_email || ''), {
       parentName: st.payer_name || '',
       studentName: st.full_name || '',
@@ -416,6 +446,12 @@ export async function advanceAfterRoleSigned(
       signUrl: parentSignUrl(appOrigin, parentRow.token),
       pdfUrl: schoolSignedPdfUrl || undefined,
       organizationId: (contract as any).organization_id,
+      installments,
+      annualFee: Number((contract as any).annual_fee || 0).toFixed(2),
+      additionalFeeAmount: Number((contract as any).additional_fee_amount || 0) > 0
+        ? Number((contract as any).additional_fee_amount).toFixed(2)
+        : undefined,
+      additionalFeePurpose: (contract as any).additional_fee_purpose || undefined,
     });
     return { contractStatus: 'signed_by_school', done: false };
   }
@@ -432,6 +468,7 @@ export async function advanceAfterRoleSigned(
         signerPersonalCode: st.parent_secondary_personal_code,
       });
       const primarySignedPdfUrl = await createContractSignedUrl(supabase, signedPath, contractPdfFileName(contract));
+      const installments = await fetchInstallmentSchedule(supabase, contractId);
       await sendInternalEmail(appOrigin, 'school_contract_sign_request', String(st.parent_secondary_email || ''), {
         parentName: st.parent_secondary_name || '',
         studentName: st.full_name || '',
@@ -440,6 +477,12 @@ export async function advanceAfterRoleSigned(
         signUrl: parentSignUrl(appOrigin, p2.token),
         pdfUrl: primarySignedPdfUrl || undefined,
         organizationId: (contract as any).organization_id,
+        installments,
+        annualFee: Number((contract as any).annual_fee || 0).toFixed(2),
+        additionalFeeAmount: Number((contract as any).additional_fee_amount || 0) > 0
+          ? Number((contract as any).additional_fee_amount).toFixed(2)
+          : undefined,
+        additionalFeePurpose: (contract as any).additional_fee_purpose || undefined,
       });
       return { contractStatus: 'signed_by_school', done: false };
     }

@@ -369,6 +369,9 @@ export default function CompanyStudents() {
   const [deactivatingPackageId, setDeactivatingPackageId] = useState<string | null>(null);
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
   const [studentSearch, setStudentSearch] = useState('');
+  // School list filters: by grade and by latest-contract signing state.
+  const [gradeFilter, setGradeFilter] = useState('all');
+  const [contractFilter, setContractFilter] = useState<'all' | 'signed' | 'pending' | 'none'>('all');
 
   const [trialSending, setTrialSending] = useState(false);
   const [trialTutorId, setTrialTutorId] = useState<string | null>(null);
@@ -512,6 +515,19 @@ export default function CompanyStudents() {
     });
   }, [students]);
 
+  const availableGrades = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of students) {
+      const grade = String(s.grade || '').trim();
+      if (grade) set.add(grade);
+    }
+    return [...set].sort((a, b) => {
+      const [na, nb] = [Number(a), Number(b)];
+      if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+      return a.localeCompare(b, 'lt');
+    });
+  }, [students]);
+
   const filteredGroups = useMemo(() => {
     let groups = groupedStudents.filter((g) =>
       showTrashBin ? g.primary.detached_at : !g.primary.detached_at
@@ -519,8 +535,19 @@ export default function CompanyStudents() {
     if (normalizedSearch) {
       groups = groups.filter((g) => g.primary.full_name.toLowerCase().includes(normalizedSearch));
     }
+    if (gradeFilter !== 'all') {
+      groups = groups.filter((g) => g.rows.some((r) => String(r.grade || '').trim() === gradeFilter));
+    }
+    if (contractFilter !== 'all') {
+      groups = groups.filter((g) => {
+        const info = contractsByStudent[g.primary.id];
+        if (contractFilter === 'signed') return info?.signing_status === 'signed';
+        if (contractFilter === 'pending') return Boolean(info) && info!.signing_status !== 'signed';
+        return !info; // 'none'
+      });
+    }
     return groups;
-  }, [groupedStudents, normalizedSearch, showTrashBin]);
+  }, [groupedStudents, normalizedSearch, showTrashBin, gradeFilter, contractFilter, contractsByStudent]);
 
   const shouldShowParentContacts = (student: Student) =>
     isSchoolView ? hasSchoolParentContacts(student) : shouldShowPayerContactSection(student);
@@ -1942,9 +1969,36 @@ export default function CompanyStudents() {
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
             <GraduationCap className="w-6 h-6 text-indigo-600" />
             {t('compStu.title')}
+            <span className="text-base font-medium text-gray-400">({filteredGroups.length})</span>
           </h1>
 
           <div className="flex flex-wrap gap-2 justify-end items-center w-full lg:w-auto">
+            {isSchoolView && availableGrades.length > 0 && (
+              <Select value={gradeFilter} onValueChange={setGradeFilter}>
+                <SelectTrigger className="w-[140px] rounded-xl border-gray-200">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t('compStu.filterGradeAll')}</SelectItem>
+                  {availableGrades.map((gr) => (
+                    <SelectItem key={gr} value={gr}>{gr} kl.</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            {isSchoolView && (
+              <Select value={contractFilter} onValueChange={(v) => setContractFilter(v as 'all' | 'signed' | 'pending' | 'none')}>
+                <SelectTrigger className="w-[180px] rounded-xl border-gray-200">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t('compStu.filterContractAll')}</SelectItem>
+                  <SelectItem value="signed">{t('compStu.filterContractSigned')}</SelectItem>
+                  <SelectItem value="pending">{t('compStu.filterContractPending')}</SelectItem>
+                  <SelectItem value="none">{t('compStu.filterContractNone')}</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
             <div className="relative w-full sm:w-64">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
               <Input
@@ -2515,7 +2569,7 @@ export default function CompanyStudents() {
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
             {/* Mobile cards */}
             <div className="md:hidden divide-y divide-gray-100">
-              {filteredGroups.map((g) => {
+              {filteredGroups.map((g, groupIdx) => {
                 const student = g.primary;
                 const initials = student.full_name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
                 const hasTutor = g.rows.some((r) => r.tutor_id);
@@ -2551,7 +2605,9 @@ export default function CompanyStudents() {
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-2">
-                          <p className="font-semibold text-gray-900 truncate">{student.full_name}</p>
+                          <p className="font-semibold text-gray-900 truncate">
+                            <span className="text-gray-400 font-normal tabular-nums">{groupIdx + 1}.</span> {student.full_name}
+                          </p>
                           {student.linked_user_id ? (
                             <span className="text-[11px] text-green-700 bg-green-50 border border-green-200 rounded-md px-1.5 py-0.5 flex-shrink-0">
                               {t('compStu.connected')}
@@ -2658,7 +2714,7 @@ export default function CompanyStudents() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {filteredGroups.map((g) => {
+                  {filteredGroups.map((g, groupIdx) => {
                     const student = g.primary;
                     const initials = student.full_name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
                     const hasTutorDt = g.rows.some((r) => r.tutor_id);
@@ -2684,7 +2740,9 @@ export default function CompanyStudents() {
                               {initials || '?'}
                             </div>
                             <div className="min-w-0 flex-1">
-                              <p className="font-semibold text-gray-900 truncate">{student.full_name}</p>
+                              <p className="font-semibold text-gray-900 truncate">
+                                <span className="text-gray-400 font-normal tabular-nums">{groupIdx + 1}.</span> {student.full_name}
+                              </p>
                               <div className="mt-1 flex flex-wrap items-center gap-1">
                                 {student.linked_user_id ? (
                                   <span className="text-[11px] text-green-700 bg-green-50 border border-green-200 rounded-md px-2 py-0.5">{t('compStu.connected')}</span>

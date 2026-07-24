@@ -1206,8 +1206,34 @@ function paymentSuccess(d: any, locale: Locale) {
 
 // School-contract e-signing (GoSign). Lithuanian-only B2B feature, so the copy
 // is inline LT rather than going through the 12-locale i18n dictionaries.
-function schoolContractSignRequest(d: any, _locale: Locale) {
+function schoolContractSignRequest(d: any, locale: Locale) {
   const student = d.studentName ? ` – ${d.studentName}` : '';
+  // Payment schedule configured at contract creation (schools split the annual
+  // fee, but the split intentionally isn't in the contract template itself).
+  const installments = Array.isArray(d.installments) ? d.installments : [];
+  const installmentsTotal = installments.reduce((sum: number, it: any) => sum + Number(it?.amount || 0), 0);
+  const scheduleBlock = installments.length > 0
+    ? `
+        <p style="color:#111827; font-size:14px; font-weight:600; margin:20px 0 8px;">Mokėjimo grafikas</p>
+        <div class="info-card">
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            ${installments
+              .map((it: any, idx: number) =>
+                td(
+                  `${esc(it.number ?? idx + 1)} įmoka`,
+                  `${emailMoney(Number(it.amount || 0), locale)} — iki ${esc(it.dueDate || '—')}`,
+                  idx < installments.length - 1 || installments.length > 1,
+                ),
+              )
+              .join('')}
+            ${installments.length > 1 ? td('Iš viso', emailMoney(installmentsTotal, locale), false) : ''}
+          </table>
+        </div>
+        ${Number(d.additionalFeeAmount || 0) > 0
+          ? `<p style="color:#6b7280; font-size:12px; margin:8px 0 0;">Į 1 įmoką įtrauktas papildomas mokestis — ${emailMoney(Number(d.additionalFeeAmount), locale)}${d.additionalFeePurpose ? ` (${esc(d.additionalFeePurpose)})` : ''}.</p>`
+          : ''}
+        <p style="color:#6b7280; font-size:12px; margin:8px 0 0;">Mokėjimo nuorodas gausite el. paštu po sutarties pasirašymo — pagal aukščiau nurodytus terminus.</p>`
+    : '';
   return {
     subject: `Pasirašykite ugdymo sutartį${student}`,
     html: wrap(
@@ -1220,7 +1246,7 @@ function schoolContractSignRequest(d: any, _locale: Locale) {
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
           ${d.schoolName || 'Mokykla'} pasirašė ugdymo sutartį${d.studentName ? ` dėl ${d.studentName}` : ''}.
           Kviečiame ją pasirašyti elektroniniu parašu — Mobiliuoju parašu, LT ID, asmens tapatybės kortele ar USB laikmena. Naudojate Smart-ID? Nuorodoje rasite pasirašymo per Dokobit instrukciją, o pasirašytą PDF įkelsite ten pat.
-        </p>
+        </p>${scheduleBlock}
         <div style="text-align:center; margin-top:24px;">
           ${outlookEmailButton(d.signUrl, 'Pasirašyti sutartį', '#4f46e5', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
         </div>

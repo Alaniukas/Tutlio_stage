@@ -180,3 +180,56 @@ describe('school_contract questions contact', () => {
     expect(html).toContain('susisiekite su mokykla: info@laisvivaikai.lt');
   });
 });
+
+describe('school_contract_sign_request payment schedule', () => {
+  it('renders the installment schedule with total and post-signing note', async () => {
+    const { html } = await sendEmail('school_contract_sign_request', {
+      parentName: 'Brigita Vėgėlė',
+      studentName: 'Vėgėlė Ąžuolas',
+      schoolName: 'VšĮ „Laisvi vaikai"',
+      signUrl: 'https://tutlio.lt/pasirasymas/sutarties/per/go-sign/tok',
+      installments: [
+        { number: 1, amount: '150.00', dueDate: '2026-09-01', paid: false },
+        { number: 2, amount: '150.00', dueDate: '2027-01-15', paid: false },
+      ],
+      annualFee: '280.00',
+      additionalFeeAmount: '20.00',
+      additionalFeePurpose: 'Ugdymo priemonės',
+    });
+    expect(html).toContain('Mokėjimo grafikas');
+    expect(html).toContain('1 įmoka');
+    expect(html).toContain('2 įmoka');
+    expect(html).toContain('2026-09-01');
+    expect(html).toContain('2027-01-15');
+    expect(html).toContain('Iš viso');
+    expect(html).toContain('Į 1 įmoką įtrauktas papildomas mokestis');
+    expect(html).toContain('Ugdymo priemonės');
+    expect(html).toContain('Mokėjimo nuorodas gausite el. paštu po sutarties pasirašymo');
+    // Signing CTA still present.
+    expect(html).toContain('Pasirašyti sutartį');
+  });
+
+  it('renders a single installment without a total row', async () => {
+    const { html } = await sendEmail('school_contract_sign_request', {
+      parentName: 'Tėvas',
+      studentName: 'Mokinys',
+      schoolName: 'Mokykla',
+      signUrl: 'https://tutlio.lt/sign',
+      installments: [{ number: 1, amount: '300.00', dueDate: '2026-09-01', paid: false }],
+    });
+    expect(html).toContain('Mokėjimo grafikas');
+    expect(html).toContain('1 įmoka');
+    expect(html).not.toContain('Iš viso');
+  });
+
+  it('omits the schedule block when no installments are passed', async () => {
+    const { html } = await sendEmail('school_contract_sign_request', {
+      parentName: 'Tėvas',
+      studentName: 'Mokinys',
+      schoolName: 'Mokykla',
+      signUrl: 'https://tutlio.lt/sign',
+    });
+    expect(html).not.toContain('Mokėjimo grafikas');
+    expect(html).toContain('Pasirašyti sutartį');
+  });
+});

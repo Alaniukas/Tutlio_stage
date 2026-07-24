@@ -86,6 +86,7 @@ interface Contract {
   additional_fee_amount?: number | null;
   additional_fee_purpose?: string | null;
   signatures?: { role: string; status: string; signed_at?: string | null; gosign_transaction_id?: string | null; manually_marked_at?: string | null }[];
+  installments?: { installment_number: number; amount: number; due_date: string | null; payment_status: string | null }[];
   student?: { full_name: string; email: string; phone?: string | null; payer_name: string | null; payer_email: string | null; payer_phone?: string | null; payer_personal_code?: string | null; parent_secondary_name?: string | null; parent_secondary_email?: string | null; parent_secondary_phone?: string | null; parent_secondary_personal_code?: string | null; parent_secondary_address?: string | null; student_address?: string | null; student_city?: string | null; child_birth_date?: string | null };
 }
 
@@ -157,7 +158,7 @@ function templateNameFromFileName(fileName: string): string {
 }
 
 const CONTRACTS_CACHE_KEY = 'company_contracts';
-const CONTRACTS_SELECT = '*, media_publicity_consent, student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent), signatures:school_contract_signatures(role, status, signed_at, gosign_transaction_id, manually_marked_at)';
+const CONTRACTS_SELECT = '*, media_publicity_consent, student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent), signatures:school_contract_signatures(role, status, signed_at, gosign_transaction_id, manually_marked_at), installments:school_payment_installments(installment_number, amount, due_date, payment_status)';
 
 export default function CompanyContracts() {
   const { t: tr } = useTranslation();
@@ -1826,11 +1827,12 @@ export default function CompanyContracts() {
                 <p className="text-center text-gray-500 py-12">{tr('school.noContractsFiltered')}</p>
               ) : (
             <div className="grid gap-3">
-              {visibleContracts.map((c) => (
+              {visibleContracts.map((c, contractIdx) => (
                 <div key={c.id} className="bg-white rounded-xl border border-gray-200 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-gray-400 tabular-nums">{contractIdx + 1}.</span>
                         <p className="font-semibold text-gray-900">{c.student?.full_name || '—'}</p>
                         {statusBadge(c.signing_status)}
                       </div>
@@ -1846,6 +1848,21 @@ export default function CompanyContracts() {
                         {c.sent_at && <span className="ml-3">{tr('school.sent')} {new Date(c.sent_at).toLocaleDateString('lt-LT')}</span>}
                         {c.signed_at && <span className="ml-3">{tr('school.signed')} {new Date(c.signed_at).toLocaleDateString('lt-LT')}</span>}
                       </p>
+                      {(c.installments || []).length > 0 && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          <span className="font-medium text-gray-600">{tr('school.installmentsLabel')}</span>{' '}
+                          {[...(c.installments || [])]
+                            .sort((a, b) => a.installment_number - b.installment_number)
+                            .map((inst, i, arr) => (
+                              <span key={inst.installment_number} className={inst.payment_status === 'paid' ? 'text-emerald-700' : undefined}>
+                                {inst.installment_number}) €{Number(inst.amount).toFixed(2)}
+                                {inst.due_date ? ` (${new Date(inst.due_date).toLocaleDateString('lt-LT')})` : ''}
+                                {inst.payment_status === 'paid' ? ' ✓' : ''}
+                                {i < arr.length - 1 ? '  ·  ' : ''}
+                              </span>
+                            ))}
+                        </p>
+                      )}
                       {c.signed_contract_url && (
                         <p className="text-xs text-emerald-700 mt-1">
                           Pasirašyta sutartis ({c.student?.full_name || 'mokinys'}):{' '}
