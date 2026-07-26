@@ -107,6 +107,7 @@ import { resolveLessonMeetingLink } from '@/lib/meetingLink';
 import { recordJoinClick } from '@/lib/joinTracking';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
+import { isProKlaseOrg } from '@/lib/marketMoney';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { formatContactForTutorView } from '@/lib/orgContactVisibility';
@@ -239,6 +240,7 @@ export default function CalendarPage() {
   const { contactVisibility, hasFeature: hasOrgFeature } = useOrgFeatures();
   // Org feature: ended lessons are not auto-completed — the tutor must confirm the outcome.
   const requiresStatusConfirmation = hasOrgFeature('tutor_lesson_status_confirmation');
+  const hideProKlaseOrgTutorCancel = orgPolicy.isOrgTutor && isProKlaseOrg(ctxProfile?.organization_id);
   const { user: ctxUser, profile: ctxProfile } = useUser();
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -3855,6 +3857,7 @@ export default function CalendarPage() {
             <Settings2 className="w-4 h-4" />
             <span className="hidden sm:inline">{t('cal.scheduleSettings')}</span>
           </Button>
+          {!hideProKlaseOrgTutorCancel && (
           <Button
             variant="outline"
             onClick={() => setIsMassCancelModalOpen(true)}
@@ -3863,6 +3866,7 @@ export default function CalendarPage() {
             <XCircle className="w-4 h-4" />
             <span className="hidden sm:inline">{t('cal.cancelLessons')}</span>
           </Button>
+          )}
           <Button
             onClick={() => {
               // Default the new lesson to the date the calendar is currently showing
@@ -4983,7 +4987,7 @@ export default function CalendarPage() {
 
           {cancelConfirmId !== selectedEvent?.id && (
           <div className="flex flex-col gap-2 pt-2">
-            {selectedEvent?.status === 'completed' && (
+            {selectedEvent?.status === 'completed' && !hideProKlaseOrgTutorCancel && (
               <div className="flex flex-wrap gap-2">
                 <Button
                   variant="destructive"
@@ -5052,6 +5056,7 @@ export default function CalendarPage() {
                 </div>
               )}
             {selectedEvent?.status === 'active' &&
+              !hideProKlaseOrgTutorCancel &&
               !(
                 requiresStatusConfirmation &&
                 !isGroupSession &&

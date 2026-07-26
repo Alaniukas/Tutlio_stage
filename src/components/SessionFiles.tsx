@@ -59,8 +59,8 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
     return () => { cancelled = true; };
   }, [sessionId, groupSessionIds]);
 
-  async function fetchFiles() {
-    setLoading(true);
+  async function fetchFiles(silent = false) {
+    if (!silent) setLoading(true);
     const allIds = resolvedGroupIds.length > 0 ? resolvedGroupIds : [sessionId];
     const results = await Promise.all(
       allIds.map((id) =>
@@ -77,12 +77,28 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
       }
     }
     setFiles(merged);
-    setLoading(false);
+    if (!silent) setLoading(false);
   }
 
   useEffect(() => {
     if (resolvedGroupIds.length > 0) fetchFiles();
   }, [resolvedGroupIds]);
+
+  useEffect(() => {
+    if (role !== 'student' || resolvedGroupIds.length === 0) return;
+
+    const poll = () => void fetchFiles(true);
+    const interval = window.setInterval(poll, 10_000);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') poll();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [role, resolvedGroupIds, sessionId]);
 
   function safeObjectName(originalName: string): string {
     // Supabase Storage rejects some characters in object keys (e.g. diacritics, some punctuation).

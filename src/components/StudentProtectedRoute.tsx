@@ -1,8 +1,20 @@
 import { useEffect, useState } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
-import { resolveAccountPortals, type AccountPortals } from '@/lib/account-portal';
+import { resolveAccountPortals, setLastRolePortal, type AccountPortals } from '@/lib/account-portal';
 import { rpcGetStudentByUserIdDeduped } from '@/lib/preload';
 import { useUser } from '@/contexts/UserContext';
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+async function resolveStudentWithRetry(userId: string, attempts = 3) {
+    for (let i = 0; i < attempts; i++) {
+        const result = await rpcGetStudentByUserIdDeduped(userId);
+        if (result?.error) throw result.error;
+        if (result?.data?.[0]) return result;
+        if (i < attempts - 1) await sleep(350 * (i + 1));
+    }
+    return null;
+}
 
 export default function StudentProtectedRoute() {
     const { user: ctxUser, profile: ctxProfile, loading: ctxLoading } = useUser();
@@ -13,6 +25,10 @@ export default function StudentProtectedRoute() {
     // Allow rendering success UI right after Stripe redirect,
     // even if auth state isn't fully restored yet.
     const allowInvoiceSuccess = params.get('invoice_paid') === 'true';
+
+    useEffect(() => {
+        setLastRolePortal('student');
+    }, []);
 
     useEffect(() => {
         let cancelled = false;
@@ -47,7 +63,20 @@ export default function StudentProtectedRoute() {
                     resolveAccountPortals(ctxUser.id),
                     2500,
                 );
+
                 if (portals.tutor && !portals.student) {
+                    const retryResult = await withTimeout(
+                        resolveStudentWithRetry(ctxUser.id, 3),
+                        4000,
+                    );
+                    const retryStudent = retryResult?.data?.[0] ?? null;
+                    if (retryStudent) {
+                        if (!cancelled) {
+                            setStatus('student');
+                            setIsFrozen(!!retryStudent.detached_at);
+                        }
+                        return;
+                    }
                     if (!cancelled) setStatus('tutor');
                     return;
                 }

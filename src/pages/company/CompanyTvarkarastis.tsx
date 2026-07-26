@@ -443,6 +443,7 @@ export default function CompanyTvarkarastis() {
   const [createRecurringWeekdays, setCreateRecurringWeekdays] = useState<number[]>([]);
   const [createIsPaid, setCreateIsPaid] = useState(false);
   const [createIsTrial, setCreateIsTrial] = useState(false);
+  const [createFirstLessonIsTrial, setCreateFirstLessonIsTrial] = useState(false);
   /** Set when the create modal was opened from an availability block (keeps the marked time). */
   const [createFromAvailabilityBlock, setCreateFromAvailabilityBlock] = useState<{ availabilityId: string; tutorId: string } | null>(null);
   /** One click can fire both onSelectSlot and onSelectEvent for the same block. */
@@ -1174,7 +1175,7 @@ export default function CompanyTvarkarastis() {
         student?.pricing_lessons_per_week,
       );
       price = resolveOrganizationLessonPrice({
-        rules: subj.is_group || subj.is_trial ? [] : dynamicPricingRules,
+        rules: createIsTrial || subj.is_group || subj.is_trial ? [] : dynamicPricingRules,
         student,
         lessonsPerWeek: frequency,
         individualPrice: pricing?.price,
@@ -1201,6 +1202,18 @@ export default function CompanyTvarkarastis() {
 
   useEffect(() => {
     if (!createSubjectId || !createStudentId) return;
+    if (createIsTrial) {
+      setCreatePrice(trialDefaults.priceEur);
+      const subject = subjects.find((row) => row.id === createSubjectId);
+      if (subject && createStartTime && createStartTime.includes('T')) {
+        const newStart = new Date(createStartTime);
+        if (!Number.isNaN(newStart.getTime())) {
+          const newEnd = new Date(newStart.getTime() + trialDefaults.durationMinutes * 60 * 1000);
+          setCreateEndTime(format(newEnd, "yyyy-MM-dd'T'HH:mm"));
+        }
+      }
+      return;
+    }
     const subject = subjects.find((row) => row.id === createSubjectId);
     if (!subject) return;
     const matchedTemplate = orgSubjectTemplates.find(
@@ -1224,7 +1237,7 @@ export default function CompanyTvarkarastis() {
     );
     setCreatePrice(
       resolveOrganizationLessonPrice({
-        rules: subject.is_group || subject.is_trial ? [] : dynamicPricingRules,
+        rules: createIsTrial || subject.is_group || subject.is_trial ? [] : dynamicPricingRules,
         student,
         lessonsPerWeek: frequency,
         individualPrice,
@@ -1237,6 +1250,7 @@ export default function CompanyTvarkarastis() {
     createStudentId,
     createSubjectId,
     createTutorId,
+    createIsTrial,
     dynamicPricingRules,
     individualPricing,
     orgSubjectTemplates,
@@ -2115,6 +2129,7 @@ export default function CompanyTvarkarastis() {
         createIsPaid,
         createPrice,
         createIsTrial,
+        createFirstLessonIsTrial: createIsRecurring && createFirstLessonIsTrial,
         createTutorComment,
         createShowCommentToStudent,
         subjects,
@@ -2127,18 +2142,20 @@ export default function CompanyTvarkarastis() {
       // Trial payment email on creation: attach a 1-lesson package to the new
       // trial lesson and email the payer a one-time pay link.
       if (
-        createIsTrial &&
+        (createIsTrial || (createIsRecurring && createFirstLessonIsTrial)) &&
         !createIsPaid &&
         createPrice > 0 &&
         hasFeature('trial_creation_payment_email') &&
         createResult.createdSessionIds.length > 0
       ) {
-        const trialDurationMin = (() => {
-          const start = new Date(createStartTime);
-          const end = new Date(createEndTime);
-          if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return trialDefaults.durationMinutes;
-          return Math.max(15, Math.round((end.getTime() - start.getTime()) / 60000));
-        })();
+        const trialDurationMin = createIsTrial
+          ? (() => {
+              const start = new Date(createStartTime);
+              const end = new Date(createEndTime);
+              if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return trialDefaults.durationMinutes;
+              return Math.max(15, Math.round((end.getTime() - start.getTime()) / 60000));
+            })()
+          : trialDefaults.durationMinutes;
         try {
           const resp = await fetch('/api/create-trial-package', {
             method: 'POST',
@@ -2878,7 +2895,7 @@ export default function CompanyTvarkarastis() {
               </div>
             </div>
 
-            {!subjects.find(s => s.id === createSubjectId)?.is_group && (
+            {!subjects.find(s => s.id === createSubjectId)?.is_group && !createIsRecurring && (
               <div className="border border-amber-100 rounded-xl p-3 sm:p-4 bg-amber-50/50">
                 <button
                   type="button"
@@ -2887,6 +2904,7 @@ export default function CompanyTvarkarastis() {
                     setCreateIsTrial(next);
                     if (next) {
                       setCreateIsRecurring(false);
+                      setCreateFirstLessonIsTrial(false);
                       setCreateRecurringEndDate('');
                       setCreateRecurringWeekdays([]);
                       setCreatePrice(trialDefaults.priceEur);
@@ -2930,18 +2948,48 @@ export default function CompanyTvarkarastis() {
               </label>
             </div>
 
-            {!createIsTrial && (
-              <RecurrenceFields
-                enabled={createIsRecurring}
-                onEnabledChange={setCreateIsRecurring}
-                frequency={createRecurringFrequency}
-                onFrequencyChange={setCreateRecurringFrequency}
-                weekdays={createRecurringWeekdays}
-                onWeekdaysChange={setCreateRecurringWeekdays}
-                endDate={createRecurringEndDate}
-                onEndDateChange={setCreateRecurringEndDate}
-                startTime={createStartTime}
-              />
+            <RecurrenceFields
+              enabled={createIsRecurring}
+              onEnabledChange={(enabled) => {
+                setCreateIsRecurring(enabled);
+                if (enabled) {
+                  setCreateIsTrial(false);
+                  setAutoTrialStudentId(null);
+                } else {
+                  setCreateFirstLessonIsTrial(false);
+                }
+              }}
+              frequency={createRecurringFrequency}
+              onFrequencyChange={setCreateRecurringFrequency}
+              weekdays={createRecurringWeekdays}
+              onWeekdaysChange={setCreateRecurringWeekdays}
+              endDate={createRecurringEndDate}
+              onEndDateChange={setCreateRecurringEndDate}
+              startTime={createStartTime}
+            />
+
+            {createIsRecurring && !subjects.find(s => s.id === createSubjectId)?.is_group && (
+              <div className="border border-amber-100 rounded-xl p-3 sm:p-4 bg-amber-50/50">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !createFirstLessonIsTrial;
+                    setCreateFirstLessonIsTrial(next);
+                    if (next) {
+                      setCreateTopic((prev) => (prev.trim() ? prev : trialDefaults.topic));
+                    }
+                  }}
+                  className="flex items-center justify-between gap-3 w-full text-left"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-amber-900">{t('compSch.firstLessonTrial')}</p>
+                    <p className="text-xs text-amber-800/80 hidden sm:block">{t('compSch.firstLessonTrialDesc')}</p>
+                  </div>
+                  <div className={`relative inline-flex h-6 w-11 items-center rounded-full flex-shrink-0 ${createFirstLessonIsTrial ? 'bg-amber-500' : 'bg-gray-300'}`}>
+                    <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${createFirstLessonIsTrial ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </div>
+                </button>
+              </div>
             )}
             </div>
 
@@ -3116,6 +3164,7 @@ export default function CompanyTvarkarastis() {
                       paymentStatus={selectedEvent.payment_status ?? undefined}
                       paid={selectedEvent.paid}
                       endTime={selectedEvent.end_time}
+                      pendingConfirmation={hasFeature('tutor_lesson_status_confirmation')}
                       moved={hasFeature('monthly_packages') && !!(selectedEvent as any).original_start_time && !!(selectedEvent as any).lesson_package_id}
                     />
                     {!!selectedEvent.subject_id && trialSubjectIds.has(selectedEvent.subject_id) && (

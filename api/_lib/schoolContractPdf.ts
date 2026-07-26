@@ -11,6 +11,7 @@ import {
   SCHOOL_CONTRACTS_BUCKET,
   extractSchoolContractStoragePath,
 } from './schoolContractPdfPath.js';
+import { buildSchoolContractTemplatePayload } from './schoolContractTemplatePayload.js';
 
 export const BUCKET = SCHOOL_CONTRACTS_BUCKET;
 
@@ -112,10 +113,9 @@ export async function createDocxTemplatePdf(params: {
 export async function renderAndStoreSchoolContractPdf(
   supabase: SupabaseClient,
   contract: any,
+  options?: { includeMediaConsentFlags?: boolean },
 ): Promise<{ uploadedPath: string | null; renderedBody: string }> {
   const st = contract.student || {};
-  const consent = String(contract.media_publicity_consent || st.media_publicity_consent || '').trim();
-
   const fullAddress = [st.student_address || '', st.student_city || ''].filter(Boolean).join(', ');
   const parentName = String(st.payer_name || '').trim();
   const parentEmail = String(st.payer_email || '').trim();
@@ -160,34 +160,14 @@ export async function renderAndStoreSchoolContractPdf(
     '{{school_name}}': String(contract.organizations?.name || ''),
   });
 
-  const consentPending = !consent;
-  const templatePayload: Record<string, string | boolean | null> = {
-    contract_number: templateSafe(contract.contract_number),
-    student_name: templateSafe(st.full_name),
-    student_email: templateSafe(st.email),
-    student_phone: templateSafe(st.phone),
-    parent_name: templateSafe(parentName),
-    parent_email: templateSafe(parentEmail),
-    parent_phone: templateSafe(parentPhone),
-    parent_personal_code: templateSafe(parentPersonalCode),
-    parent_address: templateSafe(fullAddress),
-    parent2_name: templateSafe(parent2Name),
-    parent2_email: templateSafe(parent2Email),
-    parent2_phone: templateSafe(parent2Phone),
-    parent2_personal_code: templateSafe(parent2PersonalCode),
-    parent2_address: templateSafe(parent2Address),
-    parent2_adress: templateSafe(parent2Address),
-    parent2_block: templateSafe(parent2Block),
-    parent2_inline: templateSafe(parent2Inline),
-    child_birth_date: templateSafe(childBirthDate),
-    address: templateSafe(fullAddress),
-    annual_fee: templateSafe(contract.annual_fee),
-    date: new Date().toLocaleDateString('lt-LT'),
-    school_name: templateSafe(contract.organizations?.name),
-    consent_pending: consentPending,
-    consent_agree_selected: consent === 'agree',
-    consent_disagree_selected: consent === 'disagree',
-  };
+  const templatePayload = buildSchoolContractTemplatePayload({
+    contractNumber: contract.contract_number,
+    annualFee: contract.annual_fee,
+    schoolName: contract.organizations?.name,
+    mediaPublicityConsent: contract.media_publicity_consent,
+    student: st,
+    includeMediaConsentFlags: options?.includeMediaConsentFlags === true,
+  });
 
   let pdfBytes: Uint8Array;
   const templatePathOrUrl = String(contract.template?.pdf_url || '').trim();
@@ -222,12 +202,15 @@ export async function renderAndStoreSchoolContractPdf(
     contractId: String(contract.id),
     contractNumber: contract.contract_number ?? null,
   });
-  const { error: uploadErr } = await supabase.storage.from(BUCKET).upload(
-    path,
-    new Blob([pdfBytes], { type: 'application/pdf' }),
-    { cacheControl: '3600', upsert: true, contentType: 'application/pdf' },
-  );
-  const uploadedPath = uploadErr ? null : path;
+  const pdfBuffer = Buffer.from(pdfBytes);
+  const { error: uploadErr } = await supabase.storage.from(BUCKET).upload(path, pdfBuffer, {
+    cacheControl: '3600',
+    upsert: true,
+    contentType: 'application/pdf',
+  });
+  if (uploadErr) {
+    throw new Error(`Nepavyko įkelti sutarties PDF: ${uploadErr.message}`);
+  }
 
-  return { uploadedPath, renderedBody };
+  return { uploadedPath: path, renderedBody };
 }

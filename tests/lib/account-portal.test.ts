@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { canAccessLoginPortal, loginErrorKeyForPortalMismatch, type AccountPortals } from '../../src/lib/account-portal';
+import {
+  canAccessLoginPortal,
+  loginErrorKeyForPortalMismatch,
+  profileQualifiesAsTutor,
+  type AccountPortals,
+} from '../../src/lib/account-portal';
 
 describe('canAccessLoginPortal', () => {
   it('allows each portal only when the matching account exists', () => {
@@ -41,5 +46,34 @@ describe('loginErrorKeyForPortalMismatch', () => {
         tutor: false,
       }),
     ).toBe('login.noTutorFound');
+  });
+});
+
+describe('profileQualifiesAsTutor', () => {
+  const ghostProfile = {
+    id: 'user-1',
+    organization_id: null,
+    subscription_status: null,
+    manual_subscription_exempt: false,
+  };
+
+  it('treats student + bare profiles row as student-only (not tutor)', () => {
+    expect(profileQualifiesAsTutor(ghostProfile, true)).toBe(false);
+  });
+
+  it('treats solo tutor signup profile as tutor when no student row', () => {
+    expect(profileQualifiesAsTutor(ghostProfile, false)).toBe(true);
+  });
+
+  it('treats org-linked profile as tutor even with a student row', () => {
+    expect(
+      profileQualifiesAsTutor({ ...ghostProfile, organization_id: 'org-1' }, true),
+    ).toBe(true);
+  });
+
+  it('treats subscribed profile as tutor', () => {
+    expect(
+      profileQualifiesAsTutor({ ...ghostProfile, subscription_status: 'active' }, true),
+    ).toBe(true);
   });
 });

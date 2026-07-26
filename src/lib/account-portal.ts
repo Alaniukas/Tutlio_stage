@@ -1,8 +1,32 @@
 import { supabase } from '@/lib/supabase';
 import { orgAdminRowByUserDeduped, rpcGetStudentByUserIdDeduped } from '@/lib/preload';
 import { getOrgAdminDashboardPath } from '@/lib/orgAdminDashboardPath';
+import { hasAnySubscriptionStatus } from '@/lib/subscription';
 
 export type LoginPortal = 'tutor' | 'student' | 'parent' | 'org_admin';
+
+export type RolePortal = 'student' | 'tutor';
+
+const LAST_ROLE_PORTAL_KEY = 'tutlio_last_portal';
+
+export function setLastRolePortal(portal: RolePortal): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(LAST_ROLE_PORTAL_KEY, portal);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getLastRolePortal(): RolePortal | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const v = localStorage.getItem(LAST_ROLE_PORTAL_KEY);
+    return v === 'student' || v === 'tutor' ? v : null;
+  } catch {
+    return null;
+  }
+}
 
 export interface AccountPortals {
   orgAdmin: boolean;
@@ -10,6 +34,31 @@ export interface AccountPortals {
   student: boolean;
   /** Tutor platform account (profiles row). */
   tutor: boolean;
+}
+
+/** Profile row fields used to decide whether this user is a real tutor, not a ghost profiles row. */
+export type TutorProfileGate = {
+  id?: string;
+  organization_id?: string | null;
+  subscription_status?: string | null;
+  manual_subscription_exempt?: boolean | null;
+};
+
+/**
+ * A linked `students` row plus a bare `profiles` row (no org, no subscription) is a
+ * student account — not a dual-role tutor. Ghost profiles often come from QA seeds
+ * or auth metadata upserts during email confirmation.
+ */
+export function profileQualifiesAsTutor(
+  profile: TutorProfileGate | null | undefined,
+  hasStudentRow: boolean,
+): boolean {
+  if (!profile?.id) return false;
+  if (profile.organization_id) return true;
+  if (profile.manual_subscription_exempt === true) return true;
+  if (hasAnySubscriptionStatus(profile.subscription_status)) return true;
+  if (hasStudentRow) return false;
+  return true;
 }
 
 export async function resolveAccountPortals(
@@ -22,14 +71,17 @@ export async function resolveAccountPortals(
     orgAdminRowByUserDeduped(userId),
     supabase.rpc('get_parent_profile_id_by_user_id', { p_user_id: userId }),
     rpcGetStudentByUserIdDeduped(userId),
-    supabase.from('profiles').select('id').eq('id', userId).maybeSingle(),
+    supabase
+      .from('profiles')
+      .select('id, organization_id, subscription_status, manual_subscription_exempt')
+      .eq('id', userId)
+      .maybeSingle(),
   ]);
 
   let student = Boolean(studentResult?.data?.[0]);
   const parent = Boolean(parentResult?.data && !parentResult.error);
-  const tutor = Boolean(profileResult?.data?.id);
+  const tutor = profileQualifiesAsTutor(profileResult?.data, student);
   const orgAdmin = Boolean(orgAdminRow);
-
   if (!student && options?.linkStudentByEmail && email) {
     try {
       const { data: linkRows, error: rpcError } = await supabase.rpc('get_student_by_email_for_linking', {
@@ -77,18 +129,21 @@ export async function getHomePathForPortals(
   }
   if (portals.parent) return '/parent';
 
-  // Org tutors who also have a student row (e.g. bad test data) should land on tutor dashboard.
+  // Genuine dual-role (org tutor + student): honour last-used portal.
   if (portals.tutor && portals.student) {
+    const lastRole = getLastRolePortal();
+    if (lastRole === 'student') return '/student';
+    if (lastRole === 'tutor') return '/dashboard';
     const { data: prof } = await supabase
       .from('profiles')
       .select('organization_id')
       .eq('id', userId)
       .maybeSingle();
     if (prof?.organization_id) return '/dashboard';
+    return '/student';
   }
 
-  if (portals.student) return '/student';
-  if (portals.tutor) return '/dashboard';
+  if (portals.student) return '/student';  if (portals.tutor) return '/dashboard';
   return null;
 }
 

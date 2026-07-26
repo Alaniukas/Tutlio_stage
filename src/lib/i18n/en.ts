@@ -836,6 +836,8 @@ export const en: Record<string, string> = {
   'compSch.trialLessonDesc': 'The lesson will be created as a trial (tutor comment required on completion)',
   'compSch.trialPriceNote': 'Default trial lesson price — you can adjust it',
   'compSch.firstLessonAutoTrial': "This student's first lesson — automatically marked as a trial. Topic, duration and price can be adjusted.",
+  'compSch.firstLessonTrial': 'First lesson is trial',
+  'compSch.firstLessonTrialDesc': 'In a recurring series, the chronologically first lesson will be a trial with trial pricing rules.',
   'compSch.invalidEndDuration': 'Invalid end duration',
   'compSch.invalidStartDateTime': 'Invalid start date time',
   'compSch.lessonInfo': 'Lesson info',

@@ -47,6 +47,8 @@ export const sharedOrganizationWorkflowTranslations: Record<string, string> = {
   'dynamicPricing.frequencyOption': '{n}/week',
   'dynamicPricing.frequencySaved': 'Contracted frequency saved. Upcoming lesson prices updated.',
   'compSch.firstLessonAutoTrial': "This student's first lesson — automatically marked as a trial. Topic, duration and price can be adjusted.",
+  'compSch.firstLessonTrial': 'First lesson is trial',
+  'compSch.firstLessonTrialDesc': 'In a recurring series, the chronologically first lesson will be a trial with trial pricing rules.',
   'package.studentGrade': 'Grade',
   'package.gradeValue': 'Grade {grade}',
   'package.weeklyFrequency': 'Frequency per week',

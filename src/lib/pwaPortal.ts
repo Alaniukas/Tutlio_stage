@@ -28,6 +28,7 @@ export function getLastPortal(): LastPortal {
   if (typeof window === 'undefined') return 'regular';
   try {
     const v = localStorage.getItem(LAST_PORTAL_KEY);
+    if (v === 'student' || v === 'tutor') return 'regular';
     return v === 'company' || v === 'school' ? v : 'regular';
   } catch {
     return 'regular';

@@ -78,6 +78,7 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
   const [sessionCount, setSessionCount] = useState<number | null>(null);
   const [trialDefaults, setTrialDefaults] = useState<TrialDefaults>({ topic: '', durationMinutes: 60, priceEur: 0 });
   const [isTrial, setIsTrial] = useState(false);
+  const [firstLessonIsTrial, setFirstLessonIsTrial] = useState(false);
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurringFrequency, setRecurringFrequency] = useState<RecurrenceFrequency>('weekly');
   const [recurringWeekdays, setRecurringWeekdays] = useState<number[]>([]);
@@ -121,6 +122,7 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
       setCreatedIntervals([]);
       setSuccessMessage('');
       setIsTrial(false);
+      setFirstLessonIsTrial(false);
       setIsRecurring(false);
       setRecurringFrequency('weekly');
       setRecurringWeekdays([]);
@@ -241,6 +243,7 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
         createIsPaid: isPaid,
         createPrice: price,
         createIsTrial: isTrial,
+        createFirstLessonIsTrial: isRecurring && firstLessonIsTrial,
         createTutorComment: '',
         createShowCommentToStudent: false,
         subjects: [
@@ -259,7 +262,7 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
 
       // Trial payment email on creation (one-time pay link for that lesson).
       if (
-        isTrial &&
+        (isTrial || (isRecurring && firstLessonIsTrial)) &&
         !isPaid &&
         price > 0 &&
         hasFeature('trial_creation_payment_email') &&
@@ -274,7 +277,7 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
               tutorId: pick.tutorId,
               sessionId: result.createdSessionIds[0],
               topic: topic || trialDefaults.topic || undefined,
-              durationMinutes: trialDefaults.durationMinutes,
+              durationMinutes: isTrial ? trialDefaults.durationMinutes : trialDefaults.durationMinutes,
               priceEur: price,
             }),
           });
@@ -375,7 +378,7 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
             )}
 
             {/* First-ever lesson: recommended as a trial (admin can uncheck). */}
-            {(isTrial || (sessionCount === 0 && !orgFeaturesLoading && hasFeature('auto_trial_first_lesson'))) && (
+            {(isTrial || (sessionCount === 0 && !orgFeaturesLoading && hasFeature('auto_trial_first_lesson'))) && !isRecurring && (
               <div className="border border-amber-200 rounded-xl p-3 bg-amber-50/60">
                 <button
                   type="button"
@@ -384,6 +387,7 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
                     setIsTrial(next);
                     if (next) {
                       setIsRecurring(false);
+                      setFirstLessonIsTrial(false);
                       setRecurringWeekdays([]);
                       setRecurringEndDate('');
                     }
@@ -437,7 +441,10 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
               <RecurrenceFields
                 compact
                 enabled={isRecurring}
-                onEnabledChange={setIsRecurring}
+                onEnabledChange={(enabled) => {
+                  setIsRecurring(enabled);
+                  if (!enabled) setFirstLessonIsTrial(false);
+                }}
                 frequency={recurringFrequency}
                 onFrequencyChange={setRecurringFrequency}
                 weekdays={recurringWeekdays}
@@ -446,6 +453,28 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
                 onEndDateChange={setRecurringEndDate}
                 startTime={selectedSlot ? format(new Date(selectedSlot), "yyyy-MM-dd'T'HH:mm") : undefined}
               />
+            )}
+
+            {isRecurring && !subject?.is_group && (
+              <div className="border border-amber-200 rounded-xl p-3 bg-amber-50/60">
+                <button
+                  type="button"
+                  onClick={() => setFirstLessonIsTrial((v) => !v)}
+                  className="flex items-center justify-between gap-3 w-full text-left"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-amber-950">{t('compSch.firstLessonTrial')}</p>
+                    <p className="text-xs text-amber-900/80">{t('compSch.firstLessonTrialDesc')}</p>
+                  </div>
+                  <div
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full flex-shrink-0 ${firstLessonIsTrial ? 'bg-amber-500' : 'bg-gray-300'}`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${firstLessonIsTrial ? 'translate-x-6' : 'translate-x-1'}`}
+                    />
+                  </div>
+                </button>
+              </div>
             )}
 
             <div className="border border-green-100 rounded-xl p-3 sm:p-4 bg-green-50/50 flex flex-col justify-center min-h-[4.5rem]">

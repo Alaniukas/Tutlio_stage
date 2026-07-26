@@ -46,6 +46,12 @@
         },
         "api/school-contract-parent-upload.ts": {
             "maxDuration": 60
+        },
+        "api/school-contract-complete.ts": {
+            "maxDuration": 60
+        },
+        "api/school-contract-render-docx-pdf.ts": {
+            "maxDuration": 60
         }
     },
     "headers": [

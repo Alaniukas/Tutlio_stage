@@ -46,7 +46,7 @@ interface Session {
     tutor_comment?: string | null;
     show_comment_to_student?: boolean;
     subject_id?: string | null;
-    subjects?: { is_group?: boolean; max_students?: number; name?: string } | null;
+    subjects?: { is_group?: boolean; max_students?: number; name?: string; is_trial?: boolean } | null;
     lesson_package_id?: string | null;
     is_late_cancelled?: boolean;
     cancellation_penalty_amount?: number | null;
@@ -196,6 +196,7 @@ export default function StudentSessions() {
     const sessionsSecondaryGenRef = useRef(0);
     /** Clears packages/waitlist when the resolved student differs from last successful Pamokų load. */
     const sessionsLoadedStudentIdRef = useRef<string | null>(null);
+    const [trackedStudentId, setTrackedStudentId] = useState<string | null>(null);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
     const now = new Date();
 
@@ -207,6 +208,29 @@ export default function StudentSessions() {
         void fetchSessions();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [ctxUser?.id, location.pathname, parentLessonsFetchKey, studentSessionsSearchKey]);
+
+    useEffect(() => {
+        if (!trackedStudentId) return;
+        const channel = supabase
+            .channel(`student-sessions:${trackedStudentId}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: 'UPDATE',
+                    schema: 'public',
+                    table: 'sessions',
+                    filter: `student_id=eq.${trackedStudentId}`,
+                },
+                () => {
+                    void fetchSessions();
+                },
+            )
+            .subscribe();
+        return () => {
+            supabase.removeChannel(channel);
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [trackedStudentId]);
     useEffect(() => { setShowAllSessions(false); }, [filter, lessonsSubjectFilter, lessonsDateFrom, lessonsDateTo]);
 
     const lessonSubjectOptions = useMemo(() => {
@@ -768,22 +792,23 @@ export default function StudentSessions() {
         }
         const sessionRows = (sessionsRes.data || []) as Record<string, unknown>[];
         const subjectIdsForSessions = [...new Set(sessionRows.map((r) => r.subject_id).filter(Boolean) as string[])];
-        let subjectMeta: Record<string, { name: string; is_group?: boolean; max_students?: number | null }> =
+        let subjectMeta: Record<string, { name: string; is_group?: boolean; max_students?: number | null; is_trial?: boolean }> =
             {};
         if (subjectIdsForSessions.length > 0) {
             const { data: subs, error: subErr } = await supabase
                 .from('subjects')
-                .select('id,name,is_group,max_students')
+                .select('id,name,is_group,max_students,is_trial')
                 .in('id', subjectIdsForSessions);
             if (subErr) {
                 console.warn('[StudentSessions] subjects load:', subErr.code, subErr.message);
             } else {
                 for (const s of subs ?? []) {
-                    const row = s as { id: string; name: string; is_group?: boolean; max_students?: number | null };
+                    const row = s as { id: string; name: string; is_group?: boolean; max_students?: number | null; is_trial?: boolean };
                     subjectMeta[row.id] = {
                         name: row.name,
                         is_group: row.is_group ?? undefined,
                         max_students: row.max_students,
+                        is_trial: row.is_trial ?? undefined,
                     };
                 }
             }
@@ -794,7 +819,7 @@ export default function StudentSessions() {
             return {
                 ...(row as unknown as Session),
                 subjects: sm
-                    ? { name: sm.name, is_group: sm.is_group, max_students: sm.max_students ?? undefined }
+                    ? { name: sm.name, is_group: sm.is_group, max_students: sm.max_students ?? undefined, is_trial: sm.is_trial }
                     : null,
             };
         });
@@ -805,6 +830,7 @@ export default function StudentSessions() {
             setActivePackages([]);
         }
         sessionsLoadedStudentIdRef.current = currentStudentIdForFetch;
+        setTrackedStudentId(currentStudentIdForFetch);
 
         const storeCacheKey = isParentLessonsRoute ? `parent_lessons_${st.id}` : 'student_sessions';
         setCache(storeCacheKey, { sessions: fetchedSessions, waitlist: [] });
@@ -1622,6 +1648,11 @@ export default function StudentSessions() {
                                                     {t('stuSess.group')}
                                                 </span>
                                             )}
+                                            {s.subjects?.is_trial && (
+                                                <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide flex-shrink-0">
+                                                    {t('status.trialLesson')}
+                                                </span>
+                                            )}
                                         </div>
                                         <div className="flex items-center gap-2 mt-0.5 text-gray-500">
                                             <Clock className="w-4 h-4" />
@@ -1723,6 +1754,7 @@ export default function StudentSessions() {
                                         status={selectedSession?.status || ''}
                                         paymentStatus={selectedSession?.payment_status}
                                         paid={selectedSession?.paid}
+                                        isTrial={selectedSession?.subjects?.is_trial === true}
                                         endTime={selectedSession?.end_time}
                                         treatUnpaidAsReserved={!showPerLessonStripeButton}
                                     />

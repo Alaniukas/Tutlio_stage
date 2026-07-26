@@ -129,8 +129,13 @@ export async function convertDocxBufferToPdfWithFallbacks(docxBuffer: Buffer): P
   if (hasRemote) {
     try {
       return await convertWithDocxConverterService(docxBuffer);
-    } catch {
-      // fall through
+    } catch (remoteError) {
+      // On serverless (Vercel) LibreOffice is unavailable — surface the hosted
+      // converter error instead of a misleading "install LibreOffice" message.
+      if (process.env.VERCEL) {
+        throw remoteError;
+      }
+      // fall through to local LibreOffice on dev machines
     }
   }
 

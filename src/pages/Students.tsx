@@ -38,6 +38,7 @@ import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { isPlMarket } from '@/lib/market';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { isProKlaseOrg } from '@/lib/marketMoney';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import {
   isPerStudentPaymentOverrideEnabled,
@@ -131,6 +132,7 @@ export default function StudentsPage() {
   const location = useLocation();
   const { user, profile } = useUser();
   const orgPolicy = useOrgTutorPolicy();
+  const hideProKlaseOrgTutorCancel = orgPolicy.isOrgTutor && isProKlaseOrg(profile?.organization_id);
   const { hasFeature, loading: orgFeaturesLoading, contactVisibility } = useOrgFeatures();
   const stcache = getCached<any>('tutor_students');
   const [students, setStudents] = useState<Student[]>(stcache?.students ?? []);
@@ -3010,6 +3012,7 @@ export default function StudentsPage() {
             <div className="flex gap-2 flex-1 flex-wrap">
               {selectedSessionForModal?.status === 'active' && (
                 <>
+                  {!hideProKlaseOrgTutorCancel && (
                   <Button
                     variant="destructive"
                     onClick={() => {
@@ -3024,6 +3027,7 @@ export default function StudentsPage() {
                     <XCircle className="w-4 h-4 mr-1" />
                     {t('cal.cancelLessonTitle')}
                   </Button>
+                  )}
                   <Button
                     variant="outline"
                     onClick={handleMarkCompleted}

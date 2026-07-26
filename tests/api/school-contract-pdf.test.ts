@@ -16,7 +16,7 @@ vi.mock('../../api/_lib/renderSchoolContractDocxToPdf', () => ({
 import { renderAndStoreSchoolContractPdf } from '../../api/_lib/schoolContractPdf';
 
 function makeSupabase(opts: { signError?: boolean } = {}) {
-  const uploads: Array<{ path: string; blob: Blob }> = [];
+  const uploads: Array<{ path: string; data: Buffer }> = [];
   const supabase = {
     storage: {
       from: () => ({
@@ -24,8 +24,8 @@ function makeSupabase(opts: { signError?: boolean } = {}) {
           opts.signError
             ? { data: null, error: { message: 'sign failed' } }
             : { data: { signedUrl: 'https://storage.example/signed-template.docx' }, error: null },
-        upload: async (path: string, blob: Blob) => {
-          uploads.push({ path, blob });
+        upload: async (path: string, data: Buffer) => {
+          uploads.push({ path, data });
           return { error: null };
         },
       }),
@@ -73,7 +73,7 @@ describe('renderAndStoreSchoolContractPdf — DOCX template fidelity', () => {
     expect(uploads[0].path).toBe(
       'org-1/contracts/c0000000-0000-0000-0000-000000000001/Sutartis-SUT-20260713-1238.pdf',
     );
-    expect(Buffer.from(await uploads[0].blob.arrayBuffer())).toEqual(converted);
+    expect(Buffer.from(uploads[0].data)).toEqual(converted);
     expect(result.uploadedPath).toBe(uploads[0].path);
   });
 
@@ -104,7 +104,7 @@ describe('renderAndStoreSchoolContractPdf — DOCX template fidelity', () => {
 
     expect(mocks.renderDocx).not.toHaveBeenCalled();
     expect(uploads).toHaveLength(1);
-    const bytes = Buffer.from(await uploads[0].blob.arrayBuffer());
+    const bytes = Buffer.from(uploads[0].data);
     expect(bytes.subarray(0, 5).toString()).toBe('%PDF-');
     expect(result.uploadedPath).toBe(uploads[0].path);
     expect(result.renderedBody).toContain('Jonukas Pet');

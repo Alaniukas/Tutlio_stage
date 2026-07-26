@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="lt">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mano Korepetitorius — Demo prisijungimai</title>
+  <style>
+    :root { --pink: #E1557D; --purple: #4B0091; --bg: #fdf2f8; --card: #fff; --ink: #1f2937; --muted: #6b7280; --line: #e5e7eb; }
+    body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: linear-gradient(135deg, #fdf2f8, #f3e8ff); color: var(--ink); line-height: 1.5; }
+    main { max-width: 720px; margin: 0 auto; padding: 32px 20px 64px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 24px; box-shadow: 0 10px 30px rgba(75,0,145,.08); margin-bottom: 20px; }
+    h1 { margin: 0 0 8px; font-size: 1.6rem; color: var(--purple); }
+    .sub { color: var(--muted); margin: 0 0 20px; }
+    .logo { max-height: 72px; margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+    code { background: #f3f4f6; padding: 2px 6px; border-radius: 6px; font-size: 13px; }
+    a { color: var(--pink); font-weight: 600; }
+    .cta { display: inline-block; margin-top: 12px; padding: 12px 18px; border-radius: 12px; background: linear-gradient(135deg, var(--pink), var(--purple)); color: #fff; text-decoration: none; font-weight: 700; }
+    .note { background: #fff7ed; border: 1px solid #fed7aa; border-radius: 12px; padding: 12px 14px; font-size: 14px; color: #9a3412; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="card">
+      <img class="logo" src="/demo/manokorepetitorius-logo.png" alt="Mano Korepetitorius" />
+      <h1>Mano Korepetitorius — pardavimo demo</h1>
+      <p class="sub">Whitelabel demonstracija su fake duomenimis. Rodykite klientui šią nuorodą — iškart matys jų spalvas ir logotipą.</p>
+      <p><strong>Whitelabel prisijungimas (korepetitorius / mokinys):</strong><br />
+        <a href="https://tutlio.lt/login?org=manokorepetitorius">https://tutlio.lt/login?org=manokorepetitorius</a>
+      </p>
+      <a class="cta" href="https://tutlio.lt/login?org=manokorepetitorius">Atidaryti demo login</a>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0;font-size:1.1rem;">Prisijungimai</h2>
+      <p class="sub" style="margin-top:0;">Visiems vienodas slaptažodis: <code>ManoKorepDemo2026!</code></p>
+      <table>
+        <thead><tr><th>Rolė</th><th>El. paštas</th><th>Ką rodyti</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>Korepetitorius</strong></td>
+            <td><code>manokorepetitorius.demo.tutor@tutlio.lt</code></td>
+            <td>Kalendorius, 3 mokiniai, artimiausios pamokos</td>
+          </tr>
+          <tr>
+            <td><strong>Mokinys</strong></td>
+            <td><code>manokorepetitorius.demo.student@tutlio.lt</code></td>
+            <td>Mokinio portalas su tvarkaraščiu</td>
+          </tr>
+          <tr>
+            <td><strong>Įmonės admin</strong></td>
+            <td><code>manokorepetitorius.demo.admin@tutlio.lt</code></td>
+            <td><a href="https://tutlio.lt/company/login">/company/login</a> (dar be whitelabel)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <motion class="card note">
+      <strong>Pastaba:</strong> Įmonės admin login puslapis vis dar rodo Tutlio brandingą.
+      Korepetitoriaus ir mokinio prisijungimas per <code>?org=manokorepetitorius</code> — pilnai personalizuotas (logo, spalvos, pavadinimas).
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0;font-size:1.1rem;">Paleisti iš naujo / atnaujinti demo</h2>
+      <p style="margin:0;font-size:14px;color:var(--muted);">Projekte: <code>node scripts/seed-manokorepetitorius-demo.mjs</code></p>
+    </div>
+  </main>
+</body>
+</html>

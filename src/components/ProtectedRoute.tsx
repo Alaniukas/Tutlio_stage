@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
-import { resolveAccountPortals } from '@/lib/account-portal';
+import { resolveAccountPortals, setLastRolePortal, getLastRolePortal } from '@/lib/account-portal';
 import { supabase } from '@/lib/supabase';
 import { hasActiveSubscription, tutorHasPlatformSubscriptionAccess } from '@/lib/subscription';
 import { useUser } from '@/contexts/UserContext';
@@ -15,6 +15,10 @@ export default function ProtectedRoute() {
 
   const isDashboard = location.pathname === '/dashboard';
   const isDashboardWithSuccess = isDashboard && new URLSearchParams(location.search).get('subscription_success') === '1';
+
+  useEffect(() => {
+    setLastRolePortal('tutor');
+  }, []);
 
   // Recheck subscription when needs_subscription and on dashboard
   useEffect(() => {
@@ -108,6 +112,13 @@ export default function ProtectedRoute() {
       if (portals.student && !portals.tutor) {
         if (!cancelled) { resolvedForUserRef.current = ctxUser.id; setStatus('student'); }
         return;
+      }
+      if (portals.student && portals.tutor) {
+        const lastRole = getLastRolePortal();
+        if (lastRole === 'student') {
+          if (!cancelled) { resolvedForUserRef.current = ctxUser.id; setStatus('student'); }
+          return;
+        }
       }
 
       let profile: {

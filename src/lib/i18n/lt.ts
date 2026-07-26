@@ -888,6 +888,8 @@ export const lt: Record<string, string> = {
   'compSch.trialLessonDesc': 'Pamoka bus sukurta kaip bandomoji (su privalomu korepetitoriaus komentaru)',
   'compSch.trialPriceNote': 'Numatytoji bandomosios pamokos kaina – galite koreguoti',
   'compSch.firstLessonAutoTrial': 'Pirmoji šio mokinio pamoka – automatiškai pažymėta kaip bandomoji. Pavadinimą, trukmę ir kainą galite koreguoti.',
+  'compSch.firstLessonTrial': 'Pirma pamoka bandomoji',
+  'compSch.firstLessonTrialDesc': 'Pasikartojančioje serijoje chronologiškai pirmoji pamoka bus bandomoji su bandomosios kainos sąlygomis.',
   'compSch.invalidEndDuration': 'Neteisinga pabaigos trukmė',
   'compSch.invalidStartDateTime': 'Neteisinga pradžios data/laikas',
   'compSch.lessonInfo': 'Pamokos informacija',

@@ -1790,6 +1790,41 @@ export default function CompanyStudents() {
    * 'auto' recomputes from the recurring schedule; a number pins it manually.
    * The RPC also re-prices upcoming unpaid lessons to the matching tier.
    */
+  const persistStudentPricingFrequency = async (
+    studentIds: string[],
+    lessonsPerWeek: number,
+    options?: { silent?: boolean },
+  ) => {
+    let effective: number | null = lessonsPerWeek;
+    for (const id of studentIds) {
+      const { data, error } = await supabase.rpc('set_student_pricing_frequency', {
+        p_student_id: id,
+        p_lessons_per_week: lessonsPerWeek,
+      });
+      if (error) {
+        if (!options?.silent) {
+          setToastMessage({ message: t('compStu.errorPrefix', { msg: error.message }), type: 'error' });
+        }
+        return false;
+      }
+      if (selectedStudent && id === selectedStudent.id) effective = (data as number | null) ?? lessonsPerWeek;
+    }
+    const patch = { pricing_lessons_per_week: effective, pricing_lessons_per_week_is_manual: true };
+    if (selectedStudent && studentIds.includes(selectedStudent.id)) {
+      setSelectedStudent((current) => (current ? { ...current, ...patch } : current));
+    }
+    setSelectedStudentGroup((current) =>
+      current.map((row) => (studentIds.includes(row.id) ? { ...row, ...patch } : row)),
+    );
+    setStudents((current) =>
+      current.map((row) => (studentIds.includes(row.id) ? { ...row, ...patch } : row)),
+    );
+    if (!options?.silent) {
+      setToastMessage({ message: t('dynamicPricing.frequencySaved'), type: 'success' });
+    }
+    return true;
+  };
+
   const handleUpdateStudentFrequency = async (value: string) => {
     if (!selectedStudent) return;
     const ids = selectedStudentGroup.length > 0
@@ -1814,6 +1849,14 @@ export default function CompanyStudents() {
     setSelectedStudentGroup((current) => current.map((row) => ({ ...row, ...patch })));
     setStudents((current) => current.map((row) => (ids.includes(row.id) ? { ...row, ...patch } : row)));
     setToastMessage({ message: t('dynamicPricing.frequencySaved'), type: 'success' });
+  };
+
+  const handlePkgLessonsPerWeekChange = (value: string) => {
+    const next = Number(value);
+    if (!Number.isFinite(next) || next < 1) return;
+    setPkgLessonsPerWeek(next);
+    if (!selectedStudent) return;
+    void persistStudentPricingFrequency([selectedStudent.id], next, { silent: true });
   };
 
   const handleDetachStudent = async (id: string) => {
@@ -3013,7 +3056,9 @@ export default function CompanyStudents() {
                         value={
                           selectedStudent.pricing_lessons_per_week_is_manual && selectedStudent.pricing_lessons_per_week
                             ? String(selectedStudent.pricing_lessons_per_week)
-                            : 'auto'
+                            : selectedStudent.pricing_lessons_per_week
+                              ? String(selectedStudent.pricing_lessons_per_week)
+                              : 'auto'
                         }
                         onValueChange={(value) => void handleUpdateStudentFrequency(value)}
                       >
@@ -3878,7 +3923,7 @@ export default function CompanyStudents() {
                             </div>
                             <div className="space-y-1">
                               <Label className="text-[11px] text-violet-900">{t('package.weeklyFrequency')}</Label>
-                              <Select value={String(pkgLessonsPerWeek)} onValueChange={(value) => setPkgLessonsPerWeek(Number(value))}>
+                              <Select value={String(pkgLessonsPerWeek)} onValueChange={handlePkgLessonsPerWeekChange}>
                                 <SelectTrigger className="h-9 rounded-lg text-xs"><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                   {[1, 2, 3, 4, 5].map((count) => (

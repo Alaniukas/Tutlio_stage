@@ -56,6 +56,7 @@ import {
     tutorStudentCountEstimatedDeduped,
 } from '@/lib/preload';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { isProKlaseOrg } from '@/lib/marketMoney';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { formatContactForTutorView } from '@/lib/orgContactVisibility';
 import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
@@ -193,6 +194,7 @@ export default function DashboardPage() {
     const [hasSubjects, setHasSubjects] = useState(false);
     const [orgTutorFallback, setOrgTutorFallback] = useState<boolean | null>(null);
     const isOrgTutor: boolean | null = ctxProfile ? !!ctxProfile.organization_id : orgTutorFallback;
+    const hideProKlaseOrgTutorCancel = isOrgTutor === true && isProKlaseOrg(ctxProfile?.organization_id);
     const [isEditingTime, setIsEditingTime] = useState(false);
     const [editNewStartTime, setEditNewStartTime] = useState('');
     const [rescheduleReason, setRescheduleReason] = useState('');
@@ -1336,7 +1338,7 @@ export default function DashboardPage() {
                                           {isToday ? `${t('stuSched.today')}, ${format(start, 'HH:mm')}` : format(start, 'EEE d MMM, HH:mm', { locale: dateFnsLocale })}
                                           {s.topic && <span className="ml-1">· {s.topic}</span>}
                                         </span>
-                                        <div className="scale-90 origin-left flex items-center gap-1 flex-wrap"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} isTrial={s.subjects?.is_trial === true} orgTutorCopy={isOrgTutor === true} hidePaymentStatus={isOrgTutor === true} endTime={s.end_time} /><AttendanceBadge session={s} /></div>
+                                        <div className="scale-90 origin-left flex items-center gap-1 flex-wrap"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} isTrial={s.subjects?.is_trial === true} orgTutorCopy={isOrgTutor === true} hidePaymentStatus={isOrgTutor === true} endTime={s.end_time} pendingConfirmation={requiresStatusConfirmation} /><AttendanceBadge session={s} /></div>
                                       </div>
                                     </div>
                                     {isOrgTutor !== true && s.price && <span className="text-sm font-semibold text-gray-700 flex-shrink-0">{fmt(s.price)}</span>}
@@ -1378,7 +1380,7 @@ export default function DashboardPage() {
                                   <div key={s.id} onClick={() => { setSelectedSession(s); setIsModalOpen(true); }} className="flex flex-col gap-2 p-3 rounded-xl cursor-pointer border border-red-100 hover:shadow-md transition-all bg-red-50/50">
                                     <div className="flex items-center justify-between">
                                       <p className="text-sm font-semibold text-gray-900 truncate">{s.student?.full_name}</p>
-                                      <div className="scale-90 origin-right"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} isTrial={s.subjects?.is_trial === true} orgTutorCopy={isOrgTutor === true} hidePaymentStatus={isOrgTutor === true} endTime={s.end_time} /></div>
+                                      <div className="scale-90 origin-right"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} isTrial={s.subjects?.is_trial === true} orgTutorCopy={isOrgTutor === true} hidePaymentStatus={isOrgTutor === true} endTime={s.end_time} pendingConfirmation={requiresStatusConfirmation} /></div>
                                     </div>
                                     <p className="text-xs text-gray-500">
                                       {format(start, "EEE d MMM yyyy, HH:mm", { locale: dateFnsLocale })}
@@ -2157,6 +2159,7 @@ export default function DashboardPage() {
                                         orgTutorCopy
                                         hidePaymentStatus
                                         endTime={selectedSession?.end_time}
+                                        pendingConfirmation={requiresStatusConfirmation}
                                     />
                                 </div>
                             </div>
@@ -2318,6 +2321,7 @@ export default function DashboardPage() {
                         {selectedSession?.status === 'active' && (
                             <div className="flex w-full flex-col gap-2">
                                 <div className="grid grid-cols-2 gap-2">
+                                    {!hideProKlaseOrgTutorCancel && (
                                     <Button
                                         variant="outline"
                                         onClick={() => {
@@ -2332,6 +2336,7 @@ export default function DashboardPage() {
                                         <XCircle className="w-4 h-4 mr-1" />
                                         {t('cal.cancelLessonTitle')}
                                     </Button>
+                                    )}
                                     <Button
                                         variant="outline"
                                         onClick={handleMarkCompleted}

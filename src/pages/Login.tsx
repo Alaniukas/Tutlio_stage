@@ -10,6 +10,7 @@ import {
   getHomePathForPortals,
   loginErrorKeyForPortalMismatch,
   resolveAccountPortals,
+  setLastRolePortal,
   type LoginPortal,
 } from '@/lib/account-portal';
 import { Input } from '@/components/ui/input';
@@ -18,6 +19,7 @@ import { AlertCircle, ArrowLeft, ArrowRight, BookOpen, ChevronRight, Sparkles, B
 import { useTranslation } from '@/lib/i18n';
 import { useOrgBranding } from '@/hooks/useOrgBranding';
 import { setLastPortal } from '@/lib/pwaPortal';
+import { loadSavedLoginForm, persistLoginForm, readRememberMePreference } from '@/lib/loginCredentials';
 
 // ─── SVG Illustrations ────────────────────────────────────────────────────────
 
@@ -133,7 +135,7 @@ export default function Login() {
   // Tutor / student login form
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMeState] = useState(true);
+  const [rememberMe, setRememberMeState] = useState(() => readRememberMePreference());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -240,6 +242,12 @@ export default function Login() {
     });
     if (!portals) return false;
 
+    if (portals.student && !portals.tutor) {
+      setLastRolePortal('student');
+      navigate('/student');
+      return true;
+    }
+
     const homePath = await getHomePathForPortals(user.id, portals);
     if (homePath && homePath !== '/dashboard') {
       navigate(homePath);
@@ -316,13 +324,13 @@ export default function Login() {
     }
   };
 
-  // When user opens /login with existing session (e.g. "remember me" + reload) → auto redirect
+  // Remember portal for installed-PWA routing; do not auto-redirect — user must submit login.
   useEffect(() => {
-    if (redirectOnceRef.current) return;
-    redirectOnceRef.current = true;
-    // Remember this device uses the regular portal (installed-PWA login routing).
     setLastPortal('regular');
-    redirectByRole();
+    const saved = loadSavedLoginForm();
+    if (saved.email) setEmail(saved.email);
+    if (saved.password) setPassword(saved.password);
+    setRememberMeState(saved.rememberMe);
   }, []);
 
   useEffect(() => {
@@ -374,6 +382,7 @@ export default function Login() {
     setError(null);
     try {
       setRememberMe(rememberMe);
+      persistLoginForm(email, password, rememberMe);
       // Clear logout intent when user is actively logging in
       sessionStorage.removeItem('tutlio_logout_intent');
       const { data, error } = await withTimeout(
@@ -422,6 +431,7 @@ export default function Login() {
         }
 
         if (role === 'student') {
+          setLastRolePortal('student');
           setLoading(false);
           navigate('/student');
           return;
@@ -867,6 +877,7 @@ export default function Login() {
                       <Input
                         id="email"
                         type="email"
+                        autoComplete="username"
                         placeholder={t('register.emailPlaceholder')}
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
@@ -909,6 +920,7 @@ export default function Login() {
                       <Input
                         id="email"
                         type="email"
+                        autoComplete="username"
                         placeholder={t('register.emailPlaceholder')}
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
@@ -930,6 +942,7 @@ export default function Login() {
                       <Input
                         id="password"
                         type="password"
+                        autoComplete="current-password"
                         placeholder="••••••••"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
@@ -1044,6 +1057,7 @@ export default function Login() {
                       <Input
                         id="p-email"
                         type="email"
+                        autoComplete="username"
                         placeholder={t('register.emailPlaceholder')}
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
@@ -1083,6 +1097,7 @@ export default function Login() {
                       <Input
                         id="p-email2"
                         type="email"
+                        autoComplete="username"
                         placeholder={t('register.emailPlaceholder')}
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
@@ -1104,6 +1119,7 @@ export default function Login() {
                       <Input
                         id="p-password"
                         type="password"
+                        autoComplete="current-password"
                         placeholder="••••••••"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
@@ -1228,6 +1244,7 @@ export default function Login() {
                         <Input
                           id="s-email"
                           type="email"
+                        autoComplete="username"
                           placeholder={t('register.emailPlaceholder')}
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
@@ -1267,6 +1284,7 @@ export default function Login() {
                         <Input
                           id="s-email"
                           type="email"
+                        autoComplete="username"
                           placeholder={t('register.emailPlaceholder')}
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
@@ -1288,6 +1306,7 @@ export default function Login() {
                         <Input
                           id="s-password"
                           type="password"
+                        autoComplete="current-password"
                           placeholder="••••••••"
                           value={password}
                           onChange={(e) => setPassword(e.target.value)}

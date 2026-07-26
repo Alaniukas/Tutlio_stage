@@ -13,6 +13,7 @@ import { lt } from 'date-fns/locale';
 import { deleteSessionFromGoogle, syncSessionToGoogle } from './_lib/google-calendar.js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { canStudentSideCancelSession, canTutorSideCancelSession } from './_lib/cancel-session-access.js';
+import { isProKlaseOrg } from './_lib/marketMoney.js';
 import { releaseSessionSlotAsAvailability } from './_lib/release-session-availability.js';
 
 async function sendEmail(body: object) {
@@ -136,6 +137,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
             if (!canTutorSideCancelSession(userId, tutorId, isOrgAdminForTutorOrg)) {
                 return res.status(403).json({ error: 'Forbidden' });
+            }
+            // Pro Klasė org tutors may not cancel their own lessons (org admin may).
+            if (
+                userId === tutorId &&
+                orgId &&
+                isProKlaseOrg(orgId) &&
+                !isOrgAdminForTutorOrg
+            ) {
+                return res.status(403).json({ error: 'Org tutors cannot cancel lessons for this organization' });
             }
         } else {
             if (!existingSession.student_id) {

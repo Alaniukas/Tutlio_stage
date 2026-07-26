@@ -292,6 +292,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ...(isMediaConsentMissing ? { media_publicity_consent: consentValue } : {}),
   };
 
+  const mergedStudent = { ...st, ...studentUpdatePayload };
+  const contractForPdf = {
+    ...(contract as any),
+    student: mergedStudent,
+    ...(isMediaConsentMissing ? { media_publicity_consent: consentValue } : {}),
+  };
+
+  let uploadedPath = '';
+  let renderedBody = '';
+  try {
+    const result = await renderAndStoreSchoolContractPdf(supabase, contractForPdf, {
+      // Match admin contract creation unless the parent is submitting a new consent choice.
+      includeMediaConsentFlags: isMediaConsentMissing,
+    });
+    uploadedPath = result.uploadedPath || '';
+    renderedBody = result.renderedBody;
+  } catch (e: any) {
+    console.error('[school-contract-complete] PDF generation failed:', e?.message || e);
+    return res.status(500).send(pageHtml('<h2>Nepavyko paruošti atnaujintos sutarties.</h2><p>Bandykite dar kartą vėliau.</p>'));
+  }
+
+  if (!uploadedPath) {
+    return res.status(500).send(pageHtml('<h2>Nepavyko paruošti atnaujintos sutarties.</h2>'));
+  }
+
   const [studentResult, contractConsentResult] = await Promise.all([
     supabase.from('students').update(studentUpdatePayload).eq('id', (contract as any).student_id),
     isMediaConsentMissing
@@ -308,30 +333,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.error('[school-contract-complete] nepavyko išsaugoti sutikimo:', contractConsentResult.error.message);
   }
 
-  // Re-fetch the contract so the joined student row reflects the just-saved
-  // data, then regenerate the PDF for the admin's mandatory review/signature.
-  const { data: freshContract } = await supabase
-    .from('school_contracts')
-    .select(CONTRACT_SELECT)
-    .eq('id', (contract as any).id)
-    .maybeSingle();
-
-  let uploadedPath = '';
-  let renderedBody = '';
-  try {
-    const result = await renderAndStoreSchoolContractPdf(supabase, freshContract || contract);
-    uploadedPath = result.uploadedPath;
-    renderedBody = result.renderedBody;
-  } catch (e: any) {
-    console.error('[school-contract-complete] PDF generation failed:', e?.message || e);
-    return res.status(500).send(pageHtml('<h2>Nepavyko paruošti atnaujintos sutarties.</h2><p>Bandykite dar kartą vėliau.</p>'));
-  }
-
-  if (!uploadedPath) {
-    return res.status(500).send(pageHtml('<h2>Nepavyko paruošti atnaujintos sutarties.</h2>'));
-  }
-
-  const emailContract = freshContract || contract;
+  const emailContract = { ...(contract as any), student: mergedStudent };
   const esignEnabled =
     Boolean((emailContract as any)?.organizations?.features?.school_contract_esign) && isGoSignConfigured();
   const completionSubmittedAt = new Date().toISOString();

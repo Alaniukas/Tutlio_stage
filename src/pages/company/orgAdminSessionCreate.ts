@@ -39,6 +39,106 @@ type CreatedSessionRow = {
   end_time: string;
 };
 
+type TrialSubjectMeta = {
+  subject: SubjectLite;
+  price: number;
+  durationMinutes: number;
+  topic: string;
+};
+
+/** Resolve org trial defaults and the tutor's trial subject (create if missing). */
+async function resolveOrCreateTrialSubject(
+  supabase: SupabaseClient,
+  tutorId: string,
+  priceOverride?: number,
+  options?: { useOrgPriceOnly?: boolean },
+): Promise<TrialSubjectMeta> {
+  const { data: tutorOrgRow } = await supabase
+    .from('profiles')
+    .select('organization_id')
+    .eq('id', tutorId)
+    .maybeSingle();
+  let featObj: Record<string, unknown> = {};
+  const trialOrgId = (tutorOrgRow as { organization_id?: string | null })?.organization_id;
+  if (trialOrgId) {
+    const { data: orgRow } = await supabase
+      .from('organizations')
+      .select('features')
+      .eq('id', trialOrgId)
+      .maybeSingle();
+    const feat = (orgRow as { features?: unknown })?.features;
+    if (feat && typeof feat === 'object' && !Array.isArray(feat)) featObj = feat as Record<string, unknown>;
+  }
+  const trialName =
+    typeof featObj.trial_lesson_topic === 'string' && featObj.trial_lesson_topic.trim()
+      ? String(featObj.trial_lesson_topic).trim()
+      : 'Bandomoji pamoka';
+  const trialDuration =
+    typeof featObj.trial_lesson_duration_minutes === 'number'
+      ? Math.max(15, Math.round(featObj.trial_lesson_duration_minutes as number))
+      : 60;
+  const trialPriceDefault =
+    typeof featObj.trial_lesson_price_eur === 'number'
+      ? Math.max(0, featObj.trial_lesson_price_eur as number)
+      : 0;
+
+  const { data: existingTrial } = await supabase
+    .from('subjects')
+    .select('id, name, price, duration_minutes, is_group, max_students, is_trial')
+    .eq('tutor_id', tutorId)
+    .eq('is_trial', true)
+    .maybeSingle();
+
+  let trialSubject = existingTrial as SubjectLite | null;
+  if (!trialSubject) {
+    const { data: createdTrial, error: trialErr } = await supabase
+      .from('subjects')
+      .insert({
+        tutor_id: tutorId,
+        name: trialName,
+        duration_minutes: trialDuration,
+        price: trialPriceDefault,
+        color: '#fbbf24',
+        is_trial: true,
+      })
+      .select('id, name, price, duration_minutes, is_group, max_students, is_trial')
+      .single();
+    if (trialErr || !createdTrial) {
+      throw new Error(trialErr?.message || 'Nepavyko sukurti bandomosios pamokos dalyko.');
+    }
+    trialSubject = createdTrial as SubjectLite;
+  }
+
+  const requestedPrice = Number(priceOverride);
+  const price =
+    options?.useOrgPriceOnly
+      ? trialPriceDefault
+      : Number.isFinite(requestedPrice) && requestedPrice >= 0
+        ? requestedPrice
+        : Number(trialSubject.price ?? trialPriceDefault);
+
+  return {
+    subject: trialSubject,
+    price,
+    durationMinutes: trialDuration,
+    topic: trialName,
+  };
+}
+
+async function persistRecurringPlanFrequency(
+  supabase: SupabaseClient,
+  studentIds: string[],
+  lessonsPerWeek: number,
+): Promise<void> {
+  if (!lessonsPerWeek || lessonsPerWeek < 1) return;
+  for (const studentId of studentIds) {
+    await supabase.rpc('set_student_pricing_frequency', {
+      p_student_id: studentId,
+      p_lessons_per_week: lessonsPerWeek,
+    });
+  }
+}
+
 function rawPaymentStatusForEmail(paid: boolean, payment_status?: string | null): string {
   if (!paid) return 'pending';
   if (payment_status === 'confirmed') return 'paid';
@@ -319,6 +419,8 @@ export interface OrgAdminCreateSessionInput {
   createPrice: number;
   /** Create as the tutor's trial subject (bandomoji pamoka) — one-off, individual only. */
   createIsTrial?: boolean;
+  /** Recurring schedule where the chronologically first session is a trial lesson. */
+  createFirstLessonIsTrial?: boolean;
   createTutorComment: string;
   createShowCommentToStudent: boolean;
   subjects: SubjectLite[];
@@ -354,6 +456,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     createRecurringWeekdays = [],
     createIsPaid,
     createIsTrial = false,
+    createFirstLessonIsTrial = false,
     createTutorComment,
     createShowCommentToStudent,
     subjects,
@@ -365,71 +468,15 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
   let subj = subjects.find(s => s.id === createSubjectId);
   if (!subj) throw new Error('Dalykas nerastas.');
 
-  if (createIsTrial) {
-    if (createIsRecurring) throw new Error('Bandomoji pamoka negali būti pasikartojanti.');
-    // The trial concept is subject-scoped (subjects.is_trial): reuse or create the
-    // tutor's trial subject with the org's trial defaults, same as /api/create-trial-package.
-    const { data: tutorOrgRow } = await supabase
-      .from('profiles')
-      .select('organization_id')
-      .eq('id', createTutorId)
-      .maybeSingle();
-    let featObj: Record<string, unknown> = {};
-    const trialOrgId = (tutorOrgRow as any)?.organization_id as string | null | undefined;
-    if (trialOrgId) {
-      const { data: orgRow } = await supabase
-        .from('organizations')
-        .select('features')
-        .eq('id', trialOrgId)
-        .maybeSingle();
-      const feat = (orgRow as any)?.features;
-      if (feat && typeof feat === 'object' && !Array.isArray(feat)) featObj = feat as Record<string, unknown>;
-    }
-    const trialName = typeof featObj.trial_lesson_topic === 'string' && featObj.trial_lesson_topic.trim()
-      ? String(featObj.trial_lesson_topic).trim()
-      : 'Bandomoji pamoka';
-    const trialDuration = typeof featObj.trial_lesson_duration_minutes === 'number'
-      ? Math.max(15, Math.round(featObj.trial_lesson_duration_minutes as number))
-      : 60;
-    const trialPrice = typeof featObj.trial_lesson_price_eur === 'number'
-      ? Math.max(0, featObj.trial_lesson_price_eur as number)
-      : 0;
+  if (createIsTrial && createIsRecurring) {
+    throw new Error('Bandomoji pamoka negali būti pasikartojanti. Naudokite „Pirma pamoka bandomoji“.');
+  }
 
-    const { data: existingTrial } = await supabase
-      .from('subjects')
-      .select('id, name, price, duration_minutes, is_group, max_students, is_trial')
-      .eq('tutor_id', createTutorId)
-      .eq('is_trial', true)
-      .maybeSingle();
-
-    let trialSubject = existingTrial as SubjectLite | null;
-    if (!trialSubject) {
-      const { data: createdTrial, error: trialErr } = await supabase
-        .from('subjects')
-        .insert({
-          tutor_id: createTutorId,
-          name: trialName,
-          duration_minutes: trialDuration,
-          price: trialPrice,
-          color: '#fbbf24',
-          is_trial: true,
-        })
-        .select('id, name, price, duration_minutes, is_group, max_students, is_trial')
-        .single();
-      if (trialErr || !createdTrial) {
-        throw new Error(trialErr?.message || 'Nepavyko sukurti bandomosios pamokos dalyko.');
-      }
-      trialSubject = createdTrial as SubjectLite;
-    }
-
-    createSubjectId = trialSubject.id;
-    subj = trialSubject;
-    // Editable trial price (feedback item 10): the dialog's value wins; the
-    // trial subject's stored price is only the fallback.
-    const requestedTrialPrice = Number(p.createPrice);
-    createPrice = Number.isFinite(requestedTrialPrice) && requestedTrialPrice >= 0
-      ? requestedTrialPrice
-      : Number(trialSubject.price ?? 0);
+  if (createIsTrial && !createIsRecurring) {
+    const trialMeta = await resolveOrCreateTrialSubject(supabase, createTutorId, createPrice);
+    createSubjectId = trialMeta.subject.id;
+    subj = trialMeta.subject;
+    createPrice = trialMeta.price;
   }
   let effectiveShowCommentToStudent = createShowCommentToStudent;
   if ((createTutorComment || '').trim()) {
@@ -689,6 +736,24 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       }
     }
 
+    if (createFirstLessonIsTrial && sessionsRows.length > 0) {
+      const trialMeta = await resolveOrCreateTrialSubject(supabase, createTutorId, undefined, {
+        useOrgPriceOnly: true,
+      });
+      const firstRow = [...sessionsRows].sort(
+        (a, b) => new Date(String(a.start_time)).getTime() - new Date(String(b.start_time)).getTime(),
+      )[0];
+      if (firstRow) {
+        const firstStart = new Date(String(firstRow.start_time));
+        firstRow.subject_id = trialMeta.subject.id;
+        firstRow.price = trialMeta.price;
+        firstRow.end_time = new Date(firstStart.getTime() + trialMeta.durationMinutes * 60 * 1000).toISOString();
+        if (!String(firstRow.topic || '').trim()) {
+          firstRow.topic = trialMeta.topic;
+        }
+      }
+    }
+
     if (sessionsRows.length === 0) throw new Error('Failed to generate lessons.');
     try {
       await assertTutorSlotsFree(
@@ -750,6 +815,8 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     for (const row of inserted || []) {
       syncGoogle((row as { id: string }).id);
     }
+
+    await persistRecurringPlanFrequency(supabase, [...new Set(recurringTemplates.map((t) => t.student_id))], planFrequency);
 
     if (!p.suppressSuccessAlert) alert(`Created ${sessionsRows.length} recurring lessons.`);
     return { createdSessionIds: allCreated.map((row) => row.id) };

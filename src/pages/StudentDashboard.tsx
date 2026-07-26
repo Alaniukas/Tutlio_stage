@@ -32,7 +32,7 @@ import { Button } from '@/components/ui/button';
 import { useTranslation } from '@/lib/i18n';
 import { useStudentPolicy } from '@/contexts/StudentPolicyContext';
 
-interface Session { id: string; start_time: string; end_time: string; status: string; paid: boolean; price: number | null; topic: string | null; meeting_link: string | null; payment_status?: string; tutor_comment?: string | null; show_comment_to_student?: boolean; subject_id?: string | null; subjects?: { is_group?: boolean; max_students?: number } | null; }
+interface Session { id: string; start_time: string; end_time: string; status: string; paid: boolean; price: number | null; topic: string | null; meeting_link: string | null; payment_status?: string; tutor_comment?: string | null; show_comment_to_student?: boolean; subject_id?: string | null; subjects?: { is_group?: boolean; max_students?: number; is_trial?: boolean } | null; }
 interface StudentInfo {
     full_name: string;
     grade: string | null;
@@ -338,17 +338,18 @@ export default function StudentDashboard() {
             } else {
                 const rows = (sessionRowsRaw || []) as Record<string, unknown>[];
                 const subjectIds = [...new Set(rows.map((r) => r.subject_id).filter(Boolean) as string[])];
-                let subjectMeta: Record<string, { is_group?: boolean; max_students?: number | null }> = {};
+                let subjectMeta: Record<string, { is_group?: boolean; max_students?: number | null; is_trial?: boolean }> = {};
                 if (subjectIds.length > 0) {
                     const { data: subs } = await supabase
                         .from('subjects')
-                        .select('id,is_group,max_students')
+                        .select('id,is_group,max_students,is_trial')
                         .in('id', subjectIds);
                     for (const s of subs ?? []) {
-                        const row = s as { id: string; is_group?: boolean; max_students?: number | null };
+                        const row = s as { id: string; is_group?: boolean; max_students?: number | null; is_trial?: boolean };
                         subjectMeta[row.id] = {
                             is_group: row.is_group ?? undefined,
                             max_students: row.max_students,
+                            is_trial: row.is_trial ?? undefined,
                         };
                     }
                 }
@@ -361,6 +362,7 @@ export default function StudentDashboard() {
                             ? {
                                   is_group: sm.is_group,
                                   max_students: sm.max_students ?? undefined,
+                                  is_trial: sm.is_trial,
                               }
                             : null,
                     };
@@ -648,6 +650,11 @@ export default function StudentDashboard() {
                                                             <Users className="w-3 h-3" />
                                                         </span>
                                                     )}
+                                                    {nextSession.subjects?.is_trial && (
+                                                        <span className="bg-amber-200/90 text-amber-950 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide">
+                                                            {t('status.trialLesson')}
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 <p className="text-violet-200 text-xs font-medium mb-1">{t('studentDash.duration')}</p>
                                                 <div className="mt-1">
@@ -655,6 +662,7 @@ export default function StudentDashboard() {
                                                         status={nextSession.status}
                                                         paymentStatus={nextSession.payment_status}
                                                         paid={nextSession.paid}
+                                                        isTrial={nextSession.subjects?.is_trial === true}
                                                         endTime={nextSession.end_time}
                                                         treatUnpaidAsReserved={!showPerLessonPayment}
                                                     />
@@ -707,12 +715,17 @@ export default function StudentDashboard() {
                                                         <Users className="w-3 h-3" />
                                                     </span>
                                                 )}
+                                                {s.subjects?.is_trial && (
+                                                    <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide">
+                                                        {t('status.trialLesson')}
+                                                    </span>
+                                                )}
                                             </div>
                                             <p className="text-xs text-gray-500 font-medium flex items-center gap-1.5 mt-0.5">
                                                 <Clock className="w-3.5 h-3.5" /> {format(new Date(s.start_time), 'HH:mm')}
                                             </p>
                                         </div>
-                                        <StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} endTime={s.end_time} treatUnpaidAsReserved={!showPerLessonPayment} />
+                                        <StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} isTrial={s.subjects?.is_trial === true} endTime={s.end_time} treatUnpaidAsReserved={!showPerLessonPayment} />
                                     </div>
                                 </div>
                             ))}
@@ -771,7 +784,7 @@ export default function StudentDashboard() {
                         {isSchoolOrgStudent ? (
                             <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100 flex flex-col items-center justify-center">
                                 <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wider">{t('studentDash.statusLabel')}</p>
-                                <StatusBadge status={selectedSession?.status || ''} paymentStatus={selectedSession?.payment_status} paid={selectedSession?.paid} endTime={selectedSession?.end_time} treatUnpaidAsReserved={!showPerLessonPayment} />
+                                <StatusBadge status={selectedSession?.status || ''} paymentStatus={selectedSession?.payment_status} paid={selectedSession?.paid} isTrial={selectedSession?.subjects?.is_trial === true} endTime={selectedSession?.end_time} treatUnpaidAsReserved={!showPerLessonPayment} />
                             </div>
                         ) : (
                             <div className="grid grid-cols-2 gap-3 text-sm">
@@ -784,7 +797,7 @@ export default function StudentDashboard() {
                                 </div>
                                 <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100 flex flex-col items-center justify-center">
                                     <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wider">{t('studentDash.statusLabel')}</p>
-                                    <StatusBadge status={selectedSession?.status || ''} paymentStatus={selectedSession?.payment_status} paid={selectedSession?.paid} endTime={selectedSession?.end_time} treatUnpaidAsReserved={!showPerLessonPayment} />
+                                    <StatusBadge status={selectedSession?.status || ''} paymentStatus={selectedSession?.payment_status} paid={selectedSession?.paid} isTrial={selectedSession?.subjects?.is_trial === true} endTime={selectedSession?.end_time} treatUnpaidAsReserved={!showPerLessonPayment} />
                                 </div>
                             </div>
                         )}
