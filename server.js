@@ -13,7 +13,7 @@ const app = express();
 app.use(express.json({ limit: '20mb' }));
 
 const LO_USER_PROFILE = path.join(os.tmpdir(), 'tutlio-lo-profile');
-const SERVICE_VERSION = '1.7.1';
+const SERVICE_VERSION = '2.0.0';
 
 /** Calibrated on Railway Linux LO vs Word Save-as-PDF for annex table "Dalykas" x=120. */
 const FLOATING_TABLE_TBL_IND = Number(process.env.FLOATING_TABLE_TBL_IND || -580);
@@ -171,16 +171,18 @@ function prepareDocxForLibreOffice(docxBuffer) {
 
 function sofficeCandidates() {
   const fromEnv = process.env.LIBREOFFICE_PATH ? [process.env.LIBREOFFICE_PATH] : [];
-  return [
-    ...fromEnv,
+  const linux = [
     'soffice',
-    'soffice.bin',
     '/usr/bin/soffice',
     '/usr/lib/libreoffice/program/soffice',
+    '/usr/lib/libreoffice/program/soffice.bin',
+  ];
+  const win = [
     'soffice.exe',
     'C:\\Program Files\\LibreOffice\\program\\soffice.exe',
     'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe',
   ];
+  return [...new Set([...fromEnv, ...(process.platform === 'win32' ? win : linux)])];
 }
 
 function timingSafeEqualStr(a, b) {
@@ -245,8 +247,10 @@ async function convertWithLibreOffice(docxBuffer) {
   ];
 
   let lastError = null;
+  const tried = [];
   try {
     for (const bin of sofficeCandidates()) {
+      tried.push(bin);
       try {
         await execFileAsync(bin, convertArgs, { timeout: 120000, windowsHide: true });
         const pdf = await fs.readFile(outputPath);
@@ -255,7 +259,8 @@ async function convertWithLibreOffice(docxBuffer) {
         lastError = error;
       }
     }
-    throw new Error(lastError instanceof Error ? lastError.message : 'LibreOffice conversion failed');
+    const lastMessage = lastError instanceof Error ? lastError.message : 'LibreOffice conversion failed';
+    throw new Error(`LibreOffice not available (tried: ${tried.join(', ')}). Last error: ${lastMessage}`);
   } finally {
     await fs.rm(workDir, { recursive: true, force: true });
   }
