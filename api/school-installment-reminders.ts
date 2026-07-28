@@ -38,22 +38,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const supabase = createClient(supabaseUrl, serviceRoleKey);
   const today = new Date();
+  const todayYmd = ymdInVilnius(today);
   const dueIn3 = ymdInVilnius(plusDays(today, 3));
   const dueIn1 = ymdInVilnius(plusDays(today, 1));
 
-  const { data: installments, error } = await supabase
-    .from('school_payment_installments')
-    .select('id, contract_id, installment_number, amount, due_date, payment_status, reminder_3d_sent_at, reminder_1d_sent_at, contract:school_contracts(id, student_id, organization_id, archived_at, annual_fee, additional_fee_amount, additional_fee_purpose, student:students(full_name, email, payer_email, payer_name), org:organizations(name, email, features, stripe_account_id, stripe_onboarding_complete))')
-    .eq('payment_status', 'pending')
-    .in('due_date', [dueIn3, dueIn1]);
+  const installmentSelect =
+    'id, contract_id, installment_number, amount, due_date, payment_status, reminder_3d_sent_at, reminder_1d_sent_at, contract:school_contracts(id, student_id, organization_id, archived_at, annual_fee, additional_fee_amount, additional_fee_purpose, student:students(full_name, email, payer_email, payer_name), org:organizations(name, email, features, stripe_account_id, stripe_onboarding_complete))';
 
-  if (error) return res.status(500).json({ error: error.message });
-  if (!installments?.length) return res.status(200).json({ sent: 0 });
+  const [upcomingRes, overdueRes] = await Promise.all([
+    supabase
+      .from('school_payment_installments')
+      .select(installmentSelect)
+      .eq('payment_status', 'pending')
+      .in('due_date', [dueIn3, dueIn1]),
+    supabase
+      .from('school_payment_installments')
+      .select(installmentSelect)
+      .eq('payment_status', 'pending')
+      .lt('due_date', todayYmd)
+      .is('reminder_3d_sent_at', null)
+      .is('reminder_1d_sent_at', null),
+  ]);
+
+  if (upcomingRes.error) return res.status(500).json({ error: upcomingRes.error.message });
+  if (overdueRes.error) return res.status(500).json({ error: overdueRes.error.message });
+
+  const seen = new Set<string>();
+  const installments = [...(upcomingRes.data || []), ...(overdueRes.data || [])].filter((inst) => {
+    if (seen.has(inst.id)) return false;
+    seen.add(inst.id);
+    return true;
+  });
+
+  if (!installments.length) return res.status(200).json({ sent: 0 });
 
   let sent = 0;
   for (const inst of installments as any[]) {
-    const is3d = inst.due_date === dueIn3;
-    const alreadySent = is3d ? !!inst.reminder_3d_sent_at : !!inst.reminder_1d_sent_at;
+    const isOverdue = inst.due_date < todayYmd;
+    const is3d = !isOverdue && inst.due_date === dueIn3;
+    const alreadySent = isOverdue
+      ? false
+      : is3d
+        ? !!inst.reminder_3d_sent_at
+        : !!inst.reminder_1d_sent_at;
     if (alreadySent || inst.payment_status !== 'pending' || inst.contract?.archived_at) continue;
 
     const student = inst.contract?.student;
@@ -113,7 +140,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     await supabase
       .from('school_payment_installments')
-      .update(is3d ? { reminder_3d_sent_at: new Date().toISOString() } : { reminder_1d_sent_at: new Date().toISOString() })
+      .update(
+        isOverdue || is3d
+          ? { reminder_3d_sent_at: new Date().toISOString() }
+          : { reminder_1d_sent_at: new Date().toISOString() },
+      )
       .eq('id', inst.id);
     sent += 1;
   }

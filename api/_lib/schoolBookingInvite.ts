@@ -2,6 +2,111 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
+export const SPLIT_CONTRACT_FEE_EUR = 50;
+export const SPLIT_CONTRACT_FEE_DUE = '2026-07-31';
+
+type InstallmentRow = {
+  installment_number: number;
+  amount: number | string;
+  due_date?: string | null;
+  payment_status?: string;
+};
+
+/** True when #1 is the standalone 50€ contract-fee row from the fee-split migration. */
+export function isSplitContractFeeInstallment(
+  installment: InstallmentRow,
+  contract?: { additional_fee_amount?: number | string | null } | null,
+  allInstallments?: Array<{ installment_number: number }>,
+): boolean {
+  if (installment.installment_number !== 1) return false;
+  if (Math.abs(Number(installment.amount) - SPLIT_CONTRACT_FEE_EUR) > 0.01) return false;
+  if (Number(contract?.additional_fee_amount || 0) > 0) return false;
+  if (installment.due_date && installment.due_date !== SPLIT_CONTRACT_FEE_DUE) return false;
+  if (allInstallments && !allInstallments.some((i) => i.installment_number > 1)) return false;
+  return true;
+}
+
+async function sendSchoolInstallmentRequestEmail(
+  serviceRoleKey: string,
+  recipient: string,
+  data: Record<string, unknown>,
+): Promise<void> {
+  await fetch(`${APP_URL}/api/send-email`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-internal-key': serviceRoleKey },
+    body: JSON.stringify({ type: 'school_installment_request', to: recipient, data }),
+  }).catch(() => {});
+}
+
+/** After the 50€ split fee is paid, email the next pending annual installment (LAŠKAS B). */
+export async function sendNextPendingInstallmentAfterSplitFeePaid(
+  supabase: SupabaseClient,
+  contractId: string,
+  serviceRoleKey: string,
+  options?: { scheduleUpdated?: boolean; apologyForMissingEmail?: boolean },
+): Promise<boolean> {
+  const { data: contract } = await supabase
+    .from('school_contracts')
+    .select(
+      'id, organization_id, annual_fee, additional_fee_amount, additional_fee_purpose, student:students(full_name, email, payer_email, payer_name), organizations(name, email, features)',
+    )
+    .eq('id', contractId)
+    .maybeSingle();
+
+  if (!contract) return false;
+
+  const { data: installments } = await supabase
+    .from('school_payment_installments')
+    .select('id, installment_number, amount, due_date, payment_status')
+    .eq('contract_id', contractId)
+    .order('installment_number');
+
+  if (!installments?.length) return false;
+
+  const nextPending = installments.find(
+    (i) => i.installment_number > 1 && i.payment_status === 'pending',
+  );
+  if (!nextPending) return false;
+
+  const st = (contract as any).student || {};
+  const org = (contract as any).organizations || {};
+  const recipient = String(st.payer_email || st.email || '').trim();
+  if (!recipient.includes('@')) return false;
+
+  const orgFeatures =
+    org.features && typeof org.features === 'object' && !Array.isArray(org.features)
+      ? (org.features as Record<string, unknown>)
+      : {};
+  const orgContactEmail =
+    (typeof orgFeatures.contact_email === 'string' && orgFeatures.contact_email.trim()) ||
+    (typeof orgFeatures.school_contract_signing_email === 'string' &&
+      orgFeatures.school_contract_signing_email.trim()) ||
+    org.email ||
+    '';
+
+  await sendSchoolInstallmentRequestEmail(serviceRoleKey, recipient, {
+    schoolName: org.name || '',
+    schoolEmail: org.email || '',
+    contactEmail: orgContactEmail,
+    studentName: st.full_name || '',
+    parentName: st.payer_name || st.full_name || '',
+    recipientName: st.payer_name || st.full_name || '',
+    installmentNumber: nextPending.installment_number,
+    totalInstallments: installments.length,
+    amount: Number(nextPending.amount || 0).toFixed(2),
+    dueDate: nextPending.due_date
+      ? new Date(nextPending.due_date).toLocaleDateString('lt-LT')
+      : '—',
+    installmentId: nextPending.id,
+    contractAnnualFee: Number((contract as any).annual_fee || 0).toFixed(2),
+    organizationId: (contract as any).organization_id,
+    ...(options?.scheduleUpdated ? { scheduleUpdated: true } : {}),
+    ...(options?.apologyForMissingEmail ? { apologyForMissingEmail: true } : {}),
+  });
+
+  return true;
+}
+
 type InviteRecipient = { email: string; recipientName: string };
 
 function generateInviteCode(): string {
@@ -110,7 +215,7 @@ export async function markSchoolInstallmentPaidAndMaybeInvite(
     })
     .eq('id', installmentId)
     .eq('payment_status', 'pending')
-    .select('id, installment_number, amount, contract_id')
+    .select('id, installment_number, amount, due_date, contract_id')
     .maybeSingle();
 
   if (updateErr) return { success: false, error: updateErr.message };
@@ -119,7 +224,7 @@ export async function markSchoolInstallmentPaidAndMaybeInvite(
     ? updatedInstallment
     : (await supabase
         .from('school_payment_installments')
-        .select('id, installment_number, amount, contract_id')
+        .select('id, installment_number, amount, due_date, contract_id')
         .eq('id', installmentId)
         .maybeSingle()).data;
 
@@ -127,19 +232,31 @@ export async function markSchoolInstallmentPaidAndMaybeInvite(
 
   const { data: contractRow } = await supabase
     .from('school_contracts')
-    .select('organization_id, student_id')
+    .select('organization_id, student_id, additional_fee_amount')
     .eq('id', effectiveInstallment.contract_id)
     .maybeSingle();
 
   const { data: allInstallments } = await supabase
     .from('school_payment_installments')
-    .select('id, payment_status, installment_number')
+    .select('id, payment_status, installment_number, amount, due_date')
     .eq('contract_id', effectiveInstallment.contract_id)
     .order('installment_number');
 
   const paidInstallments = (allInstallments || []).filter((i) => i.payment_status === 'paid');
   const firstPaid = paidInstallments.length === 1 ? paidInstallments[0] : null;
   let invitesSent = false;
+
+  if (
+    updatedInstallment &&
+    isSplitContractFeeInstallment(effectiveInstallment, contractRow, allInstallments || [])
+  ) {
+    await sendNextPendingInstallmentAfterSplitFeePaid(
+      supabase,
+      effectiveInstallment.contract_id,
+      options.serviceRoleKey,
+      { scheduleUpdated: true },
+    );
+  }
 
   if (updatedInstallment && firstPaid?.id === installmentId) {
     const studentId = String(options.studentId || contractRow?.student_id || '').trim();

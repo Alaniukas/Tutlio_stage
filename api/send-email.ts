@@ -2255,6 +2255,15 @@ function schoolInstallmentRequest(d: any, locale: Locale) {
         }</p>`
       : '';
 
+  const apologyNote =
+    d.apologyForMissingEmail === true
+      ? `<p style="color:#92400e;font-size:14px;line-height:1.6;margin:0 0 16px;padding:12px 14px;background:#fffbeb;border-radius:8px;border:1px solid #fcd34d;">${
+          locale === 'lt'
+            ? '<strong>Atsiprašome už nepatogumus.</strong> Dėl sistemos klaidos po sutarties mokesčio (50&nbsp;€) apmokėjimo automatiškai negavote metinio mokesčio mokėjimo laiško. Žemiau — teisinga suma ir mokėjimo nuoroda.'
+            : '<strong>We apologise for the inconvenience.</strong> Due to a system error, you did not automatically receive the annual fee payment email after paying the €50 contract fee. Below is the correct amount and payment link.'
+        }</p>`
+      : '';
+
   const scheduleUpdatedNote =
     d.scheduleUpdated === true
       ? `<p style="color:#1d4ed8;font-size:14px;line-height:1.6;margin:0 0 16px;padding:12px 14px;background:#eff6ff;border-radius:8px;border:1px solid #bfdbfe;">${
@@ -2273,6 +2282,7 @@ function schoolInstallmentRequest(d: any, locale: Locale) {
       </div>
       <div class="body">
         <p class="greeting">${locale === 'lt' ? 'Sveiki,' : 'Hello,'}</p>
+        ${apologyNote}
         ${scheduleUpdatedNote}
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
           ${totalAmount > 0
