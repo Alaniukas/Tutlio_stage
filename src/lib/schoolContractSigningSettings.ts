@@ -1,5 +1,7 @@
 export interface SchoolContractSigningSettings {
   email: string;
+  /** Parent-facing contact for payment / questions emails. */
+  parentContactEmail: string;
   reason: string;
   location: string;
   contact: string;
@@ -19,8 +21,10 @@ export function parseSchoolContractSigningSettings(
     ? features as Record<string, unknown>
     : {};
   const email = text(f.school_contract_signing_email) || text(organizationEmail);
+  const parentContactEmail = text(f.contact_email) || email;
   return {
     email,
+    parentContactEmail,
     reason: text(f.school_contract_signature_reason) || DEFAULT_SCHOOL_CONTRACT_SIGNING_REASON,
     location: text(f.school_contract_signature_location),
     contact: text(f.school_contract_signature_contact) || email,

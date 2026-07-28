@@ -43,7 +43,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: installments, error } = await supabase
     .from('school_payment_installments')
-    .select('id, contract_id, installment_number, amount, due_date, payment_status, reminder_3d_sent_at, reminder_1d_sent_at, contract:school_contracts(id, student_id, organization_id, archived_at, student:students(full_name, email, payer_email, payer_name), org:organizations(name, email, stripe_account_id, stripe_onboarding_complete))')
+    .select('id, contract_id, installment_number, amount, due_date, payment_status, reminder_3d_sent_at, reminder_1d_sent_at, contract:school_contracts(id, student_id, organization_id, archived_at, annual_fee, additional_fee_amount, additional_fee_purpose, student:students(full_name, email, payer_email, payer_name), org:organizations(name, email, features, stripe_account_id, stripe_onboarding_complete))')
     .eq('payment_status', 'pending')
     .in('due_date', [dueIn3, dueIn1]);
 
@@ -74,6 +74,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // The email's "Pay now" button links to /api/pay-school-installment, which
     // creates the Stripe Checkout on demand when the payer clicks it.
+    const orgFeatures = (org?.features && typeof org.features === 'object' && !Array.isArray(org.features))
+      ? org.features as Record<string, unknown>
+      : {};
+    const orgContactEmail =
+      (typeof orgFeatures.contact_email === 'string' && orgFeatures.contact_email.trim()) ||
+      (typeof orgFeatures.school_contract_signing_email === 'string' && orgFeatures.school_contract_signing_email.trim()) ||
+      org?.email ||
+      '';
+
     await fetch(`${APP_URL}/api/send-email`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-internal-key': serviceRoleKey },
@@ -83,6 +92,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         data: {
           schoolName: org?.name || '',
           schoolEmail: org?.email || '',
+          contactEmail: orgContactEmail,
           studentName: student?.full_name || '',
           parentName: student?.payer_name || student?.full_name || '',
           recipientName: student?.payer_name || student?.full_name || '',
@@ -91,6 +101,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           amount: Number(inst.amount).toFixed(2),
           dueDate: new Date(inst.due_date).toLocaleDateString('lt-LT'),
           installmentId: inst.id,
+          additionalFeeAmount: Number(inst.contract?.additional_fee_amount || 0) > 0
+            ? Number(inst.contract.additional_fee_amount).toFixed(2)
+            : undefined,
+          additionalFeePurpose: inst.contract?.additional_fee_purpose || undefined,
+          contractAnnualFee: Number(inst.contract?.annual_fee || 0).toFixed(2),
           ...(inst.contract?.organization_id ? { organizationId: inst.contract.organization_id } : {}),
         },
       }),

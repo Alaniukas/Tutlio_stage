@@ -642,7 +642,7 @@ export default function CompanyContracts() {
       data: {
         schoolName: orgName,
         schoolEmail: signingSettings.email || orgEmail,
-        contactEmail: signingSettings.email || orgEmail,
+        contactEmail: signingSettings.parentContactEmail || signingSettings.email || orgEmail,
         studentName: params.studentName,
         parentName: params.parentName,
         recipientName: params.parentName,
@@ -652,7 +652,7 @@ export default function CompanyContracts() {
         dueDate: new Date(params.dueDate).toLocaleDateString('lt-LT'),
         additionalFeeAmount: params.additionalFeeAmount ? Number(params.additionalFeeAmount).toFixed(2) : undefined,
         additionalFeePurpose: params.additionalFeePurpose || undefined,
-        annualFee: params.annualFee != null && String(params.annualFee) !== '' ? Number(params.annualFee).toFixed(2) : undefined,
+        contractAnnualFee: params.annualFee != null && String(params.annualFee) !== '' ? Number(params.annualFee).toFixed(2) : undefined,
         installmentId: params.installmentId,
         ...(orgId ? { organizationId: orgId } : {}),
       },

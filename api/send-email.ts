@@ -21,6 +21,7 @@ import { isInternalRequest } from './_lib/auth.js';
 import { isCronAuthorized } from './_lib/cronAuth.js';
 import { markdownToEmailHtml } from './_lib/blogMarkdownEmail.js';
 import { canonicalOriginForOrgLocale } from './_lib/public-origin.js';
+import { schoolInstallmentPaymentBreakdown } from './_lib/schoolBookingInvite.js';
 
 
 function randomToken() {
@@ -93,6 +94,39 @@ function escapeHtml(unsafe: unknown): string {
 
 function esc(value: unknown): string {
   return escapeHtml(value);
+}
+
+/** Parent-facing "questions?" contact in school payment / contract emails. */
+function schoolParentContactEmail(d: { contactEmail?: unknown; schoolEmail?: unknown }): string {
+  const contact = String(d.contactEmail || '').trim();
+  if (contact) return contact;
+  return String(d.schoolEmail || '').trim();
+}
+
+function schoolStudentSubjectSuffix(studentName: unknown): string {
+  const name = String(studentName || '').trim();
+  return name ? ` (${name})` : '';
+}
+
+function schoolInstallmentEmailSubject(
+  d: { studentName?: unknown; installmentNumber?: unknown },
+  locale: Locale,
+): string {
+  const suffix = schoolStudentSubjectSuffix(d.studentName);
+  const installmentLabel =
+    d.installmentNumber != null && d.installmentNumber !== ''
+      ? ` — įmoka #${d.installmentNumber}`
+      : '';
+  return locale === 'lt'
+    ? `Ugdymo šeimoje${installmentLabel}${suffix}`
+    : `Home education${installmentLabel}${suffix}`;
+}
+
+function schoolContractFeeEmailSubject(d: { studentName?: unknown }, locale: Locale): string {
+  const suffix = schoolStudentSubjectSuffix(d.studentName);
+  return locale === 'lt'
+    ? `Ugdymo šeimoje — sutarties mokestis${suffix}`
+    : `Home education — contract fee${suffix}`;
 }
 
 function unescapeHtml(s: string): string {
@@ -2090,31 +2124,156 @@ function schoolContract(d: any, locale: Locale) {
         ${signingInstructionsHtml}
         ${reviewRequired && missingFields.length === 0 ? `<div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:12px;padding:14px;margin:16px 0;color:#3730a3;font-size:13px;line-height:1.55;">Net jei duomenų netrūksta, prieš mokyklai pasirašant prašome patvirtinti, kad sutartį peržiūrėjote ir duomenys yra teisingi.</div>` : ''}
         ${reviewRequired && completionLink ? `<div style="margin:0 0 20px;">${outlookEmailButton(completionLink, missingFields.length > 0 ? 'Papildyti duomenis ir peržiūrėti sutartį' : 'Peržiūrėti ir patvirtinti sutartį', '#2563eb', { fontWeight: '600', fontSize: '14px', padding: '12px 24px' })}</div>` : ''}
-        <p style="color:#6b7280; font-size:13px;">Jei turite klausimų, susisiekite su mokykla: ${esc(d.contactEmail || d.schoolEmail || '')}.</p>
+        <p style="color:#6b7280; font-size:13px;">Jei turite klausimų, susisiekite su mokykla: ${esc(schoolParentContactEmail(d))}.</p>
+      </div>${footerFor(locale)}`, locale),
+  };
+}
+
+function schoolContractFeeDue(d: any, locale: Locale) {
+  const appUrl = getAppUrl();
+  const amountEur = Number(d.amount || 50);
+  const payUrl = d.installmentId
+    ? `${appUrl.replace(/\/$/, '')}/api/pay-school-installment?installment=${encodeURIComponent(String(d.installmentId))}`
+    : '';
+  const dueDate = String(d.dueDate || '2026-07-31').trim();
+  const feePurpose = String(d.feePurpose || d.additionalFeePurpose || 'Sutarties mokestis').trim();
+  const hadPriorPaymentEmail = d.hadPriorPaymentEmail === true;
+
+  const priorEmailNote = hadPriorPaymentEmail
+    ? `<p style="color:#4b5563;font-size:14px;line-height:1.6;margin:16px 0 0;">${
+        locale === 'lt'
+          ? 'Jei anksčiau jau gavote mokėjimo laišką su kita suma — šie <strong>50&nbsp;€</strong> bus atskaityti nuo bendros mokėtinų įmokų sumos. Atnaujintą metinio mokesčio informaciją gausite atskiru laišku.'
+          : 'If you already received a payment email with a different total — this <strong>€50</strong> will be deducted from your remaining installments. You will receive an updated annual-fee payment email separately.'
+      }</p>`
+    : '';
+
+  const unsignedNote =
+    d.contractSigningPending === true
+      ? `<p style="color:#4b5563;font-size:14px;line-height:1.6;margin:16px 0 0;">${
+          locale === 'lt'
+            ? 'Jei sutartis dar nepasirašyta — sutarties mokestį galite apmokėti jau dabar; metinio mokesčio įmokas gausite atskirai po pasirašymo.'
+            : 'If the contract is not fully signed yet — you may pay the contract fee now; annual fee installments will follow after signing.'
+        }</p>`
+      : '';
+
+  return {
+    subject: schoolContractFeeEmailSubject(d, locale),
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#059669', '#047857')}">
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">${
+          locale === 'lt' ? 'Sutarties mokestis' : 'Contract fee'
+        }</h1>
+        <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'Mokykla')}</p>
+      </div>
+      <div class="body">
+        <p class="greeting">${locale === 'lt' ? 'Laba diena,' : 'Hello,'}</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          ${
+            locale === 'lt'
+              ? `Informuojame, kad Jūsų patogumui sutarties mokestį atskyrėme nuo metinio ugdymo mokesčio (<strong>${esc(d.studentName || 'mokinys')}</strong>).`
+              : `For your convenience we have separated the contract fee from the annual tuition fee for <strong>${esc(d.studentName || 'your child')}</strong>.`
+          }
+        </p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;margin:16px 0 0;">
+          ${
+            locale === 'lt'
+              ? `Maloniai prašome sutarties mokestį apmokėti iki <strong>${esc(dueDate)}</strong>.`
+              : `Please pay the contract fee by <strong>${esc(dueDate)}</strong>.`
+          }
+        </p>
+        ${priorEmailNote}
+        ${unsignedNote}
+        <div class="info-card">
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            ${td(locale === 'lt' ? 'Mokinys' : 'Student', esc(d.studentName || '—'))}
+            ${td(locale === 'lt' ? 'Mokestis' : 'Fee', esc(feePurpose))}
+            ${td(locale === 'lt' ? 'Mokėtina suma' : 'Amount due', emailMoney(amountEur, locale), false)}
+            ${td(locale === 'lt' ? 'Terminas' : 'Due date', esc(dueDate), false)}
+          </table>
+        </div>
+        ${payUrl ? `<div style="text-align:center; margin:24px 0;">${outlookEmailButton(payUrl, locale === 'lt' ? 'Apmokėti 50 €' : 'Pay €50', '#059669', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}</div>` : ''}
+        <p style="color:#6b7280; font-size:13px;">${
+          locale === 'lt'
+            ? `Jei turite klausimų, susisiekite su mokykla: ${esc(schoolParentContactEmail(d))}.`
+            : `Questions? Contact the school: ${esc(schoolParentContactEmail(d))}.`
+        }</p>
       </div>${footerFor(locale)}`, locale),
   };
 }
 
 function schoolInstallmentRequest(d: any, locale: Locale) {
   const appUrl = getAppUrl();
-  const annualFee = Number(d.annualFee || 0);
-  const additionalFee = Number(d.additionalFeeAmount || 0);
-  const hasBreakdown = annualFee > 0 || additionalFee > 0;
+  const installmentNumber = Number(d.installmentNumber || 1);
   const totalAmount = Number(d.amount || 0);
-  // Self-service on-demand pay link (mirrors per-lesson /api/pay-session). The
-  // payer can pay anytime; falls back to a pre-generated paymentUrl if provided.
+  const contractAnnualFee = Number(d.contractAnnualFee ?? d.annualFee ?? 0);
+  const additionalFeeOnContract = Number(d.additionalFeeAmount || 0);
+  const breakdown = schoolInstallmentPaymentBreakdown(
+    { installment_number: installmentNumber, amount: totalAmount },
+    {
+      additional_fee_amount: additionalFeeOnContract,
+      additional_fee_purpose: d.additionalFeePurpose,
+    },
+  );
   const payUrl = d.installmentId
     ? `${appUrl.replace(/\/$/, '')}/api/pay-school-installment?installment=${encodeURIComponent(String(d.installmentId))}`
     : (typeof d.paymentUrl === 'string' && d.paymentUrl.trim().length > 0 ? String(d.paymentUrl).trim() : '');
+
+  const breakdownRows: string[] = [];
+  if (breakdown.annualPortionEur > 0) {
+    breakdownRows.push(
+      td(
+        locale === 'lt' ? 'Metinio mokesčio dalis (ši įmoka)' : 'Annual fee portion (this payment)',
+        emailMoney(breakdown.annualPortionEur, locale),
+      ),
+    );
+  }
+  if (breakdown.additionalPortionEur > 0) {
+    breakdownRows.push(
+      td(
+        locale === 'lt' ? 'Papildomas mokestis (ši įmoka)' : 'Additional fee (this payment)',
+        `${emailMoney(breakdown.additionalPortionEur, locale)}${d.additionalFeePurpose ? ` (${esc(d.additionalFeePurpose)})` : breakdown.additionalPurpose ? ` (${esc(breakdown.additionalPurpose)})` : ''}`,
+      ),
+    );
+  }
+  if (breakdownRows.length === 0 && totalAmount > 0) {
+    breakdownRows.push(td(locale === 'lt' ? 'Suma' : 'Amount', emailMoney(totalAmount, locale)));
+  }
+  breakdownRows.push(
+    td(
+      locale === 'lt' ? 'Mokėtina suma' : 'Amount due',
+      totalAmount > 0 ? emailMoney(breakdown.totalEur, locale) : '—',
+      false,
+    ),
+  );
+
+  const contractContext =
+    contractAnnualFee > 0 && Number(d.totalInstallments || 0) > 1
+      ? `<p style="color:#6b7280;font-size:12px;line-height:1.5;margin:12px 0 0;">${
+          locale === 'lt'
+            ? `Visoje sutartyje metinis mokestis — ${emailMoney(contractAnnualFee, locale)} (mokate dalimis pagal grafiką).`
+            : `Total annual fee in the contract — ${emailMoney(contractAnnualFee, locale)} (paid in installments).`
+        }</p>`
+      : '';
+
+  const scheduleUpdatedNote =
+    d.scheduleUpdated === true
+      ? `<p style="color:#1d4ed8;font-size:14px;line-height:1.6;margin:0 0 16px;padding:12px 14px;background:#eff6ff;border-radius:8px;border:1px solid #bfdbfe;">${
+          locale === 'lt'
+            ? '<strong>Atnaujinta mokėjimo informacija.</strong> Sutarties mokestį (50&nbsp;€) atskyrėme — šiame laiške nurodyta tik metinio mokesčio įmoka. Jei anksčiau gavote kitą sumą, naudokite šią nuorodą.'
+            : '<strong>Updated payment details.</strong> The €50 contract fee is now separate — this email is for the annual fee installment only. Use this link if you received an older amount.'
+        }</p>`
+      : '';
+
   return {
-    subject: `Mokėjimo prašymas — įmoka #${d.installmentNumber || ''}`,
+    subject: schoolInstallmentEmailSubject(d, locale),
     html: wrap(`
       <div class="header" style="${headerInlineStyle('#059669', '#047857')}">
         <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Mokėjimo prašymas</h1>
         <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'Mokykla')}</p>
       </div>
       <div class="body">
-        <p class="greeting">Sveiki, ${esc(d.recipientName || d.parentName || d.studentName)},</p>
+        <p class="greeting">${locale === 'lt' ? 'Sveiki,' : 'Hello,'}</p>
+        ${scheduleUpdatedNote}
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
           ${totalAmount > 0
             ? `Atėjo laikas apmokėti <strong>${esc(d.studentName)}</strong> metinio mokesčio įmoką (${esc(d.schoolName)}).`
@@ -2124,15 +2283,13 @@ function schoolInstallmentRequest(d: any, locale: Locale) {
           <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
             ${td('Mokinys', esc(d.studentName))}
             ${td('Įmoka', `#${d.installmentNumber || '—'} iš ${d.totalInstallments || '—'}`)}
-            ${td('Suma', d.amount ? emailMoney(d.amount, locale) : '—')}
-            ${hasBreakdown ? td('Metinis mokestis', annualFee > 0 ? emailMoney(annualFee, locale) : '—') : ''}
-            ${hasBreakdown ? td('Papildomas mokestis', additionalFee > 0 ? `${emailMoney(additionalFee, locale)}${d.additionalFeePurpose ? ` (${esc(d.additionalFeePurpose)})` : ''}` : '—') : ''}
-            ${hasBreakdown ? td('Iš viso', totalAmount > 0 ? emailMoney(totalAmount, locale) : '—') : ''}
+            ${breakdownRows.join('')}
             ${td('Terminas', d.dueDate || '—', false)}
           </table>
+          ${contractContext}
         </div>
         ${payUrl ? `<div style="text-align:center; margin:24px 0;">${outlookEmailButton(payUrl, totalAmount > 0 ? 'Apmokėti dabar' : 'Patvirtinti registraciją', '#059669', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}</div>` : ''}
-        <p style="color:#6b7280; font-size:13px;">Jei turite klausimų, susisiekite su mokykla: ${esc(d.contactEmail || d.schoolEmail || '')}.</p>
+        <p style="color:#6b7280; font-size:13px;">Jei turite klausimų, susisiekite su mokykla: ${esc(schoolParentContactEmail(d))}.</p>
       </div>${footerFor(locale)}`, locale),
   };
 }
@@ -2718,13 +2875,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             // Optional per-org "questions" contact address (e.g. irminta@) shown in
             // school emails. Signed contracts still go to the org email (schoolEmail).
             const orgContactEmail = String((features.contact_email as string) || '').trim();
-            if (orgContactEmail) (data as any).contactEmail = orgContactEmail;
             const contractSigningEmail = String((features.school_contract_signing_email as string) || '').trim();
-            if (String(type).startsWith('school_contract')) {
+            const schoolQuestionsEmail = orgContactEmail || contractSigningEmail;
+            if (schoolQuestionsEmail) (data as any).contactEmail = schoolQuestionsEmail;
+            if (String(type).startsWith('school_contract') && type !== 'school_contract_fee_due') {
               (data as any).esignFlow = features.school_contract_esign === true;
               if (contractSigningEmail) {
                 (data as any).schoolEmail = contractSigningEmail;
-                (data as any).contactEmail = contractSigningEmail;
               }
             }
             // Optional parent-facing display name (e.g. Mokykla be sienų „Laisvi
@@ -2840,6 +2997,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'product_update_whiteboard_parent': emailContent = productUpdateWhiteboardParent(data, locale); break;
       case 'custom_html_announcement': emailContent = customHtmlAnnouncement(data, locale); break;
       case 'school_contract': emailContent = schoolContract(data, locale); break;
+      case 'school_contract_fee_due': emailContent = schoolContractFeeDue(data, locale); break;
       case 'school_installment_request': emailContent = schoolInstallmentRequest(data, locale); break;
       case 'tutor_student_assigned': emailContent = tutorStudentAssigned(data, locale); break;
       case 'parent_invite': emailContent = parentInvite(data, locale); break;
@@ -2849,11 +3007,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     emailContent = applyBranding(emailContent);
 
-    // Parents at a school see a neutral subject ("Ugdymo šeimoje") for contract/payment emails.
     if (isSchoolOrg && type === 'school_contract') {
-      emailContent = { ...emailContent, subject: 'Ugdymo šeimoje sutartis' };
-    } else if (isSchoolOrg && type === 'school_installment_request') {
-      emailContent = { ...emailContent, subject: 'Ugdymo šeimoje' };
+      emailContent = {
+        ...emailContent,
+        subject: `Ugdymo šeimoje sutartis${schoolStudentSubjectSuffix(data?.studentName)}`,
+      };
     }
 
     const emailPayload: Parameters<typeof resend.emails.send>[0] = {

@@ -33,6 +33,8 @@ export function randomSignToken(): string {
 
 export interface ContractSigningSettings {
   email: string;
+  /** Parent-facing contact for payment / questions emails (features.contact_email). */
+  parentContactEmail: string;
   reason: string;
   location: string;
   contact: string;
@@ -49,8 +51,10 @@ export function contractSigningSettings(contract: any): ContractSigningSettings 
     ? org.features as Record<string, unknown>
     : {};
   const email = stringSetting(features.school_contract_signing_email) || stringSetting(org.email);
+  const parentContactEmail = stringSetting(features.contact_email) || email;
   return {
     email,
+    parentContactEmail,
     reason: stringSetting(features.school_contract_signature_reason) || 'Ugdymo sutarties pasirašymas',
     location: stringSetting(features.school_contract_signature_location),
     contact: stringSetting(features.school_contract_signature_contact) || email,
@@ -514,7 +518,7 @@ async function sendFirstPendingInstallmentEmail(
   await sendInternalEmail(appOrigin, 'school_installment_request', recipient, {
     schoolName: contract.organizations?.name || '',
     schoolEmail: settings.email,
-    contactEmail: settings.email,
+    contactEmail: settings.parentContactEmail,
     studentName: st.full_name || '',
     parentName: st.payer_name || st.full_name || '',
     recipientName: st.payer_name || st.full_name || '',
@@ -526,7 +530,7 @@ async function sendFirstPendingInstallmentEmail(
       ? Number(contract.additional_fee_amount).toFixed(2)
       : undefined,
     additionalFeePurpose: contract.additional_fee_purpose || undefined,
-    annualFee: Number(contract.annual_fee || 0).toFixed(2),
+    contractAnnualFee: Number(contract.annual_fee || 0).toFixed(2),
     installmentId: pending.id,
     organizationId: contract.organization_id,
   });

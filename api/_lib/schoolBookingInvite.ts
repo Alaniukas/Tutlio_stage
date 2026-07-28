@@ -165,3 +165,17 @@ export function schoolInstallmentChargeEur(
   const extraEur = installment.installment_number === 1 && extraEurRaw > 0 ? extraEurRaw : 0;
   return baseEur + extraEur;
 }
+
+/** Line-item breakdown for a single installment checkout (matches pay-school-installment). */
+export function schoolInstallmentPaymentBreakdown(
+  installment: { installment_number: number; amount: number | string },
+  contract?: { additional_fee_amount?: number | string | null; additional_fee_purpose?: string | null } | null,
+): { annualPortionEur: number; additionalPortionEur: number; totalEur: number; additionalPurpose: string } {
+  const totalEur = Number(installment.amount || 0);
+  const extraEurRaw = Number(contract?.additional_fee_amount || 0);
+  const additionalPortionEur =
+    installment.installment_number === 1 && extraEurRaw > 0 ? extraEurRaw : 0;
+  const annualPortionEur = Math.max(0, totalEur - additionalPortionEur);
+  const additionalPurpose = String(contract?.additional_fee_purpose || '').trim() || 'Sutarties mokestis';
+  return { annualPortionEur, additionalPortionEur, totalEur, additionalPurpose };
+}

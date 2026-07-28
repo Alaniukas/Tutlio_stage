@@ -22,12 +22,15 @@ import {
 import { Plus, CreditCard, Send, CheckCircle, Clock, AlertCircle, Trash2, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import Toast from '@/components/Toast';
 import { sendEmail } from '@/lib/email';
+import { authHeaders } from '@/lib/apiHelpers';
 import { useTranslation } from '@/lib/i18n';
 
 interface Contract {
   id: string;
   student_id: string;
   annual_fee: number;
+  additional_fee_amount?: number | null;
+  additional_fee_purpose?: string | null;
   signing_status: string;
   student?: { full_name: string; email: string; payer_email: string | null; payer_name: string | null };
 }
@@ -59,6 +62,7 @@ export default function CompanyPayments() {
   const [orgId, setOrgId] = useState<string | null>(pc?.orgId ?? null);
   const [orgName, setOrgName] = useState(pc?.orgName ?? '');
   const [orgEmail, setOrgEmail] = useState(pc?.orgEmail ?? '');
+  const [orgContactEmail, setOrgContactEmail] = useState(pc?.orgContactEmail ?? '');
   const [orgStripeConnected, setOrgStripeConnected] = useState<boolean>(pc?.orgStripeConnected ?? false);
   const [contracts, setContracts] = useState<Contract[]>(pc?.contracts ?? []);
   const [installments, setInstallments] = useState<Installment[]>(pc?.installments ?? []);
@@ -70,6 +74,7 @@ export default function CompanyPayments() {
   const [rows, setRows] = useState<NewInstallmentRow[]>([{ amount: '', due_date: '' }]);
   const [saving, setSaving] = useState(false);
   const [sendingId, setSendingId] = useState<string | null>(null);
+  const [markingId, setMarkingId] = useState<string | null>(null);
   const [collapsedContracts, setCollapsedContracts] = useState<Record<string, boolean>>({});
 
   useEffect(() => { load(); }, []);
@@ -87,7 +92,7 @@ export default function CompanyPayments() {
 
     const { data: admin } = await supabase
       .from('organization_admins')
-      .select('organization_id, organizations(name, email, stripe_account_id, stripe_onboarding_complete)')
+      .select('organization_id, organizations(name, email, features, stripe_account_id, stripe_onboarding_complete)')
       .eq('user_id', user.id)
       .maybeSingle();
 
@@ -95,9 +100,16 @@ export default function CompanyPayments() {
     setOrgId(admin.organization_id);
     const name = (admin.organizations as any)?.name || '';
     const email = (admin.organizations as any)?.email || '';
+    const features = (admin.organizations as any)?.features;
+    const featObj = features && typeof features === 'object' && !Array.isArray(features) ? features : {};
+    const contactEmail =
+      (typeof featObj.contact_email === 'string' && featObj.contact_email.trim()) ||
+      (typeof featObj.school_contract_signing_email === 'string' && featObj.school_contract_signing_email.trim()) ||
+      email;
     const stripeConnected = !!(admin.organizations as any)?.stripe_onboarding_complete && !!(admin.organizations as any)?.stripe_account_id;
     setOrgName(name);
     setOrgEmail(email);
+    setOrgContactEmail(contactEmail);
     setOrgStripeConnected(stripeConnected);
 
     const [cRes, iRes] = await Promise.all([
@@ -110,7 +122,7 @@ export default function CompanyPayments() {
         .order('created_at', { ascending: false }),
       supabase
         .from('school_payment_installments')
-        .select('*, contract:school_contracts(id, student_id, annual_fee, signing_status, organization_id, archived_at, student:students(full_name, email, payer_email, payer_name))')
+        .select('*, contract:school_contracts(id, student_id, annual_fee, additional_fee_amount, additional_fee_purpose, signing_status, organization_id, archived_at, student:students(full_name, email, payer_email, payer_name))')
         .order('due_date', { ascending: true }),
     ]);
 
@@ -118,7 +130,7 @@ export default function CompanyPayments() {
     const filtered = (iRes.data || []).filter((i: any) => i.contract?.organization_id === admin.organization_id && !i.contract?.archived_at);
     setContracts(cData as unknown as Contract[]);
     setInstallments(filtered);
-    setCache(PAYMENTS_CACHE_KEY, { orgId: admin.organization_id, orgName: name, orgEmail: email, orgStripeConnected: stripeConnected, contracts: cData, installments: filtered });
+    setCache(PAYMENTS_CACHE_KEY, { orgId: admin.organization_id, orgName: name, orgEmail: email, orgContactEmail: contactEmail, orgStripeConnected: stripeConnected, contracts: cData, installments: filtered });
     setLoading(false);
   };
 
@@ -187,6 +199,7 @@ export default function CompanyPayments() {
         data: {
           schoolName: orgName,
           schoolEmail: orgEmail,
+          contactEmail: orgContactEmail || orgEmail,
           studentName: student?.full_name || '',
           parentName: student?.payer_name || student?.full_name || '',
           recipientName: student?.payer_name || student?.full_name || '',
@@ -195,6 +208,11 @@ export default function CompanyPayments() {
           amount: Number(installment.amount).toFixed(2),
           dueDate: new Date(installment.due_date).toLocaleDateString('lt-LT'),
           installmentId: installment.id,
+          additionalFeeAmount: Number(contract?.additional_fee_amount || 0) > 0
+            ? Number(contract.additional_fee_amount).toFixed(2)
+            : undefined,
+          additionalFeePurpose: contract?.additional_fee_purpose || undefined,
+          contractAnnualFee: Number(contract?.annual_fee || 0).toFixed(2),
           ...(orgId ? { organizationId: orgId } : {}),
         },
       });
@@ -214,6 +232,28 @@ export default function CompanyPayments() {
       setToast({ message: t('school.toastPaymentError'), type: 'error' });
     }
     setSendingId(null);
+  };
+
+  const markInstallmentPaid = async (installment: Installment) => {
+    if (!confirm(t('school.confirmMarkInstallmentPaid'))) return;
+    setMarkingId(installment.id);
+    try {
+      const resp = await fetch('/api/confirm-school-installment-manual', {
+        method: 'POST',
+        headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ installmentId: installment.id }),
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        setToast({ message: String(json?.error || t('school.toastError', { msg: resp.status })), type: 'error' });
+        return;
+      }
+      setToast({ message: t('school.toastInstallmentMarkedPaid'), type: 'success' });
+      reload();
+    } catch {
+      setToast({ message: t('school.toastPaymentError'), type: 'error' });
+    }
+    setMarkingId(null);
   };
 
   const deleteInstallment = async (id: string) => {
@@ -319,9 +359,21 @@ export default function CompanyPayments() {
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         {inst.payment_status !== 'paid' && (
-                          <Button size="sm" variant="outline" onClick={() => sendPaymentLink(inst)} disabled={sendingId === inst.id}>
+                          <Button size="sm" variant="outline" onClick={() => sendPaymentLink(inst)} disabled={sendingId === inst.id || markingId === inst.id}>
                             {sendingId === inst.id ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <Send className="w-3.5 h-3.5 mr-1.5" />}
                             {t('school.sendLink')}
+                          </Button>
+                        )}
+                        {inst.payment_status !== 'paid' && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => markInstallmentPaid(inst)}
+                            disabled={markingId === inst.id || sendingId === inst.id}
+                            className="text-green-700 border-green-200 hover:bg-green-50"
+                          >
+                            {markingId === inst.id ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <CheckCircle className="w-3.5 h-3.5 mr-1.5" />}
+                            {t('compSch.markPaid')}
                           </Button>
                         )}
                         {inst.payment_status !== 'paid' && (
