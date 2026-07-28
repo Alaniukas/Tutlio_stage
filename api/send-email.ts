@@ -2264,6 +2264,11 @@ function schoolInstallmentRequest(d: any, locale: Locale) {
         }</p>`
       : '';
 
+  const correctedPaymentNote =
+    typeof d.correctedPaymentNote === 'string' && d.correctedPaymentNote.trim()
+      ? `<p style="color:#92400e;font-size:14px;line-height:1.6;margin:0 0 16px;padding:12px 14px;background:#fffbeb;border-radius:8px;border:1px solid #fcd34d;">${d.correctedPaymentNote.trim()}</p>`
+      : '';
+
   const scheduleUpdatedNote =
     d.scheduleUpdated === true
       ? `<p style="color:#1d4ed8;font-size:14px;line-height:1.6;margin:0 0 16px;padding:12px 14px;background:#eff6ff;border-radius:8px;border:1px solid #bfdbfe;">${
@@ -2283,6 +2288,7 @@ function schoolInstallmentRequest(d: any, locale: Locale) {
       <div class="body">
         <p class="greeting">${locale === 'lt' ? 'Sveiki,' : 'Hello,'}</p>
         ${apologyNote}
+        ${correctedPaymentNote}
         ${scheduleUpdatedNote}
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
           ${totalAmount > 0

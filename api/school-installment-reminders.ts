@@ -83,6 +83,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         : !!inst.reminder_1d_sent_at;
     if (alreadySent || inst.payment_status !== 'pending' || inst.contract?.archived_at) continue;
 
+    const contract = inst.contract;
+    const extraFee = Number(contract?.additional_fee_amount || 0);
+    const isLegacySplitFeeRow =
+      inst.installment_number === 1 &&
+      Math.abs(Number(inst.amount) - 50) < 0.01 &&
+      inst.due_date === '2026-07-31';
+    // Skip orphaned fee-split rows left after contract was reverted to bundled payments.
+    if (isLegacySplitFeeRow && extraFee > 0) {
+      console.warn('[school-installment-reminders] skip: stale split fee row on bundled contract', contract?.id, inst.id);
+      continue;
+    }
+
     const student = inst.contract?.student;
     const org = inst.contract?.org;
     const recipient = student?.payer_email || student?.email;
