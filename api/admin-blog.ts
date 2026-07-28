@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { timingSafeEqual } from 'crypto';
 import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClientOptions.js';
 import { slugify } from './_lib/slugify.js';
+import { fetchRelatedBlogPosts, relatedPostsForLocale } from './_lib/blogRelatedLinks.js';
 
 function getPlatformAdminSecret(): string {
   const s = process.env.ADMIN_SECRET || process.env.VITE_ADMIN_SECRET;
@@ -87,7 +88,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!post) return res.status(404).json({ error: 'Post not found' });
 
       const canonicalSlug = locale ? postSlug(post, locale) : (post.slug as string);
-      const payload: Record<string, unknown> = { post };
+      const relatedRows = await fetchRelatedBlogPosts(supabase, {
+        tag: (post.tag as string) || undefined,
+        excludeId: String(post.id),
+        limit: 3,
+      });
+      const related = locale ? relatedPostsForLocale(relatedRows, locale) : [];
+      const payload: Record<string, unknown> = { post, related };
       if (locale && canonicalSlug && canonicalSlug !== slug) {
         payload.redirectSlug = canonicalSlug;
       }

@@ -13,6 +13,12 @@ import {
   hreflangCode,
   esc as seoEsc,
 } from './_lib/seo-routing.js';
+import {
+  fetchRelatedBlogPosts,
+  relatedPostsForLocale,
+  renderAboutTutlioHtml,
+  renderRelatedPostsHtml,
+} from './_lib/blogRelatedLinks.js';
 
 function getSupabase() {
   const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -335,6 +341,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       mainEntityOfPage: { '@type': 'WebPage', '@id': url },
     });
 
+    const relatedRows = await fetchRelatedBlogPosts(supabase, {
+      tag: (post.tag as string) || undefined,
+      excludeId: String(post.id),
+      limit: 3,
+    });
+    const related = relatedPostsForLocale(relatedRows, locale);
+    const pricingUrl = buildCanonicalUrl('/pricing', locale);
+    const blogListCanonical = buildCanonicalUrl('/blog', locale);
+    const hasAboutInContent = /## (Apie Tutlio|About Tutlio|O Tutlio)/i.test(content);
+    const footerExtras = [
+      !hasAboutInContent ? renderAboutTutlioHtml(locale, pricingUrl, blogListCanonical) : '',
+      renderRelatedPostsHtml(related, locale),
+    ].filter(Boolean).join('\n');
+
     const body = `
 <div class="hero">
   ${image ? `<img class="cover" src="${esc(image)}" alt="${esc(title)}" />` : ''}
@@ -343,6 +363,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 </div>
 <article class="content">
   ${mdToHtml(content)}
+  ${footerExtras}
   <p style="margin-top:2em"><a href="${blogListPath}">&larr; ${l.back}</a></p>
 </article>`;
 

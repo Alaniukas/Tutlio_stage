@@ -15,6 +15,7 @@ import Landing from '@/pages/Landing';
 import AboutUs from '@/pages/AboutUs';
 import Contact from '@/pages/Contact';
 import FeaturePage from '@/pages/FeaturePage';
+import FeaturesIndexPage from '@/pages/FeaturesIndexPage';
 import Pricing from '@/pages/Pricing';
 import Blog from '@/pages/Blog';
 import BlogPost from '@/pages/BlogPost';
@@ -225,6 +226,8 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/:locale/kontaktai" element={<Contact />} />
         <Route path="/contacts" element={<Contact />} />
         <Route path="/:locale/contacts" element={<Contact />} />
+        <Route path="/features" element={<FeaturesIndexPage />} />
+        <Route path="/:locale/features" element={<FeaturesIndexPage />} />
         <Route path="/features/:feature" element={<FeaturePage />} />
         <Route path="/:locale/features/:feature" element={<FeaturePage />} />
         <Route path="/pricing" element={<Pricing />} />

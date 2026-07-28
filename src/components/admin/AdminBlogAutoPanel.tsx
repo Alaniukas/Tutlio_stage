@@ -7,6 +7,8 @@ interface BlogAutoSettings {
   enabled: boolean;
   interval_days: number;
   last_run_at: string | null;
+  auto_publish: boolean;
+  notify_on_draft: boolean;
 }
 
 interface BlogAutoKeyword {
@@ -33,7 +35,13 @@ export default function AdminBlogAutoPanel({ adminSecret }: { adminSecret: strin
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [settings, setSettings] = useState<BlogAutoSettings>({ enabled: false, interval_days: 1, last_run_at: null });
+  const [settings, setSettings] = useState<BlogAutoSettings>({
+    enabled: false,
+    interval_days: 1,
+    last_run_at: null,
+    auto_publish: true,
+    notify_on_draft: false,
+  });
   const [keywords, setKeywords] = useState<BlogAutoKeyword[]>([]);
   const [log, setLog] = useState<GenerationLogRow[]>([]);
   const [newKeyword, setNewKeyword] = useState('');
@@ -53,6 +61,8 @@ export default function AdminBlogAutoPanel({ adminSecret }: { adminSecret: strin
           enabled: !!data.settings.enabled,
           interval_days: Number(data.settings.interval_days) || 1,
           last_run_at: data.settings.last_run_at || null,
+          auto_publish: data.settings.auto_publish !== false,
+          notify_on_draft: !!data.settings.notify_on_draft,
         });
       }
       setKeywords(data.keywords || []);
@@ -84,6 +94,8 @@ export default function AdminBlogAutoPanel({ adminSecret }: { adminSecret: strin
           enabled: !!data.settings.enabled,
           interval_days: Number(data.settings.interval_days) || 1,
           last_run_at: data.settings.last_run_at || null,
+          auto_publish: data.settings.auto_publish !== false,
+          notify_on_draft: !!data.settings.notify_on_draft,
         });
       }
       setSuccess('Settings saved');
@@ -160,6 +172,7 @@ export default function AdminBlogAutoPanel({ adminSecret }: { adminSecret: strin
       const data = await res.json();
       if (!res.ok && !data.skipped) throw new Error(data.reason || data.error || 'Generation failed');
       if (data.skipped) setSuccess(`Skipped: ${data.reason}`);
+      else if (data.published) setSuccess(data.postId ? `Published (${data.keyword})` : 'Published');
       else setSuccess(data.postId ? `Draft created (${data.keyword})` : 'Done');
       void load();
     } catch (e: any) {
@@ -181,7 +194,7 @@ export default function AdminBlogAutoPanel({ adminSecret }: { adminSecret: strin
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold text-slate-300">Auto SEO blog</h2>
-          <p className="text-xs text-slate-500 mt-0.5">Generuoja LT/EN/PL draft kas {settings.interval_days} d. · el. laiškas su Publish</p>
+          <p className="text-xs text-slate-500 mt-0.5">Cron ~08:00 LT · auto-publish arba draft · el. laiškas tik jei įjungtas</p>
         </div>
         <button
           type="button"
@@ -210,6 +223,28 @@ export default function AdminBlogAutoPanel({ adminSecret }: { adminSecret: strin
               className="rounded border-white/20"
             />
             <span className="text-sm text-slate-200">Auto-generavimas įjungtas</span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={settings.auto_publish}
+              disabled={saving}
+              onChange={(e) => void saveSettings({ auto_publish: e.target.checked })}
+              className="rounded border-white/20"
+            />
+            <span className="text-sm text-slate-200">Auto-publish (be el. laiško)</span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer" title="Tik kai auto-publish išjungtas">
+            <input
+              type="checkbox"
+              checked={settings.notify_on_draft}
+              disabled={saving || settings.auto_publish}
+              onChange={(e) => void saveSettings({ notify_on_draft: e.target.checked })}
+              className="rounded border-white/20"
+            />
+            <span className={`text-sm ${settings.auto_publish ? 'text-slate-500' : 'text-slate-200'}`}>
+              El. laiškas draft peržiūrai
+            </span>
           </label>
           <div className="flex items-center gap-2">
             <Label className="text-slate-400 text-xs">Intervalas (d.)</Label>

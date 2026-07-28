@@ -1,12 +1,19 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { slugify } from './slugify.js';
-import { generateBlogWithAi, BLOG_AUTO_LOCALES } from './blogAiProvider.js';
+import { generateBlogWithAi, BLOG_AUTO_LOCALES, type BlogAutoLocale } from './blogAiProvider.js';
 import {
   uploadBlogImageFromBase64,
   uploadBlogImageFromUrl,
 } from './blogImageUpload.js';
 import { blogQuickPublishUrl, blogDraftPreviewUrl } from './blogPublishToken.js';
 import { INTERNAL_NOTIFY_EMAILS } from './resendConfig.js';
+import { submitIndexNowUrls } from './indexnowSubmit.js';
+import {
+  enrichBlogLocaleContent,
+  fetchRelatedBlogPosts,
+  relatedPostsForLocale,
+} from './blogRelatedLinks.js';
+import { buildCanonicalUrl } from './seo-routing.js';
 
 const DUPLICATE_WINDOW_DAYS = 30;
 
@@ -15,6 +22,8 @@ export interface BlogAutoSettings {
   enabled: boolean;
   interval_days: number;
   last_run_at: string | null;
+  auto_publish: boolean;
+  notify_on_draft: boolean;
 }
 
 export interface BlogAutoKeyword {
@@ -40,6 +49,7 @@ export interface RunBlogAutoGenerateResult {
   keyword?: string;
   publishUrl?: string;
   previewUrl?: string;
+  published?: boolean;
 }
 
 function blogNotifyEmails(): string[] {
@@ -183,6 +193,10 @@ export async function runBlogAutoGenerate(
   }
 
   try {
+    const autoPublish = settings?.auto_publish !== false;
+    const notifyOnDraft = settings?.notify_on_draft === true;
+    const relatedRows = await fetchRelatedBlogPosts(supabase, { tag: keywordRow.tag || undefined, limit: 3 });
+
     const ai = await generateBlogWithAi({ keyword, tag: keywordRow.tag || undefined });
 
     let coverImage = ai.coverImageUrl;
@@ -202,19 +216,24 @@ export async function runBlogAutoGenerate(
     }
 
     const slugLt = slugify(ai.locales.lt.title);
+    const nowIso = new Date().toISOString();
     const row: Record<string, unknown> = {
       slug: slugLt,
       title_lt: ai.locales.lt.title,
       excerpt_lt: ai.locales.lt.excerpt,
-      content_lt: ai.locales.lt.content,
+      content_lt: enrichBlogLocaleContent(
+        ai.locales.lt.content,
+        'lt',
+        relatedPostsForLocale(relatedRows, 'lt'),
+      ),
       slug_lt: slugLt,
       cover_image: coverImage,
       tag: ai.tag || keywordRow.tag || 'SEO',
-      status: 'draft',
-      published_at: null,
+      status: autoPublish ? 'published' : 'draft',
+      published_at: autoPublish ? nowIso : null,
       source: 'auto',
       generation_keyword: keyword,
-      updated_at: new Date().toISOString(),
+      updated_at: nowIso,
     };
 
     for (const loc of BLOG_AUTO_LOCALES) {
@@ -222,7 +241,11 @@ export async function runBlogAutoGenerate(
       const block = ai.locales[loc];
       row[`title_${loc}`] = block.title;
       row[`excerpt_${loc}`] = block.excerpt;
-      row[`content_${loc}`] = block.content;
+      row[`content_${loc}`] = enrichBlogLocaleContent(
+        block.content,
+        loc as BlogAutoLocale,
+        relatedPostsForLocale(relatedRows, loc),
+      );
       row[`slug_${loc}`] = slugify(block.title);
     }
 
@@ -249,7 +272,20 @@ export async function runBlogAutoGenerate(
 
     const publishUrl = blogQuickPublishUrl(String(post.id), appOrigin);
     const previewUrl = blogDraftPreviewUrl(String(post.id), appOrigin);
-    await sendDraftReadyEmail(appOrigin, post as Record<string, unknown>, keyword, publishUrl, previewUrl);
+
+    if (!autoPublish && notifyOnDraft) {
+      await sendDraftReadyEmail(appOrigin, post as Record<string, unknown>, keyword, publishUrl, previewUrl);
+    }
+
+    if (autoPublish) {
+      const indexUrls = BLOG_AUTO_LOCALES.map((loc) => {
+        const slug = String(row[`slug_${loc}`] || slugLt);
+        return buildCanonicalUrl(`/blog/${slug}`, loc);
+      });
+      await submitIndexNowUrls(indexUrls).catch((e) =>
+        console.error('[blog-auto-generate] indexnow failed:', e),
+      );
+    }
 
     return {
       ok: true,
@@ -257,6 +293,7 @@ export async function runBlogAutoGenerate(
       keyword,
       publishUrl,
       previewUrl,
+      published: autoPublish,
     };
   } catch (e: any) {
     const msg = e?.message || String(e);

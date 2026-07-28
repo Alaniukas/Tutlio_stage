@@ -57,6 +57,7 @@ export default function LandingNavbar() {
 
   const navLinks = [
     { to: buildLocalizedPath(localizedPagePath('about', locale), locale), label: t('nav.aboutUs') },
+    { to: buildLocalizedPath('/features', locale), label: t('nav.features') },
     { to: buildLocalizedPath('/pricing', locale), label: t('common.prices') },
     { to: buildLocalizedPath(localizedPagePath('contacts', locale), locale), label: t('common.contacts') },
   ];

@@ -12,6 +12,14 @@ import { BlogSidebar, BlogInlineCta, BlogHeroCover, BlogAuthorRow } from '@/comp
 import { usePlatform } from '@/contexts/PlatformContext';
 import { applyDefaultDocumentMeta } from '@/lib/documentMeta';
 
+interface RelatedPost {
+  id: string;
+  slug: string;
+  title: string;
+  tag: string;
+  url: string;
+}
+
 function splitHtmlAfterFirstH2(html: string): { before: string; after: string } {
   const idx = html.search(/<\/h2>/i);
   if (idx === -1) return { before: html, after: '' };
@@ -24,6 +32,7 @@ export default function BlogPost() {
   const { t, locale } = useTranslation();
   const { platform } = usePlatform();
   const [post, setPost] = useState<Record<string, unknown> | null>(null);
+  const [related, setRelated] = useState<RelatedPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [activeSection, setActiveSection] = useState('');
@@ -34,7 +43,7 @@ export default function BlogPost() {
     setNotFound(false);
     fetch(`/api/admin-blog?slug=${encodeURIComponent(slug)}&locale=${encodeURIComponent(locale)}`)
       .then(r => { if (!r.ok) throw new Error('Not found'); return r.json(); })
-      .then((d: { post?: Record<string, unknown>; redirectSlug?: string }) => {
+      .then((d: { post?: Record<string, unknown>; redirectSlug?: string; related?: RelatedPost[] }) => {
         if (!d.post) throw new Error('Not found');
         const target = d.redirectSlug || postSlug(d.post, locale);
         if (target && target !== slug) {
@@ -42,6 +51,7 @@ export default function BlogPost() {
           return;
         }
         setPost(d.post);
+        setRelated(Array.isArray(d.related) ? d.related : []);
       })
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
@@ -158,6 +168,24 @@ export default function BlogPost() {
                       <div className="mt-6">
                         <BlogInlineCta />
                       </div>
+                    )}
+
+                    {related.length > 0 && (
+                      <section className="mt-8 rounded-2xl border border-gray-200 bg-white p-6 sm:p-8 shadow-sm">
+                        <h2 className="text-lg font-bold text-gray-900 mb-4">{t('blog.readAlso')}</h2>
+                        <ul className="space-y-2">
+                          {related.map((item) => (
+                            <li key={item.id}>
+                              <Link
+                                to={buildLocalizedPath(`/blog/${item.slug}`, locale)}
+                                className="text-indigo-600 hover:text-indigo-800 text-sm font-medium hover:underline"
+                              >
+                                {item.title}
+                              </Link>
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
                     )}
                   </div>
 

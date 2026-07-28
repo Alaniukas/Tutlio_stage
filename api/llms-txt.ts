@@ -2,7 +2,8 @@ import type { VercelRequest, VercelResponse } from './types';
 import { TUTOR_PLANS, eur } from '../src/lib/pricing.js';
 import { SUBSCRIPTION_PLN } from '../src/lib/subscriptionPricing.js';
 import { formatPln } from '../src/lib/formatPln.js';
-import { detectDomain } from './_lib/seo-routing.js';
+import { detectDomain, type DomainKey } from './_lib/seo-routing.js';
+import { FEATURE_PAGES } from '../src/lib/featurePages.js';
 
 function pricingBlock(isPl: boolean): string {
   if (isPl) {
@@ -15,10 +16,75 @@ function pricingBlock(isPl: boolean): string {
 - **Subscription Only**: ${eur(TUTOR_PLANS.subscriptionOnly.pricePerMonthEur)}/month (manual payment tracking instead of Stripe collection — no commission on student payments)`;
 }
 
-function buildLlmsTxt(isPl: boolean): string {
+function featureLinks(base: string): string {
+  return Object.entries(FEATURE_PAGES)
+    .map(([id, f]) => `- ${id}: ${base}${f.path}`)
+    .join('\n');
+}
+
+function buildLlmsTxt(domain: DomainKey): string {
+  const isPl = domain === 'pl';
+  const isLt = domain === 'lt';
+  const base = isPl ? 'https://www.tutlio.pl' : isLt ? 'https://www.tutlio.lt' : 'https://www.tutlio.com';
+
+  if (isLt) {
+    return `# Tutlio
+
+> Tutlio — korepetitorių ir korepetavimo mokyklų valdymo platforma Lietuvoje. Automatizuoja tvarkaraštį, mokėjimus, mokinių valdymą ir komunikaciją.
+
+## Kas yra Tutlio
+
+Tutlio pakeičia Excel, WhatsApp ir išskaidytus įrankius viena platforma. Korepetitoriai nustato prieinamumą, mokiniai rezervuoja pamokas patys. Sistema tvarko priminimus, mokėjimus, atšaukimus, laukimo eilę ir finansų sekimą.
+
+## Pagrindinės funkcijos
+
+- **Išmanusis kalendorius**: savarankiškas užsakymas, pasikartojančios pamokos, grupinės pamokos
+- **Mokinių laukimo eilė**: atšaukus pamoką, laisva vieta automatiškai siūloma eilėje esantiems mokiniams
+- **Stripe mokėjimai**: kortelių mokėjimai, sąskaitos, paketai, mėnesinės ataskaitos
+- **Automatiniai priminimai**: el. paštas prieš ir po pamokų, vėluojantys mokėjimai
+- **Mokinių ir tėvų portalai**: tvarkaraštis, mokėjimai, žinutės
+- **Mokyklų režimas**: keli mokytojai, sutartys, GoSign e-pasirašymas, įmokų planai
+- **12 kalbų**: LT, EN, PL ir dar 9 rinkos
+
+## Funkcijų puslapiai
+
+${featureLinks(base)}
+- Visos funkcijos (hub): ${base}/features
+
+## Kainodara
+
+${pricingBlock(false)}
+
+- 7 dienų nemokamas bandomasis laikotarpis
+
+## Nuorodos
+
+- Svetainė: https://www.tutlio.lt
+- Tarptautinė: https://www.tutlio.com
+- Mokykloms: https://www.tutlio.lt/schools
+- Tinklaraštis: https://www.tutlio.lt/blog
+- RSS: https://www.tutlio.lt/blog/rss.xml
+- Kainos: https://www.tutlio.lt/pricing
+- Kontaktai: info@tutlio.lt
+
+## Kam skirta
+
+- Privatūs korepetitoriai (bet koks dalykas)
+- Korepetavimo mokyklos ir švietimo centrai
+- Kalbų, muzikos, matematikos mokyklos
+- Lietuvoje ieškantiems: korepetitorių platforma, pamokų tvarkaraštis online, mokinių laukimo eilė
+
+## Techninė informacija
+
+- Web aplikacija + PWA
+- Stripe, Google Calendar, GoSign integracijos
+- GDPR, duomenys ES
+`;
+  }
+
   return `# Tutlio
 
-> Tutlio is a tutoring management platform for private tutors and tutoring schools. It automates scheduling, payments, student management, and communication so tutors can focus on teaching.
+> Tutlio is tutoring management software for private tutors and tutoring schools. It automates scheduling, payments, student management, and communication so tutors can focus on teaching.
 
 ## What Tutlio Does
 
@@ -35,8 +101,13 @@ Tutlio replaces spreadsheets, notebooks, and scattered tools with a single platf
 - **Invoicing**: Generate and send invoices to students or parents.
 - **Parent Portals**: Parents can view their child's schedule, payment status, and progress.
 - **Real-time Messaging**: Built-in chat between tutors, students, and parents.
-- **Multi-language**: Available in 12 languages — Lithuanian, English, Polish, Latvian, Estonian, French, Spanish, German, Swedish, Danish, Finnish, Norwegian.
 - **Tutoring School Mode**: Manage multiple tutors, students, subjects, and groups under one organization.
+- **Multi-language**: Available in 12 languages — Lithuanian, English, Polish, Latvian, Estonian, French, Spanish, German, Swedish, Danish, Finnish, Norwegian.
+
+## Feature Pages
+
+${featureLinks(base)}
+- All features (hub): ${base}/features
 
 ## Pricing
 
@@ -50,11 +121,11 @@ ${pricingBlock(isPl)}
 - Website: https://www.tutlio.com
 - Website (Lithuania): https://www.tutlio.lt
 - Website (Poland): https://www.tutlio.pl
-- For Schools: https://www.tutlio.com/schools
-- Blog: https://www.tutlio.com/blog
-- Blog RSS feed: https://www.tutlio.com/blog/rss.xml
-- Pricing: ${isPl ? 'https://www.tutlio.pl/pricing' : 'https://www.tutlio.com/pricing'}
-- About: https://www.tutlio.com/about
+- For Schools: ${base}/schools
+- Blog: ${base}/blog
+- Blog RSS feed: ${base}/blog/rss.xml
+- Pricing: ${base}/pricing
+- About: ${base}/about
 - Contact: info@tutlio.lt
 
 ## Target Users
@@ -65,6 +136,7 @@ ${pricingBlock(isPl)}
 - Math and science tutors
 - Tutoring schools and education centers
 - After-school program coordinators
+- Users searching for: tutor management software, lesson scheduling software, tutoring business platform, tutoring school management
 
 ## Technical Details
 
@@ -88,11 +160,7 @@ Tutors define their weekly availability by setting time slots for each day. Stud
 - Visual color coding per subject
 
 ### Student Waitlist
-The waitlist is Tutlio's signature feature. When a student cancels a lesson, the freed time slot is automatically offered to students on the waitlist who expressed interest in that time. This dramatically reduces no-shows and lost revenue. The flow:
-1. Student signs up for the waitlist for preferred time slots
-2. When a slot opens (cancellation), the system notifies waitlisted students
-3. First student to confirm gets the slot
-4. If no one confirms within the deadline, the slot stays open for general booking
+The waitlist is Tutlio's signature feature. When a student cancels a lesson, the freed time slot is automatically offered to students on the waitlist who expressed interest in that time. This dramatically reduces no-shows and lost revenue.
 
 ### Payments & Finance
 - Stripe-powered card payments with 3D Secure
@@ -102,28 +170,13 @@ The waitlist is Tutlio's signature feature. When a student cancels a lesson, the
 - Automatic payment reminders for overdue invoices
 - Invoice generation with PDF export
 
-### Cancellation System
-- Tutors set a cancellation deadline (e.g., 24 hours before lesson)
-- Late cancellations incur a configurable fee (e.g., 50% of lesson price)
-- System automatically calculates and applies fees
-- Freed slots go to the waitlist automatically
-
-### Communication
-- Built-in real-time messaging between tutors, students, and parents
-- Email notifications for bookings, cancellations, reminders, and payments
-- Customizable reminder timing (e.g., 24h before, 1h before)
-
 ### Tutoring School Features
 - Multi-tutor management under one organization
 - Admin dashboard with overview of all tutors and students
-- Centralized billing and financial reporting
+- Contract templates and e-signing (GoSign in Lithuania)
+- Installment payment plans on school contracts
 - Custom branding (white-label support)
 - Role-based access (admin, tutor, student, parent)
-
-### Student & Parent Experience
-- Students get a personal dashboard with upcoming lessons, payment history, and booking
-- Parents can monitor their children's schedules and payments
-- Students receive automated reminders and can self-manage bookings
 
 ## Company Information
 
@@ -136,9 +189,9 @@ The waitlist is Tutlio's signature feature. When a student cancels a lesson, the
 `;
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
-  const isPl = detectDomain(req) === 'pl';
+  const domain = detectDomain(req);
   const isFull = (req.url || '').includes('llms-full');
-  const body = buildLlmsTxt(isPl) + (isFull ? LLMS_FULL_SUFFIX : '');
+  const body = buildLlmsTxt(domain) + (isFull ? LLMS_FULL_SUFFIX : '');
 
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Cache-Control', 'public, s-maxage=86400, stale-while-revalidate=86400');

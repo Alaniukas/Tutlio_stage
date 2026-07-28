@@ -133,6 +133,10 @@ describe('middleware SSR routing', () => {
       .toBe('/api/page-render?page=landing&locale=pl');
     expect(ssrDestination(botRequest('https://www.tutlio.pl/pricing', 'www.tutlio.pl')))
       .toBe('/api/page-render?page=pricing&locale=pl');
+    expect(ssrDestination(botRequest('https://www.tutlio.lt/features', 'www.tutlio.lt')))
+      .toBe('/api/features-index-render?locale=lt');
+    expect(ssrDestination(botRequest('https://www.tutlio.com/en/features', 'www.tutlio.com')))
+      .toBe('/api/features-index-render?locale=en');
   });
 
   it('returns null (→ 404) for unknown marketing-shaped URLs', () => {
@@ -150,6 +154,7 @@ describe('sitemap', () => {
     expect(urls).toContain('https://www.tutlio.com/schools/pricing');
     expect(urls).toContain('https://www.tutlio.com/about');
     expect(urls).toContain('https://www.tutlio.com/contacts');
+    expect(urls).toContain('https://www.tutlio.com/features');
 
     const ltUrls = STATIC_PAGES.map((p) => p.urlFor('lt'));
     expect(ltUrls).toContain('https://www.tutlio.lt/apie-mus');

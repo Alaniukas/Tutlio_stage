@@ -73,6 +73,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data: existing } = await supabase.from('blog_auto_settings').select('id').limit(1).maybeSingle();
     const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (typeof body.enabled === 'boolean') patch.enabled = body.enabled;
+    if (typeof body.auto_publish === 'boolean') patch.auto_publish = body.auto_publish;
+    if (typeof body.notify_on_draft === 'boolean') patch.notify_on_draft = body.notify_on_draft;
     if (typeof body.interval_days === 'number' && body.interval_days >= 1 && body.interval_days <= 30) {
       patch.interval_days = body.interval_days;
     }

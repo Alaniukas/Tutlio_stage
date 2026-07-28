@@ -14,8 +14,11 @@ import {
   t,
   esc,
   webPageJsonLd,
+  faqJsonLd,
   hreflangCode,
 } from './_lib/ssr-shell.js';
+
+const SCHOOLS_FAQ_KEYS = ['whatIs', 'whoFor', 'contracts', 'pricing', 'trial'] as const;
 
 type SchoolsPageId = 'landing' | 'pricing';
 
@@ -155,7 +158,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     : t(locale, 'schoolsLanding.ctaBannerDesc');
 
   const canonicalUrl = urlFor(locale);
-  const jsonLd = webPageJsonLd({ name: title, description, url: canonicalUrl });
+  const schoolsFaq = page === 'landing'
+    ? SCHOOLS_FAQ_KEYS.map((f) => ({
+        question: t(locale, `schoolsLanding.faq.${f}Q`),
+        answer: t(locale, `schoolsLanding.faq.${f}A`),
+      }))
+    : [];
+  const jsonLd = page === 'landing'
+    ? `${webPageJsonLd({ name: title, description, url: canonicalUrl })}</script><script type="application/ld+json">${faqJsonLd(schoolsFaq)}`
+    : webPageJsonLd({ name: title, description, url: canonicalUrl });
 
   const breadcrumbs = page === 'pricing'
     ? [

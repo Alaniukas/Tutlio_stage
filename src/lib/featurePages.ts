@@ -70,3 +70,36 @@ export const FEATURE_PAGE_IDS = Object.keys(FEATURE_PAGES) as FeaturePageId[];
 export function isFeaturePageId(value: string): value is FeaturePageId {
   return value in FEATURE_PAGES;
 }
+
+/** Landing highlight keys shown on /features hub (subset may link to deep pages). */
+export const FEATURE_HUB_HIGHLIGHT_KEYS = [
+  'calendar',
+  'reminders',
+  'messaging',
+  'plans',
+  'autoPayments',
+  'invoices',
+  'parents',
+  'files',
+  'stats',
+  'waitlist',
+  'whiteLabel',
+  'whiteboard',
+] as const;
+
+export type FeatureHubHighlightKey = (typeof FEATURE_HUB_HIGHLIGHT_KEYS)[number];
+
+/** Map landing highlight key → deep feature page when one exists. */
+export const HIGHLIGHT_FEATURE_PAGE: Partial<Record<FeatureHubHighlightKey, FeaturePageId>> = {
+  calendar: 'calendar',
+  waitlist: 'waitlist',
+  reminders: 'reminders',
+  autoPayments: 'payments',
+  invoices: 'payments',
+  files: 'comments',
+};
+
+export function featureHubHighlightPath(key: FeatureHubHighlightKey): string | null {
+  const pageId = HIGHLIGHT_FEATURE_PAGE[key];
+  return pageId ? FEATURE_PAGES[pageId].path : null;
+}

@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { isSsrMethod, rejectSsrMethod, sendSsrHtml } from './_lib/ssr-http.js';
+import { createClient } from '@supabase/supabase-js';
 import {
   type Locale,
   type DomainKey,
@@ -20,8 +21,16 @@ import {
   type FeaturePageId as FeatureId,
   FEATURE_PAGES as FEATURES,
 } from '../src/lib/featurePages.js';
+import { fetchRelatedBlogPosts, relatedPostsForLocale, renderRelatedPostsHtml } from './_lib/blogRelatedLinks.js';
 
-function renderFeature(featureId: FeatureId, locale: Locale, domain: DomainKey): string {
+function getSupabase() {
+  const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+}
+
+function renderFeature(featureId: FeatureId, locale: Locale, domain: DomainKey, relatedHtml = ''): string {
   const cfg = FEATURES[featureId];
   const registerPath = buildPath('/register', locale, domain);
 
@@ -57,6 +66,7 @@ function renderFeature(featureId: FeatureId, locale: Locale, domain: DomainKey):
   <h2>${esc(t(locale, 'landing.faqTitle'))}</h2>
 </div>
 <div class="faq">${faqHtml}</div>
+${relatedHtml}
 <div class="section" style="text-align:center;padding:60px 24px">
   <h2>${esc(t(locale, 'landing.ctaTitle'))}</h2>
   <p>${esc(t(locale, 'landing.ctaDesc'))}</p>
@@ -92,7 +102,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     { name: t(locale, cfg.titleKey), url: buildCanonicalUrl(path, locale) },
   ];
 
-  const body = renderFeature(featureId, locale, domain);
+  let relatedHtml = '';
+  const supabase = getSupabase();
+  if (supabase) {
+    const relatedRows = await fetchRelatedBlogPosts(supabase as any, { limit: 3 });
+    const related = relatedPostsForLocale(relatedRows, locale);
+    if (related.length) {
+      const heading = locale === 'lt' ? 'Straipsniai iš tinklaraščio' : 'From the blog';
+      relatedHtml = `<div class="section"><h2>${esc(heading)}</h2>${renderRelatedPostsHtml(related, locale)}</div>`;
+    }
+  }
+
+  const body = renderFeature(featureId, locale, domain, relatedHtml);
   const html = renderShell({ locale, domain, path, title, description, body, jsonLd, breadcrumbs });
 
   sendSsrHtml(req, res, html, {

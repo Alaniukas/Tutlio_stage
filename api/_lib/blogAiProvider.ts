@@ -81,7 +81,11 @@ export const BLOG_SEO_WRITING_RULES =
   '- Include 5–7 ## H2 sections + ### H3 where useful; lists, numbered steps, optional > Pro tip: blockquote.\n' +
   '- Add one short FAQ section (###) with 2–3 questions if it fits the keyword.\n' +
   '- excerpt: reader benefit only, no brand name, no CTA.\n' +
-  '- ~550–750 words per locale. LT primary; EN/PL natural adaptations.';
+  '- ~550–750 words per locale. LT primary; EN/PL natural adaptations.\n' +
+  '- Internal linking (required): include 2–3 natural markdown links to Tutlio pages using relative paths only, e.g.\n' +
+  '  [pamokų kalendorius](/features/calendar), [laukimo eilė](/features/waitlist), [mokėjimai](/features/payments),\n' +
+  '  [priminimai](/features/reminders), [kainos](/pricing), [tinklaraštis](/blog). Pick links that fit the topic.\n' +
+  '- End with one soft contextual link to /pricing or /blog if it fits naturally.';
 
 export type BlogAiProviderName = 'custom' | 'gemini';
 

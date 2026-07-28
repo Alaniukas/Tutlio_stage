@@ -224,28 +224,55 @@ ${body}
 
 export const DEFAULT_OG_IMAGE = 'https://www.tutlio.com/og-image.jpg';
 
-export function organizationJsonLd(): string {
+export function organizationJsonLd(locale: Locale = 'en'): string {
+  const isLt = locale === 'lt';
+  const isPl = locale === 'pl';
+  const url = isPl ? 'https://www.tutlio.pl' : isLt ? 'https://www.tutlio.lt' : 'https://www.tutlio.com';
+  const description = isLt
+    ? 'Korepetitorių ir korepetavimo mokyklų valdymo platforma — pamokų tvarkaraštis, laukimo eilė, Stripe mokėjimai ir automatizacija.'
+    : isPl
+      ? 'Oprogramowanie do zarządzania korepetycjami — harmonogram lekcji, lista oczekujących, płatności Stripe i automatyzacja.'
+      : 'Tutoring management software for private tutors and tutoring schools — smart calendar, waitlist, payments, and automation.';
   return JSON.stringify({
     '@context': 'https://schema.org',
     '@type': 'Organization',
     name: 'Tutlio',
-    url: 'https://www.tutlio.com',
+    url,
     logo: {
       '@type': 'ImageObject',
       url: 'https://www.tutlio.com/pwa-512x512.png',
       width: 512,
       height: 512,
     },
-    description: 'Tutoring management platform for private tutors and tutoring schools — smart calendar, waitlist, payments, and automation.',
+    description,
     email: 'info@tutlio.lt',
     foundingDate: '2024',
     areaServed: 'Worldwide',
-    sameAs: ['https://www.tutlio.lt', 'https://www.tutlio.pl'],
+    sameAs: ['https://www.tutlio.lt', 'https://www.tutlio.com', 'https://www.tutlio.pl'],
     contactPoint: {
       '@type': 'ContactPoint',
       email: 'info@tutlio.lt',
       contactType: 'customer support',
-      availableLanguage: ['English', 'Lithuanian'],
+      availableLanguage: ['English', 'Lithuanian', 'Polish'],
+    },
+  });
+}
+
+export function websiteJsonLd(locale: Locale = 'en'): string {
+  const isPl = locale === 'pl';
+  const isLt = locale === 'lt';
+  const url = isPl ? 'https://www.tutlio.pl' : isLt ? 'https://www.tutlio.lt' : 'https://www.tutlio.com';
+  return JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'WebSite',
+    name: 'Tutlio',
+    url,
+    description: t(locale, 'landing.heroDesc').replace(/<[^>]+>/g, ''),
+    publisher: { '@type': 'Organization', name: 'Tutlio', url },
+    potentialAction: {
+      '@type': 'SearchAction',
+      target: `${url}/blog?q={search_term_string}`,
+      'query-input': 'required name=search_term_string',
     },
   });
 }

@@ -218,6 +218,10 @@ export function ssrDestination(request: Request): string | null {
     return `/api/blog-render?locale=${locale}`;
   }
 
+  if (rest === '/features') {
+    return `/api/features-index-render?locale=${locale}`;
+  }
+
   const feature = rest.match(/^\/features\/([^/]+)$/);
   if (feature && FEATURES.has(feature[1])) {
     return `/api/feature-render?feature=${encodeURIComponent(feature[1])}&locale=${locale}`;

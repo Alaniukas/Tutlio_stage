@@ -53,10 +53,6 @@ const CUSTOMER_LOGOS: { src: string; alt: string; invert?: boolean }[] = [
 const HERO_SPOT_ICONS_TUTOR = [CalendarDays, ListOrdered] as const;
 const HERO_SPOT_ICONS_SCHOOLS = [Building2, Users] as const;
 
-function scrollToFeaturesSection() {
-  document.getElementById('tutlio-privalumai')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-
 export default function HeroSection({ variant = 'tutor' }: { variant?: LandingVariant }) {
   const { t, locale } = useTranslation();
   const p = variant === 'schools' ? 'schoolsLanding' : 'landing';
@@ -153,13 +149,12 @@ export default function HeroSection({ variant = 'tutor' }: { variant?: LandingVa
               })}
             </ul>
             <div className="mt-8 flex justify-center">
-              <button
-                type="button"
-                onClick={scrollToFeaturesSection}
+              <Link
+                to={buildLocalizedPath('/features', locale)}
                 className="inline-flex items-center justify-center h-10 sm:h-11 px-6 text-[13px] sm:text-sm rounded-full border border-gray-300/90 bg-white/80 font-medium text-gray-700 hover:bg-white hover:border-gray-400 transition-all duration-200 active:scale-[0.98] touch-manipulation"
               >
                 {t(`${p}.heroMoreFeaturesCta`)}
-              </button>
+              </Link>
             </div>
           </div>
         </Reveal>

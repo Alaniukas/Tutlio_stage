@@ -14,6 +14,7 @@ import {
   t,
   esc,
   organizationJsonLd,
+  websiteJsonLd,
   webPageJsonLd,
   faqJsonLd,
   softwareAppJsonLd,
@@ -289,7 +290,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       question: t(locale, `landing.faq.${f}Q`),
       answer: t(locale, `landing.faq.${f}A`),
     }));
-    jsonLd = `${organizationJsonLd()}</script><script type="application/ld+json">${softwareAppJsonLd(locale)}</script><script type="application/ld+json">${faqJsonLd(landingFaq)}`;
+    jsonLd = `${organizationJsonLd(locale)}</script><script type="application/ld+json">${websiteJsonLd(locale)}</script><script type="application/ld+json">${softwareAppJsonLd(locale)}</script><script type="application/ld+json">${faqJsonLd(landingFaq)}`;
   } else if (page === 'pricing') {
     const faqItems = ['trial', 'cancel', 'limit', 'payment', 'switch'].map((f) => ({
       question: t(locale, `pricing.faq.${f}Q`),

@@ -38,6 +38,7 @@ export const STATIC_PAGES: SitemapPage[] = [
   { urlFor: (l) => buildCanonicalUrl(localizedPagePath('contacts', l), l), changefreq: 'monthly', priority: '0.6' },
   { urlFor: (l) => buildPlatformCanonicalUrl('/schools', '/', l), changefreq: 'weekly', priority: '0.8' },
   { urlFor: (l) => buildPlatformCanonicalUrl('/schools', '/pricing', l), changefreq: 'monthly', priority: '0.7' },
+  plainPage('/features', 'monthly', '0.85'),
   plainPage('/features/calendar', 'monthly', '0.7'),
   plainPage('/features/waitlist', 'monthly', '0.7'),
   plainPage('/features/payments', 'monthly', '0.7'),
