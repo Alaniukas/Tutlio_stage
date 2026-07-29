@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
+import { resolveInvoiceBranding } from './_lib/invoiceBranding.js';
 import { generateInvoicePdf, type InvoicePdfData } from './_lib/invoicePdf.js';
 
 const supabase = createClient(
@@ -45,8 +46,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // Try serving from storage first
-    if (invoice.pdf_storage_path) {
+    // Try serving from storage first (skip cache for white-label orgs — layout/branding may change)
+    const brandingPreview = invoice.organization_id
+      ? await resolveInvoiceBranding(supabase, invoice.organization_id)
+      : null;
+
+    if (!brandingPreview && invoice.pdf_storage_path) {
       const { data: fileData, error: dlErr } = await supabase.storage
         .from('invoices')
         .download(invoice.pdf_storage_path);
@@ -66,6 +71,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq('invoice_id', invoiceId)
       .order('created_at', { ascending: true });
 
+    const branding = brandingPreview;
+
     const pdfData: InvoicePdfData = {
       invoiceNumber: invoice.invoice_number,
       issueDate: new Date(invoice.issue_date).toLocaleDateString('lt-LT'),
@@ -84,6 +91,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         totalPrice: Number(li.total_price),
       })),
       totalAmount: Number(invoice.total_amount),
+      branding: branding ?? undefined,
     };
 
     const pdfBytes = await generateInvoicePdf(pdfData);

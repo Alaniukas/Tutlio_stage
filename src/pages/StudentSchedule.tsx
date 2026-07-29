@@ -837,20 +837,12 @@ export default function StudentSchedule() {
         }
 
         setExistingSessions(mySessionsData);
-        if (tutorFrozenByLicense) {
-            setOccupiedSlots([]);
-        } else {
-            setOccupiedSlots([]);
-            void fetchOccupiedSlotsDeduped({
-                tutorId: st.tutor_id,
-                studentId: st.id,
-                startISO: past,
-                endISO: future,
-            }).then((slots) => setOccupiedSlots(slots ?? []));
-        }
+        setOccupiedSlots([]);
 
         // Mark initial range as loaded (30 days ago to 7 days ahead)
-        setLoadedRanges([{ start: addDays(new Date(), -30), end: addDays(new Date(), 7) }]);
+        const initialRangeStart = addDays(new Date(), -30);
+        const initialRangeEnd = addDays(new Date(), 7);
+        setLoadedRanges([{ start: initialRangeStart, end: initialRangeEnd }]);
         await refetchBookingBlock();
 
         // OPTIMIZATION: Pre-fetch current month in background for smooth navigation
@@ -859,6 +851,19 @@ export default function StudentSchedule() {
             const monthEnd = endOfMonth(new Date());
             fetchDateRange(monthStart, monthEnd);
         }, 500);
+
+        // Defer occupied-slots API so the calendar can paint before the extra round-trip.
+        if (!tutorFrozenByLicense) {
+            const occupiedParams = {
+                tutorId: st.tutor_id,
+                studentId: st.id,
+                startISO: past,
+                endISO: future,
+            };
+            setTimeout(() => {
+                void fetchOccupiedSlotsDeduped(occupiedParams).then((slots) => setOccupiedSlots(slots ?? []));
+            }, 400);
+        }
         });
         } catch (e) {
             console.error('[StudentSchedule] fetchInitialData', e);

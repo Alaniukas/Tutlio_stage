@@ -28,6 +28,7 @@ type CompanyFinanceCache = {
   enableMonthlyBilling: boolean;
   enablePrepaidPackages: boolean;
   restrictBookingOnOverdue: boolean;
+  enablePerStudentPaymentOverride: boolean;
   orgTutors: { id: string; full_name: string }[];
 };
 
@@ -58,6 +59,9 @@ export default function CompanyFinance() {
   const [enableMonthlyBilling, setEnableMonthlyBilling] = useState(fc?.enableMonthlyBilling ?? false);
   const [enablePrepaidPackages, setEnablePrepaidPackages] = useState(fc?.enablePrepaidPackages ?? false);
   const [restrictBookingOnOverdue, setRestrictBookingOnOverdue] = useState(fc?.restrictBookingOnOverdue ?? false);
+  const [enablePerStudentPaymentOverride, setEnablePerStudentPaymentOverride] = useState(
+    fc?.enablePerStudentPaymentOverride ?? false,
+  );
 
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
 
@@ -128,7 +132,7 @@ export default function CompanyFinance() {
     const { data: orgData, error: orgError } = await supabase
       .from('organizations')
       .select(
-        'stripe_account_id, stripe_onboarding_complete, payment_timing, payment_deadline_hours, enable_per_lesson, enable_monthly_billing, enable_prepaid_packages, restrict_booking_on_overdue'
+        'stripe_account_id, stripe_onboarding_complete, payment_timing, payment_deadline_hours, enable_per_lesson, enable_monthly_billing, enable_prepaid_packages, restrict_booking_on_overdue, features'
       )
       .eq('id', adminRow.organization_id)
       .single();
@@ -141,6 +145,7 @@ export default function CompanyFinance() {
     let enableMonthlyBillingLocal = false;
     let enablePrepaidPackagesLocal = false;
     let restrictBookingOnOverdueLocal = false;
+    let enablePerStudentPaymentOverrideLocal = false;
 
     if (orgError) {
       setToastMessage({ message: t('companyFinance.fetchFailed', { msg: orgError.message }), type: 'error' });
@@ -153,6 +158,8 @@ export default function CompanyFinance() {
       enableMonthlyBillingLocal = orgData.enable_monthly_billing ?? false;
       enablePrepaidPackagesLocal = orgData.enable_prepaid_packages ?? false;
       restrictBookingOnOverdueLocal = orgData.restrict_booking_on_overdue ?? false;
+      const featObj = (orgData.features as Record<string, unknown> | null) ?? {};
+      enablePerStudentPaymentOverrideLocal = featObj.per_student_payment_override === true;
     }
 
     const orgTutorsLocal = await getOrgVisibleTutors(
@@ -171,6 +178,7 @@ export default function CompanyFinance() {
     setEnableMonthlyBilling(enableMonthlyBillingLocal);
     setEnablePrepaidPackages(enablePrepaidPackagesLocal);
     setRestrictBookingOnOverdue(restrictBookingOnOverdueLocal);
+    setEnablePerStudentPaymentOverride(enablePerStudentPaymentOverrideLocal);
     setOrgTutors(orgTutorsLocal);
 
     setCache('company_finance', {
@@ -183,6 +191,7 @@ export default function CompanyFinance() {
       enableMonthlyBilling: enableMonthlyBillingLocal,
       enablePrepaidPackages: enablePrepaidPackagesLocal,
       restrictBookingOnOverdue: restrictBookingOnOverdueLocal,
+      enablePerStudentPaymentOverride: enablePerStudentPaymentOverrideLocal,
       orgTutors: orgTutorsLocal,
     });
 
@@ -191,6 +200,16 @@ export default function CompanyFinance() {
 
   const handleSaveFinance = async () => {
     if (!orgId) return;
+
+    const { data: currentOrg } = await supabase
+      .from('organizations')
+      .select('features')
+      .eq('id', orgId)
+      .maybeSingle();
+    const mergedFeatures = {
+      ...((currentOrg?.features as Record<string, unknown> | null) ?? {}),
+      per_student_payment_override: enablePerStudentPaymentOverride,
+    };
 
     const { error } = await supabase
       .from('organizations')
@@ -201,11 +220,15 @@ export default function CompanyFinance() {
         enable_monthly_billing: enableMonthlyBilling,
         enable_prepaid_packages: enablePrepaidPackages,
         restrict_booking_on_overdue: restrictBookingOnOverdue,
+        features: mergedFeatures,
       })
       .eq('id', orgId);
 
     if (error) setToastMessage({ message: t('companyFinance.saveFailed', { msg: error.message }), type: 'error' });
-    else setToastMessage({ message: t('companyFinance.saveSuccess'), type: 'success' });
+    else {
+      invalidateCache('company_finance');
+      setToastMessage({ message: t('companyFinance.saveSuccess'), type: 'success' });
+    }
   };
 
   const handleInvoicePreview = async () => {
@@ -568,6 +591,19 @@ export default function CompanyFinance() {
                 </div>
               )}
             </div>
+
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-1 w-4 h-4 rounded border-gray-300 text-violet-600"
+                checked={enablePerStudentPaymentOverride}
+                onChange={(e) => setEnablePerStudentPaymentOverride(e.target.checked)}
+              />
+              <span className="text-sm text-gray-800">
+                <span className="font-medium">{t('finance.perStudentOverride')}</span>
+                <span className="block text-xs text-gray-500">{t('finance.perStudentOverrideDesc')}</span>
+              </span>
+            </label>
           </div>
           <div className="flex justify-end pt-2 border-t border-gray-100">
             <Button onClick={handleSaveFinance} className="gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700">

@@ -238,10 +238,10 @@ export default function CalendarPage() {
   const orgPolicy = useOrgTutorPolicy();
   const licenseFrozen = orgPolicy.isOrgTutor && orgPolicy.orgUsesLicenses && !orgPolicy.hasActiveLicense;
   const { contactVisibility, hasFeature: hasOrgFeature } = useOrgFeatures();
+  const { user: ctxUser, profile: ctxProfile } = useUser();
   // Org feature: ended lessons are not auto-completed — the tutor must confirm the outcome.
   const requiresStatusConfirmation = hasOrgFeature('tutor_lesson_status_confirmation');
   const hideProKlaseOrgTutorCancel = orgPolicy.isOrgTutor && isProKlaseOrg(ctxProfile?.organization_id);
-  const { user: ctxUser, profile: ctxProfile } = useUser();
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -475,6 +475,7 @@ export default function CalendarPage() {
     // Silent refresh (after an action with an optimistic local update) keeps the
     // current grid on screen instead of flashing the full-screen loading spinner.
     if (!opts?.silent) setLoading(true);
+    try {
     setCurrentUserId(user.id);
 
     let profileData: {
@@ -602,8 +603,9 @@ export default function CalendarPage() {
 
     const { data: av } = await tutorAvailabilityAllRowsDeduped(user.id);
     setAvailability(av || []);
-
-    setLoading(false);
+    } finally {
+      setLoading(false);
+    }
     });
   };
 

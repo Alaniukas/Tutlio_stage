@@ -32,6 +32,8 @@ import {
 } from '@/lib/orgContactVisibility';
 import { getCached, setCache } from '@/lib/dataCache';
 import { SUPPORTED_LOCALES, LOCALE_NAMES, type Locale } from '@/lib/i18n/core';
+import { useOrgEntityType } from '@/contexts/OrgEntityContext';
+import { isSchoolOrg, hasProKlaseIntakeFeatures } from '@/lib/orgIntakeMode';
 
 type TrialCommentMode = 'student_and_parent' | 'internal_only';
 
@@ -83,6 +85,8 @@ const DEFAULT_SETTINGS = {
 
 export default function CompanySettings() {
   const { t } = useTranslation();
+  const orgEntityType = useOrgEntityType();
+  const isSchoolOrgView = isSchoolOrg(orgEntityType);
   const sc = getCached<any>('company_settings');
   const [loading, setLoading] = useState(!sc);
   const [saving, setSaving] = useState(false);
@@ -109,6 +113,15 @@ export default function CompanySettings() {
   const [orgFeaturesSnapshot, setOrgFeaturesSnapshot] = useState<Record<string, unknown>>(
     sc?.orgFeaturesSnapshot ?? {}
   );
+  const showTrialSettings = useMemo(() => {
+    if (isSchoolOrgView) return false;
+    return (
+      hasProKlaseIntakeFeatures((id) => orgFeaturesSnapshot[id] === true) ||
+      orgFeaturesSnapshot['trial_reservation_flow'] === true ||
+      orgFeaturesSnapshot['auto_trial_first_lesson'] === true ||
+      orgFeaturesSnapshot['trial_creation_payment_email'] === true
+    );
+  }, [isSchoolOrgView, orgFeaturesSnapshot]);
   const [contactTutorStudentEmail, setContactTutorStudentEmail] = useState<TutorSeesContactMode>(
     sc?.contactTutorStudentEmail ?? DEFAULT_TUTOR_SEES_CONTACT
   );
@@ -1013,6 +1026,7 @@ export default function CompanySettings() {
             </div>
           </div>
 
+          {showTrialSettings && (
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
             <div className="flex items-start gap-3">
               <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center flex-shrink-0">
@@ -1096,7 +1110,7 @@ export default function CompanySettings() {
                   <p className="text-xs text-gray-400">{t('compSet.trialReservationDeadlineDesc')}</p>
                 </div>
               )}
-              {orgFeaturesSnapshot['package_reservation_flow'] === true && (
+              {orgFeaturesSnapshot['package_reservation_flow'] === true && !isSchoolOrgView && (
                 <div className="space-y-1.5 col-span-full border-t border-gray-100 pt-4">
                   <Label className="text-xs">{t('compSet.packagePaymentDeadline')}</Label>
                   <div className="flex items-center gap-2 max-w-xs">
@@ -1115,6 +1129,7 @@ export default function CompanySettings() {
               )}
             </div>
           </div>
+          )}
 
           {/* Subject Management Section */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">

@@ -55,10 +55,11 @@ import {
 import { orgCanonicalOrigin } from '@/lib/orgPublicOrigin';
 import type { BusyInterval } from '@/lib/tutorMatching';
 import PackageItemsEditor, { type PackageEditorItem, type PackageEditorSubject } from '@/components/PackageItemsEditor';
-import { pickStudentContactsForTutorEmail, shouldShowPayerContactSection } from '@/lib/orgContactVisibility';
+import { pickStudentContactsForTutorEmail } from '@/lib/orgContactVisibility';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { findOrgTutorEmailConflict } from '@/lib/orgStudentTutorGuards';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
+import { hasProKlaseIntakeFeatures } from '@/lib/orgIntakeMode';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import {
   parseStudentGrade,
@@ -244,6 +245,8 @@ export default function CompanyStudents() {
   const { t, locale } = useTranslation();
   const { fmt } = useMarketMoney();
   const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
+  const proKlaseIntake =
+    !isSchoolView && !orgFeaturesLoading && hasProKlaseIntakeFeatures(hasFeature);
   const orgUsesManualPackages = !orgFeaturesLoading && hasFeature('manual_payments');
   /** Full contact editing: schools always; other orgs behind full_student_edit (email only until registered). */
   const canFullEditStudent = isSchoolView || (!orgFeaturesLoading && hasFeature('full_student_edit'));
@@ -407,7 +410,7 @@ export default function CompanyStudents() {
     enable_prepaid_packages: false,
   });
 
-  const monthlyPackageMode = !orgFeaturesLoading && hasFeature('monthly_packages');
+  const monthlyPackageMode = proKlaseIntake && hasFeature('monthly_packages');
   const monthlyPackagePeriod = useMemo(
     () => monthlyPackagePeriodFrom(formatLocalYmd(new Date()), pkgLessonsPerWeek),
     [pkgLessonsPerWeek],
@@ -549,8 +552,7 @@ export default function CompanyStudents() {
     return groups;
   }, [groupedStudents, normalizedSearch, showTrashBin, gradeFilter, contractFilter, contractsByStudent]);
 
-  const shouldShowParentContacts = (student: Student) =>
-    isSchoolView ? hasSchoolParentContacts(student) : shouldShowPayerContactSection(student);
+  const shouldShowParentContacts = (student: Student) => hasSchoolParentContacts(student);
 
   const paymentActions = useMemo(() => {
     if (!selectedStudent) return { canSendInvoice: false, canSendPackage: false };
@@ -1503,9 +1505,9 @@ export default function CompanyStudents() {
       }
     }
 
-    // Flexible invitations (req 7): when the admin chose "student + parent" and
-    // the feature is on, also send parent portal invites for each new student.
-    if (hasFeature('flexible_invitations') && newStudent.invite_target === 'both') {
+    // When admin chose "student + parent", send parent portal invites.
+    // Plain company: always; school: only with flexible_invitations (Pro Klasė-style).
+    if (newStudent.invite_target === 'both' && (!isSchoolView || hasFeature('flexible_invitations'))) {
       for (const row of inserted) {
         await sendParentPortalInvites(row.id, false);
       }
@@ -2081,6 +2083,7 @@ export default function CompanyStudents() {
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-3">
                       <Label>{t('compStu.tutorsRequired')}</Label>
+                      {proKlaseIntake && (
                       <Button
                         type="button"
                         size="sm"
@@ -2094,6 +2097,7 @@ export default function CompanyStudents() {
                         <Search className="mr-1.5 h-3.5 w-3.5" />
                         {t('compStu.findTutorByAvailability')}
                       </Button>
+                      )}
                     </div>
                     <div className="relative">
                       <button
@@ -2208,6 +2212,7 @@ export default function CompanyStudents() {
                       className="rounded-xl"
                     />
                   </div>
+                  {(isSchoolView || proKlaseIntake) && (
                   <div className="space-y-2 sm:col-span-2">
                     <Label>{t('studentSettings.grade')}</Label>
                     <Select
@@ -2229,9 +2234,10 @@ export default function CompanyStudents() {
                       </SelectContent>
                     </Select>
                   </div>
+                  )}
                   </div>
 
-                  {!isSchoolView && hasFeature('flexible_invitations') && (
+                  {!isSchoolView && (
                     <div className="rounded-xl border border-gray-200 p-3 space-y-3">
                       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
                         {t('compStu.parentContactLabel')}
@@ -2711,7 +2717,7 @@ export default function CompanyStudents() {
                             {student.invite_code}
                           </code>
                           <div className="flex items-center gap-1.5">
-                            {(isSchoolView || hasFeature('flexible_invitations')) && (student.payer_email || student.parent_secondary_email) && (
+                            {(student.payer_email || student.parent_secondary_email) && (
                               <button
                                 type="button"
                                 onClick={(e) => { e.stopPropagation(); void sendParentPortalInvites(student.id, true); }}
@@ -2859,7 +2865,7 @@ export default function CompanyStudents() {
                         </td>
                         <td className="px-4 py-4 text-right align-top">
                           <div className="inline-flex items-center gap-1.5">
-                            {(isSchoolView || hasFeature('flexible_invitations')) && (student.payer_email || student.parent_secondary_email) && (
+                            {(student.payer_email || student.parent_secondary_email) && (
                               <button
                                 type="button"
                                 onClick={(e) => { e.stopPropagation(); void sendParentPortalInvites(student.id, true); }}
@@ -3011,6 +3017,11 @@ export default function CompanyStudents() {
                       {shouldShowParentContacts(selectedStudent) && (
                         <div className="pt-2 border-t border-gray-100">
                           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">{t('compStu.payerLabel')}</p>
+                          {(selectedStudent.payer_name || '').trim() && (
+                            <p>
+                              {t('compStu.parentNameLabel')}: <span className="text-gray-900">{selectedStudent.payer_name}</span>
+                            </p>
+                          )}
                           <p>
                             {t('compStu.emailInline')} <span className="text-gray-900">{adminShowEmail(selectedStudent.payer_email)}</span>
                           </p>
@@ -3031,6 +3042,30 @@ export default function CompanyStudents() {
                     <p className="text-gray-600 text-sm">
                       {t('compStu.codeInline')} <code className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">{selectedStudent.invite_code}</code>
                     </p>
+                    {isSchoolView && (
+                    <div className="mt-3 max-w-xs space-y-1.5">
+                      <Label className="text-xs text-gray-500">{t('studentSettings.grade')}</Label>
+                      <Select
+                        value={selectedStudent.grade || 'unset'}
+                        onValueChange={(value) => void handleUpdateStudentGrade(value)}
+                      >
+                        <SelectTrigger className="h-9 rounded-xl bg-white">
+                          <SelectValue placeholder={t('dynamicPricing.gradeUnset')} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="unset">{t('dynamicPricing.gradeUnset')}</SelectItem>
+                          {Array.from({ length: 12 }, (_, index) => (
+                            <SelectItem key={index + 1} value={`${index + 1} klasė`}>
+                              {t('onboard.gradeN', { n: index + 1 })}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value="Studentas">{t('lessonSet.gradeUniversity')}</SelectItem>
+                          <SelectItem value="Kita">{t('onboard.gradeOther')}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    )}
+                    {proKlaseIntake && (
                     <div className="mt-3 max-w-xs space-y-1.5">
                       <Label className="text-xs text-gray-500">{t('studentSettings.grade')}</Label>
                       <Select
@@ -3083,6 +3118,7 @@ export default function CompanyStudents() {
                         <p className="text-[11px] text-amber-700">{t('dynamicPricing.studentGradeRequired')}</p>
                       )}
                     </div>
+                    )}
                     {isSchoolView && selectedStudent && (
                       <SchoolStudentContractStatus
                         student={selectedStudent}
@@ -3208,10 +3244,9 @@ export default function CompanyStudents() {
                     )}
                     <div className="pt-1 flex items-center gap-2 flex-wrap">
                       {(() => {
-                        const canInviteParents = isSchoolView || hasFeature('flexible_invitations');
                         const inviteRecipient =
                           (selectedStudent.email || '').trim() ||
-                          (canInviteParents ? (selectedStudent.payer_email || '').trim() : '');
+                          (selectedStudent.payer_email || '').trim();
                         return (
                           <Button
                             type="button"
@@ -3227,8 +3262,7 @@ export default function CompanyStudents() {
                           </Button>
                         );
                       })()}
-                      {(isSchoolView || hasFeature('flexible_invitations')) &&
-                        (selectedStudent.payer_email || selectedStudent.parent_secondary_email) && (
+                      {(selectedStudent.payer_email || selectedStudent.parent_secondary_email) && (
                         <Button
                           type="button"
                           size="sm"
@@ -3260,7 +3294,7 @@ export default function CompanyStudents() {
                   </div>
 
                   {/* Recurring schedule + move/cancel counters (near the edit button). */}
-                  {selectedStudent && !orgFeaturesLoading && hasFeature('student_schedule_overview') && (
+                  {selectedStudent && proKlaseIntake && hasFeature('student_schedule_overview') && (
                     <StudentScheduleSummary
                       studentRowIds={(selectedStudentGroup.length > 0 ? selectedStudentGroup : [selectedStudent]).map((row) => row.id)}
                       refreshKey={modalSessionsRefreshKey}
@@ -3812,8 +3846,9 @@ export default function CompanyStudents() {
                 )}
 
                 {/* Trial lesson offer (only for brand new students with 0 sessions) */}
-                {selectedStudent && (selectedStudentSessionCount ?? 0) === 0 && !selectedStudent.trial_offer_disabled &&
-                  !(!orgFeaturesLoading && hasFeature('hide_trial_offer_button')) && (
+                {selectedStudent && proKlaseIntake && (selectedStudentSessionCount ?? 0) === 0 && !selectedStudent.trial_offer_disabled &&
+                  !hasFeature('hide_trial_offer_button') &&
+                  (hasFeature('trial_reservation_flow') || hasFeature('auto_trial_first_lesson')) && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       <Button
@@ -3956,7 +3991,7 @@ export default function CompanyStudents() {
                           onChange={setPkgItems}
                         />
                       )}
-                      {!orgFeaturesLoading && hasFeature('package_reservation_flow') && (
+                      {!orgFeaturesLoading && proKlaseIntake && hasFeature('package_reservation_flow') && (
                         <div className="space-y-2 border-t border-violet-200 pt-3">
                           <p className="text-xs font-semibold text-violet-800">{t('package.reserveTimesTitle')}</p>
                           <p className="text-[11px] text-violet-600">{t('package.reserveTimesHint')}</p>
@@ -4278,6 +4313,7 @@ export default function CompanyStudents() {
           }}
         />
 
+        {proKlaseIntake && (
         <FindTutorModal
           isOpen={addStudentFindTutorOpen}
           onClose={() => setAddStudentFindTutorOpen(false)}
@@ -4293,6 +4329,7 @@ export default function CompanyStudents() {
             setAddStudentFindTutorOpen(false);
           }}
         />
+        )}
 
         {!orgFeaturesLoading && hasFeature('student_card_booking') && (
           <>

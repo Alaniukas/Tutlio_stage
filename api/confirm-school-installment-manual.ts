@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { markSchoolInstallmentPaidAndMaybeInvite } from './_lib/schoolBookingInvite.js';
+import { schoolContractAllowsInstallmentPayment } from './_lib/schoolContractPaymentGate.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.statusCode = status;
@@ -29,7 +30,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: installment, error: installmentErr } = await supabase
     .from('school_payment_installments')
     .select(
-      'id, payment_status, contract:school_contracts(id, organization_id, student_id, archived_at)',
+      'id, payment_status, contract:school_contracts(id, organization_id, student_id, signing_status, archived_at)',
     )
     .eq('id', installmentId)
     .maybeSingle();
@@ -39,6 +40,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const contract = (installment as any).contract;
   if (!contract) return json(res, 404, { error: 'Contract not found' });
   if (contract.archived_at) return json(res, 400, { error: 'Contract archived' });
+  if (!schoolContractAllowsInstallmentPayment(contract.signing_status)) {
+    return json(res, 409, { error: 'Mokėjimą galima žymėti tik po pilnai pasirašytos sutarties.' });
+  }
 
   const orgId = String(contract.organization_id || '').trim();
   if (!orgId) return json(res, 500, { error: 'Contract missing organization_id' });

@@ -30,11 +30,14 @@ import { useTranslation } from '@/lib/i18n';
 import { useTotalChatUnread } from '@/hooks/useChat';
 import { OrgEntityProvider, type OrgEntityType } from '@/contexts/OrgEntityContext';
 import { useUser } from '@/contexts/UserContext';
+import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { showDynamicPricingNav } from '@/lib/orgIntakeMode';
 
 export function buildCompanyNavItems(
   isSchool: boolean,
   orgBasePath: '/school' | '/company',
   t: (key: string) => string,
+  showDynamicPricing: boolean,
 ) {
   const base = [
     { href: `${orgBasePath}`, label: t('companyNav.overview'), icon: LayoutDashboard, exact: true },
@@ -50,7 +53,7 @@ export function buildCompanyNavItems(
     base.push({ href: `${orgBasePath}/contracts`, label: t('companyNav.contracts'), icon: FileText });
   }
   base.push({ href: `${orgBasePath}/finance`, label: t('companyNav.finance'), icon: CreditCard });
-  if (!isSchool) {
+  if (showDynamicPricing) {
     base.push({ href: `${orgBasePath}/dynamic-pricing`, label: t('companyNav.dynamicPricing'), icon: BadgeEuro });
   }
   // Help stays last so the operational organization tools remain grouped.
@@ -79,14 +82,17 @@ export default function CompanyLayout() {
   };
 
   const isSchool = entityType === 'school';
+  const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
+  const showDynamicPricing =
+    !orgFeaturesLoading && showDynamicPricingNav(entityType, hasFeature);
   /** Pagal org tipą, ne `pathname.startsWith('/school')` — kitaip `/schools` (landing) klaidingai atitinka `/school`. */
   const orgBasePath = isSchool ? '/school' : '/company';
   const BrandIcon = isSchool ? School : Building2;
   const brandLabel = isSchool ? t('layout.tutlioSchool') : t('layout.tutlioCompany');
 
   const NAV_ITEMS = useMemo(
-    () => buildCompanyNavItems(isSchool, orgBasePath, t),
-    [t, isSchool, orgBasePath],
+    () => buildCompanyNavItems(isSchool, orgBasePath, t, showDynamicPricing),
+    [t, isSchool, orgBasePath, showDynamicPricing],
   );
 
   useEffect(() => {

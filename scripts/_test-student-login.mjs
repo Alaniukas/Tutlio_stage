@@ -14,7 +14,7 @@ for (const line of raw.split(/\r?\n/)) {
 const sb = createClient(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_ANON_KEY);
 const login = await sb.auth.signInWithPassword({
   email: 'proklase.qa.student@tutlio.lt',
-  password: 'ProKlaseQA2026!',
+  password: 'TutlioQaDemo2026!',
 });
 if (login.error) {
   console.error('LOGIN_FAIL', login.error.message);

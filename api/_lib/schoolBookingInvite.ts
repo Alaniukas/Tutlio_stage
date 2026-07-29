@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { schoolContractAllowsInstallmentPayment } from './schoolContractPaymentGate.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
@@ -48,12 +49,13 @@ export async function sendNextPendingInstallmentAfterSplitFeePaid(
   const { data: contract } = await supabase
     .from('school_contracts')
     .select(
-      'id, organization_id, annual_fee, additional_fee_amount, additional_fee_purpose, student:students(full_name, email, payer_email, payer_name), organizations(name, email, features)',
+      'id, organization_id, signing_status, annual_fee, additional_fee_amount, additional_fee_purpose, student:students(full_name, email, payer_email, payer_name), organizations(name, email, features)',
     )
     .eq('id', contractId)
     .maybeSingle();
 
   if (!contract) return false;
+  if (!schoolContractAllowsInstallmentPayment((contract as any).signing_status)) return false;
 
   const { data: installments } = await supabase
     .from('school_payment_installments')

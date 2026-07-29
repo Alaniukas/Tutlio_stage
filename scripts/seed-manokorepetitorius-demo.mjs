@@ -20,7 +20,7 @@ const DEMO = {
   email: 'manokorepetitorius.demo.admin@tutlio.lt',
   brandColor: '#E1557D',
   brandColorSecondary: '#4B0091',
-  password: 'ManoKorepDemo2026!',
+  password: 'TutlioQaDemo2026!',
   users: {
     admin: {
       id: 'c1a00000-7e57-4000-8000-000000000002',
@@ -160,11 +160,8 @@ async function main() {
     custom_branding: true,
     public_name: 'Mano Korepetitorius',
     contact_email: DEMO.email,
-    manual_payments: true,
-    enable_prepaid_packages: true,
-    monthly_packages: true,
-    package_reservation_flow: true,
-    student_schedule_overview: true,
+    manual_payments: false,
+    per_student_payment_override: true,
     org_admin_calendar_view: true,
   };
 
@@ -183,6 +180,9 @@ async function main() {
       brand_color: DEMO.brandColor,
       brand_color_secondary: DEMO.brandColorSecondary,
       preferred_locale: 'lt',
+      enable_per_lesson: true,
+      enable_prepaid_packages: true,
+      enable_monthly_billing: false,
       features,
     },
     { onConflict: 'id' },
@@ -197,7 +197,11 @@ async function main() {
   console.log('Upserting profiles…');
   const profiles = [
     { ...DEMO.users.admin, organization_id: DEMO.orgId },
-    { ...DEMO.users.tutor, organization_id: DEMO.orgId },
+    {
+      ...DEMO.users.tutor,
+      organization_id: DEMO.orgId,
+      enable_manual_student_payments: false,
+    },
     { ...DEMO.users.student1, organization_id: DEMO.orgId },
     { ...DEMO.users.student2, organization_id: DEMO.orgId },
   ].map((u) => ({
@@ -205,6 +209,9 @@ async function main() {
     email: u.email,
     full_name: u.fullName,
     organization_id: u.organization_id,
+    ...(u.enable_manual_student_payments !== undefined
+      ? { enable_manual_student_payments: u.enable_manual_student_payments }
+      : {}),
   }));
 
   const { error: profErr } = await supabase.from('profiles').upsert(profiles, { onConflict: 'id' });

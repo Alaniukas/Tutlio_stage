@@ -15,6 +15,10 @@ import { schoolInstallmentChargeEur } from './_lib/schoolBookingInvite.js';
 import { marketFromRequest } from './_lib/market.js';
 import { chargeCurrency } from './_lib/marketMoney.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
+import {
+  schoolContractAllowsInstallmentPayment,
+  SCHOOL_INSTALLMENT_PAYMENT_BLOCKED_LT,
+} from './_lib/schoolContractPaymentGate.js';
 
 /** Connect accounts need this API version (matches api/stripe-connect.ts) — mixed versions caused opaque failures. */
 const STRIPE_API_VERSION = '2026-02-25.clover' as any;
@@ -70,6 +74,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         if (contract.archived_at) {
             return res.status(400).send(errorPage('Sutartis nebegalioja', 'Ši sutartis archyvuota. Kreipkitės į mokyklą.'));
+        }
+        if (!schoolContractAllowsInstallmentPayment(contract.signing_status)) {
+            return res.status(403).send(errorPage('Mokėjimas dar negalimas', SCHOOL_INSTALLMENT_PAYMENT_BLOCKED_LT));
         }
 
         const student = contract.student;

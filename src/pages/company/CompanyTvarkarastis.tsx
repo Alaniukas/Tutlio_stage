@@ -41,6 +41,8 @@ import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring'
 import { authHeaders } from '@/lib/apiHelpers';
 import { cancelSessionAndFillWaitlist, releaseSessionSlotViaApi } from '@/lib/lesson-actions';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { useOrgEntityType } from '@/contexts/OrgEntityContext';
+import { isSchoolOrg, hasProKlaseIntakeFeatures } from '@/lib/orgIntakeMode';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { Button } from '@/components/ui/button';
 import {
@@ -296,10 +298,23 @@ export default function CompanyTvarkarastis() {
   const { t, locale, dateFnsLocale } = useTranslation();
   const { fmt } = useMarketMoney();
   const { loading: featuresLoading, hasFeature, organizationId } = useOrgFeatures();
+  const orgEntityType = useOrgEntityType();
+  const isSchoolOrgView = isSchoolOrg(orgEntityType);
+  const proKlaseIntake =
+    !isSchoolOrgView && !featuresLoading && hasProKlaseIntakeFeatures(hasFeature);
 
   // Feature flags
   const canView = hasFeature('org_admin_calendar_view') || hasFeature('org_admin_calendar_full_control');
   const canFullControl = hasFeature('org_admin_calendar_full_control');
+  const canManageAvailability = isSchoolOrgView ? canFullControl : canView;
+  /** Pamokų paieška — visoms įmonėms su kalendoriaus prieiga; Pro Klasė frequency tik su flag'u. */
+  const showFindLesson = canView;
+  const showTrialToggleInCreate =
+    !isSchoolOrgView &&
+    !featuresLoading &&
+    (proKlaseIntake
+      ? hasFeature('trial_reservation_flow') || hasFeature('auto_trial_first_lesson')
+      : canView);
   const hideAdminPrices = hasFeature('hide_admin_lesson_prices');
 
   const assertTutorLicensed = async (tutorId: string) => {
@@ -658,10 +673,12 @@ export default function CompanyTvarkarastis() {
           setOrgSubjectTemplates(tpl.filter((t: any) => t?.id && t?.name).map((t: any) => ({ id: t.id, name: String(t.name).trim() })));
         }
 
-        const { data: dynamicRows } = await supabase
-          .from('organization_dynamic_pricing')
-          .select('id, organization_id, grade_min, grade_max, lessons_per_week, price')
-          .eq('organization_id', organizationId);
+        const { data: dynamicRows } = proKlaseIntake
+          ? await supabase
+              .from('organization_dynamic_pricing')
+              .select('id, organization_id, grade_min, grade_max, lessons_per_week, price')
+              .eq('organization_id', organizationId)
+          : { data: [] as OrganizationDynamicPricingRule[] };
         nextDynamicPricingRules = (dynamicRows ?? []).map((row) => ({
           ...row,
           grade_min: Number(row.grade_min),
@@ -1353,7 +1370,7 @@ export default function CompanyTvarkarastis() {
     // to the availability editor and lose the marked time. Now the create-lesson
     // modal opens prefilled with that time (+ the block's tutor); availability
     // editing stays one click away via the link inside the modal.
-    if (canFullControl && !showOnlySessions) {
+    if (canManageAvailability && !showOnlySessions) {
       const match = availabilityBlocks.find((b: any) => (
         b.start?.getTime?.() === slotInfo.start.getTime() &&
         b.end?.getTime?.() === slotInfo.end.getTime() &&
@@ -1385,7 +1402,7 @@ export default function CompanyTvarkarastis() {
 
   const handleSelectEvent = (event: any) => {
     if (event.resource?.type === 'availability') {
-      if (!canFullControl) return;
+      if (!canManageAvailability) return;
       // One physical click can fire both onSelectSlot (→ prefilled create
       // modal) and onSelectEvent for the same block — don't stack the editor
       // on top of the just-opened create modal.
@@ -2299,11 +2316,13 @@ export default function CompanyTvarkarastis() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2 w-full sm:w-auto sm:justify-end sm:flex-shrink-0">
+            {showFindLesson && (
             <Button variant="outline" onClick={() => setFindLessonOpen(true)} className="flex-1 min-w-[min(100%,10rem)] sm:flex-initial touch-manipulation gap-2">
               <Search className="w-4 h-4 shrink-0" />
               <span className="truncate text-xs sm:text-sm">{t('compSch.findLesson')}</span>
             </Button>
-            {canFullControl && (
+            )}
+            {canManageAvailability && (
               <Button variant="outline" onClick={() => setIsCreateAvailabilityOpen(true)} className="flex-1 min-w-[min(100%,10rem)] sm:flex-initial touch-manipulation gap-2">
                 <Plus className="w-4 h-4 shrink-0" />
                 <span className="truncate text-xs sm:text-sm">{t('compSch.freeTime')}</span>
@@ -2518,6 +2537,7 @@ export default function CompanyTvarkarastis() {
                   onSelectSlot={handleSelectSlot}
                   onSelectEvent={handleSelectEvent}
                   selectable={canView}
+                  toolbar={false}
                   eventPropGetter={eventStyleGetter}
                   culture={locale}
                   {...(currentView !== Views.MONTH
@@ -2597,7 +2617,7 @@ export default function CompanyTvarkarastis() {
               {t('compSch.createNewLesson')}
             </DialogTitle>
             <DialogDescription className="text-center">{t('compSch.fillInfoAdmin')}</DialogDescription>
-            {createFromAvailabilityBlock && canFullControl && (
+            {createFromAvailabilityBlock && canManageAvailability && (
               <button
                 type="button"
                 className="mx-auto text-xs text-indigo-600 hover:text-indigo-800 underline underline-offset-2"
@@ -2895,7 +2915,7 @@ export default function CompanyTvarkarastis() {
               </div>
             </div>
 
-            {!subjects.find(s => s.id === createSubjectId)?.is_group && !createIsRecurring && (
+            {!subjects.find(s => s.id === createSubjectId)?.is_group && !createIsRecurring && showTrialToggleInCreate && (
               <div className="border border-amber-100 rounded-xl p-3 sm:p-4 bg-amber-50/50">
                 <button
                   type="button"
@@ -3305,7 +3325,7 @@ export default function CompanyTvarkarastis() {
                 </div>
               )}
 
-              {canFullControl && selectedEvent.status !== 'cancelled' && !cancelConfirmOpen && (
+              {canView && selectedEvent.status !== 'cancelled' && !cancelConfirmOpen && (
                 <div className="space-y-2 pt-1">
                   <Button
                     variant="outline"
@@ -4055,7 +4075,7 @@ export default function CompanyTvarkarastis() {
         onIsPaidChange={setFindLessonBookIsPaid}
         showSuccess={findLessonBookSuccess}
         showCrossTutorHint={findLessonBookCrossTutor}
-        showTrialButton={hasFeature('trial_reservation_flow')}
+        showTrialButton={proKlaseIntake && hasFeature('trial_reservation_flow')}
         saving={findLessonBookSaving}
         trialSending={findLessonBookTrialSending}
         createdCount={findLessonBookCreatedIntervals.length}
@@ -4079,9 +4099,11 @@ export default function CompanyTvarkarastis() {
         isOpen={findLessonOpen}
         onClose={() => setFindLessonOpen(false)}
         orgId={organizationId}
-        frequencyEnabled={hasFeature('tutor_frequency_search')}
+        orgAdminMode={!proKlaseIntake}
+        students={!proKlaseIntake ? students.map((s) => ({ id: s.id, full_name: s.full_name })) : undefined}
+        frequencyEnabled={proKlaseIntake && hasFeature('tutor_frequency_search')}
         hidePrices={hideAdminPrices}
-        onPickSlot={(slot) => {
+        onPickSlot={(slot, context) => {
           setFindLessonOpen(false);
           setFindLessonBook({
             tutorId: slot.tutorId,
@@ -4091,7 +4113,7 @@ export default function CompanyTvarkarastis() {
             tutorName: slot.tutorName,
             subjectName: slot.subjectName,
           });
-          setFindLessonBookStudentId('');
+          setFindLessonBookStudentId(context?.studentId || '');
           setFindLessonBookStudentIds([]);
           setFindLessonBookTopic(slot.subjectName);
           setFindLessonBookSelectedSlot('');

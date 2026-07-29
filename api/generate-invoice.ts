@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
+import { resolveInvoiceBranding } from './_lib/invoiceBranding.js';
 import { generateInvoicePdf, type InvoicePdfData } from './_lib/invoicePdf.js';
 
 /** EUR per lesson for org-tutor → company invoices (see profiles.company_commission_percent). */
@@ -471,6 +472,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // Generate PDF
       try {
+        const orgIdForBranding = profile.organization_id ?? null;
+        const branding = orgIdForBranding
+          ? await resolveInvoiceBranding(supabase, orgIdForBranding)
+          : null;
+
         const pdfData: InvoicePdfData = {
           invoiceNumber,
           issueDate: new Date().toLocaleDateString('lt-LT'),
@@ -485,6 +491,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             totalPrice: li.totalPrice,
           })),
           totalAmount,
+          branding: branding ?? undefined,
         };
 
         const pdfBytes = await generateInvoicePdf(pdfData);
@@ -745,9 +752,10 @@ function buildLineItems(
         ...pseudo.flatMap((s: any) => (Array.isArray(s.__lessonDates) ? s.__lessonDates : [])),
       ].sort();
       const namePart = group.studentName ? ` – ${group.studentName}` : '';
-      const datesPart = dates.length > 0 ? ` (${dates.join(', ')})` : '';
+      const mainLine = `${group.name}${namePart} – ${qty} pam.`;
+      const datesLine = dates.length > 0 ? `(${dates.join(', ')})` : '';
       return {
-        description: `${group.name}${namePart} – ${qty} pam.${datesPart}`,
+        description: datesLine ? `${mainLine}\n${datesLine}` : mainLine,
         quantity: Math.max(1, qty),
         unitPrice: qty > 0 ? Math.round((totalPrice / qty) * 100) / 100 : Math.round(totalPrice * 100) / 100,
         totalPrice: Math.round(totalPrice * 100) / 100,

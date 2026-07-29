@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Navigate } from 'react-router-dom';
 import { BadgeEuro, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useTranslation } from '@/lib/i18n';
+import { useOrgEntityType } from '@/contexts/OrgEntityContext';
+import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { isSchoolOrg, showDynamicPricingNav } from '@/lib/orgIntakeMode';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -23,6 +27,10 @@ const sortRules = (rules: EditableRule[]) =>
 
 export default function CompanyDynamicPricing() {
   const { t } = useTranslation();
+  const entityType = useOrgEntityType();
+  const { loading: featuresLoading, hasFeature } = useOrgFeatures();
+  const allowed =
+    !featuresLoading && !isSchoolOrg(entityType) && showDynamicPricingNav(entityType, hasFeature);
   const [organizationId, setOrganizationId] = useState('');
   const [rules, setRules] = useState<EditableRule[]>([]);
   const [deletedIds, setDeletedIds] = useState<string[]>([]);
@@ -31,8 +39,14 @@ export default function CompanyDynamicPricing() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   useEffect(() => {
+    if (!allowed) return;
     void loadRules();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allowed]);
+
+  if (!featuresLoading && !allowed) {
+    return <Navigate to={isSchoolOrg(entityType) ? '/school' : '/company'} replace />;
+  }
 
   const loadRules = async () => {
     setLoading(true);

@@ -23,12 +23,16 @@ import {
 
 export type TutorSlotPick = MatchSlot;
 
+export type FindTutorPickContext = {
+  studentId?: string;
+};
+
 interface FindTutorModalProps {
   isOpen: boolean;
   onClose: () => void;
   orgId: string | null;
   /** Paspaudus rezultatą – uždaryti paiešką ir atidaryti užsakymą (pvz. org tvarkaraštyje) */
-  onPickSlot?: (slot: TutorSlotPick) => void;
+  onPickSlot?: (slot: TutorSlotPick, context?: FindTutorPickContext) => void;
   /** Student creation flow: select the matching tutor without booking a lesson yet. */
   onPickTutor?: (tutor: { id: string; name: string }) => void;
   /** When opened from a student context, this tutor is ranked first. */
@@ -41,6 +45,12 @@ interface FindTutorModalProps {
   hidePrices?: boolean;
   /** Student's saved availability — seeds the preferred day/time windows on open. */
   initialPreferredWindows?: Array<{ dayOfWeek: number; startTime: string; endTime: string }>;
+  /**
+   * Paprasta org admin paieška: neprivalomi filtrai (mokinys, korepetitorius, dalykas,
+   * datos, dienos, laikas) be Pro Klasė frequency UI.
+   */
+  orgAdminMode?: boolean;
+  students?: Array<{ id: string; full_name: string }>;
 }
 
 type PreferredWindow = {
@@ -73,6 +83,8 @@ export default function FindTutorModal({
   busyIntervals = [],
   hidePrices,
   initialPreferredWindows,
+  orgAdminMode = false,
+  students = [],
 }: FindTutorModalProps) {
   const { t, dateFnsLocale } = useTranslation();
   const [subjects, setSubjects] = useState<MatchSubject[]>([]);
@@ -80,9 +92,13 @@ export default function FindTutorModal({
     { id: 'subject-default', subjectName: '', frequency: 1 },
   ]);
   const [dateFrom, setDateFrom] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const [preferredWindows, setPreferredWindows] = useState<PreferredWindow[]>([
-    { id: 'mon-default', dayOfWeek: 1, startTime: '16:00', endTime: '20:00' },
-  ]);
+  const [dateTo, setDateTo] = useState('');
+  const [filterTutorId, setFilterTutorId] = useState('__all__');
+  const [filterStudentId, setFilterStudentId] = useState('__all__');
+  const [filterSubjectName, setFilterSubjectName] = useState('__all__');
+  const [globalTimeFrom, setGlobalTimeFrom] = useState('08:00');
+  const [globalTimeTo, setGlobalTimeTo] = useState('20:00');
+  const [preferredWindows, setPreferredWindows] = useState<PreferredWindow[]>([]);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<MatchSlot[]>([]);
   const [searched, setSearched] = useState(false);
@@ -100,11 +116,31 @@ export default function FindTutorModal({
     setLoading(false);
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    if (orgAdminMode) {
+      const today = format(new Date(), 'yyyy-MM-dd');
+      setDateFrom(today);
+      setDateTo(format(addDays(new Date(), SEARCH_HORIZON_DAYS), 'yyyy-MM-dd'));
+      setFilterTutorId('__all__');
+      setFilterStudentId('__all__');
+      setFilterSubjectName('__all__');
+      setGlobalTimeFrom('08:00');
+      setGlobalTimeTo('20:00');
+      setPreferredWindows([]);
+      setResults([]);
+      setSearched(false);
+      return;
+    }
+    setPreferredWindows([{ id: 'mon-default', dayOfWeek: 1, startTime: '16:00', endTime: '20:00' }]);
+  }, [isOpen, orgAdminMode]);
+
   // Seed the day/time filters from the student's saved availability each time
   // the modal opens; deliberately keyed on isOpen only so parent re-renders
   // (new array identity) never clobber the admin's in-dialog edits.
   useEffect(() => {
     if (!isOpen) return;
+    if (orgAdminMode) return;
     if (!initialPreferredWindows || initialPreferredWindows.length === 0) return;
     setPreferredWindows(initialPreferredWindows.map((window) => ({
       id: windowId(window.dayOfWeek),
@@ -173,33 +209,37 @@ export default function FindTutorModal({
   };
 
   const handleSearch = async () => {
-    if (preferredWindows.length === 0) {
+    if (!orgAdminMode && preferredWindows.length === 0) {
       setSearched(true);
       setResults([]);
       return;
     }
     setLoading(true);
     setSearched(true);
-    const tutorIds = Object.keys(tutors);
-    if (tutorIds.length === 0) { setResults([]); setLoading(false); return; }
+
+    const tutorIdList = orgAdminMode && filterTutorId !== '__all__'
+      ? [filterTutorId]
+      : Object.keys(tutors);
+    if (tutorIdList.length === 0) { setResults([]); setLoading(false); return; }
+
+    const effectiveDateTo = orgAdminMode && dateTo.trim()
+      ? dateTo
+      : format(addDays(new Date(`${dateFrom}T12:00:00`), SEARCH_HORIZON_DAYS), 'yyyy-MM-dd');
 
     const from = new Date(dateFrom);
     from.setHours(0, 0, 0, 0);
-    const dateTo = format(addDays(new Date(`${dateFrom}T12:00:00`), SEARCH_HORIZON_DAYS), 'yyyy-MM-dd');
-    const to = new Date(dateTo);
+    const to = new Date(effectiveDateTo);
     to.setHours(23, 59, 59, 999);
 
     const { data: availability } = await supabase
       .from('availability')
       .select('tutor_id, day_of_week, start_time, end_time, is_recurring, specific_date, end_date, created_at, subject_ids')
-      .in('tutor_id', tutorIds);
+      .in('tutor_id', tutorIdList);
 
     const { data: sessions } = await supabase
       .from('sessions')
       .select('tutor_id, start_time, end_time')
-      .in('tutor_id', tutorIds)
-      // Any overlap is busy: session starts before the range ends and ends
-      // after the range starts. This also covers lessons crossing a boundary.
+      .in('tutor_id', tutorIdList)
       .lt('start_time', to.toISOString())
       .gt('end_time', from.toISOString())
       .neq('status', 'cancelled');
@@ -210,8 +250,18 @@ export default function FindTutorModal({
       end: new Date(s.end_time),
     })).concat(busyIntervals);
 
+    const windowsForSearch = preferredWindows.length > 0
+      ? preferredWindows.map((w) => ({ dayOfWeek: w.dayOfWeek, startTime: w.startTime, endTime: w.endTime }))
+      : undefined;
+    const timeFrom = windowsForSearch ? '00:00' : globalTimeFrom;
+    const timeTo = windowsForSearch ? '23:59' : globalTimeTo;
+
+    const criteria: SubjectCriterion[] = orgAdminMode
+      ? [{ id: 'org-admin', subjectName: filterSubjectName === '__all__' ? '' : filterSubjectName, frequency: 1 }]
+      : subjectCriteria;
+
     const slotsByKey = new Map<string, MatchSlot>();
-    for (const criterion of subjectCriteria) {
+    for (const criterion of criteria) {
       const criterionSlots = computeTutorSlots(
         (availability as AvailabilityRule[]) || [],
         busy,
@@ -219,11 +269,11 @@ export default function FindTutorModal({
         tutors,
         {
           dateFrom,
-          dateTo,
-          timeFrom: '00:00',
-          timeTo: '23:59',
+          dateTo: effectiveDateTo,
+          timeFrom,
+          timeTo,
           subjectName: criterion.subjectName,
-          preferredWindows,
+          preferredWindows: windowsForSearch,
         },
       );
       for (const slot of criterionSlots) {
@@ -249,7 +299,9 @@ export default function FindTutorModal({
       type="button"
       disabled={!onPickSlot && !onPickTutor}
       onClick={() => {
-        if (onPickSlot) onPickSlot(slot);
+        const pickContext: FindTutorPickContext | undefined =
+          orgAdminMode && filterStudentId !== '__all__' ? { studentId: filterStudentId } : undefined;
+        if (onPickSlot) onPickSlot(slot, pickContext);
         else if (onPickTutor) onPickTutor({ id: slot.tutorId, name: slot.tutorName });
       }}
       className={cn(
@@ -274,11 +326,172 @@ export default function FindTutorModal({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Search className="w-5 h-5 text-indigo-600" />
-            {t('findLesson.title')}
+            {orgAdminMode ? t('compSch.findLesson') : t('findLesson.title')}
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
+          {orgAdminMode ? (
+            <>
+              <p className="text-xs text-gray-500">{t('findLesson.orgAdminHint')}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">{t('findLesson.filterStudent')}</Label>
+                  <Select value={filterStudentId} onValueChange={setFilterStudentId}>
+                    <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">{t('findLesson.allStudents')}</SelectItem>
+                      {students.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">{t('findLesson.filterTutor')}</Label>
+                  <Select value={filterTutorId} onValueChange={setFilterTutorId}>
+                    <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">{t('findLesson.allTutors')}</SelectItem>
+                      {Object.entries(tutors).map(([id, name]) => (
+                        <SelectItem key={id} value={id}>{name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs">{t('findLesson.subject')}</Label>
+                <Select value={filterSubjectName} onValueChange={setFilterSubjectName}>
+                  <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">{t('findLesson.allSubjects')}</SelectItem>
+                    {uniqueSubjectNames.map((name) => (
+                      <SelectItem key={name} value={name}>{name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">{t('findLesson.dateFrom')}</Label>
+                  <DateInput
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                    min={format(new Date(), 'yyyy-MM-dd')}
+                    className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">{t('findLesson.dateTo')}</Label>
+                  <DateInput
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                    min={dateFrom}
+                    className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+              <div className="space-y-3 rounded-xl border border-gray-200 bg-gray-50/60 p-3">
+                <div>
+                  <Label className="text-xs">{t('findLesson.preferredDaysOptional')}</Label>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {weekdays.map((weekday) => {
+                      const active = preferredWindows.some((window) => window.dayOfWeek === weekday.dayOfWeek);
+                      return (
+                        <button
+                          key={weekday.dayOfWeek}
+                          type="button"
+                          onClick={() => toggleWeekday(weekday.dayOfWeek)}
+                          className={cn(
+                            'min-w-12 rounded-full px-3 py-2 text-xs font-semibold transition-colors',
+                            active ? 'bg-indigo-600 text-white' : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-100',
+                          )}
+                        >
+                          {weekday.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                {preferredWindows.length > 0 ? (
+                  weekdays.filter((weekday) => preferredWindows.some((window) => window.dayOfWeek === weekday.dayOfWeek)).map((weekday) => (
+                    <div key={weekday.dayOfWeek} className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold text-gray-900">{weekday.label}</p>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => setPreferredWindows((current) => [
+                            ...current,
+                            { id: windowId(weekday.dayOfWeek), dayOfWeek: weekday.dayOfWeek, startTime: globalTimeFrom, endTime: globalTimeTo },
+                          ])}
+                        >
+                          <Plus className="w-3.5 h-3.5 mr-1" /> {t('findLesson.addTime')}
+                        </Button>
+                      </div>
+                      {preferredWindows.filter((window) => window.dayOfWeek === weekday.dayOfWeek).map((window) => (
+                        <div key={window.id} className="grid grid-cols-[1fr_auto_1fr_auto] items-end gap-2" onWheel={(e) => e.stopPropagation()}>
+                          <div className="space-y-1 min-w-0">
+                            <Label className="text-[11px] text-gray-500">{t('findLesson.timeFrom')}</Label>
+                            <TimeInput
+                              value={window.startTime}
+                              onChange={(value) => updatePreferredWindow(window.id, { startTime: value })}
+                              minuteStep={5}
+                              className="w-full rounded-lg border border-gray-200 px-2 py-2 text-sm"
+                            />
+                          </div>
+                          <span className="pb-2 text-gray-400">–</span>
+                          <div className="space-y-1 min-w-0">
+                            <Label className="text-[11px] text-gray-500">{t('findLesson.timeTo')}</Label>
+                            <TimeInput
+                              value={window.endTime}
+                              onChange={(value) => updatePreferredWindow(window.id, { endTime: value })}
+                              minuteStep={5}
+                              className="w-full rounded-lg border border-gray-200 px-2 py-2 text-sm"
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            className="mb-1 inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-600"
+                            onClick={() => setPreferredWindows((current) => current.filter((item) => item.id !== window.id))}
+                            aria-label={t('common.remove')}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ))
+                ) : (
+                  <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
+                    <div className="space-y-1 min-w-0">
+                      <Label className="text-[11px] text-gray-500">{t('findLesson.timeFrom')}</Label>
+                      <TimeInput
+                        value={globalTimeFrom}
+                        onChange={setGlobalTimeFrom}
+                        minuteStep={5}
+                        className="w-full rounded-lg border border-gray-200 px-2 py-2 text-sm"
+                      />
+                    </div>
+                    <span className="pb-2 text-gray-400">–</span>
+                    <div className="space-y-1 min-w-0">
+                      <Label className="text-[11px] text-gray-500">{t('findLesson.timeTo')}</Label>
+                      <TimeInput
+                        value={globalTimeTo}
+                        onChange={setGlobalTimeTo}
+                        minuteStep={5}
+                        className="w-full rounded-lg border border-gray-200 px-2 py-2 text-sm"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+          <>
           <div className="space-y-2">
             {subjectCriteria.map((criterion, index) => (
               <div key={criterion.id} className={cn('grid items-end gap-3', frequencyEnabled ? 'grid-cols-[1fr_10rem_auto]' : 'grid-cols-[1fr_auto]')}>
@@ -441,6 +654,8 @@ export default function FindTutorModal({
               {t('findLesson.noEndDateHint')}
             </div>
           </div>
+          </>
+          )}
 
           <Button className="w-full rounded-xl bg-indigo-600 hover:bg-indigo-700" disabled={loading} onClick={handleSearch}>
             {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Search className="w-4 h-4 mr-2" />}

@@ -23,6 +23,7 @@ import { Plus, CreditCard, Send, CheckCircle, Clock, AlertCircle, Trash2, Loader
 import Toast from '@/components/Toast';
 import { sendEmail } from '@/lib/email';
 import { authHeaders } from '@/lib/apiHelpers';
+import { schoolContractAllowsInstallmentPayment } from '@/lib/schoolContractPaymentGate';
 import { useTranslation } from '@/lib/i18n';
 
 interface Contract {
@@ -127,7 +128,12 @@ export default function CompanyPayments() {
     ]);
 
     const cData = cRes.data || [];
-    const filtered = (iRes.data || []).filter((i: any) => i.contract?.organization_id === admin.organization_id && !i.contract?.archived_at);
+    const filtered = (iRes.data || []).filter(
+      (i: any) =>
+        i.contract?.organization_id === admin.organization_id &&
+        !i.contract?.archived_at &&
+        schoolContractAllowsInstallmentPayment(i.contract?.signing_status),
+    );
     setContracts(cData as unknown as Contract[]);
     setInstallments(filtered);
     setCache(PAYMENTS_CACHE_KEY, { orgId: admin.organization_id, orgName: name, orgEmail: email, orgContactEmail: contactEmail, orgStripeConnected: stripeConnected, contracts: cData, installments: filtered });
@@ -180,6 +186,11 @@ export default function CompanyPayments() {
     setSendingId(installment.id);
     try {
       const contract = installment.contract as any;
+      if (!schoolContractAllowsInstallmentPayment(contract?.signing_status)) {
+        setToast({ message: t('school.toastPaymentContractUnsigned'), type: 'error' });
+        setSendingId(null);
+        return;
+      }
       const student = contract?.student;
       const recipient = student?.payer_email || student?.email;
 
@@ -235,6 +246,11 @@ export default function CompanyPayments() {
   };
 
   const markInstallmentPaid = async (installment: Installment) => {
+    const contract = installment.contract as any;
+    if (!schoolContractAllowsInstallmentPayment(contract?.signing_status)) {
+      setToast({ message: t('school.toastPaymentContractUnsigned'), type: 'error' });
+      return;
+    }
     if (!confirm(t('school.confirmMarkInstallmentPaid'))) return;
     setMarkingId(installment.id);
     try {

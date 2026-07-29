@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { requireCronAuth } from './_lib/cronAuth.js';
+import { schoolContractAllowsInstallmentPayment } from './_lib/schoolContractPaymentGate.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
@@ -43,7 +44,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const dueIn1 = ymdInVilnius(plusDays(today, 1));
 
   const installmentSelect =
-    'id, contract_id, installment_number, amount, due_date, payment_status, reminder_3d_sent_at, reminder_1d_sent_at, contract:school_contracts(id, student_id, organization_id, archived_at, annual_fee, additional_fee_amount, additional_fee_purpose, student:students(full_name, email, payer_email, payer_name), org:organizations(name, email, features, stripe_account_id, stripe_onboarding_complete))';
+    'id, contract_id, installment_number, amount, due_date, payment_status, reminder_3d_sent_at, reminder_1d_sent_at, contract:school_contracts(id, student_id, organization_id, signing_status, archived_at, annual_fee, additional_fee_amount, additional_fee_purpose, student:students(full_name, email, payer_email, payer_name), org:organizations(name, email, features, stripe_account_id, stripe_onboarding_complete))';
 
   const [upcomingRes, overdueRes] = await Promise.all([
     supabase
@@ -82,6 +83,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? !!inst.reminder_3d_sent_at
         : !!inst.reminder_1d_sent_at;
     if (alreadySent || inst.payment_status !== 'pending' || inst.contract?.archived_at) continue;
+    if (!schoolContractAllowsInstallmentPayment(inst.contract?.signing_status)) {
+      console.warn('[school-installment-reminders] skip: contract not fully signed', inst.contract?.id, inst.id, inst.contract?.signing_status);
+      continue;
+    }
 
     const contract = inst.contract;
     const extraFee = Number(contract?.additional_fee_amount || 0);

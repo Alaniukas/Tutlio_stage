@@ -36,19 +36,20 @@ export const ORG_FEE_PROFILES: Record<string, OrgFeeProfile> = {
   },
 };
 
-/**
- * Stable fallback keyed by organization UUID. Org slugs are admin-editable and
- * can be cleared, so the canonical org id guarantees the deal keeps applying.
- */
-export const ORG_FEE_PROFILE_BY_ID: Record<string, OrgFeeProfile> = {
-  '3422031d-6e21-424d-980b-35a9c6d7b8f1': ORG_FEE_PROFILES.proklase, // Pro Klasė
-};
-
 /** Canonical Pro Klasė org UUID (slug is admin-editable). */
 export const PRO_KLASE_ORG_ID = '3422031d-6e21-424d-980b-35a9c6d7b8f1';
 
 /** QA clone org — same Pro Klasė tutor cancel rules for testing. */
 export const PRO_KLASE_QA_ORG_ID = 'b0a00000-7e57-4000-8000-000000000001';
+
+/**
+ * Stable fallback keyed by organization UUID. Org slugs are admin-editable and
+ * can be cleared, so the canonical org id guarantees the deal keeps applying.
+ */
+export const ORG_FEE_PROFILE_BY_ID: Record<string, OrgFeeProfile> = {
+  [PRO_KLASE_ORG_ID]: ORG_FEE_PROFILES.proklase, // Pro Klasė
+  [PRO_KLASE_QA_ORG_ID]: ORG_FEE_PROFILES.proklase, // Pro Klasė QA demo
+};
 
 export function isProKlaseOrg(orgIdOrSlug?: string | null): boolean {
   if (!orgIdOrSlug) return false;

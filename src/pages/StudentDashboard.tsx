@@ -12,6 +12,7 @@ import {
 } from '@/lib/studentLessonPackagesLight';
 import { authHeaders } from '@/lib/apiHelpers';
 import { rpcGetStudentProfilesDeduped } from '@/lib/preload';
+import { schoolContractAllowsInstallmentPayment } from '@/lib/schoolContractPaymentGate';
 import { useUser } from '@/contexts/UserContext';
 import { format, isAfter, isBefore } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
@@ -62,6 +63,7 @@ interface InstallmentPayment {
     payment_status: 'pending' | 'paid' | 'overdue' | 'failed';
     paid_at: string | null;
     contract_id: string;
+    contract_signing_status: string;
 }
 
 export default function StudentDashboard() {
@@ -249,7 +251,7 @@ export default function StudentDashboard() {
                 fetchStudentActiveLessonPackagesDeduped(supabase, studentRow.id),
                 supabase
                     .from('school_payment_installments')
-                    .select('id, installment_number, amount, due_date, payment_status, paid_at, contract:school_contracts!inner(id, student_id)')
+                    .select('id, installment_number, amount, due_date, payment_status, paid_at, contract:school_contracts!inner(id, student_id, signing_status)')
                     .eq('contract.student_id', studentRow.id)
                     .order('due_date', { ascending: true }),
             ]);
@@ -412,6 +414,7 @@ export default function StudentDashboard() {
                 payment_status: row.payment_status,
                 paid_at: row.paid_at,
                 contract_id: row.contract?.id,
+                contract_signing_status: String(row.contract?.signing_status || ''),
             })));
         }
         setLoading(false);
@@ -599,7 +602,7 @@ export default function StudentDashboard() {
                                                     i.payment_status === 'overdue' ? 'Pradelsta' :
                                                         i.payment_status === 'failed' ? 'Nepavyko' : 'Laukia'}
                                             </span>
-                                            {i.payment_status !== 'paid' && (
+                                            {i.payment_status !== 'paid' && schoolContractAllowsInstallmentPayment(i.contract_signing_status) && (
                                                 <button
                                                     type="button"
                                                     onClick={() => { window.location.href = `/api/pay-school-installment?installment=${i.id}`; }}
@@ -607,6 +610,11 @@ export default function StudentDashboard() {
                                                 >
                                                     <CreditCard className="w-3.5 h-3.5" /> {t('school.payNowBtn')}
                                                 </button>
+                                            )}
+                                            {i.payment_status !== 'paid' && !schoolContractAllowsInstallmentPayment(i.contract_signing_status) && (
+                                                <span className="text-[11px] text-gray-500 text-right max-w-[9rem] leading-tight">
+                                                    {t('school.payAwaitingContract')}
+                                                </span>
                                             )}
                                         </div>
                                     </div>

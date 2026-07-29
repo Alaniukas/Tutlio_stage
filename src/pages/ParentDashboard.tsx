@@ -7,6 +7,7 @@ import { fetchSelfBookingDisabledMap } from '@/lib/studentBookingPolicy';
 import { useUser } from '@/contexts/UserContext';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from '@/lib/i18n';
+import { schoolContractAllowsInstallmentPayment } from '@/lib/schoolContractPaymentGate';
 import {
   Users,
   CalendarDays,
@@ -60,6 +61,7 @@ interface InstallmentPayment {
   due_date: string;
   payment_status: 'pending' | 'paid' | 'overdue' | 'failed';
   paid_at: string | null;
+  contract_signing_status: string;
 }
 
 interface ChildInfo {
@@ -182,7 +184,7 @@ export default function ParentDashboard() {
         supabase
           .from('school_payment_installments')
           .select(
-            'id, installment_number, amount, due_date, payment_status, paid_at, contract:school_contracts!inner(student_id)',
+            'id, installment_number, amount, due_date, payment_status, paid_at, contract:school_contracts!inner(student_id, signing_status)',
           )
           .in('contract.student_id', studentIds)
           .order('due_date', { ascending: true }),
@@ -274,6 +276,7 @@ export default function ParentDashboard() {
           due_date: row.due_date,
           payment_status: row.payment_status,
           paid_at: row.paid_at,
+          contract_signing_status: String(row.contract?.signing_status || ''),
         });
         byStudentInstallments.set(sid, arr);
       }
@@ -836,7 +839,7 @@ function ChildBlock({
                           ? t('school.payStatusFailed')
                           : t('school.payStatusPending')}
                   </span>
-                  {i.payment_status !== 'paid' && (
+                  {i.payment_status !== 'paid' && schoolContractAllowsInstallmentPayment(i.contract_signing_status) && (
                     <button
                       type="button"
                       onClick={() => {
@@ -846,6 +849,11 @@ function ChildBlock({
                     >
                       <CreditCard className="w-3.5 h-3.5" /> {t('school.payNowBtn')}
                     </button>
+                  )}
+                  {i.payment_status !== 'paid' && !schoolContractAllowsInstallmentPayment(i.contract_signing_status) && (
+                    <span className="text-[11px] text-gray-500 text-right max-w-[9rem] leading-tight">
+                      {t('school.payAwaitingContract')}
+                    </span>
                   )}
                 </div>
               </div>
