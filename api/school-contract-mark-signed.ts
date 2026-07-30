@@ -49,7 +49,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .maybeSingle();
   if (!adminRow) return json(res, 403, { error: 'Forbidden' });
 
-  if ((contract as any).org?.features?.school_contract_esign === true) {
+  const manualUpload = req.body?.manualUpload === true;
+  if ((contract as any).org?.features?.school_contract_esign === true && !manualUpload) {
     return json(res, 409, { error: 'Šios organizacijos sutartys pasirašomos tik per Tutlio GoSign srautą.' });
   }
 

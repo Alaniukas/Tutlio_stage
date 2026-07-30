@@ -1,6 +1,4 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
-import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
 import { useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,55 +19,35 @@ import {
 } from '@/components/ui/select';
 import { Plus, CreditCard, Send, CheckCircle, Clock, AlertCircle, Trash2, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import Toast from '@/components/Toast';
+import { supabase } from '@/lib/supabase';
 import { sendEmail } from '@/lib/email';
 import { authHeaders } from '@/lib/apiHelpers';
 import { schoolContractAllowsInstallmentPayment } from '@/lib/schoolContractPaymentGate';
 import { useTranslation } from '@/lib/i18n';
-
-interface Contract {
-  id: string;
-  student_id: string;
-  annual_fee: number;
-  additional_fee_amount?: number | null;
-  additional_fee_purpose?: string | null;
-  signing_status: string;
-  student?: { full_name: string; email: string; payer_email: string | null; payer_name: string | null };
-}
-
-interface Installment {
-  id: string;
-  contract_id: string;
-  installment_number: number;
-  amount: number;
-  due_date: string;
-  payment_status: 'pending' | 'paid' | 'overdue' | 'failed';
-  stripe_checkout_session_id: string | null;
-  paid_at: string | null;
-  created_at: string;
-  contract?: Contract;
-}
+import { useSchoolPaymentsData, type SchoolPaymentInstallment } from '@/hooks/useSchoolPaymentsData';
 
 interface NewInstallmentRow {
   amount: string;
   due_date: string;
 }
 
-const PAYMENTS_CACHE_KEY = 'company_payments';
-
 export default function CompanyPayments() {
   const { t } = useTranslation();
   const location = useLocation();
-  const pc = getCached<any>(PAYMENTS_CACHE_KEY);
-  const [orgId, setOrgId] = useState<string | null>(pc?.orgId ?? null);
-  const [orgName, setOrgName] = useState(pc?.orgName ?? '');
-  const [orgEmail, setOrgEmail] = useState(pc?.orgEmail ?? '');
-  const [orgContactEmail, setOrgContactEmail] = useState(pc?.orgContactEmail ?? '');
-  const [orgStripeConnected, setOrgStripeConnected] = useState<boolean>(pc?.orgStripeConnected ?? false);
-  const [contracts, setContracts] = useState<Contract[]>(pc?.contracts ?? []);
-  const [installments, setInstallments] = useState<Installment[]>(pc?.installments ?? []);
-  const [loading, setLoading] = useState(!pc);
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const {
+    orgId,
+    orgName,
+    orgEmail,
+    orgContactEmail,
+    orgStripeConnected,
+    contracts,
+    installments,
+    loading,
+    reload,
+    setInstallments,
+  } = useSchoolPaymentsData();
 
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [selectedContractId, setSelectedContractId] = useState('');
   const [rows, setRows] = useState<NewInstallmentRow[]>([{ amount: '', due_date: '' }]);
@@ -78,69 +56,12 @@ export default function CompanyPayments() {
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [collapsedContracts, setCollapsedContracts] = useState<Record<string, boolean>>({});
 
-  useEffect(() => { load(); }, []);
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.get('success') === '1' || params.get('cancelled') === '1' || params.get('installment')) {
       reload();
     }
-  }, [location.search]);
-
-  const load = async () => {
-    if (!getCached(PAYMENTS_CACHE_KEY)) setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setLoading(false); return; }
-
-    const { data: admin } = await supabase
-      .from('organization_admins')
-      .select('organization_id, organizations(name, email, features, stripe_account_id, stripe_onboarding_complete)')
-      .eq('user_id', user.id)
-      .maybeSingle();
-
-    if (!admin?.organization_id) { setLoading(false); return; }
-    setOrgId(admin.organization_id);
-    const name = (admin.organizations as any)?.name || '';
-    const email = (admin.organizations as any)?.email || '';
-    const features = (admin.organizations as any)?.features;
-    const featObj = features && typeof features === 'object' && !Array.isArray(features) ? features : {};
-    const contactEmail =
-      (typeof featObj.contact_email === 'string' && featObj.contact_email.trim()) ||
-      (typeof featObj.school_contract_signing_email === 'string' && featObj.school_contract_signing_email.trim()) ||
-      email;
-    const stripeConnected = !!(admin.organizations as any)?.stripe_onboarding_complete && !!(admin.organizations as any)?.stripe_account_id;
-    setOrgName(name);
-    setOrgEmail(email);
-    setOrgContactEmail(contactEmail);
-    setOrgStripeConnected(stripeConnected);
-
-    const [cRes, iRes] = await Promise.all([
-      supabase
-        .from('school_contracts')
-        .select('id, student_id, annual_fee, signing_status, archived_at, student:students(full_name, email, payer_email, payer_name)')
-        .eq('organization_id', admin.organization_id)
-        .is('archived_at', null)
-        .eq('signing_status', 'signed')
-        .order('created_at', { ascending: false }),
-      supabase
-        .from('school_payment_installments')
-        .select('*, contract:school_contracts(id, student_id, annual_fee, additional_fee_amount, additional_fee_purpose, signing_status, organization_id, archived_at, student:students(full_name, email, payer_email, payer_name))')
-        .order('due_date', { ascending: true }),
-    ]);
-
-    const cData = cRes.data || [];
-    const filtered = (iRes.data || []).filter(
-      (i: any) =>
-        i.contract?.organization_id === admin.organization_id &&
-        !i.contract?.archived_at &&
-        schoolContractAllowsInstallmentPayment(i.contract?.signing_status),
-    );
-    setContracts(cData as unknown as Contract[]);
-    setInstallments(filtered);
-    setCache(PAYMENTS_CACHE_KEY, { orgId: admin.organization_id, orgName: name, orgEmail: email, orgContactEmail: contactEmail, orgStripeConnected: stripeConnected, contracts: cData, installments: filtered });
-    setLoading(false);
-  };
-
-  const reload = () => { invalidateCache(PAYMENTS_CACHE_KEY); load(); };
+  }, [location.search, reload]);
 
   const addRow = () => setRows([...rows, { amount: '', due_date: '' }]);
   const removeRow = (idx: number) => setRows(rows.filter((_, i) => i !== idx));
@@ -182,7 +103,7 @@ export default function CompanyPayments() {
     reload();
   };
 
-  const sendPaymentLink = async (installment: Installment) => {
+  const sendPaymentLink = async (installment: SchoolPaymentInstallment) => {
     setSendingId(installment.id);
     try {
       const contract = installment.contract as any;
@@ -194,7 +115,6 @@ export default function CompanyPayments() {
       const student = contract?.student;
       const recipient = student?.payer_email || student?.email;
 
-      // No payer email on file — open the self-service pay link so the admin can share it.
       if (!recipient) {
         window.open(`/api/pay-school-installment?installment=${installment.id}`, '_blank');
         setToast({ message: t('school.toastCheckoutCreated'), type: 'success' });
@@ -203,7 +123,6 @@ export default function CompanyPayments() {
       }
 
       const totalInstallments = installments.filter((i) => i.contract_id === installment.contract_id).length;
-      // The email's "Pay now" button links to /api/pay-school-installment (on-demand checkout).
       const emailed = await sendEmail({
         type: 'school_installment_request',
         to: recipient,
@@ -232,7 +151,6 @@ export default function CompanyPayments() {
         setSendingId(null);
         return;
       }
-      // Warn the admin if the school can't actually receive card payments yet.
       setToast({
         message: orgStripeConnected
           ? t('school.toastPaymentLinkSent')
@@ -245,7 +163,7 @@ export default function CompanyPayments() {
     setSendingId(null);
   };
 
-  const markInstallmentPaid = async (installment: Installment) => {
+  const markInstallmentPaid = async (installment: SchoolPaymentInstallment) => {
     const contract = installment.contract as any;
     if (!schoolContractAllowsInstallmentPayment(contract?.signing_status)) {
       setToast({ message: t('school.toastPaymentContractUnsigned'), type: 'error' });
@@ -278,7 +196,7 @@ export default function CompanyPayments() {
     setInstallments((prev) => prev.filter((i) => i.id !== id));
   };
 
-  const statusBadge = (s: Installment['payment_status']) => {
+  const statusBadge = (s: SchoolPaymentInstallment['payment_status']) => {
     const map = {
       pending: { label: t('school.payStatusPending'), cls: 'bg-gray-100 text-gray-600', icon: Clock },
       paid: { label: t('school.payStatusPaid'), cls: 'bg-green-50 text-green-700', icon: CheckCircle },
@@ -289,7 +207,7 @@ export default function CompanyPayments() {
     return <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${cls}`}><Icon className="w-3 h-3" />{label}</span>;
   };
 
-  const grouped = installments.reduce<Record<string, Installment[]>>((acc, i) => {
+  const grouped = installments.reduce<Record<string, SchoolPaymentInstallment[]>>((acc, i) => {
     const key = i.contract_id;
     if (!acc[key]) acc[key] = [];
     acc[key].push(i);

@@ -1,0 +1,7 @@
+services:
+  docx-converter:
+    build: ./services/docx-converter
+    ports:
+      - "8080:8080"
+    environment:
+      DOCX_CONVERTER_API_KEY: ${DOCX_CONVERTER_API_KEY:-local-dev-key}

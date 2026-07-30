@@ -38,16 +38,6 @@ export default function CompanyDynamicPricing() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  useEffect(() => {
-    if (!allowed) return;
-    void loadRules();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allowed]);
-
-  if (!featuresLoading && !allowed) {
-    return <Navigate to={isSchoolOrg(entityType) ? '/school' : '/company'} replace />;
-  }
-
   const loadRules = async () => {
     setLoading(true);
     const {
@@ -95,6 +85,12 @@ export default function CompanyDynamicPricing() {
     }
     setLoading(false);
   };
+
+  useEffect(() => {
+    if (!allowed) return;
+    void loadRules();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allowed]);
 
   const validationError = useMemo(() => {
     for (const rule of rules) {
@@ -184,6 +180,10 @@ export default function CompanyDynamicPricing() {
     await loadRules();
     setSaving(false);
   };
+
+  if (!featuresLoading && !allowed) {
+    return <Navigate to={isSchoolOrg(entityType) ? '/school' : '/company'} replace />;
+  }
 
   if (loading) {
     return (

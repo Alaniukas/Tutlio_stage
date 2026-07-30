@@ -4,6 +4,7 @@
  * Usage:
  *   npx tsx scripts/send-fee-split-production-emails.ts           # dry-run
  *   npx tsx scripts/send-fee-split-production-emails.ts --send    # send for real
+ *   npx tsx scripts/send-fee-split-production-emails.ts --send --only=dainalight1@gmail.com
  */
 import { readFileSync, existsSync } from 'fs';
 import { createClient } from '@supabase/supabase-js';
@@ -30,6 +31,8 @@ for (const [k, v] of Object.entries(env)) {
 }
 
 const SEND = process.argv.includes('--send');
+const onlyArg = process.argv.find((a) => a.startsWith('--only='));
+const ONLY_EMAIL = onlyArg ? onlyArg.slice('--only='.length).trim().toLowerCase() : '';
 const FEE_DUE = '2026-07-31';
 const ORG_ID = '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17';
 
@@ -38,7 +41,9 @@ const TARGET_PAYER_EMAILS = [
   'dainalight1@gmail.com',
   'e.jusaitiene@gmail.com',
   'egle.s@icloud.com',
-].map((e) => e.toLowerCase());
+]
+  .map((e) => e.toLowerCase())
+  .filter((e) => !ONLY_EMAIL || e === ONLY_EMAIL);
 
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!serviceKey) {

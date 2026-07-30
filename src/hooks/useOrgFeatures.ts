@@ -1,5 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
-import { dedupeAuthGetUser, orgSuspensionRowDeduped, tutorSidebarProfileDeduped } from '@/lib/preload';
+import {
+  dedupeAuthGetUser,
+  orgAdminRowByUserDeduped,
+  orgSuspensionRowDeduped,
+  tutorSidebarProfileDeduped,
+} from '@/lib/preload';
 import { FEATURE_REGISTRY } from '@/lib/featureRegistry';
 import { parseOrgContactVisibility, type OrgContactVisibility } from '@/lib/orgContactVisibility';
 
@@ -36,7 +41,13 @@ export function useOrgFeatures(): OrgFeaturesState {
         }
 
         const { data: prof } = await tutorSidebarProfileDeduped(user.id);
-        const orgId = prof?.organization_id ?? null;
+        let orgId = prof?.organization_id ?? null;
+        // Org admins often have no organization_id on profiles — resolve via organization_admins
+        // (same source as CompanyFinance / CompanyContracts).
+        if (!orgId) {
+          const adminRow = await orgAdminRowByUserDeduped(user.id);
+          orgId = adminRow?.organization_id ?? null;
+        }
         if (!orgId) {
           setRawFeatures(null);
           setLoading(false);

@@ -38,6 +38,21 @@ vi.mock('@/lib/supabase', () => ({
   },
 }));
 
+vi.mock('@/contexts/OrgEntityContext', () => ({
+  useOrgEntityType: () => 'company',
+}));
+
+vi.mock('@/hooks/useOrgFeatures', () => ({
+  useOrgFeatures: () => ({
+    loading: false,
+    hasFeature: (id: string) => id === 'monthly_packages',
+    organizationId: 'pro-klase-org',
+    features: {},
+    isOrgUser: true,
+    contactVisibility: null,
+  }),
+}));
+
 function pricingQuery() {
   const query: any = {
     select: () => query,

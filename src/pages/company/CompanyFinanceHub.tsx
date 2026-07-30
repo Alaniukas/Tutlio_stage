@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CreditCard, BarChart3, FileText, Receipt } from 'lucide-react';
+import { CreditCard, BarChart3, FileText, Receipt, FileSpreadsheet } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/lib/i18n';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
@@ -8,8 +8,9 @@ import CompanyFinance from './CompanyFinance';
 import CompanyInvoices from './CompanyInvoices';
 import CompanyPayments from './CompanyPayments';
 import CompanyPlatformInvoices from './CompanyPlatformInvoices';
+import CompanySchoolFinanceReport from './CompanySchoolFinanceReport';
 
-type TabId = 'payments' | 'finance' | 'invoices' | 'billing';
+type TabId = 'payments' | 'report' | 'finance' | 'invoices' | 'billing';
 
 export default function CompanyFinanceHub() {
   const { t } = useTranslation();
@@ -21,6 +22,7 @@ export default function CompanyFinanceHub() {
     const all: { id: TabId; label: string; icon: typeof CreditCard }[] = [];
     if (isSchool) {
       all.push({ id: 'payments', label: t('companyNav.payments'), icon: CreditCard });
+      all.push({ id: 'report', label: t('companyNav.financeReport'), icon: FileSpreadsheet });
     }
     all.push({ id: 'finance', label: t('companyNav.finance'), icon: BarChart3 });
     all.push({ id: 'invoices', label: t('companyNav.invoices'), icon: FileText });
@@ -67,6 +69,7 @@ export default function CompanyFinanceHub() {
       </div>
 
       {activeTab === 'payments' && isSchool && <CompanyPayments />}
+      {activeTab === 'report' && isSchool && <CompanySchoolFinanceReport />}
       {activeTab === 'finance' && <CompanyFinance />}
       {activeTab === 'invoices' && <CompanyInvoices />}
       {activeTab === 'billing' && !isSchool && <CompanyPlatformInvoices />}

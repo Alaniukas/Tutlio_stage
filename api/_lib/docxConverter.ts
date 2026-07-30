@@ -130,10 +130,18 @@ export async function convertDocxBufferToPdfWithFallbacks(docxBuffer: Buffer): P
     try {
       return await convertWithDocxConverterService(docxBuffer);
     } catch (remoteError) {
-      // On serverless (Vercel) LibreOffice is unavailable — surface the hosted
-      // converter error instead of a misleading "install LibreOffice" message.
+      const remoteMessage = remoteError instanceof Error ? remoteError.message : 'Remote DOCX converter failed';
+      if (process.env.CONVERTAPI_SECRET) {
+        try {
+          return await convertWithConvertApi(docxBuffer, process.env.CONVERTAPI_SECRET);
+        } catch (apiErr) {
+          const apiMessage = apiErr instanceof Error ? apiErr.message : 'ConvertAPI failed';
+          throw new Error(`${remoteMessage}. ConvertAPI fallback also failed: ${apiMessage}`);
+        }
+      }
+      // On serverless (Vercel) LibreOffice is unavailable — surface the hosted converter error.
       if (process.env.VERCEL) {
-        throw remoteError;
+        throw new Error(remoteMessage);
       }
       // fall through to local LibreOffice on dev machines
     }

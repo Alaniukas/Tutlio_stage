@@ -506,9 +506,12 @@ export default function CompanyTvarkarastis() {
   const [findLessonBookSuccess, setFindLessonBookSuccess] = useState(false);
 
   useEffect(() => {
-    if (!featuresLoading && organizationId) {
-      fetchData();
+    if (featuresLoading) return;
+    if (!organizationId) {
+      setLoading(false);
+      return;
     }
+    fetchData();
   }, [featuresLoading, organizationId]);
 
   // Org trial defaults (same source as CompanyStudents / create-trial-package).

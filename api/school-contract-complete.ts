@@ -299,24 +299,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ...(isMediaConsentMissing ? { media_publicity_consent: consentValue } : {}),
   };
 
-  let uploadedPath = '';
-  let renderedBody = '';
-  try {
-    const result = await renderAndStoreSchoolContractPdf(supabase, contractForPdf, {
-      // Match admin contract creation unless the parent is submitting a new consent choice.
-      includeMediaConsentFlags: isMediaConsentMissing,
-    });
-    uploadedPath = result.uploadedPath || '';
-    renderedBody = result.renderedBody;
-  } catch (e: any) {
-    console.error('[school-contract-complete] PDF generation failed:', e?.message || e);
-    return res.status(500).send(pageHtml('<h2>Nepavyko paruošti atnaujintos sutarties.</h2><p>Bandykite dar kartą vėliau.</p>'));
-  }
-
-  if (!uploadedPath) {
-    return res.status(500).send(pageHtml('<h2>Nepavyko paruošti atnaujintos sutarties.</h2>'));
-  }
-
   const [studentResult, contractConsentResult] = await Promise.all([
     supabase.from('students').update(studentUpdatePayload).eq('id', (contract as any).student_id),
     isMediaConsentMissing
@@ -331,6 +313,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (studentErr) return res.status(500).send(pageHtml(`<h2>Nepavyko išsaugoti: ${studentErr.message}</h2>`));
   if (contractConsentResult.error) {
     console.error('[school-contract-complete] nepavyko išsaugoti sutikimo:', contractConsentResult.error.message);
+  }
+
+  let uploadedPath = '';
+  let renderedBody = '';
+  try {
+    const result = await renderAndStoreSchoolContractPdf(supabase, contractForPdf, {
+      // Match admin contract creation unless the parent is submitting a new consent choice.
+      includeMediaConsentFlags: isMediaConsentMissing,
+    });
+    uploadedPath = result.uploadedPath || '';
+    renderedBody = result.renderedBody;
+  } catch (e: any) {
+    const detail = String(e?.message || e || '').trim();
+    console.error('[school-contract-complete] PDF generation failed:', detail);
+    return res.status(500).send(
+      pageHtml(
+        '<h2>Nepavyko paruošti atnaujintos sutarties.</h2>' +
+          '<p>Duomenys išsaugoti, bet PDF generavimas nepavyko. Bandykite dar kartą vėliau arba kreipkitės į mokyklą.</p>',
+      ),
+    );
+  }
+
+  if (!uploadedPath) {
+    return res.status(500).send(
+      pageHtml(
+        '<h2>Nepavyko paruošti atnaujintos sutarties.</h2><p>Duomenys išsaugoti. Bandykite dar kartą vėliau.</p>',
+      ),
+    );
   }
 
   const emailContract = { ...(contract as any), student: mergedStudent };

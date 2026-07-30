@@ -603,6 +603,8 @@ export default function CalendarPage() {
 
     const { data: av } = await tutorAvailabilityAllRowsDeduped(user.id);
     setAvailability(av || []);
+    } catch (error) {
+      console.error('[Calendar] fetchData failed:', error);
     } finally {
       setLoading(false);
     }

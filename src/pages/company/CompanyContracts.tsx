@@ -30,7 +30,8 @@ import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
 import { useLocation } from 'react-router-dom';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { schoolContractPdfStoragePath } from '@/lib/schoolContractPdfPath';
-import { openContractFileInNewTab } from '@/lib/contractStorage';
+import { openContractFileInNewTab, uploadContractFile } from '@/lib/contractStorage';
+import { isManualSignedFile, MANUAL_SIGNED_FILE_ACCEPT, mimeForManualSignedFile } from '@/lib/schoolFinanceExport';
 import { fmtMoney } from '@/lib/marketMoney';
 import { validateDocxTemplateBytes } from '@/lib/docxTemplateValidation';
 import {
@@ -1616,6 +1617,11 @@ export default function CompanyContracts() {
 
   const uploadSignedContract = async (contract: Contract, file: File) => {
     if (!orgId) return;
+    if (!isManualSignedFile(file)) {
+      setToast({ message: tr('school.toastSignedUploadInvalidType'), type: 'error' });
+      return;
+    }
+    const wasSigned = contract.signing_status === 'signed';
     const fileExt = file.name.split('.').pop()?.toLowerCase() || 'pdf';
     const safeStudent = (contract.student?.full_name || 'student')
       .toLowerCase()
@@ -1624,24 +1630,23 @@ export default function CompanyContracts() {
     const path = `${orgId}/signed/${contract.id}-${safeStudent}-${Date.now()}.${fileExt}`;
 
     setSaving(true);
-    const { error: uploadErr } = await supabase.storage.from('school-contracts').upload(path, file, {
-      cacheControl: '3600',
-      upsert: false,
-      contentType: file.type || 'application/pdf',
-    });
-    if (uploadErr) {
+    const { path: storedPath, error: uploadErr } = await uploadContractFile(
+      path,
+      file,
+      mimeForManualSignedFile(file),
+    );
+    if (uploadErr || !storedPath) {
       setSaving(false);
-      setToast({ message: uploadErr.message, type: 'error' });
+      setToast({ message: uploadErr || tr('school.toastTemplateUploadPrepareFail'), type: 'error' });
       return;
     }
-    const { data } = supabase.storage.from('school-contracts').getPublicUrl(path);
     const { error: updateErr } = await supabase
       .from('school_contracts')
       .update({
-        signed_contract_url: data.publicUrl,
+        signed_contract_url: storedPath,
         signed_uploaded_at: new Date().toISOString(),
         signing_status: 'signed',
-        signed_at: new Date().toISOString(),
+        signed_at: contract.signed_at || new Date().toISOString(),
       })
       .eq('id', contract.id);
     setSaving(false);
@@ -1649,18 +1654,19 @@ export default function CompanyContracts() {
       setToast({ message: updateErr.message, type: 'error' });
       return;
     }
-    setToast({ message: 'Pasirašyta sutartis įkelta.', type: 'success' });
-    // Ensure the student invite code exists (no emails are sent here; the child
-    // invite goes out after the first paid Stripe installment).
+    setToast({ message: tr('school.toastSignedContractUploaded'), type: 'success' });
     try {
       const hdrs = await authHeaders();
-      void fetch('/api/school-contract-mark-signed', {
+      await fetch('/api/school-contract-mark-signed', {
         method: 'POST',
         headers: hdrs,
-        body: JSON.stringify({ contractId: contract.id }),
+        body: JSON.stringify({ contractId: contract.id, manualUpload: true }),
       });
     } catch {
       /* non-fatal */
+    }
+    if (!wasSigned) {
+      await sendPaymentEmailForSignedContract({ ...contract, signing_status: 'signed' });
     }
     reload();
   };
@@ -1668,7 +1674,7 @@ export default function CompanyContracts() {
   const pickAndUploadSignedContract = (contract: Contract) => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    input.accept = MANUAL_SIGNED_FILE_ACCEPT;
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
@@ -1971,9 +1977,9 @@ export default function CompanyContracts() {
                           <Send className="w-3.5 h-3.5 mr-1.5" /> {tr('school.resend')}
                         </Button>
                       )}
-                      {!eSignEnabled && (
+                      {c.signing_status !== 'draft' && (
                         <Button size="sm" variant="outline" onClick={() => pickAndUploadSignedContract(c)} disabled={saving}>
-                          Įkelti pasirašytą
+                          {tr('school.uploadSignedCopy')}
                         </Button>
                       )}
                       <button onClick={() => deleteContract(c.id)} className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">
@@ -2055,6 +2061,7 @@ export default function CompanyContracts() {
                   <p className="text-xs text-gray-600 mb-2">
                     Įkelkite iš Dokobit (ar kitos sistemos) atsisiųstą pasirašytą PDF. Failas patikrinamas automatiškai,
                     o galutinėje sutartyje matysis <span className="font-medium">visų šalių parašai</span>.
+                    Jei turite tik nuotrauką pasirašytos sutarties, naudokite mygtuką „{tr('school.uploadSignedCopy')}“ sutarčių sąraše.
                   </p>
                   <label className={`block ${manualMarkBusy ? 'opacity-60' : 'cursor-pointer'}`}>
                     <input
