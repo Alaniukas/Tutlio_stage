@@ -1240,14 +1240,18 @@ function paymentSuccess(d: any, locale: Locale) {
 
 // School-contract e-signing (GoSign). Lithuanian-only B2B feature, so the copy
 // is inline LT rather than going through the 12-locale i18n dictionaries.
-function schoolContractSignRequest(d: any, locale: Locale) {
-  const student = d.studentName ? ` – ${d.studentName}` : '';
-  // Payment schedule configured at contract creation (schools split the annual
-  // fee, but the split intentionally isn't in the contract template itself).
+function schoolInstallmentScheduleHtml(
+  d: any,
+  locale: Locale,
+  footerNote?: string,
+): string {
   const installments = Array.isArray(d.installments) ? d.installments : [];
+  if (installments.length === 0) return '';
   const installmentsTotal = installments.reduce((sum: number, it: any) => sum + Number(it?.amount || 0), 0);
-  const scheduleBlock = installments.length > 0
-    ? `
+  const note =
+    footerNote ||
+    'Mokėjimo nuorodas gausite el. paštu po sutarties pasirašymo — pagal aukščiau nurodytus terminus.';
+  return `
         <p style="color:#111827; font-size:14px; font-weight:600; margin:20px 0 8px;">Mokėjimo grafikas</p>
         <div class="info-card">
           <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
@@ -1266,8 +1270,12 @@ function schoolContractSignRequest(d: any, locale: Locale) {
         ${Number(d.additionalFeeAmount || 0) > 0
           ? `<p style="color:#6b7280; font-size:12px; margin:8px 0 0;">Į 1 įmoką įtrauktas papildomas mokestis — ${emailMoney(Number(d.additionalFeeAmount), locale)}${d.additionalFeePurpose ? ` (${esc(d.additionalFeePurpose)})` : ''}.</p>`
           : ''}
-        <p style="color:#6b7280; font-size:12px; margin:8px 0 0;">Mokėjimo nuorodas gausite el. paštu po sutarties pasirašymo — pagal aukščiau nurodytus terminus.</p>`
-    : '';
+        <p style="color:#6b7280; font-size:12px; margin:8px 0 0;">${note}</p>`;
+}
+
+function schoolContractSignRequest(d: any, locale: Locale) {
+  const student = d.studentName ? ` – ${d.studentName}` : '';
+  const scheduleBlock = schoolInstallmentScheduleHtml(d, locale);
   return {
     subject: `Pasirašykite ugdymo sutartį${student}`,
     html: wrap(
@@ -2073,6 +2081,15 @@ function schoolContract(d: any, locale: Locale) {
     : [];
   const reviewRequired = d.requiresReview === true || missingFields.length > 0 || Boolean(d.completionUrl);
   const completionLink = reviewRequired ? String(d.completionUrl || '').trim() : '';
+  const installments = Array.isArray(d.installments) ? d.installments : [];
+  const scheduleBlock =
+    installments.length > 1
+      ? schoolInstallmentScheduleHtml(
+          d,
+          locale,
+          'Metinis mokestis mokamas dalimis pagal grafiką. Mokėjimo nuorodą gausite el. paštu po sutarties pasirašymo.',
+        )
+      : '';
   const missingFieldsHtml = missingFields.length
     ? `<div style="background:#fff7ed; border:1px solid #fed7aa; border-radius:12px; padding:14px; margin:16px 0;">
         <p style="color:#9a3412; font-size:13px; font-weight:700; margin:0 0 8px;">Prašome papildyti trūkstamus duomenis:</p>
@@ -2118,6 +2135,7 @@ function schoolContract(d: any, locale: Locale) {
             ${td('Data', d.date || new Date().toLocaleDateString('lt-LT'), false)}
           </table>
         </div>
+        ${scheduleBlock}
         ${d.contractBody ? '' : ''}
         ${missingFieldsHtml}
         ${d.pdfUrl ? `<div style="margin:16px 0 10px;">${outlookEmailButton(d.pdfUrl, 'Atidaryti PDF sutartį', '#059669', { fontWeight: '600', fontSize: '14px', padding: '12px 24px' })}</div>` : ''}
@@ -2269,6 +2287,15 @@ function schoolInstallmentRequest(d: any, locale: Locale) {
       ? `<p style="color:#92400e;font-size:14px;line-height:1.6;margin:0 0 16px;padding:12px 14px;background:#fffbeb;border-radius:8px;border:1px solid #fcd34d;">${d.correctedPaymentNote.trim()}</p>`
       : '';
 
+  const installmentScheduleBlock =
+    Array.isArray(d.installments) && d.installments.length > 1
+      ? schoolInstallmentScheduleHtml(
+          d,
+          locale,
+          'Šiuo metu prašome apmokėti pirmąją įmoką (žemiau). Kitos įmokos — pagal grafiką.',
+        )
+      : '';
+
   const scheduleUpdatedNote =
     d.scheduleUpdated === true
       ? `<p style="color:#1d4ed8;font-size:14px;line-height:1.6;margin:0 0 16px;padding:12px 14px;background:#eff6ff;border-radius:8px;border:1px solid #bfdbfe;">${
@@ -2290,6 +2317,7 @@ function schoolInstallmentRequest(d: any, locale: Locale) {
         ${apologyNote}
         ${correctedPaymentNote}
         ${scheduleUpdatedNote}
+        ${installmentScheduleBlock}
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
           ${totalAmount > 0
             ? `Atėjo laikas apmokėti <strong>${esc(d.studentName)}</strong> metinio mokesčio įmoką (${esc(d.schoolName)}).`

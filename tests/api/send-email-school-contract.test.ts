@@ -179,6 +179,29 @@ describe('school_contract questions contact', () => {
     });
     expect(html).toContain('susisiekite su mokykla: info@laisvivaikai.lt');
   });
+
+  it('shows installment schedule when contract is paid in installments', async () => {
+    const { html } = await sendEmail('school_contract', {
+      schoolName: 'VšĮ „Laisvi vaikai"',
+      schoolEmail: 'info@laisvivaikai.lt',
+      studentName: 'Gubinaitė Danielė',
+      recipientName: 'Simona Bagdonaitė',
+      contractNumber: 'SUT-20260723-1712',
+      annualFee: '300.00',
+      installments: [
+        { number: 1, amount: '100.00', dueDate: '2026-08-30' },
+        { number: 2, amount: '100.00', dueDate: '2026-09-30' },
+        { number: 3, amount: '100.00', dueDate: '2026-10-30' },
+        { number: 4, amount: '50.00', dueDate: '2026-11-30' },
+      ],
+      additionalFeeAmount: '50.00',
+      additionalFeePurpose: 'Sutarties mokestis',
+    });
+    expect(html).toContain('Mokėjimo grafikas');
+    expect(html).toContain('1 įmoka');
+    expect(html).toContain('4 įmoka');
+    expect(html).toContain('Metinis mokestis mokamas dalimis');
+  });
 });
 
 describe('school_contract_sign_request payment schedule', () => {

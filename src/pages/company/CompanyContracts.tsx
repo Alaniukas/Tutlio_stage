@@ -157,6 +157,41 @@ function templateNameFromFileName(fileName: string): string {
     .trim();
 }
 
+type ContractInstallmentRow = {
+  installment_number: number;
+  amount: number;
+  due_date: string | null;
+  payment_status: string | null;
+};
+
+function contractInstallmentsForEmail(installments?: ContractInstallmentRow[] | null) {
+  const rows = [...(installments || [])].sort((a, b) => a.installment_number - b.installment_number);
+  if (rows.length <= 1) return [];
+  return rows.map((r) => ({
+    number: r.installment_number,
+    amount: Number(r.amount).toFixed(2),
+    dueDate: r.due_date ? new Date(r.due_date).toLocaleDateString('lt-LT') : '—',
+    paid: r.payment_status === 'paid',
+  }));
+}
+
+function contractInstallmentEmailExtras(contract: {
+  installments?: ContractInstallmentRow[] | null;
+  additional_fee_amount?: number | string | null;
+  additional_fee_purpose?: string | null;
+}) {
+  const installments = contractInstallmentsForEmail(contract.installments);
+  if (!installments.length) return {};
+  return {
+    installments,
+    additionalFeeAmount:
+      Number(contract.additional_fee_amount || 0) > 0
+        ? Number(contract.additional_fee_amount).toFixed(2)
+        : undefined,
+    additionalFeePurpose: contract.additional_fee_purpose || undefined,
+  };
+}
+
 const CONTRACTS_CACHE_KEY = 'company_contracts';
 const CONTRACTS_SELECT = '*, media_publicity_consent, student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent), signatures:school_contract_signatures(role, status, signed_at, gosign_transaction_id, manually_marked_at), installments:school_payment_installments(installment_number, amount, due_date, payment_status)';
 
@@ -1121,6 +1156,8 @@ export default function CompanyContracts() {
 
       if (error) { setToast({ message: error.message, type: 'error' }); return; }
 
+      let installmentsForEmail: Array<{ number: number; amount: string; dueDate: string }> = [];
+
       if (paymentMode === 'installments' && created) {
       let schedule = installmentRows.map((r, idx) => ({
         contract_id: created.id,
@@ -1138,6 +1175,11 @@ export default function CompanyContracts() {
       } else {
         schedule = schedule.filter((row) => row.amount > 0);
       }
+      installmentsForEmail = schedule.map((row) => ({
+        number: row.installment_number,
+        amount: Number(row.amount).toFixed(2),
+        dueDate: row.due_date ? new Date(row.due_date).toLocaleDateString('lt-LT') : '—',
+      }));
       const { error: installmentsErr } = schedule.length > 0 ? await supabase
         .from('school_payment_installments')
         .insert(schedule) : { error: null };
@@ -1206,6 +1248,13 @@ export default function CompanyContracts() {
               contractBody: created.filled_body,
               pdfUrl: created.pdf_url || undefined,
               date: new Date().toLocaleDateString('lt-LT'),
+              ...(installmentsForEmail.length > 1
+                ? {
+                    installments: installmentsForEmail,
+                    additionalFeeAmount: hasAdditionalFee ? additionalFeeAmountNum.toFixed(2) : undefined,
+                    additionalFeePurpose: hasAdditionalFee ? additionalFeePurpose.trim() : undefined,
+                  }
+                : {}),
               ...(orgId ? { organizationId: orgId } : {}),
             },
           });
@@ -1280,6 +1329,7 @@ export default function CompanyContracts() {
         contractBody: contract.filled_body,
         pdfUrl: pdfUrl || undefined,
         date: new Date().toLocaleDateString('lt-LT'),
+        ...contractInstallmentEmailExtras(contract),
         ...(orgId ? { organizationId: orgId } : {}),
       },
     });

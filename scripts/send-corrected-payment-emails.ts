@@ -45,14 +45,9 @@ const sb = createClient(env.VITE_SUPABASE_URL!, serviceKey);
 /** installmentId + correction note shown in yellow box */
 const TARGETS: Array<{ installmentId: string; correctedPaymentNote: string }> = [
   {
-    installmentId: '2f655423-443e-4c4c-b0cc-bfd9a7a93acc', // Gubinaitė Darija #1
+    installmentId: 'cf7dae19-9415-4069-b489-ac441e5ca528', // Gubinaitė Danielė #1
     correctedPaymentNote:
-      'Atsiprašome — ankstesniame laiške buvo neteisinga informacija. Žemiau pateikiame teisingą mokėjimo nuorodą ir sumą. Jei kiltų klausimų, rašykite mums.',
-  },
-  {
-    installmentId: '52dd093c-37dd-477e-bc58-4e1bae94b506', // Žostautas Tobias #1
-    correctedPaymentNote:
-      'Atsiprašome — ankstesniame laiške buvo neteisinga informacija. Žemiau pateikiame teisingą mokėjimo nuorodą ir sumą. Jei kiltų klausimų, rašykite mums.',
+      'Atsiprašome — ankstesniame laiške buvo nurodytas visas metinis mokestis vienu mokėjimu. Jūsų sutartyje mokestis mokamas dalimis. Žemiau — grafikas ir pirmos įmokos nuoroda. Jei kiltų klausimų, rašykite mums.',
   },
 ];
 
@@ -102,6 +97,22 @@ async function buildPayload(installmentId: string, correctedPaymentNote: string,
     .select('id', { count: 'exact', head: true })
     .eq('contract_id', contract.id);
 
+  const { data: allInstallments } = await sb
+    .from('school_payment_installments')
+    .select('installment_number, amount, due_date, payment_status')
+    .eq('contract_id', contract.id)
+    .order('installment_number');
+
+  const installments =
+    (allInstallments || []).length > 1
+      ? (allInstallments || []).map((row) => ({
+          number: row.installment_number,
+          amount: Number(row.amount).toFixed(2),
+          dueDate: row.due_date ? new Date(row.due_date).toLocaleDateString('lt-LT') : '—',
+          paid: row.payment_status === 'paid',
+        }))
+      : [];
+
   const appUrl = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
   const payUrl = `${appUrl}/api/pay-school-installment?installment=${inst.id}`;
 
@@ -131,6 +142,7 @@ async function buildPayload(installmentId: string, correctedPaymentNote: string,
         additionalFeePurpose: contract.additional_fee_purpose || undefined,
         organizationId: contract.organization_id,
         correctedPaymentNote,
+        ...(installments.length > 1 ? { installments } : {}),
       },
     },
   };
