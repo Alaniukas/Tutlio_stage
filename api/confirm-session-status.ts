@@ -15,6 +15,7 @@ import {
   returnPackageCounterToAvailable,
   deleteSessionWaitlists,
 } from './_lib/sessionStatusConfirmation.js';
+import { isProKlaseOrg } from './_lib/marketMoney.js';
 
 const NO_SHOW_WHEN = new Set(['before_lesson', 'during_lesson', 'after_lesson']);
 
@@ -82,6 +83,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       );
     }
     if (!authorized) return json(res, 403, { error: 'Not authorized to confirm this session' });
+
+    if (status === 'cancelled' && session.tutor_id === userId) {
+      const { data: tutorRow } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', userId)
+        .maybeSingle();
+      const orgId = (tutorRow as any)?.organization_id as string | null;
+      if (orgId && isProKlaseOrg(orgId)) {
+        const { data: adminRow } = await supabase
+          .from('organization_admins')
+          .select('organization_id')
+          .eq('user_id', userId)
+          .eq('organization_id', orgId)
+          .maybeSingle();
+        if (!adminRow) {
+          return json(res, 403, { error: 'Only administration can cancel lessons for this organization' });
+        }
+      }
+    }
 
     if (session.status !== 'active') {
       return json(res, 409, { error: 'already_finalized', currentStatus: session.status });

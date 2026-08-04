@@ -28,7 +28,14 @@ import { Plus, Trash2, User, Mail, Phone, GraduationCap, CheckCircle, XCircle, S
 import { sendEmail } from '@/lib/email';
 import Toast from '@/components/Toast';
 import { useTranslation } from '@/lib/i18n';
-import { formatLithuanianPhone, validateLithuanianPhone } from '@/lib/utils';
+import {
+  buildSchoolStudentExportRows,
+  matchesMediaConsentFilter,
+  type MediaConsentFilter,
+} from '@/lib/schoolStudentsExport';
+import { downloadSchoolStudentsXlsx } from '@/lib/schoolStudentsXlsxExport';
+import { formatLithuanianPhone, validateLithuanianPhone, cn } from '@/lib/utils';
+import { ORG_TUTOR_FILTER_SCROLL_CLASS, ORG_TUTOR_SELECT_SCROLL_CLASS } from '@/lib/orgUi';
 import { SessionList } from '@/components/SessionList';
 import {
   getStudentRecentPastSessions,
@@ -375,6 +382,8 @@ export default function CompanyStudents() {
   // School list filters: by grade and by latest-contract signing state.
   const [gradeFilter, setGradeFilter] = useState('all');
   const [contractFilter, setContractFilter] = useState<'all' | 'signed' | 'pending' | 'none'>('all');
+  const [mediaConsentFilter, setMediaConsentFilter] = useState<MediaConsentFilter>('all');
+  const [exportingStudents, setExportingStudents] = useState(false);
 
   const [trialSending, setTrialSending] = useState(false);
   const [trialTutorId, setTrialTutorId] = useState<string | null>(null);
@@ -549,8 +558,32 @@ export default function CompanyStudents() {
         return !info; // 'none'
       });
     }
+    if (mediaConsentFilter !== 'all') {
+      groups = groups.filter((g) =>
+        matchesMediaConsentFilter(g.primary.media_publicity_consent, mediaConsentFilter),
+      );
+    }
     return groups;
-  }, [groupedStudents, normalizedSearch, showTrashBin, gradeFilter, contractFilter, contractsByStudent]);
+  }, [groupedStudents, normalizedSearch, showTrashBin, gradeFilter, contractFilter, mediaConsentFilter, contractsByStudent]);
+
+  const exportStudentsXlsx = async () => {
+    setExportingStudents(true);
+    try {
+      const rows = buildSchoolStudentExportRows(
+        filteredGroups.map((g) => ({
+          student: g.primary,
+          contract: contractsByStudent[g.primary.id],
+        })),
+        t,
+      );
+      const date = new Date().toISOString().slice(0, 10);
+      await downloadSchoolStudentsXlsx(rows, t, `mokiniai-${date}.xlsx`);
+    } catch (e: any) {
+      setToastMessage({ message: e?.message || t('school.studentExportFail'), type: 'error' });
+    } finally {
+      setExportingStudents(false);
+    }
+  };
 
   const shouldShowParentContacts = (student: Student) => hasSchoolParentContacts(student);
 
@@ -1863,7 +1896,29 @@ export default function CompanyStudents() {
 
   const handleDetachStudent = async (id: string) => {
     if (!confirm(t('compStu.confirmDetachStudent'))) return;
-    const { error } = await supabase.from('students').update({ detached_at: new Date().toISOString() }).eq('id', id);
+    const { data: studentRow } = await supabase
+      .from('students')
+      .select('id, linked_user_id, organization_id')
+      .eq('id', id)
+      .maybeSingle();
+    if (!studentRow) return;
+
+    const now = new Date().toISOString();
+    const patch = { detached_at: now, tutor_id: null as string | null };
+
+    let error: { message: string } | null = null;
+    if (studentRow.linked_user_id && studentRow.organization_id) {
+      const { error: bulkErr } = await supabase
+        .from('students')
+        .update(patch)
+        .eq('organization_id', studentRow.organization_id)
+        .eq('linked_user_id', studentRow.linked_user_id);
+      error = bulkErr;
+    } else {
+      const { error: singleErr } = await supabase.from('students').update(patch).eq('id', id);
+      error = singleErr;
+    }
+
     if (!error) {
       setToastMessage({ message: t('compStu.studentDetached'), type: 'success' });
       fetchData();
@@ -1873,7 +1928,26 @@ export default function CompanyStudents() {
   };
 
   const handleRestoreStudent = async (id: string) => {
-    const { error } = await supabase.from('students').update({ detached_at: null }).eq('id', id);
+    const { data: studentRow } = await supabase
+      .from('students')
+      .select('id, linked_user_id, organization_id')
+      .eq('id', id)
+      .maybeSingle();
+    if (!studentRow) return;
+
+    let error: { message: string } | null = null;
+    if (studentRow.linked_user_id && studentRow.organization_id) {
+      const { error: bulkErr } = await supabase
+        .from('students')
+        .update({ detached_at: null })
+        .eq('organization_id', studentRow.organization_id)
+        .eq('linked_user_id', studentRow.linked_user_id);
+      error = bulkErr;
+    } else {
+      const { error: singleErr } = await supabase.from('students').update({ detached_at: null }).eq('id', id);
+      error = singleErr;
+    }
+
     if (!error) {
       setToastMessage({ message: t('compStu.studentRestored'), type: 'success' });
       fetchData();
@@ -2010,56 +2084,19 @@ export default function CompanyStudents() {
         />
       )}
       <div className="max-w-6xl mx-auto">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <GraduationCap className="w-6 h-6 text-indigo-600" />
-            {t('compStu.title')}
-            <span className="text-base font-medium text-gray-400">({filteredGroups.length})</span>
-          </h1>
-
-          <div className="flex flex-wrap gap-2 justify-end items-center w-full lg:w-auto">
-            {isSchoolView && availableGrades.length > 0 && (
-              <Select value={gradeFilter} onValueChange={setGradeFilter}>
-                <SelectTrigger className="w-[140px] rounded-xl border-gray-200">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{t('compStu.filterGradeAll')}</SelectItem>
-                  {availableGrades.map((gr) => (
-                    <SelectItem key={gr} value={gr}>{gr} kl.</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-            {isSchoolView && (
-              <Select value={contractFilter} onValueChange={(v) => setContractFilter(v as 'all' | 'signed' | 'pending' | 'none')}>
-                <SelectTrigger className="w-[180px] rounded-xl border-gray-200">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{t('compStu.filterContractAll')}</SelectItem>
-                  <SelectItem value="signed">{t('compStu.filterContractSigned')}</SelectItem>
-                  <SelectItem value="pending">{t('compStu.filterContractPending')}</SelectItem>
-                  <SelectItem value="none">{t('compStu.filterContractNone')}</SelectItem>
-                </SelectContent>
-              </Select>
-            )}
-            <div className="relative w-full sm:w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-              <Input
-                type="search"
-                placeholder={t('compStu.searchPlaceholder')}
-                value={studentSearch}
-                onChange={(e) => setStudentSearch(e.target.value)}
-                className="pl-9 rounded-xl border-gray-200"
-                aria-label={t('compStu.searchAriaLabel')}
-              />
-            </div>
+        <div className="mb-6 space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+              <GraduationCap className="w-6 h-6 text-indigo-600" />
+              {t('compStu.title')}
+              <span className="text-base font-medium text-gray-400">({filteredGroups.length})</span>
+            </h1>
+            <div className="flex items-center gap-2 flex-wrap shrink-0">
               <Button
                 variant={showTrashBin ? 'default' : 'outline'}
                 size="sm"
                 className="rounded-xl gap-1.5"
-                onClick={() => setShowTrashBin(v => !v)}
+                onClick={() => setShowTrashBin((v) => !v)}
               >
                 <Archive className="w-4 h-4" />
                 {showTrashBin ? t('compStu.activeStudents') : t('compStu.trashBin')}
@@ -2123,7 +2160,7 @@ export default function CompanyStudents() {
                             onChange={(e) => setMultiTutorSearch(e.target.value)}
                             className="h-8 text-xs rounded-lg"
                           />
-                          <div className="mt-2 max-h-52 overflow-y-auto space-y-1">
+                          <div className={cn('mt-2 space-y-1', ORG_TUTOR_FILTER_SCROLL_CLASS)}>
                             {tutors
                               .filter((tu) =>
                                 tu.full_name.toLowerCase().includes(multiTutorSearch.trim().toLowerCase())
@@ -2594,6 +2631,72 @@ export default function CompanyStudents() {
               </form>
             </DialogContent>
           </Dialog>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
+            {isSchoolView && availableGrades.length > 0 && (
+              <Select value={gradeFilter} onValueChange={setGradeFilter}>
+                <SelectTrigger className="w-full sm:w-auto sm:min-w-[140px] rounded-xl border-gray-200 bg-white">
+                  <SelectValue placeholder={t('compStu.filterGradeAll')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t('compStu.filterGradeAll')}</SelectItem>
+                  {availableGrades.map((gr) => (
+                    <SelectItem key={gr} value={gr}>{gr}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            {isSchoolView && (
+              <Select value={contractFilter} onValueChange={(v) => setContractFilter(v as 'all' | 'signed' | 'pending' | 'none')}>
+                <SelectTrigger className="w-full sm:w-auto sm:min-w-[170px] rounded-xl border-gray-200 bg-white">
+                  <SelectValue placeholder={t('compStu.filterContractAll')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t('compStu.filterContractAll')}</SelectItem>
+                  <SelectItem value="signed">{t('compStu.filterContractSigned')}</SelectItem>
+                  <SelectItem value="pending">{t('compStu.filterContractPending')}</SelectItem>
+                  <SelectItem value="none">{t('compStu.filterContractNone')}</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+            {isSchoolView && (
+              <Select value={mediaConsentFilter} onValueChange={(v) => setMediaConsentFilter(v as MediaConsentFilter)}>
+                <SelectTrigger className="w-full sm:w-auto sm:min-w-[170px] rounded-xl border-gray-200 bg-white">
+                  <SelectValue placeholder={t('compStu.filterConsentAll')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t('compStu.filterConsentAll')}</SelectItem>
+                  <SelectItem value="agree">{t('compStu.filterConsentAgreeShort')}</SelectItem>
+                  <SelectItem value="disagree">{t('compStu.filterConsentDisagreeShort')}</SelectItem>
+                  <SelectItem value="unknown">{t('compStu.filterConsentUnknownShort')}</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+              <Input
+                type="search"
+                placeholder={t('compStu.searchPlaceholder')}
+                value={studentSearch}
+                onChange={(e) => setStudentSearch(e.target.value)}
+                className="pl-9 rounded-xl border-gray-200 bg-white"
+                aria-label={t('compStu.searchAriaLabel')}
+              />
+            </div>
+            {isSchoolView && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="rounded-xl shrink-0 w-full sm:w-auto"
+                onClick={() => void exportStudentsXlsx()}
+                disabled={exportingStudents || filteredGroups.length === 0}
+              >
+                <Download className="w-4 h-4 mr-1.5" />
+                {exportingStudents ? t('school.exportingExcel') : t('school.exportExcel')}
+              </Button>
+            )}
           </div>
         </div>
 
@@ -3388,7 +3491,7 @@ export default function CompanyStudents() {
                           <SelectTrigger className="rounded-xl h-9">
                             <SelectValue placeholder={t('compStu.selectPlaceholder')} />
                           </SelectTrigger>
-                          <SelectContent className="max-h-72 overflow-y-auto">
+                          <SelectContent className={ORG_TUTOR_SELECT_SCROLL_CLASS}>
                             <div className="sticky top-0 z-10 bg-white p-2 border-b border-gray-100">
                               <Input
                                 value={addingTutorSearch}

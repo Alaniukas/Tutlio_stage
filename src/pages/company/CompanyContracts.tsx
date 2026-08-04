@@ -22,7 +22,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, FileText, Send, CheckCircle, Edit2, Trash2, PenLine, Settings, Save, Search } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Plus, FileText, Send, CheckCircle, Edit2, Trash2, PenLine, Settings, Save, Search, Download, MoreVertical } from 'lucide-react';
 import Toast from '@/components/Toast';
 import { sendEmail } from '@/lib/email';
 import { useTranslation } from '@/lib/i18n';
@@ -39,6 +40,13 @@ import {
   parseSchoolContractSigningSettings,
   type SchoolContractSigningSettings,
 } from '@/lib/schoolContractSigningSettings';
+import {
+  countContractsByFilter,
+  matchesContractFilter,
+  type SchoolContractFilter,
+} from '@/lib/schoolContractFilters';
+import { buildSchoolContractExportRows } from '@/lib/schoolContractsExport';
+import { downloadSchoolContractsXlsx } from '@/lib/schoolContractsXlsxExport';
 
 interface Student {
   id: string;
@@ -84,11 +92,12 @@ interface Contract {
   signed_contract_url?: string | null;
   signed_uploaded_at?: string | null;
   completion_submitted_at?: string | null;
+  media_publicity_consent?: string | null;
   additional_fee_amount?: number | null;
   additional_fee_purpose?: string | null;
   signatures?: { role: string; status: string; signed_at?: string | null; gosign_transaction_id?: string | null; manually_marked_at?: string | null }[];
   installments?: { installment_number: number; amount: number; due_date: string | null; payment_status: string | null }[];
-  student?: { full_name: string; email: string; phone?: string | null; payer_name: string | null; payer_email: string | null; payer_phone?: string | null; payer_personal_code?: string | null; parent_secondary_name?: string | null; parent_secondary_email?: string | null; parent_secondary_phone?: string | null; parent_secondary_personal_code?: string | null; parent_secondary_address?: string | null; student_address?: string | null; student_city?: string | null; child_birth_date?: string | null };
+  student?: { full_name: string; email: string; phone?: string | null; payer_name: string | null; payer_email: string | null; payer_phone?: string | null; payer_personal_code?: string | null; parent_secondary_name?: string | null; parent_secondary_email?: string | null; parent_secondary_phone?: string | null; parent_secondary_personal_code?: string | null; parent_secondary_address?: string | null; student_address?: string | null; student_city?: string | null; child_birth_date?: string | null; media_publicity_consent?: string | null };
 }
 
 interface InstallmentDraft {
@@ -245,8 +254,9 @@ export default function CompanyContracts() {
   const [tab, setTab] = useState<'contracts' | 'templates'>('contracts');
 
   // Contract list filter (schools accumulate many contracts — no more scrolling).
-  const [contractFilter, setContractFilter] = useState<'all' | 'unsigned' | 'signed'>('all');
+  const [contractFilter, setContractFilter] = useState<SchoolContractFilter | 'unsigned'>('all');
   const [contractSearch, setContractSearch] = useState('');
+  const [exportingContracts, setExportingContracts] = useState(false);
 
   useEffect(() => { if (!getCached(CONTRACTS_CACHE_KEY)) load(); }, []);
   useEffect(() => {
@@ -1726,10 +1736,14 @@ export default function CompanyContracts() {
 
   // Diacritics-insensitive match (Vėgėlė findable as "vegele" and vice versa).
   const searchable = (value: string) => normalizePdfText(value).toLowerCase();
-  const signedCount = contracts.filter((c) => c.signing_status === 'signed').length;
+  const contractFilterCounts = countContractsByFilter(contracts, isSchoolView);
   const visibleContracts = contracts.filter((c) => {
-    if (contractFilter === 'signed' && c.signing_status !== 'signed') return false;
-    if (contractFilter === 'unsigned' && c.signing_status === 'signed') return false;
+    if (isSchoolView) {
+      if (!matchesContractFilter(contractFilter as SchoolContractFilter, c, isSchoolView)) return false;
+    } else {
+      if (contractFilter === 'signed' && c.signing_status !== 'signed') return false;
+      if (contractFilter === 'unsigned' && c.signing_status === 'signed') return false;
+    }
     const q = searchable(contractSearch.trim());
     if (!q) return true;
     const haystack = searchable(
@@ -1740,17 +1754,41 @@ export default function CompanyContracts() {
     return haystack.includes(q);
   });
 
+  const exportContractsXlsx = async () => {
+    if (!isSchoolView || visibleContracts.length === 0) return;
+    setExportingContracts(true);
+    try {
+      const rows = buildSchoolContractExportRows(visibleContracts, tr, isSchoolView);
+      const date = new Date().toISOString().slice(0, 10);
+      const suffix = contractFilter === 'awaiting_parents' ? 'laukia-tevu' : 'truksta-duomenu';
+      await downloadSchoolContractsXlsx(rows, tr, `sutartys-${suffix}-${date}.xlsx`, orgName);
+    } catch (e: any) {
+      setToast({ message: e?.message || tr('school.contractExportFail'), type: 'error' });
+    } finally {
+      setExportingContracts(false);
+    }
+  };
+
   const statusBadge = (s: Contract['signing_status']) => {
     const map = {
       draft: { label: tr('school.draft'), cls: 'bg-gray-100 text-gray-600' },
       sent: { label: tr('school.sentStatus'), cls: 'bg-amber-50 text-amber-700' },
-      awaiting_school_signature: { label: 'Laukia mokyklos parašo', cls: 'bg-indigo-50 text-indigo-700' },
-      signed_by_school: { label: 'Pasirašyta mokyklos', cls: 'bg-blue-50 text-blue-700' },
-      signed: { label: eSignEnabled ? 'Pasirašyta abiejų šalių' : tr('school.signedStatus'), cls: 'bg-green-50 text-green-700' },
+      awaiting_school_signature: { label: tr('school.statusAwaitingSchool'), cls: 'bg-indigo-50 text-indigo-700' },
+      signed_by_school: { label: tr('school.statusSignedBySchool'), cls: 'bg-blue-50 text-blue-700' },
+      signed: { label: eSignEnabled ? tr('school.statusSignedBoth') : tr('school.signedStatus'), cls: 'bg-green-50 text-green-700' },
     };
     const { label, cls } = map[s];
     return <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${cls}`}>{label}</span>;
   };
+
+  const schoolContractFilterLabel = (key: SchoolContractFilter, count: number) =>
+    `${({
+      all: tr('school.filterAll'),
+      awaiting_school: tr('school.filterAwaitingSchool'),
+      awaiting_parents: tr('school.filterAwaitingParents'),
+      incomplete_data: tr('school.filterIncompleteData'),
+      signed: tr('school.filterSigned'),
+    } as const)[key]} (${count})`;
 
   return (
     <>
@@ -1853,31 +1891,67 @@ export default function CompanyContracts() {
             </div>
           ) : (
             <>
-              <div className="flex items-center gap-2 flex-wrap">
-                <div className="bg-gray-100 rounded-lg p-1 flex gap-1">
-                  {([
-                    ['all', tr('school.filterAll'), contracts.length],
-                    ['unsigned', tr('school.filterUnsigned'), contracts.length - signedCount],
-                    ['signed', tr('school.filterSigned'), signedCount],
-                  ] as const).map(([key, label, count]) => (
-                    <button
-                      key={key}
-                      onClick={() => setContractFilter(key)}
-                      className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${contractFilter === key ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
-                    >
-                      {label} <span className={contractFilter === key ? 'text-gray-500' : 'text-gray-400'}>({count})</span>
-                    </button>
-                  ))}
-                </div>
-                <div className="relative flex-1 min-w-[220px] max-w-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                {isSchoolView ? (
+                  <Select
+                    value={contractFilter as SchoolContractFilter}
+                    onValueChange={(v) => setContractFilter(v as SchoolContractFilter)}
+                  >
+                    <SelectTrigger className="w-full sm:w-[min(100%,320px)] rounded-xl border-gray-200 bg-white">
+                      <SelectValue placeholder={tr('school.filterContractsLabel')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {([
+                        'all',
+                        'awaiting_school',
+                        'awaiting_parents',
+                        'incomplete_data',
+                        'signed',
+                      ] as const).map((key) => (
+                        <SelectItem key={key} value={key}>
+                          {schoolContractFilterLabel(key, contractFilterCounts[key])}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <div className="bg-gray-100 rounded-lg p-1 flex gap-1 flex-wrap">
+                    {([
+                      ['all', tr('school.filterAll'), contracts.length],
+                      ['unsigned', tr('school.filterUnsigned'), contracts.length - contractFilterCounts.signed],
+                      ['signed', tr('school.filterSigned'), contractFilterCounts.signed],
+                    ] as const).map(([key, label, count]) => (
+                      <button
+                        key={key}
+                        onClick={() => setContractFilter(key)}
+                        className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${contractFilter === key ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+                      >
+                        {label} <span className={contractFilter === key ? 'text-gray-500' : 'text-gray-400'}>({count})</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="relative flex-1 min-w-[200px]">
                   <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <Input
                     value={contractSearch}
                     onChange={(e) => setContractSearch(e.target.value)}
                     placeholder={tr('school.searchContracts')}
-                    className="pl-9"
+                    className="pl-9 rounded-xl"
                   />
                 </div>
+                {isSchoolView && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0 rounded-xl"
+                    onClick={() => void exportContractsXlsx()}
+                    disabled={exportingContracts || visibleContracts.length === 0}
+                  >
+                    <Download className="w-4 h-4 mr-1.5" />
+                    {exportingContracts ? tr('school.exportingExcel') : tr('school.exportExcel')}
+                  </Button>
+                )}
               </div>
               {visibleContracts.length === 0 ? (
                 <p className="text-center text-gray-500 py-12">{tr('school.noContractsFiltered')}</p>
@@ -1885,14 +1959,14 @@ export default function CompanyContracts() {
             <div className="grid gap-3">
               {visibleContracts.map((c, contractIdx) => (
                 <div key={c.id} className="bg-white rounded-xl border border-gray-200 p-4">
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-3">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-xs text-gray-400 tabular-nums">{contractIdx + 1}.</span>
                         <p className="font-semibold text-gray-900">{c.student?.full_name || '—'}</p>
                         {statusBadge(c.signing_status)}
                       </div>
-      <p className="text-sm text-gray-500 mt-1">
+                      <p className="text-sm text-gray-500 mt-1">
                         {c.contract_number && <span className="mr-3">Sutarties Nr. {c.contract_number}</span>}
                         {tr('school.annualFee')} <span className="font-medium text-gray-700">&euro;{Number(c.annual_fee).toFixed(2)}</span>
                         {Number(c.additional_fee_amount || 0) > 0 && (
@@ -1946,43 +2020,96 @@ export default function CompanyContracts() {
                         </p>
                       )}
                     </div>
-                    <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
+
+                    <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-gray-100">
                       {c.signing_status === 'draft' && (
-                        <Button size="sm" variant="outline" onClick={() => sendContract(c)}>
+                        <Button size="sm" onClick={() => sendContract(c)}>
                           <Send className="w-3.5 h-3.5 mr-1.5" /> {tr('school.send')}
                         </Button>
                       )}
                       {c.signing_status === 'awaiting_school_signature' && (
                         <Button size="sm" onClick={() => signAsSchool(c)} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
-                          <PenLine className="w-3.5 h-3.5 mr-1.5" /> {saving ? 'Ruošiama…' : 'Pasirašyti (direktorė)'}
+                          <PenLine className="w-3.5 h-3.5 mr-1.5" /> {saving ? 'Ruošiama…' : tr('school.signAsDirector')}
                         </Button>
                       )}
                       {c.signing_status === 'signed_by_school' && (
-                        <span className="text-xs text-blue-700 self-center">Laukiama tėvų parašo…</span>
+                        <span className="text-xs text-blue-700 font-medium">{tr('school.waitingParentSignature')}</span>
                       )}
-                      {eSignEnabled && c.signing_status === 'signed_by_school' && (
-                        <Button size="sm" variant="outline" onClick={() => openManualMark(c)} className="text-green-700 border-green-200 hover:bg-green-50">
-                          <CheckCircle className="w-3.5 h-3.5 mr-1.5" /> Pažymėti pasirašyta
-                        </Button>
-                      )}
-                      {!eSignEnabled && (c.signing_status === 'sent' ||
-                        c.signing_status === 'awaiting_school_signature' ||
-                        c.signing_status === 'signed_by_school') && (
-                        <Button size="sm" variant="outline" onClick={() => markSigned(c)} className="text-green-700 border-green-200 hover:bg-green-50">
-                          <CheckCircle className="w-3.5 h-3.5 mr-1.5" /> {tr('school.markSigned')}
-                        </Button>
-                      )}
-                      {c.signing_status !== 'draft' && (!eSignEnabled || c.signing_status === 'sent') && (
-                        <Button size="sm" variant="outline" onClick={() => resendContract(c)}>
-                          <Send className="w-3.5 h-3.5 mr-1.5" /> {tr('school.resend')}
-                        </Button>
-                      )}
-                      {c.signing_status !== 'draft' && (
-                        <Button size="sm" variant="outline" onClick={() => pickAndUploadSignedContract(c)} disabled={saving}>
-                          {tr('school.uploadSignedCopy')}
-                        </Button>
-                      )}
-                      <button onClick={() => deleteContract(c.id)} className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">
+
+                      {(() => {
+                        const menuActions = [
+                          eSignEnabled && c.signing_status === 'signed_by_school',
+                          !eSignEnabled && (c.signing_status === 'sent'
+                            || c.signing_status === 'awaiting_school_signature'
+                            || c.signing_status === 'signed_by_school'),
+                          c.signing_status !== 'draft' && (!eSignEnabled || c.signing_status === 'sent'),
+                          c.signing_status !== 'draft',
+                        ].some(Boolean);
+                        if (!menuActions) return null;
+                        return (
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button size="sm" variant="outline" className="gap-1.5">
+                            <MoreVertical className="w-4 h-4" />
+                            {tr('school.contractActions')}
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent align="end" className="w-64 p-1">
+                          <div className="flex flex-col">
+                            {eSignEnabled && c.signing_status === 'signed_by_school' && (
+                              <button
+                                type="button"
+                                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-left hover:bg-gray-50 text-green-700"
+                                onClick={() => openManualMark(c)}
+                              >
+                                <CheckCircle className="w-4 h-4 shrink-0" />
+                                {tr('school.markSigned')}
+                              </button>
+                            )}
+                            {!eSignEnabled && (c.signing_status === 'sent'
+                              || c.signing_status === 'awaiting_school_signature'
+                              || c.signing_status === 'signed_by_school') && (
+                              <button
+                                type="button"
+                                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-left hover:bg-gray-50 text-green-700"
+                                onClick={() => markSigned(c)}
+                              >
+                                <CheckCircle className="w-4 h-4 shrink-0" />
+                                {tr('school.markSigned')}
+                              </button>
+                            )}
+                            {c.signing_status !== 'draft' && (!eSignEnabled || c.signing_status === 'sent') && (
+                              <button
+                                type="button"
+                                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-left hover:bg-gray-50"
+                                onClick={() => resendContract(c)}
+                              >
+                                <Send className="w-4 h-4 shrink-0" />
+                                {tr('school.resend')}
+                              </button>
+                            )}
+                            {c.signing_status !== 'draft' && (
+                              <button
+                                type="button"
+                                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-left hover:bg-gray-50"
+                                onClick={() => pickAndUploadSignedContract(c)}
+                                disabled={saving}
+                              >
+                                <FileText className="w-4 h-4 shrink-0" />
+                                {tr('school.uploadSignedCopy')}
+                              </button>
+                            )}
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                        );
+                      })()}
+
+                      <button
+                        onClick={() => deleteContract(c.id)}
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors ml-auto"
+                        aria-label={tr('school.confirmDeleteContract')}
+                      >
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>

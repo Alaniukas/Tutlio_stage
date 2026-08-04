@@ -19,7 +19,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import BuyLicensesDialog from '@/components/company/BuyLicensesDialog';
-import { fmtMoney } from '@/lib/marketMoney';
+import { fmtMoney, isProKlaseOrg } from '@/lib/marketMoney';
+import { authHeaders } from '@/lib/apiHelpers';
 import { isPlMarket } from '@/lib/market';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -424,15 +425,71 @@ export default function CompanyTutors() {
   const [editMinBooking, setEditMinBooking] = useState(1);
   const [editCommissionPercent, setEditCommissionPercent] = useState(0);
   const [editMeetingLink, setEditMeetingLink] = useState('');
+  const [tutorInvoiceProfile, setTutorInvoiceProfile] = useState<Record<string, string | null> | null>(null);
+  const [penaltyManualAmount, setPenaltyManualAmount] = useState('');
+  const [penaltyManualReason, setPenaltyManualReason] = useState('');
+  const [applyingPenalty, setApplyingPenalty] = useState(false);
+  const [applyingPenaltyType, setApplyingPenaltyType] = useState<string | null>(null);
+  const [penaltyFeedback, setPenaltyFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const isProKlaseAdmin = isProKlaseOrg(orgId);
 
-  useEffect(() => { loadData({ silent: !!getCached(COMPANY_TUTORS_CACHE_KEY) }); }, []);
+  const applyTutorAdjustment = async (
+    type: 'penalty_tutor_no_show' | 'penalty_missing_report' | 'penalty_manual',
+    amountEur?: number,
+    reason?: string,
+  ) => {
+    if (!selectedTutor) return;
+    setApplyingPenalty(true);
+    setApplyingPenaltyType(type);
+    setPenaltyFeedback(null);
+    try {
+      const res = await fetch('/api/tutor-adjustment', {
+        method: 'POST',
+        headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tutorId: selectedTutor.id,
+          type,
+          amountEur,
+          reason,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPenaltyFeedback({
+          type: 'error',
+          message: (json as { error?: string }).error || t('compTut.penaltyFailed'),
+        });
+        return;
+      }
+      setPenaltyManualAmount('');
+      setPenaltyManualReason('');
+      setPenaltyFeedback({ type: 'success', message: t('compTut.penaltyApplied') });
+    } catch {
+      setPenaltyFeedback({ type: 'error', message: t('compTut.penaltyFailed') });
+    } finally {
+      setApplyingPenalty(false);
+      setApplyingPenaltyType(null);
+    }
+  };
+
+  const penaltyButtonLabel = (
+    type: string,
+    label: string,
+  ) => (
+    <>
+      {applyingPenalty && applyingPenaltyType === type ? (
+        <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+      ) : null}
+      <span>{label}</span>
+    </>
+  );
 
   const loadData = async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent === true;
     if (!silent) setLoading(true);
+    try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-      if (!silent) setLoading(false);
       return;
     }
 
@@ -442,7 +499,6 @@ export default function CompanyTutors() {
       .eq('user_id', user.id)
       .maybeSingle();
     if (!adminRow) {
-      if (!silent) setLoading(false);
       return;
     }
 
@@ -595,8 +651,16 @@ export default function CompanyTutors() {
       tutorLicenseCount: effectiveLicenseCount,
       tutors: visibleTutors, invites: enriched,
     });
-    if (!silent) setLoading(false);
+    } catch (err) {
+      console.error('[CompanyTutors] loadData failed:', err);
+    } finally {
+      if (!silent) setLoading(false);
+    }
   };
+
+  useEffect(() => {
+    void loadData({ silent: !!getCached(COMPANY_TUTORS_CACHE_KEY) });
+  }, []);
 
   const licenseUsedCount = useMemo(() => {
     if (!tutorLicenseCount) return 0;
@@ -830,7 +894,21 @@ export default function CompanyTutors() {
     setEditMinBooking(tutor.min_booking_hours ?? orgDefaults.min_booking_hours);
     setEditCommissionPercent(tutor.company_commission_percent ?? orgDefaults.company_commission_percent);
     setEditMeetingLink(tutor.personal_meeting_link || '');
+    setTutorInvoiceProfile(null);
+    setPenaltyFeedback(null);
     setTutorModalOpen(true);
+
+    try {
+      const res = await fetch(`/api/invoice-settings?scope=tutor&tutorId=${encodeURIComponent(tutor.id)}`, {
+        headers: await authHeaders(),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && (json as { profile?: Record<string, string | null> }).profile) {
+        setTutorInvoiceProfile((json as { profile: Record<string, string | null> }).profile);
+      }
+    } catch {
+      /* optional */
+    }
   };
 
   const handleSaveTutor = async () => {
@@ -1364,6 +1442,64 @@ export default function CompanyTutors() {
                   <Input value={editPhone} onChange={e => setEditPhone(e.target.value)} className="rounded-xl" />
                 </div>
               </div>
+
+              <div className="space-y-2 pt-3 border-t border-gray-100">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('compTut.invoiceRequisites')}</p>
+                {tutorInvoiceProfile ? (
+                  <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-sm text-gray-700 space-y-1">
+                    {tutorInvoiceProfile.entity_type && <p><span className="text-gray-500">Tipas:</span> {tutorInvoiceProfile.entity_type}</p>}
+                    {tutorInvoiceProfile.activity_number && <p><span className="text-gray-500">Veiklos nr.:</span> {tutorInvoiceProfile.activity_number}</p>}
+                    {tutorInvoiceProfile.personal_code && <p><span className="text-gray-500">Asm. kodas:</span> {tutorInvoiceProfile.personal_code}</p>}
+                    {tutorInvoiceProfile.contact_email && <p><span className="text-gray-500">El. paštas:</span> {tutorInvoiceProfile.contact_email}</p>}
+                    {tutorInvoiceProfile.contact_phone && <p><span className="text-gray-500">Tel.:</span> {tutorInvoiceProfile.contact_phone}</p>}
+                    {tutorInvoiceProfile.invoice_series && <p><span className="text-gray-500">SF serija:</span> {tutorInvoiceProfile.invoice_series}</p>}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">{t('compTut.invoiceRequisitesEmpty')}</p>
+                )}
+              </div>
+
+              {isProKlaseAdmin && (
+              <div className="space-y-3 pt-3 border-t border-gray-100">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('compTut.penaltiesSection')}</p>
+                {penaltyFeedback && (
+                  <p className={cn(
+                    'text-sm rounded-lg px-3 py-2',
+                    penaltyFeedback.type === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800',
+                  )}>
+                    {penaltyFeedback.message}
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" size="sm" variant="outline" disabled={applyingPenalty}
+                    className="gap-1.5"
+                    onClick={() => void applyTutorAdjustment('penalty_tutor_no_show')}>
+                    {penaltyButtonLabel('penalty_tutor_no_show', t('compTut.penaltyTutorNoShow'))}
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" disabled={applyingPenalty}
+                    className="gap-1.5"
+                    onClick={() => void applyTutorAdjustment('penalty_missing_report')}>
+                    {penaltyButtonLabel('penalty_missing_report', t('compTut.penaltyMissingReport'))}
+                  </Button>
+                </div>
+                <div className="grid sm:grid-cols-2 gap-2">
+                  <Input type="number" step="0.01" placeholder={t('compTut.penaltyManual')}
+                    value={penaltyManualAmount} onChange={(e) => setPenaltyManualAmount(e.target.value)} className="rounded-xl"
+                    disabled={applyingPenalty} />
+                  <Input placeholder={t('compTut.penaltyReason')}
+                    value={penaltyManualReason} onChange={(e) => setPenaltyManualReason(e.target.value)} className="rounded-xl"
+                    disabled={applyingPenalty} />
+                </div>
+                <Button type="button" size="sm" disabled={applyingPenalty || !penaltyManualAmount}
+                  className="gap-1.5"
+                  onClick={() => void applyTutorAdjustment('penalty_manual', Number(penaltyManualAmount), penaltyManualReason || undefined)}>
+                  {penaltyButtonLabel(
+                    'penalty_manual',
+                    applyingPenaltyType === 'penalty_manual' ? t('compTut.penaltyApplying') : t('compTut.applyPenalty'),
+                  )}
+                </Button>
+              </div>
+              )}
 
               <div className="space-y-3 pt-3 border-t border-gray-100">
                 <div className="pb-3 border-b border-gray-100">

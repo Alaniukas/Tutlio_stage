@@ -17,6 +17,7 @@ import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import PerlasFinanceSection from '@/components/PerlasFinanceSection';
 import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
+import { ORG_TUTOR_FILTER_SCROLL_CLASS } from '@/lib/orgUi';
 
 type CompanyFinanceCache = {
   orgId: string;
@@ -723,7 +724,7 @@ export default function CompanyFinance() {
             {invoiceScope === 'selected_tutors' && (
               <div className="space-y-1.5">
                 <Label>{t('companyFinance.tutorsLabel')}</Label>
-                <div className="border rounded-xl p-3 max-h-36 overflow-y-auto space-y-2">
+                <div className={cn('border rounded-xl p-3 space-y-2', ORG_TUTOR_FILTER_SCROLL_CLASS)}>
                   {orgTutors.map(tu => (
                     <label key={tu.id} className="flex items-center gap-2 text-sm cursor-pointer">
                       <input

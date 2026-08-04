@@ -17,7 +17,9 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
-import { fmtMoney } from '@/lib/marketMoney';
+import { fmtMoney, isProKlaseOrg } from '@/lib/marketMoney';
+import { sumProKlasePayBreakdown, type ProKlasePayBreakdown } from '@/lib/proKlaseTutorPay';
+import { useUser } from '@/contexts/UserContext';
 import InvoiceSettingsForm from '@/components/InvoiceSettingsForm';
 import CreateInvoiceModal from '@/components/CreateInvoiceModal';
 import {
@@ -60,6 +62,8 @@ interface Invoice {
 
 export default function OrgTutorFinanceSummary() {
   const { t, dateFnsLocale } = useTranslation();
+  const { profile } = useUser();
+  const proKlasePayMode = isProKlaseOrg(profile?.organization_id);
   const { payPerLessonEur, loading: policyLoading, invoiceIssuerMode } = useOrgTutorPolicy();
   const tutorCanIssueInvoice = invoiceIssuerMode !== 'company';
 
@@ -69,6 +73,7 @@ export default function OrgTutorFinanceSummary() {
   const [rangeEnd, setRangeEnd] = useState(() => format(new Date(), 'yyyy-MM-dd'));
   const [rangeError, setRangeError] = useState<string | null>(null);
   const [completedCount, setCompletedCount] = useState(0);
+  const [payBreakdown, setPayBreakdown] = useState<ProKlasePayBreakdown | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -148,18 +153,52 @@ export default function OrgTutorFinanceSummary() {
         .from('sessions')
         .select('*', { count: 'estimated', head: true })
         .eq('tutor_id', user.id)
-        .neq('status', 'cancelled')
-        .neq('status', 'no_show')
+        .in('status', proKlasePayMode ? ['completed', 'no_show'] : ['completed'])
         .lte('end_time', new Date().toISOString())
         .gte('start_time', startIso)
         .lte('start_time', endIso);
+
+      let breakdown: ProKlasePayBreakdown | null = null;
+      if (proKlasePayMode) {
+        const { data: sessionRows } = await supabase
+          .from('sessions')
+          .select('id, status, price, subjects(is_trial)')
+          .eq('tutor_id', user.id)
+          .in('status', ['completed', 'no_show'])
+          .lte('end_time', new Date().toISOString())
+          .gte('start_time', startIso)
+          .lte('start_time', endIso);
+
+        let adjustmentsEur = 0;
+        if (profile?.organization_id) {
+          const { data: adjRows } = await supabase
+            .from('tutor_adjustments')
+            .select('amount_eur')
+            .eq('tutor_id', user.id)
+            .eq('organization_id', profile.organization_id)
+            .gte('created_at', startIso)
+            .lte('created_at', endIso);
+          adjustmentsEur = (adjRows || []).reduce(
+            (sum, row) => sum + (Number((row as { amount_eur?: number }).amount_eur) || 0),
+            0,
+          );
+        }
+
+        breakdown = sumProKlasePayBreakdown(
+          (sessionRows || []) as any[],
+          payPerLessonEur,
+          adjustmentsEur,
+        );
+      }
 
       if (cancelled) return;
       if (error) {
         console.error('[OrgTutorFinanceSummary]', error);
         setCompletedCount(0);
+        setPayBreakdown(null);
       } else {
         setCompletedCount(count ?? 0);
+        setPayBreakdown(breakdown);
       }
       setLoading(false);
     };
@@ -169,7 +208,7 @@ export default function OrgTutorFinanceSummary() {
     return () => {
       cancelled = true;
     };
-  }, [month, periodMode, rangeStart, rangeEnd, policyLoading]);
+  }, [month, periodMode, rangeStart, rangeEnd, policyLoading, proKlasePayMode, payPerLessonEur, profile?.organization_id, t]);
 
   const fetchInvoices = useCallback(async () => {
     const user = await dedupeAuthGetUser();
@@ -235,7 +274,7 @@ export default function OrgTutorFinanceSummary() {
     );
   };
 
-  const gross = completedCount * payPerLessonEur;
+  const gross = payBreakdown?.totalEur ?? completedCount * payPerLessonEur;
 
   return (
     <div className="space-y-6">
@@ -325,10 +364,35 @@ export default function OrgTutorFinanceSummary() {
             <div className="flex items-center gap-2 mt-4 pt-4 border-t border-gray-200">
               <Euro className="w-5 h-5 text-emerald-600" />
               <div>
-                <p className="text-xs text-gray-500 uppercase tracking-wide">{t('orgFinance.approxInvoiceAmount')}</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wide">
+                  {proKlasePayMode ? t('orgFinance.payableTotal') : t('orgFinance.approxInvoiceAmount')}
+                </p>
                 <p className="text-xl font-bold text-emerald-700">{fmtMoney(gross)}</p>
               </div>
             </div>
+            {proKlasePayMode && payBreakdown && (
+              <div className="mt-4 space-y-2 text-sm">
+                <p className="font-medium text-gray-700">{t('orgFinance.payBreakdown')}</p>
+                <div className="flex justify-between text-gray-600">
+                  <span>{t('orgFinance.individualLessons')} ({payBreakdown.individualLessons})</span>
+                  <span>{fmtMoney(payBreakdown.individualEur)}</span>
+                </div>
+                <div className="flex justify-between text-gray-600">
+                  <span>{t('orgFinance.trialLessons')} ({payBreakdown.trialLessons})</span>
+                  <span>{fmtMoney(payBreakdown.trialEur)}</span>
+                </div>
+                <div className="flex justify-between text-gray-600">
+                  <span>{t('orgFinance.noShowLessons')} ({payBreakdown.noShowLessons})</span>
+                  <span>{fmtMoney(payBreakdown.noShowEur)}</span>
+                </div>
+                {payBreakdown.adjustmentsEur !== 0 && (
+                  <div className="flex justify-between text-rose-700">
+                    <span>{t('orgFinance.adjustments')}</span>
+                    <span>{fmtMoney(payBreakdown.adjustmentsEur)}</span>
+                  </div>
+                )}
+              </div>
+            )}
             <p className="text-xs text-gray-400 mt-3">
               {t('orgFinance.summaryNote')}
             </p>

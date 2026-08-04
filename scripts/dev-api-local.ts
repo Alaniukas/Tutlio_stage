@@ -16,6 +16,13 @@ const projectRoot = join(__dirname, '..');
 const apiDir = join(projectRoot, 'api');
 const PORT = Number(process.env.DEV_API_PORT || 3002);
 
+const DOTENV_FORCE_KEYS = new Set([
+  'SUPABASE_URL',
+  'VITE_SUPABASE_URL',
+  'SUPABASE_SERVICE_ROLE_KEY',
+  'VITE_SUPABASE_ANON_KEY',
+]);
+
 function loadEnvFile(name: string) {
   const p = join(projectRoot, name);
   if (!existsSync(p)) return;
@@ -44,6 +51,11 @@ function loadEnvFile(name: string) {
         key === 'STRIPE_WEBHOOK_SECRET' ||
         key === 'STRIPE_CONNECT_WEBHOOK_SECRET');
     if (preserveFromParent && process.env[key] !== undefined) continue;
+    // Windows often has stale Supabase vars in user env — project .env must win.
+    if (name === '.env' && DOTENV_FORCE_KEYS.has(key)) {
+      process.env[key] = value;
+      continue;
+    }
     if (process.env[key] === undefined || name === '.env.local') process.env[key] = value;
   }
 }
@@ -52,6 +64,16 @@ loadEnvFile('.env');
 loadEnvFile('.env.local');
 /** Let API handlers infer browser origin on localhost even if VERCEL=1 leaked into .env */
 process.env.TUTLIO_DEV_API_LOCAL = '1';
+
+/** Known-dead Supabase projects — drop so VITE_* / fresh .env can win. */
+const STALE_SUPABASE_HOST = 'xklzjhfztjxltrdkplog';
+for (const key of ['SUPABASE_URL', 'VITE_SUPABASE_URL'] as const) {
+  const v = process.env[key];
+  if (v?.includes(STALE_SUPABASE_HOST)) {
+    console.warn(`[dev-api-local] Dropping stale ${key} (${STALE_SUPABASE_HOST})`);
+    delete process.env[key];
+  }
+}
 
 // Many .env.local files only define VITE_* — API auth must use the same project URL.
 if (!process.env.SUPABASE_URL && process.env.VITE_SUPABASE_URL) {

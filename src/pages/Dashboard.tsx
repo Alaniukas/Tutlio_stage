@@ -195,6 +195,7 @@ export default function DashboardPage() {
     const [orgTutorFallback, setOrgTutorFallback] = useState<boolean | null>(null);
     const isOrgTutor: boolean | null = ctxProfile ? !!ctxProfile.organization_id : orgTutorFallback;
     const hideProKlaseOrgTutorCancel = isOrgTutor === true && isProKlaseOrg(ctxProfile?.organization_id);
+    const hideProKlaseOrgTutorFreeTime = hideProKlaseOrgTutorCancel;
     const [isEditingTime, setIsEditingTime] = useState(false);
     const [editNewStartTime, setEditNewStartTime] = useState('');
     const [rescheduleReason, setRescheduleReason] = useState('');
@@ -360,18 +361,24 @@ export default function DashboardPage() {
             const orgFeat = orgFeatRes.data?.features;
             const orgFeatObj = orgFeat && typeof orgFeat === 'object' && !Array.isArray(orgFeat) ? (orgFeat as Record<string, unknown>) : {};
             const trialCommentRequired = orgFeatObj['trial_comment_required'] === true;
+            const proKlaseCommentRequired = isProKlaseOrg(organizationId);
 
-            const missingTrialComments = trialCommentRequired
-                ? (sessionsData || [])
-                    .filter((s: any) => s.status === 'completed' && s.subjects?.is_trial === true && !String(s.tutor_comment || '').trim())
-                    .slice(0, 5)
-                : [];
+            const missingComments = (sessionsData || [])
+                .filter((s: any) => {
+                    const needsComment = ['completed', 'no_show'].includes(String(s.status));
+                    if (!needsComment || String(s.tutor_comment || '').trim()) return false;
+                    if (proKlaseCommentRequired) return true;
+                    return trialCommentRequired && s.subjects?.is_trial === true;
+                })
+                .slice(0, 5);
 
             const updates: TutorUpdateItem[] = [
-                ...missingTrialComments.map((s: any) => ({
+                ...missingComments.map((s: any) => ({
                     id: `missing_comment_${s.id}`,
                     tone: 'warning' as const,
-                    message: t('dash.trialCommentMissing', { count: 1 }),
+                    message: proKlaseCommentRequired
+                        ? t('dash.lessonCommentMissing', { count: 1 })
+                        : t('dash.trialCommentMissing', { count: 1 }),
                     when: s.start_time,
                     sessionId: s.id,
                 })),
@@ -1249,6 +1256,7 @@ export default function DashboardPage() {
                                             <CheckCircle className="w-3.5 h-3.5 mr-1" />
                                             {t('dash.statusHappened')}
                                         </Button>
+                                        {!hideProKlaseOrgTutorCancel && (
                                         <Button
                                             size="sm"
                                             variant="outline"
@@ -1259,6 +1267,7 @@ export default function DashboardPage() {
                                             <Clock className="w-3.5 h-3.5 mr-1" />
                                             {t('dash.statusHappenedLate')}
                                         </Button>
+                                        )}
                                         <Button
                                             size="sm"
                                             variant="outline"
@@ -1273,7 +1282,13 @@ export default function DashboardPage() {
                                             size="sm"
                                             variant="outline"
                                             disabled={confirmingStatusId === s.id}
-                                            onClick={() => void confirmLessonStatus(s, 'cancelled')}
+                                            onClick={() => {
+                                                if (hideProKlaseOrgTutorCancel) {
+                                                    setToastMessage({ message: t('cal.proKlaseCancelAdminOnly'), type: 'error' });
+                                                    return;
+                                                }
+                                                void confirmLessonStatus(s, 'cancelled');
+                                            }}
                                             className="rounded-lg h-8 px-2.5 text-xs text-gray-700 border-gray-300 hover:bg-gray-100"
                                         >
                                             <XCircle className="w-3.5 h-3.5 mr-1" />
@@ -2079,6 +2094,7 @@ export default function DashboardPage() {
                                 {isEditingTime ? (
                                     <div className="mt-2 space-y-2">
                                         <DateTimeSpinner value={editNewStartTime} onChange={setEditNewStartTime} />
+                                        {!hideProKlaseOrgTutorFreeTime && (
                                         <label className="flex items-start gap-2 cursor-pointer">
                                 <Checkbox
                                     checked={leaveFreeTimeOnReschedule}
@@ -2086,6 +2102,7 @@ export default function DashboardPage() {
                                 />
                                             <span className="text-xs text-gray-600 leading-snug">{t('dash.leaveFreeTime')}</span>
                                         </label>
+                                        )}
                                         {editNewStartTime && selectedSession &&
                                             Math.floor(new Date(editNewStartTime).getTime() / 60000) !== Math.floor(new Date(selectedSession.start_time).getTime() / 60000) && (
                                             <div className="space-y-1">
@@ -2291,6 +2308,7 @@ export default function DashboardPage() {
                             {cancellationReason.length > 0 && cancellationReason.trim().length < 5 && (
                                 <p className="text-xs text-red-500">{t('dash.minChars', { min: '5', current: String(cancellationReason.trim().length) })}</p>
                             )}
+                            {!hideProKlaseOrgTutorFreeTime && (
                             <label className="flex items-start gap-2 cursor-pointer pt-1">
                                 <Checkbox
                                     checked={leaveFreeTimeOnCancel}
@@ -2298,6 +2316,7 @@ export default function DashboardPage() {
                                 />
                                 <span className="text-sm text-gray-600 leading-snug">{t('dash.leaveFreeTime')}</span>
                             </label>
+                            )}
                             <div className="flex gap-2 mt-3">
                                 <Button variant="outline" size="sm" onClick={() => { setCancelConfirmId(null); setCancellationReason(''); setLeaveFreeTimeOnCancel(false); }} className="rounded-xl flex-1">
                                     {t('dash.cancelBtn')}

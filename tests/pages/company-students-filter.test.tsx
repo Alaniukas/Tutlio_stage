@@ -18,16 +18,17 @@ const testState = vi.hoisted(() => ({
   cache: {
     students: [
       {
-        ...({} as any),
         id: 's1',
         full_name: 'Vėgėlė Ąžuolas',
         grade: '5',
+        media_publicity_consent: 'agree',
         created_at: '2026-07-01T10:00:00.000Z',
       },
       {
         id: 's2',
         full_name: 'Petraitis Jonas',
         grade: '7',
+        media_publicity_consent: 'disagree',
         created_at: '2026-07-02T10:00:00.000Z',
       },
     ],
@@ -99,6 +100,8 @@ describe('CompanyStudents school list filters', () => {
     // Filter dropdowns present with their "all" labels (school view only).
     expect(screen.getByText('Visos klasės')).toBeTruthy();
     expect(screen.getByText('Visos sutartys')).toBeTruthy();
+    expect(screen.getByText('Visi atvaizdai')).toBeTruthy();
+    expect(screen.getByText('Eksportuoti Excel')).toBeTruthy();
 
     // Plain search still narrows the list.
     fireEvent.change(screen.getByPlaceholderText(/Ieškoti|Search/i), { target: { value: 'Petraitis' } });

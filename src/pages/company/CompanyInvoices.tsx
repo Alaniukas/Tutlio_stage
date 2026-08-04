@@ -25,6 +25,7 @@ import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { orgTutorLessonPayEur } from '@/lib/orgTutorLessonPay';
+import { ORG_TUTOR_CARD_LIST_SCROLL_CLASS } from '@/lib/orgUi';
 
 interface Invoice {
   id: string;
@@ -590,7 +591,7 @@ export default function CompanyInvoices() {
             ) : tutors.length === 0 ? (
               <p className="text-gray-500 text-center py-8">{t('invoices.noTutors')}</p>
             ) : (
-              <div className="space-y-2">
+              <div className={cn('space-y-2', ORG_TUTOR_CARD_LIST_SCROLL_CLASS)}>
                 <label className="flex items-center gap-2 text-xs font-medium text-gray-500 mb-2 cursor-pointer">
                   <input
                     type="checkbox"

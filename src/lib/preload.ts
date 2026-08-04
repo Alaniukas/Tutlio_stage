@@ -190,6 +190,7 @@ export function tutorStudentsRowsDeduped(tutorId: string) {
       .from('students')
       .select('*, linked_user_id')
       .eq('tutor_id', tutorId)
+      .is('detached_at', null)
       .order('created_at', { ascending: false }),
   );
 }
@@ -535,7 +536,8 @@ export async function preloadTutorData() {
       tutorDashboardSessionsDeduped(user.id),
       supabase.from('students')
         .select('id', { count: 'exact', head: true })
-        .eq('tutor_id', user.id),
+        .eq('tutor_id', user.id)
+        .is('detached_at', null),
     ]);
 
     if (!getCached('tutor_dashboard')) {

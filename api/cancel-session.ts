@@ -15,6 +15,7 @@ import { verifyRequestAuth } from './_lib/auth.js';
 import { canStudentSideCancelSession, canTutorSideCancelSession } from './_lib/cancel-session-access.js';
 import { isProKlaseOrg } from './_lib/marketMoney.js';
 import { releaseSessionSlotAsAvailability } from './_lib/release-session-availability.js';
+import { PRO_KLASE_TUTOR_NO_SHOW_PENALTY_EUR } from './_lib/proKlaseTutorPay.js';
 
 async function sendEmail(body: object) {
     const baseUrl = process.env.VERCEL_URL
@@ -60,6 +61,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         cancellationFeePercent,
         penaltyPaidViaStripe,
         leaveFreeTime,
+        cancellationReasonCode,
     } = req.body as {
         sessionId: string;
         tutorId: string;
@@ -75,6 +77,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         penaltyPaidViaStripe?: boolean;
         /** Tutor/org cancel only: create one-time availability for other students to book */
         leaveFreeTime?: boolean;
+        /** Pro Klasė: tutor_no_show | admin | ... */
+        cancellationReasonCode?: string;
     };
 
     const normEmail = (e: string | null | undefined) =>
@@ -220,11 +224,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // 1. Mark session as cancelled
+    const reasonCode = String(cancellationReasonCode || '').trim() || null;
     const { data: session, error: cancelError } = await supabase
         .from('sessions')
         .update({
             status: 'cancelled',
             cancellation_reason: reasonTrimmed,
+            cancellation_reason_code: reasonCode,
             cancelled_by: cancelledBy,  // Track who cancelled (tutor or student)
             cancelled_at: new Date().toISOString()  // Track when cancelled for auto-hide
         })
@@ -235,6 +241,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (cancelError || !session) {
         console.error('Cancel error:', cancelError);
         return res.status(500).json({ error: 'Failed to cancel session', details: cancelError });
+    }
+
+    // Pro Klasė: tutor no-show — auto penalty for tutor (admin cancel only).
+    if (reasonCode === 'tutor_no_show' && cancelledBy === 'tutor' && !auth.isInternal) {
+        const { data: tutorOrgRow } = await supabase
+            .from('profiles')
+            .select('organization_id')
+            .eq('id', tutorId)
+            .maybeSingle();
+        const pkOrgId = (tutorOrgRow as { organization_id?: string | null } | null)?.organization_id;
+        if (pkOrgId && isProKlaseOrg(pkOrgId)) {
+            const adminUserId = auth.userId;
+            if (adminUserId) {
+                await supabase.from('tutor_adjustments').insert({
+                    organization_id: pkOrgId,
+                    tutor_id: tutorId,
+                    session_id: sessionId,
+                    type: 'penalty_tutor_no_show',
+                    amount_eur: PRO_KLASE_TUTOR_NO_SHOW_PENALTY_EUR,
+                    reason: reasonTrimmed,
+                    created_by: adminUserId,
+                });
+            }
+        }
     }
 
     // Check if this is a group lesson (needed for available_spots + waitlist auto-fill)

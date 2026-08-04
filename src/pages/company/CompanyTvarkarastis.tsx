@@ -44,6 +44,9 @@ import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { isSchoolOrg, hasProKlaseIntakeFeatures } from '@/lib/orgIntakeMode';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
+import { isProKlaseOrg } from '@/lib/marketMoney';
+import { ORG_TUTOR_FILTER_SCROLL_CLASS, ORG_TUTOR_SELECT_SCROLL_CLASS } from '@/lib/orgUi';
+import { calendarSessionTitlePrefix, getCalendarSessionEventStyle } from '@/lib/calendarSessionEventStyle';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -167,6 +170,8 @@ interface Session {
   recurring_session_id?: string | null;
   no_show_when?: string | null;
   cancelled_by?: 'tutor' | 'student' | null;
+  cancellation_reason_code?: string | null;
+  is_makeup?: boolean;
   tutor_comment?: string | null;
   show_comment_to_student?: boolean;
   payment_status?: string | null;
@@ -395,6 +400,7 @@ export default function CompanyTvarkarastis() {
   const [editStatus, setEditStatus] = useState<'active' | 'completed' | 'cancelled' | 'no_show'>('active');
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const [cancellationReason, setCancellationReason] = useState('');
+  const [cancelReasonCode, setCancelReasonCode] = useState<'admin' | 'tutor_no_show'>('admin');
   const [leaveFreeTimeOnCancel, setLeaveFreeTimeOnCancel] = useState(false);
   const [leaveFreeTimeOnReschedule, setLeaveFreeTimeOnReschedule] = useState(false);
   const [rescheduleReason, setRescheduleReason] = useState('');
@@ -458,6 +464,7 @@ export default function CompanyTvarkarastis() {
   const [createRecurringWeekdays, setCreateRecurringWeekdays] = useState<number[]>([]);
   const [createIsPaid, setCreateIsPaid] = useState(false);
   const [createIsTrial, setCreateIsTrial] = useState(false);
+  const [createIsMakeup, setCreateIsMakeup] = useState(false);
   const [createFirstLessonIsTrial, setCreateFirstLessonIsTrial] = useState(false);
   /** Set when the create modal was opened from an availability block (keeps the marked time). */
   const [createFromAvailabilityBlock, setCreateFromAvailabilityBlock] = useState<{ availabilityId: string; tutorId: string } | null>(null);
@@ -638,7 +645,8 @@ export default function CompanyTvarkarastis() {
       // Visi org mokiniai (kad admin galėtų užimti laiką pas bet kurį korepetitorių)
       let studentsQuery = supabase
         .from('students')
-        .select('id, full_name, tutor_id, email, personal_meeting_link, grade, pricing_lessons_per_week');
+        .select('id, full_name, tutor_id, email, personal_meeting_link, grade, pricing_lessons_per_week')
+        .is('detached_at', null);
       if (organizationId) {
         studentsQuery = studentsQuery.eq('organization_id', organizationId);
       } else {
@@ -810,7 +818,12 @@ export default function CompanyTvarkarastis() {
     if (!showOnlyAvailability) {
       events.push(...filteredSessions.map(session => ({
         id: session.id,
-        title: `${session.subject_id && trialSubjectIds.has(session.subject_id) ? '★ ' : ''}${session.student?.full_name || 'Mokinys'} - ${session.tutor?.full_name || 'Tutorius'}`,
+        title: `${calendarSessionTitlePrefix({
+          isTrial: !!session.subject_id && trialSubjectIds.has(session.subject_id),
+          isMakeup: session.is_makeup === true,
+          cancellationReasonCode: session.cancellation_reason_code,
+          status: session.status,
+        })}${session.student?.full_name || 'Mokinys'} - ${session.tutor?.full_name || 'Tutorius'}`,
         start: session.start_time,
         end: session.end_time,
         resource: {
@@ -1306,62 +1319,27 @@ export default function CompanyTvarkarastis() {
     const session = event.resource?.session;
     if (!session) return {};
 
-    if (session.status === 'cancelled') {
-      return {
-        style: {
-          backgroundColor: '#ef4444',
-          borderColor: '#ef4444',
-          opacity: 0.5,
-          color: '#fff',
-        },
-      };
-    }
-    if (session.status === 'no_show') {
-      return {
-        style: {
-          backgroundColor: '#fda4af',
-          borderColor: '#fda4af',
-          color: '#fff',
-        },
-      };
-    }
-
     const endAt = session.end_time instanceof Date ? session.end_time : new Date(session.end_time);
-    const hasEnded = endAt.getTime() <= Date.now();
-    const isPaid = session.paid === true || session.payment_status === 'paid' || session.payment_status === 'confirmed';
-
-    const unpaidOccurred =
-      (session.status === 'completed' && !isPaid) ||
-      (session.status === 'active' && hasEnded && !isPaid) ||
-      (hasEnded && session.payment_status === 'paid_by_student');
-
-    let bgColor = '#3b82f6'; // blue - active
-    if (unpaidOccurred) {
-      bgColor = '#ca8a04'; // amber - completed unpaid
-    } else if (isPaid || session.status === 'completed') {
-      bgColor = '#10b981'; // green - completed paid
-    }
-
-    // Moved-lesson indicator (req 6): dashed amber outline when a package lesson
-    // was rescheduled (original_start_time set) and the org uses monthly packages.
-    // Matches the same-month guard scope (package lessons only).
+    const isTrialLesson = !!session.subject_id && trialSubjectIds.has(session.subject_id);
     const isMovedLesson =
       hasFeature('monthly_packages') && !!session.original_start_time && !!session.lesson_package_id;
 
-    // Trial highlight: solid amber outline + tint (dashed moved-style wins on border).
-    const isTrialLesson = !!session.subject_id && trialSubjectIds.has(session.subject_id);
+    const eventStyle = getCalendarSessionEventStyle({
+      status: session.status,
+      paid: session.paid,
+      payment_status: session.payment_status,
+      endAt,
+      isTrial: isTrialLesson,
+      isMakeup: session.is_makeup === true,
+      cancellationReasonCode: session.cancellation_reason_code,
+      isMovedLesson,
+      isOrgTutor: false,
+    });
 
     return {
       style: {
-        backgroundColor: bgColor,
-        borderColor: isMovedLesson || isTrialLesson ? '#f59e0b' : bgColor,
-        color: '#fff',
-        ...(isTrialLesson && !isMovedLesson
-          ? { border: '2px solid #f59e0b', boxShadow: 'inset 0 0 0 9999px rgba(245, 158, 11, 0.18)' }
-          : {}),
-        ...(isMovedLesson
-          ? { border: '2px dashed #f59e0b', boxShadow: 'inset 0 0 0 9999px rgba(245, 158, 11, 0.18)' }
-          : {}),
+        ...eventStyle,
+        borderColor: eventStyle.borderColor ?? eventStyle.backgroundColor,
       },
     };
   };
@@ -1686,6 +1664,7 @@ export default function CompanyTvarkarastis() {
         studentEmail: null,
         tutorEmail: null,
         leaveFreeTime: leaveFreeTimeOnCancel,
+        cancellationReasonCode: isProKlaseOrg(organizationId) ? cancelReasonCode : undefined,
       });
 
       if (success) {
@@ -2152,6 +2131,7 @@ export default function CompanyTvarkarastis() {
         createFirstLessonIsTrial: createIsRecurring && createFirstLessonIsTrial,
         createTutorComment,
         createShowCommentToStudent,
+        createIsMakeup: isProKlaseOrg(organizationId) && createIsMakeup,
         subjects,
         individualPricing,
         tutorSubjectPrices,
@@ -2374,7 +2354,7 @@ export default function CompanyTvarkarastis() {
                     {t('compSch.clear')}
                   </Button>
                 </div>
-                <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
+                <div className={cn(ORG_TUTOR_FILTER_SCROLL_CLASS, 'space-y-1 pr-1')}>
                   {filteredOrgTutorsForList.length === 0 ? (
                     <p className="text-xs text-gray-500 py-2">{t('compSch.searchNotFound')}</p>
                   ) : (
@@ -2599,8 +2579,16 @@ export default function CompanyTvarkarastis() {
             <span>{t('compSch.cancelledLesson')}</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#3b82f6', border: '2px solid #f59e0b' }}></div>
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#a855f7', border: '2px solid #7e22ce' }}></div>
             <span>{t('compSch.trialLegend')}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#8b5cf6', border: '2px solid #6d28d9' }}></div>
+            <span>{t('compSch.makeupLegend')}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded opacity-55" style={{ backgroundColor: '#ef4444', border: '2px dashed #991b1b' }}></div>
+            <span>{t('compSch.tutorNoShowLegend')}</span>
           </div>
         </div>
       </div>
@@ -2673,7 +2661,7 @@ export default function CompanyTvarkarastis() {
                   <SelectTrigger className="rounded-xl">
                     <SelectValue placeholder={t('compSch.selectTutorPlaceholder')} />
                   </SelectTrigger>
-                  <SelectContent className="max-h-72 overflow-y-auto">
+                  <SelectContent className={ORG_TUTOR_SELECT_SCROLL_CLASS}>
                     <div className="sticky top-0 z-10 bg-white p-2 border-b border-gray-100">
                       <Input
                         value={createTutorSearch}
@@ -2952,6 +2940,16 @@ export default function CompanyTvarkarastis() {
               </div>
             )}
 
+            {isProKlaseOrg(organizationId) && (
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <Checkbox
+                  checked={createIsMakeup}
+                  onChange={(e) => setCreateIsMakeup(e.target.checked)}
+                />
+                Kompensacinė pamoka (klientui nemokama)
+              </label>
+            )}
+
             <div className="space-y-2">
               <Label>{t('compSch.commentOptional')}</Label>
               <textarea
@@ -3195,6 +3193,16 @@ export default function CompanyTvarkarastis() {
                         ★ {t('compSch.trialLesson')}
                       </span>
                     )}
+                    {selectedEvent.is_makeup && (
+                      <span className="inline-flex items-center rounded-md border border-violet-300 bg-violet-50 px-1.5 py-0.5 text-[11px] font-semibold text-violet-800">
+                        Kompensacinė
+                      </span>
+                    )}
+                    {selectedEvent.cancellation_reason_code === 'tutor_no_show' && (
+                      <span className="inline-flex items-center rounded-md border border-red-300 bg-red-50 px-1.5 py-0.5 text-[11px] font-semibold text-red-800">
+                        Korep. neatvyko
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div>
@@ -3309,6 +3317,15 @@ export default function CompanyTvarkarastis() {
                     placeholder={t('compSch.specifyReasonPlaceholder')}
                     className="rounded-lg border-red-200"
                   />
+                  {isProKlaseOrg(organizationId) && (
+                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                      <Checkbox
+                        checked={cancelReasonCode === 'tutor_no_show'}
+                        onChange={(e) => setCancelReasonCode(e.target.checked ? 'tutor_no_show' : 'admin')}
+                      />
+                      Korepetitorius neatvyko (klientas nemoka, −30 € korep.)
+                    </label>
+                  )}
                   <label className="flex items-start gap-2 cursor-pointer">
                     <Checkbox
                       checked={leaveFreeTimeOnCancel}
@@ -3511,7 +3528,7 @@ export default function CompanyTvarkarastis() {
                     <SelectTrigger className="rounded-xl">
                       <SelectValue placeholder={t('compSch.selectPlaceholder')} />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className={ORG_TUTOR_SELECT_SCROLL_CLASS}>
                       {orgTutors.map(tut => {
                         const licBlocked = isTutorLicenseBlockedForOrgBooking(tut.id);
                         const keepSelectable = tut.id === (editTutorId || selectedEvent.tutor_id);
@@ -3905,7 +3922,7 @@ export default function CompanyTvarkarastis() {
                 <SelectTrigger className="rounded-xl mt-1">
                   <SelectValue placeholder={t('compSch.selectPlaceholder')} />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className={ORG_TUTOR_SELECT_SCROLL_CLASS}>
                   {orgTutors.map(t => (
                     <SelectItem key={t.id} value={t.id}>{t.full_name}</SelectItem>
                   ))}

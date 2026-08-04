@@ -108,6 +108,7 @@ import { recordJoinClick } from '@/lib/joinTracking';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { isProKlaseOrg } from '@/lib/marketMoney';
+import { calendarSessionTitlePrefix, getCalendarSessionEventStyle } from '@/lib/calendarSessionEventStyle';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { formatContactForTutorView } from '@/lib/orgContactVisibility';
@@ -159,6 +160,10 @@ interface Session {
   hidden_from_calendar?: boolean;
   subject_id?: string;
   subjects?: { name?: string | null; is_trial?: boolean } | null;
+  is_makeup?: boolean;
+  cancellation_reason_code?: string | null;
+  original_start_time?: string | null;
+  lesson_package_id?: string | null;
   available_spots?: number | null;
   recurring_session_id?: string | null;
   student?: {
@@ -242,6 +247,8 @@ export default function CalendarPage() {
   // Org feature: ended lessons are not auto-completed — the tutor must confirm the outcome.
   const requiresStatusConfirmation = hasOrgFeature('tutor_lesson_status_confirmation');
   const hideProKlaseOrgTutorCancel = orgPolicy.isOrgTutor && isProKlaseOrg(ctxProfile?.organization_id);
+  const hideProKlaseOrgTutorFreeTime = hideProKlaseOrgTutorCancel;
+  const hideProKlaseOrgTutorDelete = hideProKlaseOrgTutorCancel;
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -280,6 +287,7 @@ export default function CalendarPage() {
   // Slot choice popup (C2: Calendar day click → create free time or lesson)
   const [slotChoiceOpen, setSlotChoiceOpen] = useState(false);
   const [pendingSlot, setPendingSlot] = useState<{ start: Date; end: Date } | null>(null);
+  const [savingFreeTimeFromSlot, setSavingFreeTimeFromSlot] = useState(false);
 
   // Modal states
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -326,6 +334,11 @@ export default function CalendarPage() {
   const [cancellationReason, setCancellationReason] = useState('');
   const [leaveFreeTimeOnCancel, setLeaveFreeTimeOnCancel] = useState(false);
   const [leaveFreeTimeOnReschedule, setLeaveFreeTimeOnReschedule] = useState(false);
+  const [availabilityPrefill, setAvailabilityPrefill] = useState<{
+    specificDate?: string;
+    specificStart?: string;
+    specificEnd?: string;
+  } | null>(null);
 
   // Mass cancel states
   const [massCancelStartDate, setMassCancelStartDate] = useState('');
@@ -1013,7 +1026,7 @@ export default function CalendarPage() {
       setSelectedSlot({ start, end });
       setStartTime(format(start, "yyyy-MM-dd'T'HH:mm"));
       setEndTime(format(end, "yyyy-MM-dd'T'HH:mm"));
-      setCreateDurationTouched(false);
+      setCreateDurationTouched(true);
       setSelectedStudentId('');
       setSelectedSubjectId('');
       setMeetingLink('');
@@ -1041,7 +1054,7 @@ export default function CalendarPage() {
     setSelectedSlot(pendingSlot);
     setStartTime(format(pendingSlot.start, "yyyy-MM-dd'T'HH:mm"));
     setEndTime(format(pendingSlot.end, "yyyy-MM-dd'T'HH:mm"));
-    setCreateDurationTouched(false);
+    setCreateDurationTouched(true);
     setSelectedStudentId('');
     setSelectedSubjectId('');
     setMeetingLink('');
@@ -1054,9 +1067,97 @@ export default function CalendarPage() {
     setIsCreateModalOpen(true);
   };
 
-  const openCreateFreeTimeFromSlot = () => {
-    setSlotChoiceOpen(false);
-    setIsAvailabilityModalOpen(true);
+  const openCreateFreeTimeFromSlot = async () => {
+    if (!pendingSlot || !ctxUser) return;
+
+    if (!isOrgTutor && !stripeConnected) {
+      setSlotChoiceOpen(false);
+      alert(t('avail.stripeRequired'));
+      return;
+    }
+
+    const specificDate = format(pendingSlot.start, 'yyyy-MM-dd');
+    const specificStart = format(pendingSlot.start, 'HH:mm');
+    const specificEnd = format(pendingSlot.end, 'HH:mm');
+    const blockStart = pendingSlot.start;
+
+    const timeToMinutes = (time: string) => {
+      const [hStr, mStr] = time.split(':');
+      const h = Number(hStr);
+      const m = Number(mStr);
+      if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+      return h * 60 + m;
+    };
+    const rangesOverlap = (aStart: string, aEnd: string, bStart: string, bEnd: string) => {
+      const aS = timeToMinutes(aStart);
+      const aE = timeToMinutes(aEnd);
+      const bS = timeToMinutes(bStart.slice(0, 5));
+      const bE = timeToMinutes(bEnd.slice(0, 5));
+      if (aS === null || aE === null || bS === null || bE === null) return false;
+      return aS < bE && aE > bS;
+    };
+
+    const startMin = timeToMinutes(specificStart);
+    const endMin = timeToMinutes(specificEnd);
+    if (startMin === null || endMin === null || startMin >= endMin) {
+      setToastMessage({ message: t('avail.invalidTimeRange'), type: 'error' });
+      return;
+    }
+
+    setSavingFreeTimeFromSlot(true);
+    try {
+      const { data: existingSpecific } = await supabase
+        .from('availability')
+        .select('id, start_time, end_time')
+        .eq('tutor_id', ctxUser.id)
+        .eq('is_recurring', false)
+        .eq('specific_date', specificDate);
+
+      if (existingSpecific?.some((s) =>
+        rangesOverlap(specificStart, specificEnd, s.start_time, s.end_time),
+      )) {
+        setToastMessage({ message: t('avail.overlapError'), type: 'error' });
+        return;
+      }
+
+      const { data: inserted, error } = await supabase.from('availability').insert({
+        tutor_id: ctxUser.id,
+        specific_date: specificDate,
+        start_time: specificStart,
+        end_time: specificEnd,
+        is_recurring: false,
+        subject_ids: [],
+      }).select('id').single();
+
+      if (error || !inserted?.id) {
+        console.error('Error adding free time slot:', error);
+        setToastMessage({ message: t('avail.addFailed'), type: 'error' });
+        return;
+      }
+
+      setSlotChoiceOpen(false);
+      setPendingSlot(null);
+
+      setEditingSlot({
+        ruleId: inserted.id,
+        ruleStart: specificStart,
+        ruleEnd: specificEnd,
+        ruleIsRecurring: false,
+        ruleDate: specificDate,
+        ruleDayOfWeek: null,
+        blockStart,
+        subjectIds: [],
+        meetingLink: '',
+      });
+      setSlotEditStart(specificStart);
+      setSlotEditEnd(specificEnd);
+      setSlotEditSubjects([]);
+      setSlotEditMeetingLink('');
+      setIsSlotEditOpen(true);
+      fetchData();
+    } finally {
+      setSavingFreeTimeFromSlot(false);
+    }
   };
 
   const handleSelectEvent = useCallback((event: any) => {
@@ -1107,10 +1208,7 @@ export default function CalendarPage() {
       return;
     }
 
-    // Student-specific pricing legitimately re-defaults the duration.
-    setCreateDurationTouched(false);
-
-    // Check if there's individual pricing for this student and subject
+    // Student-specific pricing legitimately re-defaults the duration unless user drew a slot.
     const pricing = individualPricing.find(
       (p) => p.student_id === studentId && p.subject_id === selectedSubjectId,
     );
@@ -1124,16 +1222,18 @@ export default function CalendarPage() {
     setMeetingLink(resolveMeetingLink(subj.meeting_link, selectedStudentId));
 
     // Auto-adjust end time based on individual duration (if available) or subject duration
-    const durationMinutes =
-      (pricing && typeof pricing.duration_minutes === 'number'
-        ? pricing.duration_minutes
-        : subj.duration_minutes) || 60;
+    if (!createDurationTouched) {
+      const durationMinutes =
+        (pricing && typeof pricing.duration_minutes === 'number'
+          ? pricing.duration_minutes
+          : subj.duration_minutes) || 60;
 
-    if (startTime) {
-      const start = new Date(startTime);
-      if (!Number.isNaN(start.getTime())) {
-        const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
-        setEndTime(format(end, "yyyy-MM-dd'T'HH:mm"));
+      if (startTime) {
+        const start = new Date(startTime);
+        if (!Number.isNaN(start.getTime())) {
+          const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
+          setEndTime(format(end, "yyyy-MM-dd'T'HH:mm"));
+        }
       }
     }
   };
@@ -1141,7 +1241,6 @@ export default function CalendarPage() {
   // When subject changes, autofill topic and price
   const handleSubjectChange = (subjectId: string) => {
     setSelectedSubjectId(subjectId);
-    setCreateDurationTouched(false);
     const subj = subjects.find((s) => s.id === subjectId);
 
     // Clear student selection when switching between group/individual
@@ -1164,7 +1263,7 @@ export default function CalendarPage() {
         setPrice(pricing.price);
         setMeetingLink(resolveMeetingLink(subj.meeting_link, selectedStudentId));
         // Auto-adjust end time based on individual duration
-        if (startTime) {
+        if (!createDurationTouched && startTime) {
           const start = new Date(startTime);
           const end = new Date(start.getTime() + pricing.duration_minutes * 60 * 1000);
           setEndTime(format(end, "yyyy-MM-dd'T'HH:mm"));
@@ -1175,7 +1274,7 @@ export default function CalendarPage() {
         setPrice(tsp?.price ?? subj.price);
         setMeetingLink(resolveMeetingLink(subj.meeting_link, selectedStudentId));
         const dur = tsp?.duration_minutes ?? subj.duration_minutes ?? 60;
-        if (startTime) {
+        if (!createDurationTouched && startTime) {
           const start = new Date(startTime);
           const end = new Date(start.getTime() + dur * 60 * 1000);
           setEndTime(format(end, "yyyy-MM-dd'T'HH:mm"));
@@ -3359,7 +3458,19 @@ export default function CalendarPage() {
       }
       setSessions((prev) => prev.map((s) => (s.id === session.id ? { ...s, status } : s)));
       setSelectedEvent((prev) => (prev && prev.id === session.id ? { ...prev, status } : prev));
-      setIsEventModalOpen(false);
+      const needsProKlaseComment =
+        hideProKlaseOrgTutorCancel && (status === 'completed' || status === 'no_show');
+      const hasComment = Boolean(
+        viewCommentText.trim() || session.tutor_comment?.trim(),
+      );
+      if (!needsProKlaseComment || hasComment) {
+        setIsEventModalOpen(false);
+      } else {
+        setToastMessage({
+          message: t('dash.lessonCommentMissing', { count: 1 }),
+          type: 'warning',
+        });
+      }
       fetchData({ silent: true });
       if (status === 'no_show') {
         void (async () => {
@@ -3683,69 +3794,29 @@ export default function CalendarPage() {
     }
 
     const subj = subjects.find((s) => s.name === event.topic);
-    let backgroundColor = subj?.color || '#6366f1';
-
-    if (event.status === 'cancelled') {
-      return {
-        style: {
-          backgroundColor: '#ef4444',
-          opacity: 0.5,
-          border: 'none',
-          borderRadius: '8px',
-          color: 'white',
-        },
-      };
-    }
-    if (event.status === 'no_show') {
-      return {
-        style: {
-          backgroundColor: '#fda4af',
-          opacity: 1,
-          border: 'none',
-          borderRadius: '8px',
-          color: 'white',
-        },
-      };
-    }
-
-    const endAt = event.end ?? event.end_time;
-    const hasEnded = new Date(endAt).getTime() <= Date.now();
-    const isPaid =
-      event.paid === true ||
-      event.payment_status === 'paid' ||
-      event.payment_status === 'confirmed';
-
-    if (orgPolicy.isOrgTutor) {
-      if (event.status === 'completed') {
-        backgroundColor = '#10b981';
-      }
-    } else {
-      const unpaidOccurred =
-        (event.status === 'completed' && !isPaid) ||
-        (event.status === 'active' && hasEnded && !isPaid) ||
-        (hasEnded && event.payment_status === 'paid_by_student');
-
-      if (unpaidOccurred) {
-        backgroundColor = '#ca8a04';
-      } else if (event.status === 'completed') {
-        backgroundColor = '#10b981';
-      }
-    }
-
-    // Moved-lesson indicator (req 6): dashed amber outline when a package lesson
-    // has been rescheduled (original_start_time set) and the org uses monthly
-    // packages. Matches the same-month guard scope (package lessons only).
+    const isTrial = event.subjects?.is_trial === true;
+    const endAt = new Date(event.end ?? event.end_time);
     const isMovedLesson =
       hasOrgFeature('monthly_packages') && !!event.original_start_time && !!event.lesson_package_id;
 
+    const eventStyle = getCalendarSessionEventStyle({
+      status: event.status,
+      paid: event.paid,
+      payment_status: event.payment_status,
+      endAt,
+      isTrial,
+      isMakeup: event.is_makeup === true,
+      cancellationReasonCode: event.cancellation_reason_code,
+      isMovedLesson,
+      isOrgTutor: orgPolicy.isOrgTutor,
+      defaultColor: subj?.color || '#6366f1',
+    });
+
     return {
       style: {
-        backgroundColor,
-        opacity: 1,
-        border: isMovedLesson ? '2px dashed #f59e0b' : 'none',
+        ...eventStyle,
         borderRadius: '8px',
-        color: 'white',
-        ...(isMovedLesson ? { boxShadow: 'inset 0 0 0 9999px rgba(245, 158, 11, 0.18)' } : {}),
+        pointerEvents: 'auto' as const,
       },
     };
   };
@@ -4133,7 +4204,13 @@ export default function CalendarPage() {
                   statusText = t('cal.statusPending');
                 }
 
-                return `${name}${topic}${statusText}`;
+                const prefix = calendarSessionTitlePrefix({
+                  isTrial: event.subjects?.is_trial === true,
+                  isMakeup: event.is_makeup === true,
+                  cancellationReasonCode: event.cancellation_reason_code,
+                  status: event.status,
+                });
+                return `${prefix}${name}${topic}${statusText}`;
               }}
             />
           )}
@@ -4163,13 +4240,20 @@ export default function CalendarPage() {
         {[
           { color: '#6366f1', label: t('cal.legendReserved') },
           { color: '#10b981', label: t('cal.legendCompleted') },
-          ...(!orgPolicy.isOrgTutor ? [{ color: '#ca8a04', label: t('cal.legendUnpaidOccurred') }] : []),
+          { color: '#ca8a04', label: t('cal.legendUnpaidOccurred') },
+          { color: '#a855f7', label: t('cal.legendTrial'), border: '2px solid #7e22ce' },
+          { color: '#8b5cf6', label: t('cal.legendMakeup'), border: '2px solid #6d28d9' },
           { color: '#ef4444', label: t('cal.legendCancelled'), opacity: true },
+          { color: '#ef4444', label: t('cal.legendTutorNoShow'), opacity: true, border: '2px dashed #991b1b' },
         ].map((item) => (
           <div key={item.label} className="flex items-center gap-2">
             <span
               className="w-3 h-3 rounded-full"
-              style={{ backgroundColor: item.color, opacity: item.opacity ? 0.5 : 1 }}
+              style={{
+                backgroundColor: item.color,
+                opacity: item.opacity ? 0.55 : 1,
+                border: item.border ?? 'none',
+              }}
             />
             <span className="text-xs text-gray-500">{item.label}</span>
           </div>
@@ -4497,6 +4581,7 @@ export default function CalendarPage() {
                   <Edit2 className="w-3.5 h-3.5 mr-1" /> <span className="hidden sm:inline">{t('cal.editBtn')}</span>
                 </Button>
                 )}
+                {!hideProKlaseOrgTutorDelete && (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -4506,6 +4591,7 @@ export default function CalendarPage() {
                 >
                   <Trash2 className="w-3.5 h-3.5 mr-1" /> <span className="hidden sm:inline">{t('cal.delete')}</span>
                 </Button>
+                )}
                 </div>
               )}
             </DialogTitle>
@@ -4557,6 +4643,7 @@ export default function CalendarPage() {
                   </div>
                 </div>
               )}
+              {!hideProKlaseOrgTutorFreeTime && (
               <label className="flex items-start gap-2 cursor-pointer">
                 <Checkbox
                   checked={leaveFreeTimeOnReschedule}
@@ -4564,6 +4651,7 @@ export default function CalendarPage() {
                 />
                 <span className="text-sm text-gray-600 leading-snug">{t('dash.leaveFreeTime')}</span>
               </label>
+              )}
               <div className="space-y-2">
                 <Label>{t('cal.durationLabel')}</Label>
                 <Input
@@ -4970,6 +5058,7 @@ export default function CalendarPage() {
               {cancellationReason.length > 0 && cancellationReason.trim().length < 5 && (
                 <p className="text-xs text-red-500">{t('dash.minChars', { min: '5', current: String(cancellationReason.trim().length) })}</p>
               )}
+              {!hideProKlaseOrgTutorFreeTime && (
               <label className="flex items-start gap-2 cursor-pointer pt-1">
                 <Checkbox
                   checked={leaveFreeTimeOnCancel}
@@ -4977,6 +5066,7 @@ export default function CalendarPage() {
                 />
                 <span className="text-sm text-gray-600 leading-snug">{t('dash.leaveFreeTime')}</span>
               </label>
+              )}
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={() => { setCancelConfirmId(null); setCancellationReason(''); setLeaveFreeTimeOnCancel(false); }} className="rounded-xl flex-1">
                   {t('cal.cancelBtn')}
@@ -5016,7 +5106,7 @@ export default function CalendarPage() {
                 <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 space-y-2">
                   <p className="text-sm font-semibold text-amber-900">{t('cal.confirmStatusPrompt')}</p>
                   <p className="text-xs text-amber-800/80">{t('cal.confirmStatusDesc')}</p>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className={`grid gap-2 ${hideProKlaseOrgTutorCancel ? 'grid-cols-2' : 'grid-cols-2'}`}>
                     <Button
                       size="sm"
                       onClick={() => void handleConfirmSessionStatus(selectedEvent, 'completed')}
@@ -5026,6 +5116,7 @@ export default function CalendarPage() {
                       <CheckCircle className="w-4 h-4 mr-1" />
                       {t('cal.statusHappened')}
                     </Button>
+                    {!hideProKlaseOrgTutorCancel && (
                     <Button
                       size="sm"
                       variant="outline"
@@ -5036,6 +5127,7 @@ export default function CalendarPage() {
                       <Clock className="w-4 h-4 mr-1" />
                       {t('cal.statusHappenedLate')}
                     </Button>
+                    )}
                     <Button
                       size="sm"
                       variant="outline"
@@ -5049,7 +5141,13 @@ export default function CalendarPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => void handleConfirmSessionStatus(selectedEvent, 'cancelled')}
+                      onClick={() => {
+                        if (hideProKlaseOrgTutorCancel) {
+                          setToastMessage({ message: t('cal.proKlaseCancelAdminOnly'), type: 'warning' });
+                          return;
+                        }
+                        void handleConfirmSessionStatus(selectedEvent, 'cancelled');
+                      }}
                       disabled={noShowSavingId === selectedEvent.id}
                       className="rounded-xl text-gray-700 border-gray-300 hover:bg-gray-100"
                     >
@@ -5541,11 +5639,21 @@ export default function CalendarPage() {
         <DialogContent className="max-w-xs">
           <DialogHeader>
             <DialogTitle>{t('cal.slotChoiceTitle')}</DialogTitle>
+            {pendingSlot && (
+              <DialogDescription>
+                {format(pendingSlot.start, 'yyyy-MM-dd HH:mm')} – {format(pendingSlot.end, 'HH:mm')}
+              </DialogDescription>
+            )}
           </DialogHeader>
           <div className="flex flex-col gap-3 pt-2">
-            <Button variant="outline" className="justify-start gap-3 h-12" onClick={openCreateFreeTimeFromSlot}>
+            <Button
+              variant="outline"
+              className="justify-start gap-3 h-12"
+              onClick={openCreateFreeTimeFromSlot}
+              disabled={savingFreeTimeFromSlot}
+            >
               <Clock className="w-5 h-5 text-green-600" />
-              {t('cal.createFreeTime')}
+              {savingFreeTimeFromSlot ? t('avail.saving') : t('cal.createFreeTime')}
             </Button>
             <Button
               variant="outline"
@@ -5567,6 +5675,7 @@ export default function CalendarPage() {
         onOpenChange={(open) => {
           setIsAvailabilityModalOpen(open);
           if (!open) {
+            setAvailabilityPrefill(null);
             // Refetch when closing so the calendar gets new availability slots immediately
             fetchData();
           }
@@ -5579,7 +5688,7 @@ export default function CalendarPage() {
               {t('cal.setWorkHours')}
             </DialogDescription>
           </DialogHeader>
-          <AvailabilityManager />
+          <AvailabilityManager prefill={availabilityPrefill} />
         </DialogContent>
       </Dialog>
       {/* === UPCOMING SESSIONS LIST MODAL === */}
@@ -5718,6 +5827,48 @@ export default function CalendarPage() {
                 placeholder="https://zoom.us/j/... arba https://meet.google.com/..."
               />
               <p className="text-xs text-gray-400">{t('cal.linkUsedAsDefault')}</p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('cal.subjectsForSlot')}</label>
+              <div className="text-xs text-gray-400 mb-2">
+                {slotEditSubjects.length > 0
+                  ? t('cal.selectedSubjects', { count: String(slotEditSubjects.length) })
+                  : t('cal.noSubjectsSelected')}
+              </div>
+              <div className="grid grid-cols-2 gap-2 max-h-[160px] overflow-y-auto pr-1">
+                {subjects.map((subject) => (
+                  <label key={subject.id} className="flex items-start gap-2 p-2 rounded-lg border border-gray-100 hover:bg-gray-50 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500"
+                      checked={slotEditSubjects.includes(subject.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSlotEditSubjects((prev) => uniqueSubjectIds([...prev, subject.id]));
+                        } else {
+                          setSlotEditSubjects((prev) => prev.filter((id) => id !== subject.id));
+                        }
+                      }}
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-sm font-medium text-gray-700">
+                        {subject.name}
+                        {subject.is_group && subject.max_students && (
+                          <span className="text-xs text-violet-600 font-semibold ml-1">
+                            {t('cal.groupMaxSeats', { max: String(subject.max_students) })}
+                          </span>
+                        )}
+                      </span>
+                      {subject.grade_min && subject.grade_max && (
+                        <span className="text-[10px] text-gray-400">
+                          {subject.grade_min}-{subject.grade_max === 13 ? t('lessonSet.gradeUniversity') : `${subject.grade_max} ${t('lessonSet.gradeShort')}`}
+                        </span>
+                      )}
+                    </div>
+                  </label>
+                ))}
+              </div>
             </div>
 
             {/* Add Student Button */}

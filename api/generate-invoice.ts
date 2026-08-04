@@ -3,6 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { resolveInvoiceBranding } from './_lib/invoiceBranding.js';
 import { generateInvoicePdf, type InvoicePdfData } from './_lib/invoicePdf.js';
+import { isProKlaseOrg } from './_lib/marketMoney.js';
+import { proKlaseSessionPayEur } from './_lib/proKlaseTutorPay.js';
 
 /** EUR per lesson for org-tutor → company invoices (see profiles.company_commission_percent). */
 function orgTutorLessonPayEur(tutorPayRate: number | null | undefined, sessionPrice: number | null | undefined): number {
@@ -133,9 +135,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const sessionSelect = `
-        id, price, start_time, subject_id, student_id,
+        id, price, start_time, subject_id, student_id, status,
         students!inner(id, full_name, email, payer_email, payer_name, payer_phone),
-        subjects(name)
+        subjects(name, is_trial)
       `;
 
     let sessions: any[] = [];
@@ -171,6 +173,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (onlyPaid) {
         query = query.eq('paid', true);
+      }
+
+      if (isOrgTutor && isProKlaseOrg(profile.organization_id)) {
+        query = query.in('status', ['completed', 'no_show']);
       }
 
       const result = await query;
@@ -418,7 +424,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     for (const group of groups) {
       const orgTutorRateEur = isOrgTutor ? Number((profile as any)?.company_commission_percent) || 0 : null;
-      const lineItems = buildLineItems(group.sessions, groupingType, { orgTutorRateEur, detailed: detailedLineItems });
+      const proKlasePay = isOrgTutor && isProKlaseOrg(profile.organization_id);
+      let lineItems = buildLineItems(group.sessions, groupingType, {
+        orgTutorRateEur,
+        detailed: detailedLineItems,
+        proKlasePay,
+      });
+
+      if (proKlasePay && isOrgTutor) {
+        const { data: adjustments } = await supabase
+          .from('tutor_adjustments')
+          .select('id, amount_eur, type, reason, created_at')
+          .eq('tutor_id', tutorId)
+          .eq('organization_id', profile.organization_id)
+          .gte('created_at', periodStart + 'T00:00:00')
+          .lte('created_at', periodEnd + 'T23:59:59');
+        for (const adj of adjustments || []) {
+          const amt = Number((adj as any).amount_eur) || 0;
+          if (amt === 0) continue;
+          const label =
+            (adj as any).type === 'penalty_tutor_no_show'
+              ? 'Bauda: korepetitorius neatvyko'
+              : (adj as any).type === 'penalty_missing_report'
+                ? 'Bauda: nėra ataskaitos'
+                : (adj as any).reason || 'Koregavimas';
+          lineItems.push({
+            description: label,
+            quantity: 1,
+            unitPrice: amt,
+            totalPrice: amt,
+            sessionIds: [],
+          });
+        }
+      }
+
       const totalAmount = lineItems.reduce((sum, li) => sum + li.totalPrice, 0);
 
       const buyer = organizationAsBuyer ?? buildBuyerFromSessions(group.sessions);
@@ -656,12 +695,18 @@ interface LineItemData {
 function buildLineItems(
   sessions: any[],
   groupingType: GroupingType,
-  opts?: { orgTutorRateEur: number | null; detailed?: boolean }
+  opts?: { orgTutorRateEur: number | null; detailed?: boolean; proKlasePay?: boolean }
 ): LineItemData[] {
   const orgTutorPayRate = opts?.orgTutorRateEur ?? null;
   const detailed = opts?.detailed === true && orgTutorPayRate == null;
   if (orgTutorPayRate != null) {
-    const linePay = (s: any) => orgTutorLessonPayEur(orgTutorPayRate, s.price);
+    const linePay = (s: any) =>
+      opts?.proKlasePay
+        ? proKlaseSessionPayEur(
+            { status: s.status, price: s.price, subjects: s.subjects },
+            orgTutorPayRate,
+          )
+        : orgTutorLessonPayEur(orgTutorPayRate, s.price);
 
     if (groupingType === 'per_payment') {
       return sessions.map(s => {

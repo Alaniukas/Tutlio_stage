@@ -32,8 +32,10 @@ import {
 } from '@/lib/orgContactVisibility';
 import { getCached, setCache } from '@/lib/dataCache';
 import { SUPPORTED_LOCALES, LOCALE_NAMES, type Locale } from '@/lib/i18n/core';
+import { cn } from '@/lib/utils';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { isSchoolOrg, hasProKlaseIntakeFeatures } from '@/lib/orgIntakeMode';
+import { ORG_TUTOR_FILTER_SCROLL_CLASS } from '@/lib/orgUi';
 
 type TrialCommentMode = 'student_and_parent' | 'internal_only';
 
@@ -1519,7 +1521,7 @@ export default function CompanySettings() {
                   {t('compSet.noTutorsTemplateHint')}
                 </p>
               ) : (
-                <div className="border rounded-xl p-3 space-y-2 max-h-40 overflow-y-auto">
+                <div className={cn('border rounded-xl p-3 space-y-2', ORG_TUTOR_FILTER_SCROLL_CLASS)}>
                   {orgTutors.map(tutor => (
                     <label key={tutor.id} className="flex items-center gap-2 cursor-pointer">
                       <input

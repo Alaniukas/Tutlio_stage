@@ -36,9 +36,9 @@ export async function verifyRequestAuth(
   if (!serviceKey) return null;
 
   const token = authHeader.slice(7);
-  const urls = [process.env.SUPABASE_URL, process.env.VITE_SUPABASE_URL].filter(
-    (u, i, arr): u is string => Boolean(u) && arr.indexOf(u) === i,
-  );
+  const urls = [process.env.SUPABASE_URL, process.env.VITE_SUPABASE_URL]
+    .filter((u, i, arr): u is string => Boolean(u) && arr.indexOf(u) === i)
+    .filter((u) => !u.includes('xklzjhfztjxltrdkplog'));
   if (urls.length === 0) return null;
 
   for (const url of urls) {

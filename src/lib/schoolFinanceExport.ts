@@ -74,8 +74,8 @@ export function signingStatusLabel(status: string, t: (key: string) => string): 
   const map: Record<string, string> = {
     draft: t('school.draft'),
     sent: t('school.sentStatus'),
-    awaiting_school_signature: 'Laukiama mokyklos parašo',
-    signed_by_school: 'Pasirašyta mokyklos',
+    awaiting_school_signature: t('school.statusAwaitingSchool'),
+    signed_by_school: t('school.statusSignedBySchool'),
     signed: t('school.signedStatus'),
   };
   return map[status] || status;

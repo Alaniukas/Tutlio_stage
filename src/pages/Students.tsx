@@ -133,6 +133,7 @@ export default function StudentsPage() {
   const { user, profile } = useUser();
   const orgPolicy = useOrgTutorPolicy();
   const hideProKlaseOrgTutorCancel = orgPolicy.isOrgTutor && isProKlaseOrg(profile?.organization_id);
+  const hideProKlaseOrgTutorFreeTime = hideProKlaseOrgTutorCancel;
   const { hasFeature, loading: orgFeaturesLoading, contactVisibility } = useOrgFeatures();
   const stcache = getCached<any>('tutor_students');
   const [students, setStudents] = useState<Student[]>(stcache?.students ?? []);
@@ -2753,6 +2754,7 @@ export default function StudentsPage() {
                 <Label>{t('cal.timeLabel')}</Label>
                 <DateTimeSpinner value={editNewStartTime} onChange={setEditNewStartTime} />
               </div>
+              {!hideProKlaseOrgTutorFreeTime && (
               <label className="flex items-start gap-2 cursor-pointer">
                 <Checkbox
                   checked={leaveFreeTimeOnReschedule}
@@ -2760,6 +2762,7 @@ export default function StudentsPage() {
                 />
                 <span className="text-sm text-gray-600 leading-snug">{t('dash.leaveFreeTime')}</span>
               </label>
+              )}
               <div className="space-y-2">
                 <Label>{t('cal.durationLabel')}</Label>
                 <Input
@@ -2987,6 +2990,7 @@ export default function StudentsPage() {
                   {t('dash.minChars', { min: '5', current: String(cancellationReason.trim().length) })}
                 </p>
               )}
+              {!hideProKlaseOrgTutorFreeTime && (
               <label className="flex items-start gap-2 cursor-pointer pt-1">
                 <Checkbox
                   checked={leaveFreeTimeOnCancel}
@@ -2994,6 +2998,7 @@ export default function StudentsPage() {
                 />
                 <span className="text-sm text-gray-600 leading-snug">{t('dash.leaveFreeTime')}</span>
               </label>
+              )}
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={() => { setCancelConfirmId(null); setCancellationReason(''); setLeaveFreeTimeOnCancel(false); }} className="rounded-xl flex-1">
                   {t('dash.cancelBtn')}

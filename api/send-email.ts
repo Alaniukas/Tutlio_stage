@@ -1144,6 +1144,21 @@ function penaltyPaymentSuccess(d: any, locale: Locale) {
   };
 }
 
+function tutorAdjustmentNotice(d: any, _locale: Locale) {
+  const amount = Number(d.amountEur) || 0;
+  const sign = amount < 0 ? '' : '+';
+  return {
+    subject: 'Pro Klasė: koregavimas jūsų atlyginime',
+    html: wrap(`
+      <div class="body">
+        <p>Sveiki${d.tutorName ? `, ${d.tutorName}` : ''},</p>
+        <p>Administracija pritaikė koregavimą: <strong>${sign}${amount.toFixed(2)} €</strong>.</p>
+        ${d.reason ? `<p>Priežastis: ${d.reason}</p>` : ''}
+        ${d.financeUrl ? `<p><a href="${d.financeUrl}">Peržiūrėti finansus</a></p>` : ''}
+      </div>`, _locale),
+  };
+}
+
 function penaltyPaymentTutor(d: any, locale: Locale) {
   const fmt = (x: unknown) => (typeof x === 'number' ? x.toFixed(2) : String(x ?? ''));
   const charged =
@@ -3015,6 +3030,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'payment_success': emailContent = paymentSuccess(data, locale); break;
       case 'penalty_payment_success': emailContent = penaltyPaymentSuccess(data, locale); break;
       case 'penalty_payment_tutor': emailContent = penaltyPaymentTutor(data, locale); break;
+      case 'tutor_adjustment_notice': emailContent = tutorAdjustmentNotice(data, locale); break;
       case 'lesson_confirmed_tutor': emailContent = lessonConfirmedTutor(data, locale); break;
       case 'school_contract_sign_request': emailContent = schoolContractSignRequest(data, locale); break;
       case 'school_contract_fully_signed': emailContent = schoolContractFullySigned(data, locale); break;

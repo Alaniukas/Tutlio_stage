@@ -56,7 +56,17 @@ function isAvailabilityStillValid(endDate: string | null) {
   return d.getTime() >= today.getTime();
 }
 
-export default function AvailabilityManager() {
+export interface AvailabilityManagerPrefill {
+  specificDate?: string;
+  specificStart?: string;
+  specificEnd?: string;
+}
+
+interface AvailabilityManagerProps {
+  prefill?: AvailabilityManagerPrefill | null;
+}
+
+export default function AvailabilityManager({ prefill = null }: AvailabilityManagerProps) {
   const { t } = useTranslation();
 
   const DAYS = useMemo(() => [
@@ -84,6 +94,7 @@ export default function AvailabilityManager() {
   const [specificDate, setSpecificDate] = useState('');
   const [specificStart, setSpecificStart] = useState('09:00');
   const [specificEnd, setSpecificEnd] = useState('17:00');
+  const [activeTab, setActiveTab] = useState<'recurring' | 'specific'>('recurring');
 
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
   const [editStart, setEditStart] = useState('');
@@ -113,6 +124,14 @@ export default function AvailabilityManager() {
   useEffect(() => {
     fetchAvailability();
   }, []);
+
+  useEffect(() => {
+    if (!prefill) return;
+    if (prefill.specificDate) setSpecificDate(prefill.specificDate);
+    if (prefill.specificStart) setSpecificStart(prefill.specificStart);
+    if (prefill.specificEnd) setSpecificEnd(prefill.specificEnd);
+    if (prefill.specificDate) setActiveTab('specific');
+  }, [prefill]);
 
   const fetchAvailability = async () => {
     setLoading(true);
@@ -411,7 +430,11 @@ export default function AvailabilityManager() {
           onClose={() => setToastMessage(null)}
         />
       )}
-      <Tabs defaultValue="recurring" className="w-full">
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => setActiveTab(value as 'recurring' | 'specific')}
+        className="w-full"
+      >
         <TabsList className="grid w-full grid-cols-2 rounded-xl">
           <TabsTrigger value="recurring" className="rounded-xl">{t('avail.recurringTab')}</TabsTrigger>
           <TabsTrigger value="specific" className="rounded-xl">{t('avail.specificTab')}</TabsTrigger>

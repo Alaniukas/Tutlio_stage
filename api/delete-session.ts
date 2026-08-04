@@ -7,6 +7,7 @@
 
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
+import { isProKlaseOrg } from './_lib/marketMoney.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -103,6 +104,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (!allowed) return json(res, 403, { error: 'Forbidden' });
+
+    // Pro Klasė org tutors cannot hard-delete sessions (admin only).
+    if (tutorId === user.id) {
+      const { data: tutorProfile } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .maybeSingle();
+      const orgId = (tutorProfile as any)?.organization_id as string | null;
+      if (orgId && isProKlaseOrg(orgId)) {
+        const { data: adminRow } = await supabase
+          .from('organization_admins')
+          .select('organization_id')
+          .eq('user_id', user.id)
+          .eq('organization_id', orgId)
+          .maybeSingle();
+        if (!adminRow) {
+          return json(res, 403, { error: 'Org tutors cannot delete lessons for this organization' });
+        }
+      }
+    }
 
     const recurringId = (session as any).recurring_session_id as string | null;
     const startTime = (session as any).start_time as string;

@@ -423,6 +423,8 @@ export interface OrgAdminCreateSessionInput {
   createFirstLessonIsTrial?: boolean;
   createTutorComment: string;
   createShowCommentToStudent: boolean;
+  /** Pro Klasė: compensation lesson — client not charged via package. */
+  createIsMakeup?: boolean;
   subjects: SubjectLite[];
   individualPricing: PricingRow[];
   tutorSubjectPrices?: TutorSubjectPriceRow[];
@@ -459,6 +461,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     createFirstLessonIsTrial = false,
     createTutorComment,
     createShowCommentToStudent,
+    createIsMakeup = false,
     subjects,
     individualPricing,
     dynamicPricingRules = [],
@@ -841,7 +844,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     });
     let lessonPackageId: string | null = null;
 
-    if (!createIsPaid && createSubjectId) {
+    if (!createIsMakeup && !createIsPaid && createSubjectId) {
       const match = await findActivePackageForBooking(supabase, { studentId, subjectId: createSubjectId });
       if (match) {
         const { pkg, item } = match;
@@ -864,6 +867,12 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       }
     }
 
+    if (createIsMakeup) {
+      sessionPaid = true;
+      sessionPaymentStatus = 'confirmed';
+      lessonPackageId = null;
+    }
+
     sessionsToInsert.push({
       tutor_id: createTutorId,
       student_id: studentId,
@@ -881,6 +890,7 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       show_comment_to_student: effectiveShowCommentToStudent,
       created_by_role: 'org_admin',
       available_spots: subj.is_group ? subj.max_students : null,
+      is_makeup: createIsMakeup,
     });
   }
 
