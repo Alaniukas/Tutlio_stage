@@ -12,6 +12,7 @@ import ParentProtectedRoute from '@/components/ParentProtectedRoute';
 // Marketing/SEO pages stay in the main bundle: they are the entry point for
 // every organic visitor and must paint instantly (Core Web Vitals).
 import Landing from '@/pages/Landing';
+import NewLanding from '@/pages/NewLanding';
 import AboutUs from '@/pages/AboutUs';
 import Contact from '@/pages/Contact';
 import FeaturePage from '@/pages/FeaturePage';
@@ -25,6 +26,12 @@ import DataProcessingAgreement from '@/pages/DataProcessingAgreement';
 
 // Everything behind auth (and one-off payment/callback pages) loads on demand
 // so marketing visitors never download the app.
+// Demo-only public tutor landing page. Deliberately lazy (unlike the other
+// marketing pages): while it is a prototype nobody links to it, so it must not
+// cost every production user main-bundle bytes. Revisit when it goes live.
+const PublicTutorPage = lazy(() => import('@/pages/PublicTutorPage'));
+const PublicPageEditor = lazy(() => import('@/pages/PublicPageEditor'));
+
 const Login = lazy(() => import('@/pages/Login'));
 const AuthCallback = lazy(() => import('@/pages/AuthCallback'));
 const Register = lazy(() => import('@/pages/Register'));
@@ -66,6 +73,7 @@ const CompanyFinanceHub = lazy(() => import('@/pages/company/CompanyFinanceHub')
 const CompanyInstructions = lazy(() => import('@/pages/company/CompanyInstructions'));
 const CompanyDynamicPricing = lazy(() => import('@/pages/company/CompanyDynamicPricing'));
 const CompanyMessages = lazy(() => import('@/pages/company/CompanyMessages'));
+const CompanyPublicPage = lazy(() => import('@/pages/company/CompanyPublicPage'));
 const PreviewAssignStudentModal = lazy(() => import('@/pages/dev/PreviewAssignStudentModal'));
 const ParentDashboard = lazy(() => import('@/pages/ParentDashboard'));
 const ParentSessions = lazy(() => import('@/pages/ParentSessions'));
@@ -217,6 +225,10 @@ export default function App({ basename }: { basename: string }) {
         {/* Public Landing Pages - NO UserProvider wrapper */}
         <Route path="/" element={<Landing />} />
         <Route path="/:locale" element={<Landing />} />
+        {/* Rebuilt landing, parked for review. The static segment outranks the
+            /:locale route above, so /new-landing is never read as a locale. */}
+        <Route path="/new-landing" element={<NewLanding />} />
+        <Route path="/:locale/new-landing" element={<NewLanding />} />
         <Route path="/apie-mus" element={<AboutUs />} />
         <Route path="/:locale/apie-mus" element={<AboutUs />} />
         {/* English aliases — same canonical pages, kept in sync with bot SSR (middleware.ts). */}
@@ -236,6 +248,14 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/:locale/blog" element={<Blog />} />
         <Route path="/blog/:slug" element={<BlogPost />} />
         <Route path="/:locale/blog/:slug" element={<BlogPost />} />
+        {/* Public tutor/agency landing pages. Localized slug: /korepetitorius on
+            tutlio.lt, /tutor on tutlio.com and tutlio.pl — mirrors the domain-keyed
+            LOCALIZED_PAGE_PATHS in api/_lib/seo-routing.ts. Both aliases are routed
+            on every domain so the non-canonical one can 308 in middleware. */}
+        <Route path="/korepetitorius/:slug" element={<PublicTutorPage />} />
+        <Route path="/:locale/korepetitorius/:slug" element={<PublicTutorPage />} />
+        <Route path="/tutor/:slug" element={<PublicTutorPage />} />
+        <Route path="/:locale/tutor/:slug" element={<PublicTutorPage />} />
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         <Route path="/:locale/privacy-policy" element={<PrivacyPolicy />} />
         <Route path="/terms" element={<TermsOfService />} />
@@ -290,6 +310,10 @@ export default function App({ basename }: { basename: string }) {
           <Route path="/invoices" element={<InvoicesPage />} />
           <Route path="/instructions" element={<Instructions />} />
           <Route path="/lesson-settings" element={<LessonSettingsPage />} />
+          {/* Owner-facing editor for the public landing page. The page itself is
+              public; editing it is not, and the API resolves the row from the
+              session rather than from a slug in the URL. */}
+          <Route path="/landing-editor" element={<PublicPageEditor />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
 
@@ -356,6 +380,7 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/company/settings" element={<CompanySettings />} />
             <Route path="/company/finance" element={<CompanyFinanceHub />} />
             <Route path="/company/contracts" element={<CompanyContracts />} />
+            <Route path="/company/public-page" element={<CompanyPublicPage />} />
 
             <Route path="/school" element={<CompanyDashboard />} />
             <Route path="/school/tutors" element={<CompanyTutors />} />
@@ -370,6 +395,7 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/school/settings" element={<CompanySettings />} />
             <Route path="/school/finance" element={<CompanyFinanceHub />} />
             <Route path="/school/contracts" element={<CompanyContracts />} />
+            <Route path="/school/public-page" element={<CompanyPublicPage />} />
           </Route>
         </Route>
 

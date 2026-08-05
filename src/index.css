@@ -675,6 +675,33 @@
   animation: tabFadeIn 0.4s ease-out forwards;
 }
 
+/* Landing "Tutlio way" panel: two counter-rotating orbit rings. The container
+   spins, each child spins the opposite way at the same duration so its content
+   stays upright. Durations/directions come from inline CSS custom properties. */
+@keyframes orbit-rotate {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.orbit-container {
+  animation: orbit-rotate var(--orbit-duration) linear infinite;
+  animation-direction: var(--orbit-direction);
+}
+
+.orbit-counter {
+  animation: orbit-rotate var(--orbit-duration) linear infinite;
+  animation-direction: var(--counter-direction);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orbit-container,
+  .orbit-counter,
+  .animate-marquee,
+  .animate-float {
+    animation: none !important;
+  }
+}
+
 /* ==============================
    BLOG CONTENT TYPOGRAPHY
    ============================== */

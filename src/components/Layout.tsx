@@ -17,6 +17,7 @@ import {
   HelpCircle,
   MessageSquare,
   FileText,
+  Globe,
   Menu,
   X,
   ChevronsLeft,
@@ -62,10 +63,12 @@ export default function Layout({ children }: LayoutProps) {
       { href: '/finance', label: t('nav.finance'), icon: DollarSign },
       { href: '/invoices', label: t('nav.invoices'), icon: FileText },
       { href: '/lesson-settings', label: t('nav.lessonSettings'), icon: BookOpen },
+      { href: '/landing-editor', label: t('nav.publicPage'), icon: Globe },
       { href: '/instructions', label: t('nav.instructions'), icon: HelpCircle },
     ];
-    // Org tutors don't have personal invoices page, but they can see instructions.
-    if (isOrgTutor) return items.filter(item => item.href !== '/invoices');
+    // Org tutors have neither a personal invoices page nor their own public
+    // page — the school owns both — but they can still see instructions.
+    if (isOrgTutor) return items.filter(item => item.href !== '/invoices' && item.href !== '/landing-editor');
     return items;
   }, [isOrgTutor, t]);
 

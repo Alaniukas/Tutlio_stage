@@ -2,7 +2,7 @@
 
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
-import { verifyCronAuth } from './_lib/cronAuth.js';
+import { requireCronAuth } from './_lib/cronAuth.js';
 import { isProKlaseOrg, PRO_KLASE_ORG_ID, PRO_KLASE_QA_ORG_ID } from './_lib/marketMoney.js';
 import { PRO_KLASE_MISSING_REPORT_PENALTY_EUR } from './_lib/proKlaseTutorPay.js';
 
@@ -12,9 +12,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
-  if (!verifyCronAuth(req)) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+  if (!requireCronAuth(req, res)) return;
 
   const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;

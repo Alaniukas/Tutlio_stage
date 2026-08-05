@@ -69,22 +69,35 @@ $$;
 
 -- ─── 3. DROP old RLS policies that reference school_id (must precede column drops)
 
-DROP POLICY IF EXISTS "school_templates_admin_select" ON public.school_contract_templates;
-DROP POLICY IF EXISTS "school_templates_admin_insert" ON public.school_contract_templates;
-DROP POLICY IF EXISTS "school_templates_admin_update" ON public.school_contract_templates;
-DROP POLICY IF EXISTS "school_templates_admin_delete" ON public.school_contract_templates;
+-- The school_* tables below are created further down (section 4-6). On a fresh
+-- database they do not exist yet, and DROP POLICY IF EXISTS still requires the
+-- table — so guard each drop group on the table being present.
+DO $$
+BEGIN
+  IF to_regclass('public.school_contract_templates') IS NOT NULL THEN
+    DROP POLICY IF EXISTS "school_templates_admin_select" ON public.school_contract_templates;
+    DROP POLICY IF EXISTS "school_templates_admin_insert" ON public.school_contract_templates;
+    DROP POLICY IF EXISTS "school_templates_admin_update" ON public.school_contract_templates;
+    DROP POLICY IF EXISTS "school_templates_admin_delete" ON public.school_contract_templates;
+  END IF;
 
-DROP POLICY IF EXISTS "school_contracts_admin_select" ON public.school_contracts;
-DROP POLICY IF EXISTS "school_contracts_admin_insert" ON public.school_contracts;
-DROP POLICY IF EXISTS "school_contracts_admin_update" ON public.school_contracts;
-DROP POLICY IF EXISTS "school_contracts_admin_delete" ON public.school_contracts;
-DROP POLICY IF EXISTS "school_contracts_student_select" ON public.school_contracts;
+  IF to_regclass('public.school_contracts') IS NOT NULL THEN
+    DROP POLICY IF EXISTS "school_contracts_admin_select" ON public.school_contracts;
+    DROP POLICY IF EXISTS "school_contracts_admin_insert" ON public.school_contracts;
+    DROP POLICY IF EXISTS "school_contracts_admin_update" ON public.school_contracts;
+    DROP POLICY IF EXISTS "school_contracts_admin_delete" ON public.school_contracts;
+    DROP POLICY IF EXISTS "school_contracts_student_select" ON public.school_contracts;
+  END IF;
 
-DROP POLICY IF EXISTS "school_installments_admin_select" ON public.school_payment_installments;
-DROP POLICY IF EXISTS "school_installments_admin_insert" ON public.school_payment_installments;
-DROP POLICY IF EXISTS "school_installments_admin_update" ON public.school_payment_installments;
-DROP POLICY IF EXISTS "school_installments_admin_delete" ON public.school_payment_installments;
-DROP POLICY IF EXISTS "school_installments_student_select" ON public.school_payment_installments;
+  IF to_regclass('public.school_payment_installments') IS NOT NULL THEN
+    DROP POLICY IF EXISTS "school_installments_admin_select" ON public.school_payment_installments;
+    DROP POLICY IF EXISTS "school_installments_admin_insert" ON public.school_payment_installments;
+    DROP POLICY IF EXISTS "school_installments_admin_update" ON public.school_payment_installments;
+    DROP POLICY IF EXISTS "school_installments_admin_delete" ON public.school_payment_installments;
+    DROP POLICY IF EXISTS "school_installments_student_select" ON public.school_payment_installments;
+  END IF;
+END;
+$$;
 
 DROP POLICY IF EXISTS "school_admin_view_students" ON public.students;
 DROP POLICY IF EXISTS "school_admin_insert_students" ON public.students;

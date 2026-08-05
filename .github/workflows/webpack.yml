@@ -23,7 +23,21 @@ jobs:
         node-version: ${{ matrix.node-version }}
         cache: npm
 
-    - name: Build
+    - name: Install
+      run: npm ci
+
+    # `npm run build` is esbuild-only and does not typecheck, so a type error
+    # would otherwise ship silently. Both tsconfigs are checked: the SPA
+    # (src/) and the serverless functions (api/).
+    - name: Typecheck
       run: |
-        npm ci
-        npm run build
+        npm run lint
+        npm run lint:api
+
+    # tests/lib/i18n-coverage.test.ts is the gate that stops en/lt-only
+    # translation keys reaching production as visible fallback text.
+    - name: Test
+      run: npm test
+
+    - name: Build
+      run: npm run build

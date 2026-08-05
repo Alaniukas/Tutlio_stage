@@ -11,6 +11,12 @@ function navigateToPlatform(platform: 'tutors' | 'schools', locale: string) {
   window.location.href = `${prefix}${localeSegment}` || '/';
 }
 
+/** Horizontal space inside the shrunken pill that isn't nav content. */
+const PILL_BRAND_GAP = 32; // ml-8 between the brand and the links
+const PILL_GROUP_GAP = 32; // breathing room between links and actions
+const PILL_PADDING = 40; // 0 20px
+const PILL_MAX_WIDTH = 1200; // never wider than the full-size bar
+
 export default function LandingNavbar() {
   const { t, locale } = useTranslation();
   const { platform } = usePlatform();
@@ -19,10 +25,49 @@ export default function LandingNavbar() {
   const [scrolled, setScrolled] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
+  const brandRef = useRef<HTMLAnchorElement | null>(null);
+  const linksRef = useRef<HTMLDivElement | null>(null);
+  const actionsRef = useRef<HTMLDivElement | null>(null);
+
+  // Locale decides how wide the pill has to be: "Start for free" and
+  // "Essayer gratuitement" are not the same bar. Measure the real rendered
+  // groups instead of guessing, so no locale wraps to a second row.
+  const [pillMaxWidth, setPillMaxWidth] = useState(PILL_MAX_WIDTH);
+
+  const measurePill = useCallback(() => {
+    const brand = brandRef.current;
+    const links = linksRef.current;
+    const actions = actionsRef.current;
+    // `links` is display:none below md, where the pill never appears anyway.
+    if (!brand || !links || !actions || links.offsetParent === null) return;
+    const natural =
+      brand.offsetWidth +
+      PILL_BRAND_GAP +
+      links.offsetWidth +
+      PILL_GROUP_GAP +
+      actions.offsetWidth +
+      PILL_PADDING;
+    setPillMaxWidth(Math.min(Math.ceil(natural), PILL_MAX_WIDTH));
+  }, []);
 
   const checkMobile = useCallback(() => {
     setIsMobile(window.innerWidth < 768);
   }, []);
+
+  // Re-measure when the labels change, and again once the display webfont
+  // swaps in — text metrics shift under us otherwise.
+  useEffect(() => {
+    measurePill();
+    let cancelled = false;
+    void document.fonts?.ready.then(() => {
+      if (!cancelled) measurePill();
+    });
+    window.addEventListener('resize', measurePill);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('resize', measurePill);
+    };
+  }, [measurePill, locale, platform]);
 
   useEffect(() => {
     checkMobile();
@@ -66,15 +111,15 @@ export default function LandingNavbar() {
 
   return (
     <>
-      <nav className={`fixed top-0 left-0 right-0 z-50 ${showPill ? '' : isMobile ? '' : 'bg-[#f5f5f3]'}`}>
+      <nav className={`fixed top-0 left-0 right-0 z-50 ${showPill ? '' : isMobile ? '' : 'bg-white'}`}>
         <div
           className="mx-auto flex items-center"
           style={{
-            maxWidth: showPill ? 860 : 1200,
+            maxWidth: showPill ? pillMaxWidth : PILL_MAX_WIDTH,
             height: showPill ? 52 : (isMobile ? 60 : 72),
             padding: showPill ? '0 20px' : '0 20px',
             margin: showPill ? '10px auto' : '0 auto',
-            backgroundColor: showPill ? 'rgba(255,255,255,0.82)' : isMobile ? '#f5f5f3' : 'transparent',
+            backgroundColor: showPill ? 'rgba(255,255,255,0.82)' : isMobile ? '#ffffff' : 'transparent',
             backdropFilter: showPill ? 'blur(20px) saturate(1.4)' : 'none',
             WebkitBackdropFilter: showPill ? 'blur(20px) saturate(1.4)' : 'none',
             borderRadius: showPill ? 9999 : 0,
@@ -83,15 +128,16 @@ export default function LandingNavbar() {
             transition: 'max-width 0.6s cubic-bezier(0.22,1,0.36,1), height 0.5s cubic-bezier(0.22,1,0.36,1), padding 0.5s cubic-bezier(0.22,1,0.36,1), margin 0.5s cubic-bezier(0.22,1,0.36,1), background-color 0.4s ease, backdrop-filter 0.4s ease, border-radius 0.6s cubic-bezier(0.22,1,0.36,1), box-shadow 0.4s ease, border-color 0.4s ease',
           }}
         >
-          <Link to={buildLocalizedPath('/', locale)} className="flex items-center gap-2 shrink-0" onClick={() => setMobileOpen(false)}>
+          <Link ref={brandRef} to={buildLocalizedPath('/', locale)} className="flex items-center gap-2 shrink-0 whitespace-nowrap" onClick={() => setMobileOpen(false)}>
             <img src="/logo-icon.png" alt="Tutlio" className="w-7 h-7 rounded-lg" />
             <span className="font-bold text-gray-900 tracking-tight text-[15px]">{brandName}</span>
           </Link>
 
-          {/* Desktop nav */}
-          <div className="hidden md:flex items-center gap-6 ml-8">
+          {/* Desktop nav. shrink-0 + nowrap keep every locale on one row; the
+              pill is measured to fit rather than the labels squeezed to fit. */}
+          <div ref={linksRef} className="hidden md:flex items-center gap-6 ml-8 shrink-0">
             {navLinks.map((link) => (
-              <Link key={link.to} to={link.to} className="text-[13px] text-gray-500 hover:text-gray-900 transition-colors font-medium">
+              <Link key={link.to} to={link.to} className="text-[13px] text-gray-500 hover:text-gray-900 transition-colors font-medium whitespace-nowrap">
                 {link.label}
               </Link>
             ))}
@@ -99,7 +145,7 @@ export default function LandingNavbar() {
               <button
                 type="button"
                 onClick={() => setPlatformOpen(v => !v)}
-                className="flex items-center gap-1 text-[13px] text-gray-500 hover:text-gray-900 transition-colors font-medium"
+                className="flex items-center gap-1 text-[13px] text-gray-500 hover:text-gray-900 transition-colors font-medium whitespace-nowrap"
               >
                 {dropdownLabel}
                 <ChevronDown className={`w-3 h-3 transition-transform ${platformOpen ? 'rotate-180' : ''}`} />
@@ -117,16 +163,16 @@ export default function LandingNavbar() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3 ml-auto">
+          <div ref={actionsRef} className="flex items-center gap-3 ml-auto shrink-0">
             <div className="hidden md:block">
               <LanguageSelector />
             </div>
-            <Link to={orgAdminLoginHref} className="hidden md:block text-[13px] text-gray-500 hover:text-gray-900 transition-colors font-medium">
+            <Link to={orgAdminLoginHref} className="hidden md:block text-[13px] text-gray-500 hover:text-gray-900 transition-colors font-medium whitespace-nowrap">
               {t('common.login')}
             </Link>
             <Link
               to={pricingHref}
-              className="hidden sm:flex rounded-full bg-[#4f46e5] hover:bg-[#4338ca] text-white font-semibold items-center transition-all duration-200 hover:scale-[1.03] hover:shadow-lg active:scale-[0.98] h-[34px] px-4 text-[12px]"
+              className="hidden sm:flex rounded-full bg-[#4f46e5] hover:bg-[#4338ca] text-white font-semibold items-center whitespace-nowrap transition-all duration-200 hover:scale-[1.03] hover:shadow-lg active:scale-[0.98] h-[34px] px-4 text-[12px]"
             >
               {t('landing.startFree')}
             </Link>

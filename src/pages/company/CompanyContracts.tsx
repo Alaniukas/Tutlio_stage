@@ -45,7 +45,7 @@ import {
   matchesContractFilter,
   type SchoolContractFilter,
 } from '@/lib/schoolContractFilters';
-import { buildSchoolContractExportRows } from '@/lib/schoolContractsExport';
+import { buildSchoolContractExportRows, schoolContractsExportFilename } from '@/lib/schoolContractsExport';
 import { downloadSchoolContractsXlsx } from '@/lib/schoolContractsXlsxExport';
 
 interface Student {
@@ -1760,8 +1760,8 @@ export default function CompanyContracts() {
     try {
       const rows = buildSchoolContractExportRows(visibleContracts, tr, isSchoolView);
       const date = new Date().toISOString().slice(0, 10);
-      const suffix = contractFilter === 'awaiting_parents' ? 'laukia-tevu' : 'truksta-duomenu';
-      await downloadSchoolContractsXlsx(rows, tr, `sutartys-${suffix}-${date}.xlsx`, orgName);
+      const filename = schoolContractsExportFilename(contractFilter, contractSearch, date);
+      await downloadSchoolContractsXlsx(rows, tr, filename, orgName);
     } catch (e: any) {
       setToast({ message: e?.message || tr('school.contractExportFail'), type: 'error' });
     } finally {

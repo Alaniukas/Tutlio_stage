@@ -36,7 +36,7 @@ export default function FeaturePage() {
 
       <main className="flex-1 pt-[60px] md:pt-[72px]">
         {/* Hero */}
-        <section className="relative overflow-hidden bg-gradient-to-b from-[#f5f5f3] via-[#f0efed] to-white">
+        <section className="relative overflow-hidden bg-white">
           <div className="absolute top-[10%] left-1/2 -translate-x-1/2 w-[700px] h-[400px] bg-white/40 rounded-full blur-[100px] pointer-events-none" />
           <div className="relative z-10 max-w-[1200px] mx-auto px-6 pt-16 pb-20 text-center">
             <h1 className="font-display text-[2rem] sm:text-[2.75rem] lg:text-[3.25rem] font-bold text-gray-900 tracking-tight leading-[1.15] mb-5 max-w-3xl mx-auto">

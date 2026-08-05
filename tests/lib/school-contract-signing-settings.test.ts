@@ -9,10 +9,18 @@ describe('school contract signing settings', () => {
   it('falls back to the organization email and stable GoSign metadata defaults', () => {
     expect(parseSchoolContractSigningSettings({}, 'info@school.lt')).toEqual({
       email: 'info@school.lt',
+      parentContactEmail: 'info@school.lt',
       reason: DEFAULT_SCHOOL_CONTRACT_SIGNING_REASON,
       location: '',
       contact: 'info@school.lt',
     });
+  });
+
+  it('prefers the organization contact_email for the parent-facing address', () => {
+    expect(
+      parseSchoolContractSigningSettings({ contact_email: 'tevams@school.lt' }, 'info@school.lt')
+        .parentContactEmail,
+    ).toBe('tevams@school.lt');
   });
 
   it('round-trips signing settings without overwriting unrelated organization features', () => {
@@ -20,6 +28,7 @@ describe('school contract signing settings', () => {
       { school_contract_esign: true, custom_branding: true },
       {
         email: 'sutartys@school.lt',
+        parentContactEmail: 'sutartys@school.lt',
         reason: 'Mokymosi sutartis',
         location: 'Vilnius',
         contact: '+37060000000',
@@ -35,6 +44,7 @@ describe('school contract signing settings', () => {
     });
     expect(parseSchoolContractSigningSettings(merged, 'fallback@school.lt')).toEqual({
       email: 'sutartys@school.lt',
+      parentContactEmail: 'sutartys@school.lt',
       reason: 'Mokymosi sutartis',
       location: 'Vilnius',
       contact: '+37060000000',

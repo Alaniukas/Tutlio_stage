@@ -65,7 +65,7 @@ export default function StudentProtectedRoute() {
                 );
 
                 if (portals.tutor && !portals.student) {
-                    const retryResult = await withTimeout(
+                    const retryResult = await withTimeout<any>(
                         resolveStudentWithRetry(ctxUser.id, 3),
                         4000,
                     );

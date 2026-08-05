@@ -22,6 +22,7 @@ import {
   FileText,
   School,
   BadgeEuro,
+  Globe,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import OrgSuspendedBanner from '@/components/OrgSuspendedBanner';
@@ -32,12 +33,14 @@ import { OrgEntityProvider, type OrgEntityType } from '@/contexts/OrgEntityConte
 import { useUser } from '@/contexts/UserContext';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { showDynamicPricingNav } from '@/lib/orgIntakeMode';
+import { isProKlaseOrg } from '@/lib/marketMoney';
 
 export function buildCompanyNavItems(
   isSchool: boolean,
   orgBasePath: '/school' | '/company',
   t: (key: string) => string,
   showDynamicPricing: boolean,
+  showPublicPage = false,
 ) {
   const base = [
     { href: `${orgBasePath}`, label: t('companyNav.overview'), icon: LayoutDashboard, exact: true },
@@ -49,6 +52,9 @@ export function buildCompanyNavItems(
     { href: `${orgBasePath}/stats`, label: t('companyNav.stats'), icon: BarChart3 },
     { href: `${orgBasePath}/settings`, label: t('companyNav.lessonSettings'), icon: Settings },
   ];
+  if (showPublicPage) {
+    base.push({ href: `${orgBasePath}/public-page`, label: t('companyNav.publicPage'), icon: Globe });
+  }
   if (isSchool) {
     base.push({ href: `${orgBasePath}/contracts`, label: t('companyNav.contracts'), icon: FileText });
   }
@@ -82,17 +88,19 @@ export default function CompanyLayout() {
   };
 
   const isSchool = entityType === 'school';
-  const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
+  const { loading: orgFeaturesLoading, hasFeature, organizationId } = useOrgFeatures();
   const showDynamicPricing =
     !orgFeaturesLoading && showDynamicPricingNav(entityType, hasFeature);
+  /** Pro Klasė places its tutors itself, so it has no public "book me" page. */
+  const showPublicPage = !orgFeaturesLoading && !isProKlaseOrg(organizationId);
   /** Pagal org tipą, ne `pathname.startsWith('/school')` — kitaip `/schools` (landing) klaidingai atitinka `/school`. */
   const orgBasePath = isSchool ? '/school' : '/company';
   const BrandIcon = isSchool ? School : Building2;
   const brandLabel = isSchool ? t('layout.tutlioSchool') : t('layout.tutlioCompany');
 
   const NAV_ITEMS = useMemo(
-    () => buildCompanyNavItems(isSchool, orgBasePath, t, showDynamicPricing),
-    [t, isSchool, orgBasePath, showDynamicPricing],
+    () => buildCompanyNavItems(isSchool, orgBasePath, t, showDynamicPricing, showPublicPage),
+    [t, isSchool, orgBasePath, showDynamicPricing, showPublicPage],
   );
 
   useEffect(() => {

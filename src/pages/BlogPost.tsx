@@ -95,7 +95,7 @@ export default function BlogPost() {
   const blogPath = buildLocalizedPath('/blog', locale);
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] flex flex-col font-sans">
+    <div className="min-h-screen bg-white flex flex-col font-sans">
       <LandingNavbar />
       <main className="flex-1 pt-[60px] md:pt-[72px]">
         <article className="py-10 sm:py-14">

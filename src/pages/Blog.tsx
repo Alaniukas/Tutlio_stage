@@ -21,7 +21,7 @@ export default function Blog() {
   const rest = posts.slice(1);
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] flex flex-col font-sans">
+    <div className="min-h-screen bg-white flex flex-col font-sans">
       <LandingNavbar />
       <main className="flex-1 pt-[60px] md:pt-[72px]">
         <section className="py-14 sm:py-20">

@@ -2,6 +2,19 @@
 -- Org, user, profile, and admin link were created via API; this migration
 -- only handles fields and data that depend on the school-module schema.
 
+-- The org row only exists where it was created via the API (stage/prod). On a
+-- fresh database (TEST bootstrap) there is nothing to seed, so skip entirely
+-- rather than fail the FK on school_contract_templates.organization_id.
+DO $$
+BEGIN
+IF NOT EXISTS (
+  SELECT 1 FROM public.organizations
+  WHERE id = '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17'
+) THEN
+  RAISE NOTICE 'Laisvi Vaikai org not present - skipping seed';
+  RETURN;
+END IF;
+
 -- Mark the org as a school (entity_type added by 20260420000001)
 UPDATE public.organizations
 SET entity_type = 'school'
@@ -30,3 +43,5 @@ VALUES
     'https://cuhciqwmqfuajeeqjjbm.supabase.co/storage/v1/object/public/school-contracts/2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17/sutartis-pagrindinis-2026.docx'
   )
 ON CONFLICT DO NOTHING;
+END;
+$$;

@@ -49,6 +49,10 @@ vi.mock('@/lib/supabase', () => ({
 describe('CompanyContracts list filter', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Radix Select needs these DOM APIs that jsdom does not implement.
+    window.HTMLElement.prototype.scrollIntoView = vi.fn();
+    window.HTMLElement.prototype.hasPointerCapture = vi.fn();
+    window.HTMLElement.prototype.releasePointerCapture = vi.fn();
     testState.from.mockImplementation(() => {
       const query: any = {
         select: () => query,
@@ -82,7 +86,15 @@ describe('CompanyContracts list filter', () => {
     ];
   });
 
-  it('filters by signed/unsigned with counts and searches diacritics-insensitively', () => {
+  // School view filters through a Select; pick a bucket by its labelled option.
+  const pickFilter = (label: string) => {
+    fireEvent.keyDown(screen.getByRole('combobox'), { key: 'Enter' });
+    const option = screen.getByText(label).closest('[role="option"]');
+    expect(option).toBeTruthy();
+    fireEvent.keyDown(option!, { key: 'Enter' });
+  };
+
+  it('filters by bucket with counts and searches diacritics-insensitively', () => {
     render(
       <MemoryRouter initialEntries={['/school/contracts']}>
         <CompanyContracts />
@@ -92,7 +104,7 @@ describe('CompanyContracts list filter', () => {
     // Both cards + counts visible by default.
     expect(screen.getByText('Vėgėlė Ąžuolas')).toBeTruthy();
     expect(screen.getByText('Petraitis Jonas')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Visos (2)' })).toBeTruthy();
+    expect(screen.getByRole('combobox').textContent).toContain('Visos (2)');
 
     // Cards are numbered and show the installment schedule sorted by number,
     // with paid entries marked.
@@ -102,18 +114,18 @@ describe('CompanyContracts list filter', () => {
     expect(screen.getByText(/1\) €170\.00 \(2026-09-01\) ✓/)).toBeTruthy();
     expect(screen.getByText(/2\) €150\.00 \(2027-01-15\)/)).toBeTruthy();
 
-    // Unsigned bucket hides the signed contract.
-    fireEvent.click(screen.getByRole('button', { name: 'Nepasirašytos (1)' }));
+    // "Awaiting parents" bucket hides the fully signed contract.
+    pickFilter('Nepasirašyta tėvų (1)');
     expect(screen.queryByText('Vėgėlė Ąžuolas')).toBeNull();
     expect(screen.getByText('Petraitis Jonas')).toBeTruthy();
 
     // Signed bucket shows only the signed one.
-    fireEvent.click(screen.getByRole('button', { name: 'Pasirašytos (1)' }));
+    pickFilter('Pasirašytos (1)');
     expect(screen.getByText('Vėgėlė Ąžuolas')).toBeTruthy();
     expect(screen.queryByText('Petraitis Jonas')).toBeNull();
 
     // Search without diacritics finds the diacritic name (within "Visos").
-    fireEvent.click(screen.getByRole('button', { name: 'Visos (2)' }));
+    pickFilter('Visos (2)');
     fireEvent.change(screen.getByPlaceholderText('Ieškoti pagal mokinį, tėvą ar sutarties nr.'), {
       target: { value: 'vegele' },
     });

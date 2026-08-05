@@ -33,8 +33,9 @@ function getThemeColor(pathname: string): string {
   if (/\/(stripe-success|package-success|school-payment-success|school-contract-complete)$/.test(pathname)) return '#ffffff';
   if (/\/package-cancelled$/.test(pathname)) return '#f9fafb';
 
-  // Everything else: landing, marketing, blog, about, contact, pricing
-  return '#f5f5f3';
+  // Everything else: landing, marketing, blog, about, contact, pricing.
+  // Matches the white navbar these pages sit under.
+  return '#ffffff';
 }
 
 export default function ThemeColorManager() {

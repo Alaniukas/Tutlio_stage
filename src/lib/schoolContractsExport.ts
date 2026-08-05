@@ -1,4 +1,4 @@
-import type { SchoolContractFilterInput } from './schoolContractFilters';
+import type { SchoolContractFilter, SchoolContractFilterInput } from './schoolContractFilters';
 import { getContractMissingFieldLabels } from './schoolContractFilters';
 import { signingStatusLabel } from './schoolFinanceExport';
 
@@ -42,6 +42,40 @@ export function buildSchoolContractExportRows(
         : '',
     };
   });
+}
+
+// Filename slugs mirror the filter dropdown labels, so a school admin can tell
+// from the file alone which slice was exported (Laisvi vaikai feedback: every
+// export was named "truksta-duomenu", whatever the filter).
+const CONTRACT_FILTER_FILENAME_SLUGS: Record<SchoolContractFilter | 'unsigned', string> = {
+  all: 'visos',
+  awaiting_school: 'nepasirasyta-mokyklos',
+  awaiting_parents: 'nepasirasyta-tevu',
+  incomplete_data: 'truksta-duomenu',
+  signed: 'pasirasytos',
+  unsigned: 'nepasirasytos',
+};
+
+// "Serebrinskaitė" -> "serebrinskaite" so the search term stays readable in the filename.
+function slugifyForFilename(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+    .replace(/-+$/g, '');
+}
+
+export function schoolContractsExportFilename(
+  filter: SchoolContractFilter | 'unsigned',
+  search: string,
+  date: string,
+): string {
+  const filterSlug = CONTRACT_FILTER_FILENAME_SLUGS[filter] || 'visos';
+  const searchSlug = slugifyForFilename(String(search || '').trim());
+  return ['sutartys', filterSlug, searchSlug, date].filter(Boolean).join('-') + '.xlsx';
 }
 
 export function schoolContractsTableData(

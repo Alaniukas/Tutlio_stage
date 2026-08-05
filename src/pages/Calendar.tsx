@@ -3318,6 +3318,30 @@ export default function CalendarPage() {
     await hardDeleteSelectedWithApproval('single');
   };
 
+  /**
+   * Opens the inline edit form for the selected lesson. Shared by the header
+   * "edit" icon and the "reschedule lesson" button — rescheduling is just the
+   * edit form with a new start time, so both entry points land in one place.
+   * Group/recurring lessons first need the single-vs-series choice.
+   */
+  const openSessionEditor = () => {
+    if (!selectedEvent) return;
+    if ((isGroupSession || selectedEvent.recurring_session_id) && !groupEditChoice) {
+      setGroupEditChoice('single');
+      return;
+    }
+    setEditNewStartTime(format(selectedEvent.start_time, "yyyy-MM-dd'T'HH:mm"));
+    setEditDurationMinutes(Math.max(5, Math.round((selectedEvent.end_time.getTime() - selectedEvent.start_time.getTime()) / 60000)));
+    setEditTopic(selectedEvent.topic || '');
+    setEditMeetingLink(selectedEvent.meeting_link || '');
+    setEditPrice(Number(selectedEvent.price ?? 0) || 0);
+    setEditTutorComment(selectedEvent.tutor_comment || '');
+    setEditShowCommentToStudent(selectedEvent.show_comment_to_student || false);
+    setRescheduleReason('');
+    setRescheduleRequestedBy('');
+    setIsEditingSession(true);
+  };
+
   const handleMarkCompleted = async () => {
     if (!selectedEvent) return;
     setSaving(true);
@@ -4562,22 +4586,7 @@ export default function CalendarPage() {
               {!isEditingSession && (selectedEvent?.status === 'active' || selectedEvent?.status === 'completed') && (
                 <div className="flex items-center gap-1 flex-shrink-0">
                 {selectedEvent?.status === 'active' && (
-                <Button variant="ghost" size="sm" onClick={() => {
-                  if ((isGroupSession || selectedEvent?.recurring_session_id) && !groupEditChoice) {
-                    setGroupEditChoice('single');
-                    return;
-                  }
-                  setEditNewStartTime(format(selectedEvent.start_time, "yyyy-MM-dd'T'HH:mm"));
-                  setEditDurationMinutes(Math.max(5, Math.round((selectedEvent.end_time.getTime() - selectedEvent.start_time.getTime()) / 60000)));
-                  setEditTopic(selectedEvent.topic || '');
-                  setEditMeetingLink(selectedEvent.meeting_link || '');
-                  setEditPrice(Number(selectedEvent.price ?? 0) || 0);
-                  setEditTutorComment(selectedEvent.tutor_comment || '');
-                  setEditShowCommentToStudent(selectedEvent.show_comment_to_student || false);
-                  setRescheduleReason('');
-                  setRescheduleRequestedBy('');
-                  setIsEditingSession(true);
-                }} className="text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 h-8 px-2 flex-shrink-0">
+                <Button variant="ghost" size="sm" onClick={openSessionEditor} className="text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 h-8 px-2 flex-shrink-0">
                   <Edit2 className="w-3.5 h-3.5 mr-1" /> <span className="hidden sm:inline">{t('cal.editBtn')}</span>
                 </Button>
                 )}
@@ -5157,6 +5166,37 @@ export default function CalendarPage() {
                   </div>
                 </div>
               )}
+            {selectedEvent?.status === 'active' && (
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  onClick={openSessionEditor}
+                  disabled={saving}
+                  size="sm"
+                  className="rounded-xl flex-1 text-indigo-700 border-indigo-200 hover:bg-indigo-50"
+                >
+                  <CalendarDays className="w-4 h-4 mr-1" />
+                  {t('cal.moveLesson')}
+                </Button>
+                {/* Pro Klasė tutors cannot cancel — show why instead of hiding the option. */}
+                {hideProKlaseOrgTutorCancel &&
+                  !(
+                    requiresStatusConfirmation &&
+                    !isGroupSession &&
+                    isAfter(new Date(), selectedEvent.end_time)
+                  ) && (
+                  <Button
+                    variant="outline"
+                    onClick={() => setToastMessage({ message: t('cal.proKlaseCancelAdminOnly'), type: 'warning' })}
+                    size="sm"
+                    className="rounded-xl flex-1 text-gray-700 border-gray-300 hover:bg-gray-100"
+                  >
+                    <XCircle className="w-4 h-4 mr-1" />
+                    {t('cal.cancelLessonTitle')}
+                  </Button>
+                )}
+              </div>
+            )}
             {selectedEvent?.status === 'active' &&
               !hideProKlaseOrgTutorCancel &&
               !(

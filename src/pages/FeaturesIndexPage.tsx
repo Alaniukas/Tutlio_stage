@@ -58,7 +58,7 @@ export default function FeaturesIndexPage() {
       <LandingNavbar />
 
       <main className="flex-1 pt-[60px] md:pt-[72px]">
-        <section className="relative overflow-hidden bg-gradient-to-b from-[#f5f5f3] via-[#f0efed] to-white">
+        <section className="relative overflow-hidden bg-white">
           <div className="absolute top-[10%] left-1/2 -translate-x-1/2 w-[700px] h-[400px] bg-white/40 rounded-full blur-[100px] pointer-events-none" />
           <div className="relative z-10 max-w-[1200px] mx-auto px-6 pt-16 pb-14 text-center">
             <span className="inline-block px-4 py-1 rounded-full border border-gray-200 text-[12px] font-semibold text-gray-500 mb-5 tracking-wide uppercase">

@@ -62,13 +62,34 @@ describe('plan pricing has a single source of truth', () => {
 
   it('llms.txt quotes the same prices humans see (the €9.99 staleness bug)', () => {
     const res = mockRes();
-    llmsHandler({ url: '/llms.txt', method: 'GET', headers: {}, query: {} } as any, res as any);
+    llmsHandler(
+      { url: '/llms.txt', method: 'GET', headers: { host: 'www.tutlio.com' }, query: {} } as any,
+      res as any,
+    );
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain(`**Monthly**: ${eur(TUTOR_PLANS.monthly.pricePerMonthEur)}/month`);
     expect(res.body).toContain(`**Yearly**: ${eur(TUTOR_PLANS.yearly.pricePerMonthEur)}/month`);
     expect(res.body).toContain(`**Subscription Only**: ${eur(TUTOR_PLANS.subscriptionOnly.pricePerMonthEur)}/month`);
     expect(res.body).not.toMatch(/€9\.99/);
     expect(res.body).toContain('https://www.tutlio.com/blog/rss.xml');
+  });
+
+  it('serves domain-canonical llms.txt per host', () => {
+    const lt = mockRes();
+    llmsHandler(
+      { url: '/llms.txt', method: 'GET', headers: { host: 'www.tutlio.lt' }, query: {} } as any,
+      lt as any,
+    );
+    expect(lt.body).toContain('https://www.tutlio.lt/blog/rss.xml');
+    expect(lt.body).not.toContain('https://www.tutlio.com/blog/rss.xml');
+
+    const pl = mockRes();
+    llmsHandler(
+      { url: '/llms.txt', method: 'GET', headers: { host: 'www.tutlio.pl' }, query: {} } as any,
+      pl as any,
+    );
+    expect(pl.body).toContain('https://www.tutlio.pl/blog/rss.xml');
+    expect(pl.body).not.toContain('https://www.tutlio.com/blog/rss.xml');
   });
 
   it('SoftwareApplication JSON-LD offers mirror the constants', () => {

@@ -94,8 +94,11 @@ describe('CompanyContracts manual e-sign mark', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText('Laukiama tėvų parašo…')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /Pažymėti pasirašyta/ }));
+    expect(screen.getByText('Laukiama tėvų parašo')).toBeTruthy();
+
+    // Row actions now live behind a "more actions" popover.
+    fireEvent.click(screen.getByRole('button', { name: /Daugiau veiksmų/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Pažymėti pasirašytą/ }));
 
     // Dialog with both options; pending signer's name shown.
     expect(screen.getByText('Pažymėti tėvų parašą ranka')).toBeTruthy();
