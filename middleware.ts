@@ -27,8 +27,15 @@ function isBot(request: Request): boolean {
  * without them are treated as crawler-like, so an unfamiliar search/AI bot
  * still receives semantic HTML instead of the noindex SPA shell. */
 export function isBrowserNavigation(request: Request): boolean {
-  return request.headers.get('sec-fetch-mode') === 'navigate'
+  const hasNavigationMetadata = request.headers.get('sec-fetch-mode') === 'navigate'
     && request.headers.get('sec-fetch-dest') === 'document';
+  if (hasNavigationMetadata) return true;
+
+  // Some proxies and synthetic browser checks normalize or omit Fetch
+  // Metadata. Keep those real browser UAs on the SPA path; recognized bots
+  // are excluded by the caller before this fallback is considered.
+  const ua = request.headers.get('user-agent') || '';
+  return /Mozilla\/5\.0.*(?:AppleWebKit|Gecko\/|Chrome\/|Firefox\/|Edg\/)/i.test(ua);
 }
 
 export function defaultLocale(host: string): string {

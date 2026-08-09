@@ -154,6 +154,25 @@ describe('middleware SSR routing', () => {
     expect(isBrowserNavigation(unknownCrawler)).toBe(false);
   });
 
+  it('keeps browser UAs on the SPA path when Fetch Metadata is normalized', () => {
+    const browser = new Request('https://www.tutlio.com/fr', {
+      headers: {
+        host: 'www.tutlio.com',
+        'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36',
+        'sec-fetch-mode': 'cors',
+      },
+    });
+    const crawler = new Request('https://www.tutlio.com/fr', {
+      headers: {
+        host: 'www.tutlio.com',
+        'user-agent': 'Mozilla/5.0 (compatible; NewSearchCrawler/1.0)',
+      },
+    });
+
+    expect(isBrowserNavigation(browser)).toBe(true);
+    expect(isBrowserNavigation(crawler)).toBe(false);
+  });
+
   it('routes /schools and /teachers to the schools renderer', () => {
     expect(ssrDestination(botRequest('https://www.tutlio.com/schools', 'www.tutlio.com')))
       .toBe('/api/schools-render?page=landing&locale=en');
