@@ -18,6 +18,7 @@ import PerlasFinanceSection from '@/components/PerlasFinanceSection';
 import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { ORG_TUTOR_FILTER_SCROLL_CLASS } from '@/lib/orgUi';
+import { format } from 'date-fns';
 
 type CompanyFinanceCache = {
   orgId: string;
@@ -34,7 +35,7 @@ type CompanyFinanceCache = {
 };
 
 export default function CompanyFinance() {
-  const { t } = useTranslation();
+  const { t, dateFnsLocale } = useTranslation();
   const { fmt } = useMarketMoney();
   const fc = getCached<CompanyFinanceCache>('company_finance');
   const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
@@ -819,7 +820,7 @@ export default function CompanyFinance() {
                               {sList.map((s: any) => (
                                 <div key={s.id} className="px-6 py-2 flex justify-between text-xs border-b border-gray-100 last:border-b-0">
                                   <div className="flex gap-2 min-w-0">
-                                    <span className="text-gray-500 shrink-0">{new Date(s.start_time).toLocaleDateString('lt-LT')}</span>
+                                    <span className="text-gray-500 shrink-0">{format(new Date(s.start_time), 'P', { locale: dateFnsLocale })}</span>
                                     <span className="text-gray-600 truncate">
                                       {s.invoice_row_kind === 'package'
                                         ? `${t('companyFinance.packageRowLabel')}${s.subjects?.name ? ` · ${s.subjects.name}` : ''}${s.total_lessons != null ? ` (${s.total_lessons})` : ''}`

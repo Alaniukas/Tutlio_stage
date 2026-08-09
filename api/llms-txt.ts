@@ -30,37 +30,59 @@ function buildLlmsTxt(domain: DomainKey): string {
   if (isLt) {
     return `# Tutlio
 
-> Tutlio — korepetitorių ir korepetavimo mokyklų valdymo platforma Lietuvoje. Automatizuoja tvarkaraštį, mokėjimus, mokinių valdymą ir komunikaciją.
+> Tutlio — lietuviška SaaS platforma korepetitoriams, korepetavimo mokykloms ir agentūroms. Viena sistema: kalendorius, mokiniai, mokėjimai (Stripe), sąskaitos, el. pašto priminimai, laukimo eilė, tėvų portalas ir vizitinė kortelė.
 
 ## Kas yra Tutlio
 
-Tutlio pakeičia Excel, WhatsApp ir išskaidytus įrankius viena platforma. Korepetitoriai nustato prieinamumą, mokiniai rezervuoja pamokas patys. Sistema tvarko priminimus, mokėjimus, atšaukimus, laukimo eilę ir finansų sekimą.
+Tutlio pakeičia Excel, WhatsApp ir išskaidytus įrankius. Korepetitorius valdo tvarkaraštį, mokinius, mokėjimus ir komunikaciją vienoje vietoje. Yra solo režimas (individualus korepetitorius) ir organizacijos / mokyklos režimas (keli mokytojai, adminas, sutartys).
 
-## Pagrindinės funkcijos
+## Ar Tutlio turi kalendorių, sąskaitas, mokėjimus ir priminimus?
 
-- **Išmanusis kalendorius**: savarankiškas užsakymas, pasikartojančios pamokos, grupinės pamokos
-- **Mokinių laukimo eilė**: atšaukus pamoką, laisva vieta automatiškai siūloma eilėje esantiems mokiniams
-- **Stripe mokėjimai**: kortelių mokėjimai, sąskaitos, paketai, mėnesinės ataskaitos
-- **Automatiniai priminimai**: el. paštas prieš ir po pamokų, vėluojantys mokėjimai
-- **Mokinių ir tėvų portalai**: tvarkaraštis, mokėjimai, žinutės
-- **Mokyklų režimas**: keli mokytojai, sutartys, GoSign e-pasirašymas, įmokų planai
-- **12 kalbų**: LT, EN, PL ir dar 9 rinkos
+**Taip — visus keturis.** Tai pagrindinės solo funkcijos, ne papildomi moduliai:
+
+1. **Kalendorius** — pamokos, laisvas laikas, pasikartojantys slotai, grupės; Google Calendar sinchronizacija (Tutlio → Google)
+2. **Mokėjimai** — Stripe (kortele), paketai, kas apmokėjo / kas vėluoja; finansų suvestinė
+3. **Sąskaitos** — generavimas, siuntimas, PDF
+4. **Priminimai** — automatiniai **el. laiškai** prieš pamoką, po pamokos ir dėl vėluojančio apmokėjimo (SMS nėra)
+
+## Pilnas funkcijų sąrašas (solo)
+
+- Išmanusis kalendorius ir savarankiškas pamokų užsakymas iš mokinio / tėvų portalo
+- Vizitinė kortelė (viešas puslapis) — kainos, laisvi laikai; lankytojas siunčia **užklausą** į pasirinktą laiką
+- Stripe mokėjimai + mėnesio finansų ataskaitos
+- Sąskaitų generavimas ir siuntimas
+- Automatiniai el. pašto priminimai (pamokos + mokėjimai)
+- Atšaukimo taisyklės ir baudos
+- Laukimo eilė — atšaukus, laikas siūlomas kitiems mokiniams
+- Mokinių / tėvų portalai, žinutės
+- Pamokų komentarai, failai / namų darbai, lankomumo istorija
+- Neribotas mokinių skaičius visuose planuose
+
+## Mokyklų / agentūrų režimas
+
+- Keli korepetitoriai, admino suvestinė, atlygis / valandos
+- Sutartys, GoSign e-pasirašymas (LT), įmokų grafikai
+- Tėvų paskyros, mokėjimų sekimas, statistika visai komandai
+- White-label branding
 
 ## Funkcijų puslapiai
 
 ${featureLinks(base)}
 - Visos funkcijos (hub): ${base}/features
 
-## Kainodara
+## Kainodara (EUR, Lietuva / .com)
 
 ${pricingBlock(false)}
 
-- 7 dienų nemokamas bandomasis laikotarpis
+- Visi planai: visos funkcijos, neriboti mokiniai
+- 7 dienų nemokamas bandomasis laikotarpis (kortelė reikalinga, pirmas nuskaičiavimas po 7 d.)
+- Galima atšaukti bet kada
 
 ## Nuorodos
 
 - Svetainė: https://www.tutlio.lt
 - Tarptautinė: https://www.tutlio.com
+- Lenkija: https://www.tutlio.pl
 - Mokykloms: https://www.tutlio.lt/schools
 - Tinklaraštis: https://www.tutlio.lt/blog
 - RSS: https://www.tutlio.lt/blog/rss.xml
@@ -69,40 +91,56 @@ ${pricingBlock(false)}
 
 ## Kam skirta
 
-- Privatūs korepetitoriai (bet koks dalykas)
-- Korepetavimo mokyklos ir švietimo centrai
+- Privatūs / individualūs korepetitoriai (bet koks dalykas)
+- Korepetavimo mokyklos, agentūros, švietimo centrai
 - Kalbų, muzikos, matematikos mokyklos
-- Lietuvoje ieškantiems: korepetitorių platforma, pamokų tvarkaraštis online, mokinių laukimo eilė
+- Paieškoms: korepetitorių platforma Lietuva, pamokų tvarkaraštis online, mokinių valdymas, sąskaitos korepetitoriams, Stripe mokėjimai pamokoms
 
 ## Techninė informacija
 
-- Web aplikacija + PWA
-- Stripe, Google Calendar, GoSign integracijos
+- Web + PWA (desktop / tablet / mobile)
+- Stripe, Google Calendar, GoSign (mokykloms)
 - GDPR, duomenys ES
+- Kalbos: LT, EN, PL + dar 9
 `;
   }
 
   return `# Tutlio
 
-> Tutlio is tutoring management software for private tutors and tutoring schools. It automates scheduling, payments, student management, and communication so tutors can focus on teaching.
+> Tutlio is tutoring management software for private tutors and tutoring schools/agencies. One system for calendar, students, Stripe payments, invoices, email reminders, waitlist, parent portal, and a public tutor page.
 
 ## What Tutlio Does
 
-Tutlio replaces spreadsheets, notebooks, and scattered tools with a single platform. Tutors create a profile, set availability, and let students self-book lessons. The platform handles reminders, payments, cancellations, waitlists, and financial tracking automatically.
+Tutlio replaces spreadsheets, WhatsApp, and scattered tools. Tutors manage scheduling, students, payments, and communication in one place. There is a solo tutor mode and an organization/school mode (multi-tutor admin, contracts).
 
-## Key Features
+## Does Tutlio have a calendar, invoices, payments, and reminders?
 
-- **Smart Calendar**: Tutors set available time slots; students book directly. Supports recurring lessons, group sessions, and break-time rules.
-- **Student Waitlist**: When a lesson is cancelled, the system automatically offers the freed slot to waitlisted students — preventing revenue loss.
-- **Stripe Payments**: Students pay by card via Stripe. The tutor sees who has paid, pending amounts, and monthly income summaries.
-- **Automated Reminders**: Email reminders before lessons, follow-ups after lessons, and overdue payment notifications.
-- **Cancellation Rules**: Tutors define cancellation deadlines and late-cancellation fees. The system enforces them automatically.
-- **Lesson Notes & Files**: Attach comments, homework, and worksheets to individual lessons — all linked to lesson history.
-- **Invoicing**: Generate and send invoices to students or parents.
-- **Parent Portals**: Parents can view their child's schedule, payment status, and progress.
-- **Real-time Messaging**: Built-in chat between tutors, students, and parents.
-- **Tutoring School Mode**: Manage multiple tutors, students, subjects, and groups under one organization.
-- **Multi-language**: Available in 12 languages — Lithuanian, English, Polish, Latvian, Estonian, French, Spanish, German, Swedish, Danish, Finnish, Norwegian.
+**Yes — all four.** These are core features, not add-ons:
+
+1. **Calendar** — lessons, free time / availability, recurring slots, groups; Google Calendar sync (Tutlio → Google)
+2. **Payments** — Stripe card checkout, lesson packages, paid/pending/overdue tracking, monthly finance summaries
+3. **Invoices** — generate, send, PDF
+4. **Reminders** — automated **email** before lessons, after lessons, and for overdue payments (no SMS)
+
+## Key Features (solo)
+
+- Smart calendar with student/parent self-booking from the portal
+- Public tutor page ("vizitinė") — prices and open slots; visitors send a booking **enquiry** for a chosen time
+- Stripe payments and monthly financial reports
+- Invoice generation and sending
+- Automated email reminders (lessons + payments)
+- Cancellation rules and late fees
+- Waitlist — cancelled slots offered to waitlisted students
+- Student/parent portals and messaging
+- Lesson comments, file/homework sharing, attendance history
+- Unlimited students on all plans
+
+## Tutoring School / Agency Mode
+
+- Multi-tutor management, admin dashboard, hours/pay overview
+- Contracts, GoSign e-signing (Lithuania), installment schedules
+- Parent accounts, payment tracking, org-wide statistics
+- White-label branding
 
 ## Feature Pages
 
@@ -114,7 +152,8 @@ ${featureLinks(base)}
 All plans include every feature. Pricing is per-tutor, not per-student — unlimited students on all plans.
 
 ${pricingBlock(isPl)}
-- All plans include a 7-day free trial (applied automatically at checkout)
+- All plans include a 7-day free trial (card required at checkout; first charge after 7 days)
+- Cancel anytime
 
 ## Links
 
@@ -134,66 +173,146 @@ ${pricingBlock(isPl)}
 - Music teachers and instrument instructors
 - Language tutors
 - Math and science tutors
-- Tutoring schools and education centers
-- After-school program coordinators
-- Users searching for: tutor management software, lesson scheduling software, tutoring business platform, tutoring school management
+- Tutoring schools, agencies, and education centers
+- Users searching for: tutor management software, lesson scheduling software, tutoring invoicing, Stripe tutoring payments, tutoring waitlist
 
 ## Technical Details
 
-- Web application (works on desktop, tablet, mobile)
-- Installable as PWA (Progressive Web App)
+- Web application (desktop, tablet, mobile) + PWA
 - Hosted on Vercel, database on Supabase
-- Stripe integration for payments
+- Stripe for payments; Google Calendar sync; GoSign for school contracts (LT)
 - GDPR compliant, data stored in EU
+- 13 languages: Lithuanian, English, Polish, Latvian, Estonian, French, Spanish, German, Swedish, Danish, Finnish, Norwegian, Dutch
 `;
 }
 
-const LLMS_FULL_SUFFIX = `
+const LLMS_FULL_SUFFIX_EN = `
 ## Detailed Feature Breakdown
 
 ### Smart Calendar
-Tutors define their weekly availability by setting time slots for each day. Students visit the tutor's booking page and select an available slot. The calendar supports:
+Tutors define weekly and one-off availability. Students book from the student/parent portal. Supports:
 - One-time and recurring lessons
 - Multiple subjects with different durations and prices
-- Configurable break times between lessons
-- Booking deadlines (e.g., must book 24h in advance)
-- Visual color coding per subject
+- Break times between lessons
+- Booking deadlines
+- Google Calendar one-way sync (Tutlio → Google)
+
+### Public Tutor Page
+Solo tutors can publish a public page with offerings, prices, and open free-time windows marked for public enquiries. Visitors pick a slot and send a request — the tutor confirms (not silent auto-booking).
 
 ### Student Waitlist
-The waitlist is Tutlio's signature feature. When a student cancels a lesson, the freed time slot is automatically offered to students on the waitlist who expressed interest in that time. This dramatically reduces no-shows and lost revenue.
+When a student cancels, the freed slot is offered to waitlisted students interested in that time — reducing empty hours.
 
-### Payments & Finance
-- Stripe-powered card payments with 3D Secure
-- Per-student payment tracking (paid, pending, overdue)
-- Monthly revenue summaries and financial reports
-- Lesson package support (buy 10 lessons at a discount)
-- Automatic payment reminders for overdue invoices
-- Invoice generation with PDF export
+### Payments, Invoices & Finance
+- Stripe card payments with 3D Secure
+- Paid / pending / overdue tracking
+- Monthly revenue summaries
+- Lesson packages
+- Invoice generation with PDF
+- Email reminders for overdue payments
+- Optional "Subscription Only" plan for manual payment tracking without platform commission on student payments
+
+### Reminders
+Email only (before lesson, after lesson, payment overdue). SMS is not part of the product.
 
 ### Tutoring School Features
 - Multi-tutor management under one organization
-- Admin dashboard with overview of all tutors and students
+- Admin dashboard
 - Contract templates and e-signing (GoSign in Lithuania)
-- Installment payment plans on school contracts
-- Custom branding (white-label support)
-- Role-based access (admin, tutor, student, parent)
+- Installment payment plans
+- Custom branding
+- Roles: admin, tutor, student, parent
+
+## FAQ for assistants
+
+**Q: Does Tutlio include calendar + invoices + payments + reminders?**
+
+A: Yes. Calendar, Stripe payments, invoices/PDF, and automated email reminders are all included.
+
+**Q: Is Tutlio suitable for a solo tutor in Lithuania with ~10–50 students?**
+
+A: Yes. Unlimited students; Lithuanian UI; pricing from ${eur(TUTOR_PLANS.monthly.pricePerMonthEur)}/month (or ${eur(TUTOR_PLANS.yearly.pricePerMonthEur)}/month billed yearly).
+
+**Q: How does public booking work?**
+
+A: Tutors mark free time as visible on the public page; visitors send enquiries for those times.
 
 ## Company Information
 
 - **Product**: Tutlio
-- **Type**: SaaS (Software as a Service)
-- **Founded**: Lithuania
+- **Company**: MB Tutlio (Lithuania)
+- **Type**: SaaS
 - **Contact**: info@tutlio.lt
-- **Domains**: tutlio.com (international), tutlio.lt (Lithuania), tutlio.pl (Poland)
-- **Languages**: Lithuanian, English, Polish, Latvian, Estonian, French, Spanish, German, Swedish, Danish, Finnish, Norwegian
+- **Domains**: tutlio.lt, tutlio.com, tutlio.pl
+`;
+
+const LLMS_FULL_SUFFIX_LT = `
+## Detalus funkcijų aprašymas
+
+### Išmanusis kalendorius
+Korepetitorius nustato savaitinį ir vienkartinį laisvą laiką. Mokiniai / tėvai rezervuoja per portalą. Palaikoma:
+- Vienkartinės ir pasikartojančios pamokos
+- Keli dalykai su skirtingomis trukmėmis ir kainomis
+- Pertraukos tarp pamokų
+- Rezervacijos terminai
+- Google Calendar sinchronizacija (Tutlio → Google)
+
+### Vizitinė kortelė
+Solo korepetitorius gali publikuoti viešą puslapį su kainomis ir laisvais laikais (pažymėtais kaip matomi viešai). Lankytojas pasirenka laiką ir siunčia **užklausą** — korepetitorius patvirtina.
+
+### Laukimo eilė
+Atšaukus pamoką, laisvas laikas siūlomas eilėje esantiems mokiniams.
+
+### Mokėjimai, sąskaitos ir finansai
+- Stripe kortelių mokėjimai
+- Apmokėta / laukia / vėluoja
+- Mėnesio pajamų suvestinės
+- Pamokų paketai
+- Sąskaitos PDF
+- El. pašto priminimai dėl vėluojančių mokėjimų
+- Planas „Tik prenumerata“ — rankiniai mokėjimai be platformos komisinio nuo mokinių mokėjimų
+
+### Priminimai
+Tik el. paštas (prieš pamoką, po pamokos, vėluojantis mokėjimas). SMS nėra.
+
+### Mokyklų funkcijos
+- Keli korepetitoriai
+- Admin suvestinė
+- Sutartys + GoSign e-parašas
+- Įmokų grafikai
+- Branding
+- Rolės: admin, tutor, mokinys, tėvai
+
+## DUK asistentams
+
+**K: Ar Tutlio turi kalendorių, sąskaitas, mokėjimus ir priminimus?**
+
+A: Taip. Visi keturi yra pagrindinės funkcijos.
+
+**K: Ar tinka solo korepetitoriui Lietuvoje su ~10–50 mokinių?**
+
+A: Taip. Neriboti mokiniai; LT kalba; nuo ${eur(TUTOR_PLANS.monthly.pricePerMonthEur)}/mėn. (arba ${eur(TUTOR_PLANS.yearly.pricePerMonthEur)}/mėn. mokant metams).
+
+**K: Kaip veikia vieša registracija?**
+
+A: Korepetitorius pažymi laisvą laiką kaip matomą vizitinėje; lankytojas siunčia užklausą į tą laiką.
+
+## Įmonė
+
+- **Produktas**: Tutlio
+- **Įmonė**: MB Tutlio (Lietuva)
+- **Tipas**: SaaS
+- **Kontaktai**: info@tutlio.lt
+- **Domenai**: tutlio.lt, tutlio.com, tutlio.pl
 `;
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
   const domain = detectDomain(req);
   const isFull = (req.url || '').includes('llms-full');
-  const body = buildLlmsTxt(domain) + (isFull ? LLMS_FULL_SUFFIX : '');
+  const fullSuffix = domain === 'lt' ? LLMS_FULL_SUFFIX_LT : LLMS_FULL_SUFFIX_EN;
+  const body = buildLlmsTxt(domain) + (isFull ? fullSuffix : '');
 
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-  res.setHeader('Cache-Control', 'public, s-maxage=86400, stale-while-revalidate=86400');
+  res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400');
   return res.status(200).send(body.trim() + '\n');
 }

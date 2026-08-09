@@ -78,10 +78,12 @@ export default function OldVsNewComparison() {
       <div className="mx-auto w-full max-w-[1224px] px-5 sm:px-6 lg:px-8">
         <Reveal>
           <div className="mb-12 text-center lg:mb-16">
-            <h2 className="font-display text-3xl font-bold tracking-tight text-zinc-900 sm:text-4xl lg:text-5xl">
+            <h2 className="mx-auto max-w-3xl text-[1.65rem] font-semibold leading-snug text-zinc-900 sm:text-3xl lg:text-[2.15rem]">
               {t('landing.v2.compareTitle')}
             </h2>
-            <p className="mx-auto mt-4 max-w-2xl text-lg text-zinc-600">{t('landing.v2.compareSub')}</p>
+            <p className="mx-auto mt-3 max-w-xl text-base font-normal leading-relaxed text-zinc-500 sm:mt-4 sm:text-lg">
+              {t('landing.v2.compareSub')}
+            </p>
           </div>
         </Reveal>
 

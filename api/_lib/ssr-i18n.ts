@@ -11,6 +11,7 @@ import { se } from '../../src/lib/i18n/se.js';
 import { dk } from '../../src/lib/i18n/dk.js';
 import { fi } from '../../src/lib/i18n/fi.js';
 import { no } from '../../src/lib/i18n/no.js';
+import { nl } from '../../src/lib/i18n/nl.js';
 
 const translations: Record<Locale, Record<string, string>> = {
   lt,
@@ -25,6 +26,7 @@ const translations: Record<Locale, Record<string, string>> = {
   dk,
   fi,
   no,
+  nl,
 };
 
 /** Static locale bundle (Vercel-safe). Kept async for call-site compatibility. */

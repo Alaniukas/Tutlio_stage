@@ -4,6 +4,10 @@
  * checkout charges. Tier data comes from GET /api/enterprise-license-pricing.
  */
 
+import type { TutlioMarket } from './market';
+import { ENTERPRISE_EUR, enterpriseEurTierDefs } from './enterprisePricingEur';
+import { ENTERPRISE_PLN, enterprisePlnTierDefs } from './enterprisePricingPln';
+
 export interface LicenseTier {
   /** Upper bound of the tier (inclusive), null = infinite last tier. */
   upTo: number | null;
@@ -18,6 +22,24 @@ export interface EnterpriseLicensePricing {
   tiers: LicenseTier[];
   minLicenses: number;
   maxSelfServe: number;
+}
+
+/**
+ * Canonical client fallback used when the public pricing endpoint is briefly
+ * unavailable. Checkout still validates the final quantity and Stripe price.
+ */
+export function fallbackEnterpriseLicensePricing(market: TutlioMarket): EnterpriseLicensePricing {
+  const isPl = market === 'pl';
+  const config = isPl ? ENTERPRISE_PLN : ENTERPRISE_EUR;
+
+  return {
+    currency: isPl ? 'pln' : 'eur',
+    interval: 'month',
+    tiersMode: config.tiersMode,
+    tiers: isPl ? enterprisePlnTierDefs() : enterpriseEurTierDefs(),
+    minLicenses: 1,
+    maxSelfServe: config.maxSelfServe,
+  };
 }
 
 /** Tier a given quantity falls into (volume pricing semantics). */

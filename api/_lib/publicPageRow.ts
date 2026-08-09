@@ -33,4 +33,5 @@ export interface PublicPageRow {
   socials: Record<string, string> | null;
   published: boolean;
   booking_enabled: boolean;
+  updated_at?: string;
 }

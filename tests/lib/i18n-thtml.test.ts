@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest';
-import { t, tHtml } from '../../src/lib/i18n/core';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { loadLocaleDict, t, tHtml } from '../../src/lib/i18n/core';
 
 const XSS = '<img src=x onerror=alert(1)>';
+
+beforeAll(async () => {
+  await loadLocaleDict('en');
+});
 
 describe('tHtml — HTML-escaped interpolation for dangerouslySetInnerHTML sinks', () => {
   it('escapes HTML special characters in interpolated params', () => {

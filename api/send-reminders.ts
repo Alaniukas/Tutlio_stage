@@ -9,6 +9,7 @@ import { createClient } from '@supabase/supabase-js';
 import { isOrgTutor } from './_lib/isOrgTutor.js';
 import { requireCronAuth } from './_lib/cronAuth.js';
 import { dedupeReminderRecipients, type ReminderRecipient } from './_lib/reminderRecipients.js';
+import { loadReminderOptOuts } from './_lib/reminderOptOut.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -79,7 +80,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // sessionId lets /api/send-email swap the link for a tracked /api/join-session URL (attendance).
         // Whiteboard link intentionally omitted: it pointed at the deployment domain and
         // recipients (parents/students) often lack board access — it lives in-app only.
-        const baseData = { sessionId: session.id, date: dateStr, time: timeStr, topic: session.topic, duration: durationMinutes, price: session.price, meetingLink: session.meeting_link, ...(orgId ? { organizationId: orgId } : {}) };
+        const baseData = {
+          sessionId: session.id,
+          studentId: student?.id || undefined,
+          date: dateStr,
+          time: timeStr,
+          topic: session.topic,
+          duration: durationMinutes,
+          price: session.price,
+          meetingLink: session.meeting_link,
+          ...(orgId ? { organizationId: orgId } : {}),
+        };
 
         if (reminderStudentHours > 0 && !session.reminder_student_sent && diffHours <= reminderStudentHours && diffHours >= 0 && student?.email) {
           try {
@@ -151,6 +162,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             for (const r of optRows || []) {
               if (r?.disable_lesson_reminders && r?.email) optedOut.add(String(r.email).toLowerCase());
             }
+            const tableOptOuts = await loadReminderOptOuts(supabase, lookupEmails);
+            for (const e of tableOptOuts) optedOut.add(e);
           }
 
           // Dedup, drop the student's own email and opt-outs.
@@ -195,6 +208,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           try {
             const tutorReminderCore = {
               sessionId: session.id,
+              studentId: student?.id || undefined,
               date: dateStr,
               time: timeStr,
               topic: session.topic,

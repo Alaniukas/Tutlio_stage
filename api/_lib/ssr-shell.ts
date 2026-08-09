@@ -14,6 +14,8 @@ export {
   buildCanonicalUrl,
   buildPlatformPath,
   buildPlatformCanonicalUrl,
+  publicPagePath,
+  buildPublicPageCanonicalUrl,
   localizedPagePath,
   generateHreflangLinks,
   generateHreflangLinksFor,
@@ -54,6 +56,7 @@ const OG_LOCALE_MAP: Record<Locale, string> = {
   dk: 'da_DK',
   fi: 'fi_FI',
   no: 'nb_NO',
+  nl: 'nl_NL',
 };
 
 /** Native language names for the crawlable locale-links footer block. */
@@ -70,7 +73,15 @@ const LOCALE_NATIVE_NAMES: Record<Locale, string> = {
   dk: 'Dansk',
   fi: 'Suomi',
   no: 'Norsk',
+  nl: 'Nederlands',
 };
+
+function jsonLdStringify(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026');
+}
 
 export interface ShellOptions {
   locale: Locale;
@@ -89,6 +100,18 @@ export interface ShellOptions {
    * vs /apie-mus). Drives canonical, hreflang, and the locale-links footer.
    */
   urlFor?: (locale: Locale) => string;
+  /** Override the normal all-locale cluster. An empty string deliberately
+   * suppresses hreflang for single-locale user-authored pages. */
+  hreflangHtml?: string;
+  /** Public user-authored pages are not translated variants, so they must not
+   * expose links that imply 13 equivalent language versions. */
+  showLocaleLinks?: boolean;
+  /** Defaults to every supported locale for regular translated pages. */
+  ogAlternateLocales?: Locale[];
+  /** Defaults to the indexable marketing-page directive. */
+  robots?: string;
+  /** Defaults to website; public person profiles use the Open Graph profile type. */
+  ogType?: 'website' | 'profile';
 }
 
 function localeLinksHtml(urlFor: (locale: Locale) => string, current: Locale, domain: DomainKey): string {
@@ -104,18 +127,22 @@ function localeLinksHtml(urlFor: (locale: Locale) => string, current: Locale, do
 export function renderShell(opts: ShellOptions): string {
   const { locale, domain, path, title, description, body, jsonLd, extraHead, breadcrumbs } = opts;
   const ogImage = opts.ogImage || DEFAULT_OG_IMAGE;
+  const ogImageDimensions = opts.ogImage
+    ? ''
+    : '<meta property="og:image:width" content="1200" />\n<meta property="og:image:height" content="800" />';
   const urlFor = opts.urlFor || ((l: Locale) => buildCanonicalUrl(path, l));
   const canonicalUrl = urlFor(locale);
 
-  const ogLocaleAlternates = LOCALES
+  const ogLocaleAlternates = (opts.ogAlternateLocales ?? LOCALES)
     .filter((l) => l !== locale)
     .map((l) => `<meta property="og:locale:alternate" content="${OG_LOCALE_MAP[l]}" />`)
     .join('\n');
 
   const breadcrumbLd = breadcrumbs && breadcrumbs.length > 0
-    ? `<script type="application/ld+json">${JSON.stringify({
+    ? `<script type="application/ld+json">${jsonLdStringify({
         '@context': 'https://schema.org',
         '@type': 'BreadcrumbList',
+        '@id': `${canonicalUrl}#breadcrumb`,
         itemListElement: breadcrumbs.map((b, i) => ({
           '@type': 'ListItem',
           position: i + 1,
@@ -123,6 +150,14 @@ export function renderShell(opts: ShellOptions): string {
           item: b.url,
         })),
       })}</script>`
+    : '';
+  const breadcrumbHtml = breadcrumbs && breadcrumbs.length > 1
+    ? `<nav class="breadcrumbs" aria-label="Breadcrumb"><ol>${breadcrumbs.map((b, i) => {
+        const isCurrent = i === breadcrumbs.length - 1;
+        return `<li>${isCurrent
+          ? `<span aria-current="page">${esc(b.name)}</span>`
+          : `<a href="${esc(b.url)}">${esc(b.name)}</a>`}</li>`;
+      }).join('')}</ol></nav>`
     : '';
 
   return `<!DOCTYPE html>
@@ -132,11 +167,11 @@ export function renderShell(opts: ShellOptions): string {
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>${esc(title)}</title>
 <meta name="description" content="${esc(description)}" />
-<meta name="robots" content="index, follow, max-image-preview:large" />
+<meta name="robots" content="${esc(opts.robots || 'index, follow, max-image-preview:large')}" />
 <link rel="canonical" href="${esc(canonicalUrl)}" />
 <link rel="alternate" type="application/rss+xml" title="Tutlio Blog" href="${esc(buildCanonicalUrl('/blog/rss.xml', locale))}" />
-${hreflangTagsFor(urlFor)}
-<meta property="og:type" content="website" />
+${opts.hreflangHtml ?? hreflangTagsFor(urlFor)}
+<meta property="og:type" content="${opts.ogType || 'website'}" />
 <meta property="og:locale" content="${OG_LOCALE_MAP[locale]}" />
 ${ogLocaleAlternates}
 <meta property="og:title" content="${esc(title)}" />
@@ -144,8 +179,7 @@ ${ogLocaleAlternates}
 <meta property="og:url" content="${esc(canonicalUrl)}" />
 <meta property="og:site_name" content="Tutlio" />
 <meta property="og:image" content="${esc(ogImage)}" />
-<meta property="og:image:width" content="1200" />
-<meta property="og:image:height" content="800" />
+${ogImageDimensions}
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="${esc(title)}" />
 <meta name="twitter:description" content="${esc(description)}" />
@@ -167,6 +201,10 @@ a:hover{text-decoration:underline}
 .nav{display:flex;align-items:center;justify-content:space-between;max-width:1100px;margin:0 auto;padding:16px 24px}
 .nav-logo{font-weight:700;font-size:1.3rem;color:#1a1a1a}
 .nav-links{display:flex;gap:20px;font-size:.9rem}
+.breadcrumbs{max-width:1100px;margin:0 auto;padding:14px 24px 0;font-size:.82rem;color:#6b7280}
+.breadcrumbs ol{display:flex;flex-wrap:wrap;gap:8px;list-style:none}
+.breadcrumbs li:not(:last-child)::after{content:'›';margin-left:8px;color:#9ca3af}
+.breadcrumbs a{color:#4f46e5}
 .hero{max-width:1100px;margin:0 auto;padding:40px 24px 0}
 .hero h1{font-size:2.2rem;font-weight:700;line-height:1.3;margin-bottom:12px}
 .hero p{color:#555;font-size:1.1rem;max-width:640px;margin-bottom:24px}
@@ -201,21 +239,24 @@ a:hover{text-decoration:underline}
 <nav class="nav">
   <a href="${buildPath('/', locale, domain)}" class="nav-logo">Tutlio</a>
   <div class="nav-links">
+    <a href="${buildPath('/features', locale, domain)}">${t(locale, 'nav.features')}</a>
     <a href="${buildPath('/pricing', locale, domain)}">${t(locale, 'common.prices')}</a>
     <a href="${buildPath(localizedPagePath('about', locale), locale, domain)}">${t(locale, 'nav.aboutUs')}</a>
-    <a href="${buildPath('/blog', locale, domain)}">${({ lt: 'Tinklaraštis', en: 'Blog', pl: 'Blog', lv: 'Emuārs', ee: 'Blogi', fr: 'Blog', es: 'Blog', de: 'Blog', se: 'Blogg', dk: 'Blog', fi: 'Blogi', no: 'Blogg' })[locale]}</a>
+    <a href="${buildPath('/blog', locale, domain)}">${({ lt: 'Tinklaraštis', en: 'Blog', pl: 'Blog', lv: 'Emuārs', ee: 'Blogi', fr: 'Blog', es: 'Blog', de: 'Blog', se: 'Blogg', dk: 'Blog', fi: 'Blogi', no: 'Blogg', nl: 'Blog' })[locale]}</a>
   </div>
 </nav>
+${breadcrumbHtml}
 ${body}
 <footer class="footer">
   <div class="footer-links">
+    <a href="${buildPath('/features', locale, domain)}">${t(locale, 'nav.features')}</a>
     <a href="${buildPath('/privacy-policy', locale, domain)}">${t(locale, 'footer.privacyPolicy')}</a>
     <a href="${buildPath('/terms', locale, domain)}">${t(locale, 'footer.terms')}</a>
     <a href="${buildPath('/dpa', locale, domain)}">${t(locale, 'footer.dpa')}</a>
     <a href="${buildPath(localizedPagePath('contacts', locale), locale, domain)}">${t(locale, 'contact.title')}</a>
-    <a href="${buildPlatformPath('/schools', '/', locale, domain)}">${({ lt: 'Mokykloms', en: 'For Schools', pl: 'Dla szkół', lv: 'Skolām', ee: 'Koolidele', fr: 'Pour les écoles', es: 'Para escuelas', de: 'Für Schulen', se: 'För skolor', dk: 'Til skoler', fi: 'Kouluille', no: 'For skoler' })[locale]}</a>
+    <a href="${buildPlatformPath('/schools', '/', locale, domain)}">${({ lt: 'Mokykloms', en: 'For Schools', pl: 'Dla szkół', lv: 'Skolām', ee: 'Koolidele', fr: 'Pour les écoles', es: 'Para escuelas', de: 'Für Schulen', se: 'För skolor', dk: 'Til skoler', fi: 'Kouluille', no: 'For skoler', nl: 'Voor scholen' })[locale]}</a>
   </div>
-  ${localeLinksHtml(urlFor, locale, domain)}
+  ${opts.showLocaleLinks === false ? '' : localeLinksHtml(urlFor, locale, domain)}
   ${t(locale, 'common.allRightsReserved', { year: new Date().getFullYear() })}
 </footer>
 </body>
@@ -225,33 +266,36 @@ ${body}
 export const DEFAULT_OG_IMAGE = 'https://www.tutlio.com/og-image.jpg';
 
 export function organizationJsonLd(locale: Locale = 'en'): string {
-  const isLt = locale === 'lt';
-  const isPl = locale === 'pl';
-  const url = isPl ? 'https://www.tutlio.pl' : isLt ? 'https://www.tutlio.lt' : 'https://www.tutlio.com';
-  const description = isLt
-    ? 'Korepetitorių ir korepetavimo mokyklų valdymo platforma — pamokų tvarkaraštis, laukimo eilė, Stripe mokėjimai ir automatizacija.'
-    : isPl
-      ? 'Oprogramowanie do zarządzania korepetycjami — harmonogram lekcji, lista oczekujących, płatności Stripe i automatyzacja.'
-      : 'Tutoring management software for private tutors and tutoring schools — smart calendar, waitlist, payments, and automation.';
+  const url = buildCanonicalUrl('/', locale);
+  const description = t(locale, 'landing.heroDesc').replace(/<[^>]+>/g, '');
   return JSON.stringify({
     '@context': 'https://schema.org',
     '@type': 'Organization',
+    '@id': 'https://www.tutlio.com/#organization',
     name: 'Tutlio',
+    legalName: 'MB Tutlio',
     url,
     logo: {
       '@type': 'ImageObject',
+      '@id': 'https://www.tutlio.com/#logo',
       url: 'https://www.tutlio.com/pwa-512x512.png',
       width: 512,
       height: 512,
     },
     description,
     email: 'info@tutlio.lt',
+    telephone: '+37062394956',
+    taxID: '307617263',
     foundingDate: '2024',
     areaServed: 'Worldwide',
-    sameAs: ['https://www.tutlio.lt', 'https://www.tutlio.com', 'https://www.tutlio.pl'],
+    address: {
+      '@type': 'PostalAddress',
+      addressCountry: 'LT',
+    },
     contactPoint: {
       '@type': 'ContactPoint',
       email: 'info@tutlio.lt',
+      telephone: '+37062394956',
       contactType: 'customer support',
       availableLanguage: ['English', 'Lithuanian', 'Polish'],
     },
@@ -259,32 +303,35 @@ export function organizationJsonLd(locale: Locale = 'en'): string {
 }
 
 export function websiteJsonLd(locale: Locale = 'en'): string {
-  const isPl = locale === 'pl';
-  const isLt = locale === 'lt';
-  const url = isPl ? 'https://www.tutlio.pl' : isLt ? 'https://www.tutlio.lt' : 'https://www.tutlio.com';
+  const url = buildCanonicalUrl('/', locale);
   return JSON.stringify({
     '@context': 'https://schema.org',
     '@type': 'WebSite',
+    '@id': `${url}#website`,
     name: 'Tutlio',
     url,
     description: t(locale, 'landing.heroDesc').replace(/<[^>]+>/g, ''),
-    publisher: { '@type': 'Organization', name: 'Tutlio', url },
-    potentialAction: {
-      '@type': 'SearchAction',
-      target: `${url}/blog?q={search_term_string}`,
-      'query-input': 'required name=search_term_string',
-    },
+    publisher: { '@id': 'https://www.tutlio.com/#organization' },
   });
 }
 
-export function webPageJsonLd(opts: { name: string; description: string; url: string }): string {
+export function webPageJsonLd(opts: { locale: Locale; name: string; description: string; url: string }): string {
+  let publisherUrl = 'https://www.tutlio.com';
+  try {
+    publisherUrl = new URL(opts.url).origin;
+  } catch {
+    // Keep the stable global fallback if a caller ever passes a relative URL.
+  }
   return JSON.stringify({
     '@context': 'https://schema.org',
     '@type': 'WebPage',
+    '@id': `${opts.url}#webpage`,
     name: opts.name,
     description: opts.description,
     url: opts.url,
-    publisher: { '@type': 'Organization', name: 'Tutlio', url: 'https://www.tutlio.com' },
+    inLanguage: hreflangCode(opts.locale),
+    isPartOf: { '@id': `${buildCanonicalUrl('/', opts.locale)}#website` },
+    publisher: { '@type': 'Organization', '@id': 'https://www.tutlio.com/#organization', name: 'Tutlio', url: publisherUrl },
   });
 }
 
@@ -302,18 +349,22 @@ export function faqJsonLd(items: { question: string; answer: string }[]): string
 
 export function softwareAppJsonLd(locale: Locale): string {
   const isPl = locale === 'pl';
-  const pricingUrl = isPl ? 'https://www.tutlio.pl/pricing' : 'https://www.tutlio.com/pricing';
+  const canonicalHome = buildCanonicalUrl('/', locale);
+  const parsedHome = new URL(canonicalHome);
+  const site = parsedHome.pathname === '/' ? parsedHome.origin : canonicalHome;
+  const pricingUrl = buildCanonicalUrl('/pricing', locale);
   const offers = isPl
     ? [
-        { '@type': 'Offer', name: 'Monthly', price: SUBSCRIPTION_PLN.monthly.toFixed(2), priceCurrency: 'PLN', url: pricingUrl },
-        { '@type': 'Offer', name: 'Yearly', price: SUBSCRIPTION_PLN.yearlyPerMonth.toFixed(2), priceCurrency: 'PLN', url: pricingUrl },
-        { '@type': 'Offer', name: 'Subscription Only', price: SUBSCRIPTION_PLN.subscriptionOnly.toFixed(2), priceCurrency: 'PLN', url: pricingUrl },
+        { '@type': 'Offer', name: t(locale, 'pricing.monthly'), price: SUBSCRIPTION_PLN.monthly.toFixed(2), priceCurrency: 'PLN', url: pricingUrl },
+        { '@type': 'Offer', name: t(locale, 'pricing.yearly'), price: SUBSCRIPTION_PLN.yearlyPerMonth.toFixed(2), priceCurrency: 'PLN', url: pricingUrl },
+        { '@type': 'Offer', name: t(locale, 'pricing.subscriptionOnly'), price: SUBSCRIPTION_PLN.subscriptionOnly.toFixed(2), priceCurrency: 'PLN', url: pricingUrl },
       ]
     : [
-        { '@type': 'Offer', name: 'Monthly', price: TUTOR_PLANS.monthly.pricePerMonthEur.toFixed(2), priceCurrency: 'EUR', url: pricingUrl },
-        { '@type': 'Offer', name: 'Yearly', price: TUTOR_PLANS.yearly.pricePerMonthEur.toFixed(2), priceCurrency: 'EUR', url: pricingUrl },
-        { '@type': 'Offer', name: 'Subscription Only', price: TUTOR_PLANS.subscriptionOnly.pricePerMonthEur.toFixed(2), priceCurrency: 'EUR', url: pricingUrl },
+        { '@type': 'Offer', name: t(locale, 'pricing.monthly'), price: TUTOR_PLANS.monthly.pricePerMonthEur.toFixed(2), priceCurrency: 'EUR', url: pricingUrl },
+        { '@type': 'Offer', name: t(locale, 'pricing.yearly'), price: TUTOR_PLANS.yearly.pricePerMonthEur.toFixed(2), priceCurrency: 'EUR', url: pricingUrl },
+        { '@type': 'Offer', name: t(locale, 'pricing.subscriptionOnly'), price: TUTOR_PLANS.subscriptionOnly.pricePerMonthEur.toFixed(2), priceCurrency: 'EUR', url: pricingUrl },
       ];
+  const description = t(locale, 'landing.heroDesc').replace(/<[^>]+>/g, '');
   return JSON.stringify({
     '@context': 'https://schema.org',
     '@type': 'SoftwareApplication',
@@ -321,15 +372,30 @@ export function softwareAppJsonLd(locale: Locale): string {
     applicationCategory: 'BusinessApplication',
     applicationSubCategory: 'EducationApplication',
     operatingSystem: 'Web',
-    description: t(locale, 'landing.heroBadge'),
-    url: isPl ? 'https://www.tutlio.pl' : 'https://www.tutlio.com',
+    inLanguage: hreflangCode(locale),
+    description,
+    url: site,
     image: DEFAULT_OG_IMAGE,
-    featureList: 'Smart Calendar, Student Waitlist, Stripe Payments, Automated Reminders, Cancellation Rules, Lesson Notes, Invoicing, Parent Portals, Real-time Messaging, Multi-language',
+    featureList: [
+      t(locale, 'landing.feature.calendar'),
+      t(locale, 'landing.feature.payments'),
+      t(locale, 'pricing.feature.invoices'),
+      t(locale, 'landing.feature.reminders'),
+      t(locale, 'landing.feature.waitlist'),
+      t(locale, 'landing.feature.cancellation'),
+      t(locale, 'landing.feature.comments'),
+      t(locale, 'pricing.feature.parents'),
+      t(locale, 'pricing.feature.messaging'),
+      t(locale, 'landing.v2.bento4Title'),
+      t(locale, 'landing.v2.bento1Title'),
+      t(locale, 'landing.v2.bento5Title'),
+    ].join(', '),
     offers,
     publisher: {
       '@type': 'Organization',
+      '@id': 'https://www.tutlio.com/#organization',
       name: 'Tutlio',
-      url: isPl ? 'https://www.tutlio.pl' : 'https://www.tutlio.com',
+      url: site,
     },
   });
 }

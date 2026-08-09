@@ -20,6 +20,7 @@ import {
   ArrowUpDown,
   RefreshCw,
   CheckCircle2,
+  Mail,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -87,6 +88,7 @@ export default function CompanyInvoices() {
     invoiceIssuerMode === 'company' || invoiceIssuerMode === 'both';
   const [sortAsc, setSortAsc] = useState(true);
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const [remindingId, setRemindingId] = useState<string | null>(null);
 
   const tutorEffectiveRange = useMemo(() => {
     if (tutorPeriodMode === 'month' && tutorMonth && /^\d{4}-\d{2}$/.test(tutorMonth)) {
@@ -361,6 +363,31 @@ export default function CompanyInvoices() {
       console.error('[CompanyInvoices] download error:', err);
     } finally {
       setDownloadingId(null);
+    }
+  };
+
+  const handleRemind = async (invoiceId: string) => {
+    const target = invoices.find(inv => inv.id === invoiceId);
+    if (!target?.billing_batch_id) return;
+    if (target.billing_batches?.paid) return;
+    setRemindingId(invoiceId);
+    try {
+      const res = await fetch('/api/resend-monthly-invoice', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ billingBatchId: target.billing_batch_id }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        window.alert(body.error || t('invoices.remindFailed'));
+        return;
+      }
+      window.alert(t('invoices.remindSuccess'));
+    } catch (e) {
+      console.error('[CompanyInvoices] remind error:', e);
+      window.alert(t('invoices.remindFailed'));
+    } finally {
+      setRemindingId(null);
     }
   };
 
@@ -1019,20 +1046,36 @@ export default function CompanyInvoices() {
                       {inv.status === 'issued' && (
                         <>
                           {inv.billing_batch_id && (!inv.billing_batches || !inv.billing_batches.paid) && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleRegenerate(inv.id)}
-                              disabled={regeneratingId === inv.id}
-                              className="rounded-lg text-amber-600 hover:text-amber-700 hover:bg-amber-50"
-                              title={t('invoices.regenerate')}
-                            >
-                              {regeneratingId === inv.id ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                              ) : (
-                                <RefreshCw className="w-4 h-4" />
-                              )}
-                            </Button>
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleRemind(inv.id)}
+                                disabled={remindingId === inv.id}
+                                className="rounded-lg text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
+                                title={t('invoices.remindPayer')}
+                              >
+                                {remindingId === inv.id ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Mail className="w-4 h-4" />
+                                )}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleRegenerate(inv.id)}
+                                disabled={regeneratingId === inv.id}
+                                className="rounded-lg text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                                title={t('invoices.regenerate')}
+                              >
+                                {regeneratingId === inv.id ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <RefreshCw className="w-4 h-4" />
+                                )}
+                              </Button>
+                            </>
                           )}
                           <Button
                             variant="ghost"

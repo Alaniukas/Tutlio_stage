@@ -1,14 +1,17 @@
 import { Link } from 'react-router-dom';
 import { Check } from 'lucide-react';
 import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
+import { marketingAudienceFromLanding } from '@/lib/marketingAudience';
 import Reveal from '../Reveal';
+import type { LandingAudience } from './audience';
 
 /** Risk-reversal chips. These must stay true for Tutlio — the 7-day trial does
  *  ask for card details, so there is deliberately no "no credit card" claim. */
 const CHIPS = ['landing.v2.chip1', 'landing.v2.chip2', 'landing.v2.chip3'];
 
-export default function FinalCta() {
+export default function FinalCta({ audience }: { audience: LandingAudience }) {
   const { t, locale } = useTranslation();
+  const pricingHref = `${buildLocalizedPath('/pricing', locale)}?audience=${marketingAudienceFromLanding(audience)}`;
 
   return (
     <section className="bg-zinc-50">
@@ -22,7 +25,7 @@ export default function FinalCta() {
 
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row sm:gap-4">
               <Link
-                to={buildLocalizedPath('/pricing', locale)}
+                to={pricingHref}
                 className="w-full rounded-lg bg-zinc-900 px-7 py-3.5 font-semibold text-white transition-colors hover:bg-zinc-800 sm:w-auto sm:px-8"
               >
                 {t('landing.startFree')}

@@ -13,6 +13,7 @@ import {
   type Locale,
 } from '@/lib/i18n';
 import { isValidLocale } from '@/lib/i18n/core';
+import { htmlLanguageCode } from '@/lib/i18n/core';
 import { supabase } from '@/lib/supabase';
 import { usePlatform } from '@/contexts/PlatformContext';
 import { stripPlatformPrefix } from '@/lib/platform';
@@ -38,7 +39,7 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   }, [locale]);
 
   useLayoutEffect(() => {
-    document.documentElement.lang = locale;
+    document.documentElement.lang = htmlLanguageCode(locale);
     applyDefaultDocumentMeta(locale, platform);
   }, [locale, platform, dictVersion]);
 
@@ -74,11 +75,22 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
  * Used for the platform `/admin` area, which must always render in Lithuanian so
  * the (Lithuanian) team can read it even on tutlio.pl (Polish) / tutlio.com (English).
  * Side-effect free (no document.lang / SEO meta writes, no persistence) so it nests
- * safely inside the top-level LocaleProvider. Relies on lt/en/pl being bundled, so
- * no async dictionary load is needed for those.
+ * safely inside the top-level LocaleProvider. Its fixed dictionary is loaded only
+ * when this subtree is actually reached (notably the Lithuanian admin UI).
  */
 export function StaticLocaleProvider({ locale, children }: { locale: Locale; children: ReactNode }) {
   const { platform } = usePlatform();
+  const [dictVersion, setDictVersion] = useState(0);
+  const ready = isLocaleLoaded(locale);
+
+  useEffect(() => {
+    if (ready) return;
+    let cancelled = false;
+    void loadLocaleDict(locale).then(() => {
+      if (!cancelled) setDictVersion((v) => v + 1);
+    });
+    return () => { cancelled = true; };
+  }, [locale, ready]);
 
   const value = useMemo(() => ({
     locale,
@@ -86,7 +98,12 @@ export function StaticLocaleProvider({ locale, children }: { locale: Locale; chi
     t: (key: string, params?: Record<string, string | number>) => translate(locale, key, params, platform),
     tHtml: (key: string, params?: Record<string, string | number>) => translateHtml(locale, key, params, platform),
     dateFnsLocale: getDateFnsLocale(locale),
-  }), [locale, platform]);
+  // dictVersion invalidates the translation closures after the lazy load.
+  }), [locale, platform, dictVersion]);
+
+  if (!ready) {
+    return <div className="flex min-h-screen items-center justify-center" role="status" aria-label="Loading" />;
+  }
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }

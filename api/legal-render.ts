@@ -28,7 +28,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const page = typeof req.query.page === 'string' ? req.query.page : '';
   const doc = DOCS[page];
-  if (!doc) return res.status(404).send('Not found');
+  if (!doc) {
+    res.setHeader('X-Robots-Tag', 'noindex');
+    return res.status(404).send('Not found');
+  }
 
   const domain = detectDomain(req);
   const locale = detectLocale(req);
@@ -40,6 +43,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const description = rawTitle;
   const body = `<div class="hero"><h1>${esc(rawTitle)}</h1></div><div class="section">${renderLegalBody(locale, doc)}</div>`;
   const jsonLd = webPageJsonLd({
+    locale,
     name: title,
     description,
     url: buildCanonicalUrl(path, locale),

@@ -23,6 +23,7 @@ import {
 import { TUTOR_PLANS, eur } from '../src/lib/pricing.js';
 import { SUBSCRIPTION_PLN } from '../src/lib/subscriptionPricing.js';
 import { formatPln } from '../src/lib/formatPln.js';
+import { getSeoMeta } from '../src/lib/seoMeta.js';
 
 type PageId = 'landing' | 'pricing' | 'about' | 'contacts';
 
@@ -45,6 +46,7 @@ function ssrPlanPrice(locale: Locale, plan: 'monthly' | 'yearly' | 'subscription
 
 function renderLanding(locale: Locale, domain: DomainKey): string {
   const features = [
+    { key: 'digital-business-card', isNew: true },
     { key: 'calendar' },
     { key: 'waitlist' },
     { key: 'payments' },
@@ -58,6 +60,7 @@ function renderLanding(locale: Locale, domain: DomainKey): string {
       (f) => {
         const featurePath = buildPath(`/features/${f.key}`, locale, domain);
         return `<a href="${featurePath}" class="card" style="text-decoration:none;color:inherit">
+    ${f.isNew ? `<p style="display:inline-block;margin:0 0 8px;background:#4f46e5;color:#fff;padding:3px 8px;border-radius:999px;font-size:.68rem;font-weight:700;text-transform:uppercase">${esc(t(locale, 'featuresIndex.newBadge'))}</p>` : ''}
     <h3>${esc(t(locale, `landing.feature.${f.key}`))}</h3>
     <p>${esc(t(locale, `landing.feature.${f.key}Desc`))}</p>
   </a>`;
@@ -117,7 +120,7 @@ const LANDING_FAQ_KEYS = ['whatIs', 'whoFor', 'waitlist', 'freeTrial', 'language
 
 function renderPricing(locale: Locale, domain: DomainKey): string {
   const features = [
-    'calendar', 'waitlist', 'payments', 'reminders', 'comments',
+    'digitalBusinessCard', 'calendar', 'waitlist', 'payments', 'reminders', 'comments',
     'files', 'finance', 'messaging', 'plans', 'autoPayments', 'invoices', 'parents',
   ];
 
@@ -267,7 +270,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!isSsrMethod(req.method)) return rejectSsrMethod(res);
 
   const page = (typeof req.query.page === 'string' ? req.query.page : 'landing') as PageId;
-  if (!PAGE_RENDERERS[page]) return res.status(404).send('Not found');
+  if (!PAGE_RENDERERS[page]) {
+    res.setHeader('X-Robots-Tag', 'noindex');
+    return res.status(404).send('Not found');
+  }
 
   const domain = detectDomain(req);
   const locale = detectLocale(req);
@@ -277,8 +283,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const urlFor = (l: Locale) => buildCanonicalUrl(PAGE_PATHS[page](l), l);
 
   const rawTitle = t(locale, PAGE_TITLE_KEYS[page]);
-  const title = page === 'landing' ? `Tutlio - ${rawTitle}` : `${rawTitle} | Tutlio`;
-  const description = t(locale, PAGE_DESC_KEYS[page]).replace(/<[^>]+>/g, '');
+  const coreMeta = page === 'landing' || page === 'pricing' ? getSeoMeta(locale, page) : null;
+  const title = coreMeta?.title || `${rawTitle} | Tutlio`;
+  const description = coreMeta?.description || t(locale, PAGE_DESC_KEYS[page]).replace(/<[^>]+>/g, '');
 
   const extraHead = page === 'landing'
     ? `<script>try{var k=Object.keys(localStorage);if(k.some(function(x){return x.startsWith("sb-")&&x.endsWith("-auth-token")}))window.location.replace("/dashboard")}catch(e){}</script>`
@@ -296,9 +303,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       question: t(locale, `pricing.faq.${f}Q`),
       answer: t(locale, `pricing.faq.${f}A`),
     }));
-    jsonLd = `${webPageJsonLd({ name: title, description, url: buildCanonicalUrl(path, locale) })}</script><script type="application/ld+json">${faqJsonLd(faqItems)}`;
+    jsonLd = `${webPageJsonLd({ locale, name: title, description, url: buildCanonicalUrl(path, locale) })}</script><script type="application/ld+json">${faqJsonLd(faqItems)}`;
   } else {
-    jsonLd = webPageJsonLd({ name: title, description, url: buildCanonicalUrl(path, locale) });
+    jsonLd = webPageJsonLd({ locale, name: title, description, url: buildCanonicalUrl(path, locale) });
   }
 
   const homeUrl = buildCanonicalUrl('/', locale);

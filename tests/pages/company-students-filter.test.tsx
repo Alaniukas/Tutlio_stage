@@ -101,7 +101,7 @@ describe('CompanyStudents school list filters', () => {
     expect(screen.getByText('Visos klasės')).toBeTruthy();
     expect(screen.getByText('Visos sutartys')).toBeTruthy();
     expect(screen.getByText('Visi atvaizdai')).toBeTruthy();
-    expect(screen.getByText('Eksportuoti Excel')).toBeTruthy();
+    expect(screen.getByText('Eksportuoti į „Excel“')).toBeTruthy();
 
     // Plain search still narrows the list.
     fireEvent.change(screen.getByPlaceholderText(/Ieškoti|Search/i), { target: { value: 'Petraitis' } });

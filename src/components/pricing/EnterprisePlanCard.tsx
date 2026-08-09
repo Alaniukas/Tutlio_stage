@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Building2, CheckCircle2, Loader2 } from 'lucide-react';
+import { ArrowRight, Building2, CheckCircle2, CircleHelp, Loader2 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { supabase } from '@/lib/supabase';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -15,8 +15,9 @@ interface Props {
 /**
  * Full-width enterprise row: plan identity + features on the left, the
  * license calculator with instant self-serve checkout on the right.
- * Tier prices come from Stripe via /api/enterprise-license-pricing; above the
- * self-serve cap (or when pricing is unavailable) it falls back to contact-only.
+ * Tier prices are refreshed from /api/enterprise-license-pricing, with the
+ * canonical market tiers kept as a client fallback. Only quantities above the
+ * self-serve cap fall back to contacting sales.
  */
 export default function EnterprisePlanCard({ audience, onBookDemo }: Props) {
   const { t, locale } = useTranslation();
@@ -122,9 +123,10 @@ export default function EnterprisePlanCard({ audience, onBookDemo }: Props) {
           <button
             type="button"
             onClick={onBookDemo}
-            className="hidden lg:inline-flex items-center justify-center h-11 px-7 rounded-full border border-gray-700 text-gray-300 font-semibold text-[13px] transition-all duration-200 hover:scale-[1.02] hover:bg-gray-800 hover:text-white active:scale-[0.98]"
+            className="hidden lg:inline-flex items-center justify-center gap-2 h-11 px-7 rounded-full bg-[#4f46e5] text-white shadow-lg shadow-indigo-950/30 font-semibold text-[13px] transition-all duration-200 hover:scale-[1.03] hover:bg-[#4338ca] hover:shadow-xl active:scale-[0.98]"
           >
             {t('pricing.bookDemo')}
+            <ArrowRight className="h-4 w-4" />
           </button>
         </div>
 
@@ -175,7 +177,24 @@ export default function EnterprisePlanCard({ audience, onBookDemo }: Props) {
                   <>
                     <div className="flex items-baseline gap-1.5">
                       <span className="text-3xl font-bold text-white">{formatMoney(unitCents, pricing.currency, locale)}</span>
-                      <span className="text-gray-400 text-sm">{t('pricing.perLicensePerMonth')}</span>
+                      <span className="inline-flex items-center gap-1.5 text-sm text-gray-400">
+                        {t('pricing.perLicensePerMonth')}
+                        <span className="group relative inline-flex items-center">
+                          <button
+                            type="button"
+                            aria-label={t('pricing.studentFeeNote')}
+                            className="rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                          >
+                            <CircleHelp className="h-3.5 w-3.5 text-gray-400 transition-colors group-hover:text-white" />
+                          </button>
+                          <span
+                            role="tooltip"
+                            className="pointer-events-none invisible absolute left-1/2 top-full z-20 mt-2 w-64 -translate-x-1/2 rounded-lg border border-white/15 bg-white p-2.5 text-left text-xs font-medium text-gray-700 opacity-0 shadow-lg transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
+                          >
+                            {t('pricing.studentFeeNote')}
+                          </span>
+                        </span>
+                      </span>
                     </div>
                     {flatCents > 0 && (
                       <p className="text-gray-400 text-[13px] mt-1">
@@ -208,9 +227,10 @@ export default function EnterprisePlanCard({ audience, onBookDemo }: Props) {
               <button
                 type="button"
                 onClick={onBookDemo}
-                className="lg:hidden flex items-center justify-center w-full h-11 mt-2.5 rounded-full border border-gray-700 text-gray-300 font-semibold text-[13px] transition-all duration-200 hover:scale-[1.02] hover:bg-gray-800 hover:text-white active:scale-[0.98]"
+                className="lg:hidden flex items-center justify-center gap-2 w-full h-11 mt-2.5 rounded-full bg-[#4f46e5] text-white shadow-lg shadow-indigo-950/30 font-semibold text-[13px] transition-all duration-200 hover:scale-[1.02] hover:bg-[#4338ca] active:scale-[0.98]"
               >
                 {t('pricing.bookDemo')}
+                <ArrowRight className="h-4 w-4" />
               </button>
             </>
           ) : (

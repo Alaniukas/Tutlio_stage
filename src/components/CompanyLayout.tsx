@@ -33,7 +33,6 @@ import { OrgEntityProvider, type OrgEntityType } from '@/contexts/OrgEntityConte
 import { useUser } from '@/contexts/UserContext';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { showDynamicPricingNav } from '@/lib/orgIntakeMode';
-import { isProKlaseOrg } from '@/lib/marketMoney';
 
 export function buildCompanyNavItems(
   isSchool: boolean,
@@ -91,8 +90,8 @@ export default function CompanyLayout() {
   const { loading: orgFeaturesLoading, hasFeature, organizationId } = useOrgFeatures();
   const showDynamicPricing =
     !orgFeaturesLoading && showDynamicPricingNav(entityType, hasFeature);
-  /** Pro Klasė places its tutors itself, so it has no public "book me" page. */
-  const showPublicPage = !orgFeaturesLoading && !isProKlaseOrg(organizationId);
+  /** Public "vizitinė kortelė" is solo-tutor only for now. */
+  const showPublicPage = false;
   /** Pagal org tipą, ne `pathname.startsWith('/school')` — kitaip `/schools` (landing) klaidingai atitinka `/school`. */
   const orgBasePath = isSchool ? '/school' : '/company';
   const BrandIcon = isSchool ? School : Building2;

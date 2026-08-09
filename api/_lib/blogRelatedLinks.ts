@@ -17,9 +17,10 @@ function postSlug(post: Record<string, unknown>, locale: Locale): string {
   return (post[`slug_${locale}`] as string) || (post.slug as string);
 }
 
-function resolveField(post: Record<string, unknown>, field: string, locale: Locale): string {
-  return (post[`${field}_${locale}`] as string) || (post[`${field}_en`] as string) || (post[`${field}_lt`] as string) || '';
-}
+const RELATED_LOCALE_COLUMNS = LOCALES.flatMap((locale) => [
+  `title_${locale}`,
+  `slug_${locale}`,
+]).join(', ');
 
 export async function fetchRelatedBlogPosts(
   supabase: SupabaseClient,
@@ -28,7 +29,7 @@ export async function fetchRelatedBlogPosts(
   const limit = opts.limit ?? 3;
   let query = supabase
     .from('blog_posts')
-    .select('id, slug, tag, published_at, title_lt, title_en, title_pl, slug_lt, slug_en, slug_pl')
+    .select(`id, slug, tag, published_at, ${RELATED_LOCALE_COLUMNS}`)
     .eq('status', 'published')
     .order('published_at', { ascending: false })
     .limit(limit + 5);
@@ -37,16 +38,21 @@ export async function fetchRelatedBlogPosts(
   if (opts.tag) query = query.eq('tag', opts.tag);
 
   const { data } = await query;
-  return (data || []).slice(0, limit);
+  // Keep the small over-fetch: locale filtering happens afterwards and the
+  // newest rows may not all have the requested translation.
+  return (data || []) as unknown as Record<string, unknown>[];
 }
 
 export function relatedPostsForLocale(
   posts: Record<string, unknown>[],
   locale: Locale,
+  limit = 3,
 ): RelatedBlogPost[] {
   return posts
     .map((post) => {
-      const title = resolveField(post, 'title', locale);
+      // Related links must be real translations. Linking a French article to
+      // an English fallback URL creates mixed-language UX and crawl waste.
+      const title = String(post[`title_${locale}`] || '');
       const slug = postSlug(post, locale);
       if (!title || !slug) return null;
       return {
@@ -57,7 +63,8 @@ export function relatedPostsForLocale(
         url: buildCanonicalUrl(`/blog/${slug}`, locale),
       };
     })
-    .filter((p): p is RelatedBlogPost => !!p);
+    .filter((p): p is RelatedBlogPost => !!p)
+    .slice(0, limit);
 }
 
 const ABOUT_BLOCK: Record<BlogAutoLocale, string> = {
@@ -130,15 +137,16 @@ export async function enrichBlogPostContents(
 
 export function renderRelatedPostsHtml(related: RelatedBlogPost[], locale: Locale): string {
   if (!related.length) return '';
-  const heading =
-    locale === 'lt' ? 'Skaitykite taip pat' :
-    locale === 'pl' ? 'Przeczytaj także' :
-    'Read also';
+  const heading: Record<Locale, string> = {
+    lt: 'Skaitykite taip pat', en: 'Read also', pl: 'Przeczytaj także', lv: 'Lasiet arī',
+    ee: 'Loe ka', fr: 'À lire aussi', es: 'Lee también', de: 'Auch lesenswert',
+    se: 'Läs också', dk: 'Læs også', fi: 'Lue myös', no: 'Les også', nl: 'Lees ook',
+  };
   const items = related
     .map((p) => `<li><a href="${p.url.replace(/"/g, '&quot;')}">${p.title.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</a></li>`)
     .join('\n');
   return `<section class="related" style="margin-top:2.5em;padding-top:1.5em;border-top:1px solid #e5e7eb">
-  <h2 style="font-size:1.25rem;font-weight:700;margin-bottom:.75em">${heading}</h2>
+  <h2 style="font-size:1.25rem;font-weight:700;margin-bottom:.75em">${heading[locale]}</h2>
   <ul style="margin:0;padding-left:1.25em">${items}</ul>
 </section>`;
 }
@@ -164,15 +172,66 @@ export function renderAboutTutlioHtml(locale: Locale, pricingUrl: string, blogUr
       pricing: 'Zobacz cennik',
       blog: 'przeglądaj więcej artykułów',
     },
-    lv: { title: 'About Tutlio', body: 'Tutlio is tutoring management software for private tutors and tutoring schools.', pricing: 'See pricing', blog: 'browse more articles' },
-    ee: { title: 'About Tutlio', body: 'Tutlio is tutoring management software for private tutors and tutoring schools.', pricing: 'See pricing', blog: 'browse more articles' },
-    fr: { title: 'About Tutlio', body: 'Tutlio is tutoring management software for private tutors and tutoring schools.', pricing: 'See pricing', blog: 'browse more articles' },
-    es: { title: 'About Tutlio', body: 'Tutlio is tutoring management software for private tutors and tutoring schools.', pricing: 'See pricing', blog: 'browse more articles' },
-    de: { title: 'About Tutlio', body: 'Tutlio is tutoring management software for private tutors and tutoring schools.', pricing: 'See pricing', blog: 'browse more articles' },
-    se: { title: 'About Tutlio', body: 'Tutlio is tutoring management software for private tutors and tutoring schools.', pricing: 'See pricing', blog: 'browse more articles' },
-    dk: { title: 'About Tutlio', body: 'Tutlio is tutoring management software for private tutors and tutoring schools.', pricing: 'See pricing', blog: 'browse more articles' },
-    fi: { title: 'About Tutlio', body: 'Tutlio is tutoring management software for private tutors and tutoring schools.', pricing: 'See pricing', blog: 'browse more articles' },
-    no: { title: 'About Tutlio', body: 'Tutlio is tutoring management software for private tutors and tutoring schools.', pricing: 'See pricing', blog: 'browse more articles' },
+    lv: {
+      title: 'Par Tutlio',
+      body: 'Tutlio ir privātskolotāju un mācību centru pārvaldības platforma ar nodarbību grafiku, gaidīšanas sarakstu, Stripe maksājumiem un automātiskiem atgādinājumiem.',
+      pricing: 'Skatīt cenas',
+      blog: 'lasīt citus rakstus',
+    },
+    ee: {
+      title: 'Tutlio kohta',
+      body: 'Tutlio on eraõpetajate ja õppekeskuste haldusplatvorm, mis ühendab tunniplaani, ootenimekirja, Stripe’i maksed ja automaatsed meeldetuletused.',
+      pricing: 'Vaata hindu',
+      blog: 'loe teisi artikleid',
+    },
+    fr: {
+      title: 'À propos de Tutlio',
+      body: 'Tutlio est une plateforme de gestion pour professeurs particuliers et écoles, avec planning, liste d’attente, paiements Stripe et rappels automatiques.',
+      pricing: 'Voir les tarifs',
+      blog: 'lire d’autres articles',
+    },
+    es: {
+      title: 'Sobre Tutlio',
+      body: 'Tutlio es una plataforma de gestión para profesores y academias con horarios, lista de espera, pagos con Stripe y recordatorios automáticos.',
+      pricing: 'Ver precios',
+      blog: 'leer más artículos',
+    },
+    de: {
+      title: 'Über Tutlio',
+      body: 'Tutlio ist eine Verwaltungsplattform für Nachhilfelehrer und Lerninstitute mit Terminplanung, Warteliste, Stripe-Zahlungen und automatischen Erinnerungen.',
+      pricing: 'Preise ansehen',
+      blog: 'weitere Artikel lesen',
+    },
+    se: {
+      title: 'Om Tutlio',
+      body: 'Tutlio är en plattform för privatlärare och läxhjälpsföretag med schema, väntelista, Stripe-betalningar och automatiska påminnelser.',
+      pricing: 'Se priser',
+      blog: 'läs fler artiklar',
+    },
+    dk: {
+      title: 'Om Tutlio',
+      body: 'Tutlio er en platform til privatundervisere og lektiehjælp med kalender, venteliste, Stripe-betalinger og automatiske påmindelser.',
+      pricing: 'Se priser',
+      blog: 'læs flere artikler',
+    },
+    fi: {
+      title: 'Tietoa Tutliosta',
+      body: 'Tutlio on yksityisopettajien ja opetuskeskusten hallinta-alusta, jossa aikataulut, jonotuslista, Stripe-maksut ja automaattiset muistutukset ovat yhdessä paikassa.',
+      pricing: 'Katso hinnat',
+      blog: 'lue lisää artikkeleita',
+    },
+    no: {
+      title: 'Om Tutlio',
+      body: 'Tutlio er en plattform for privatlærere og leksehjelpsbedrifter med kalender, venteliste, Stripe-betalinger og automatiske påminnelser.',
+      pricing: 'Se priser',
+      blog: 'les flere artikler',
+    },
+    nl: {
+      title: 'Over Tutlio',
+      body: 'Tutlio is beheersoftware voor zelfstandige docenten en bijlesscholen, met lesplanning, wachtlijsten, Stripe-betalingen en automatische herinneringen op één plek.',
+      pricing: 'Bekijk de prijzen',
+      blog: 'bekijk meer artikelen',
+    },
   };
   const b = blocks[locale] || blocks.en;
   return `<section class="about-tutlio" style="margin-top:2.5em;padding:1.25em 1.5em;background:#f8f9ff;border-radius:12px;border:1px solid #e0e7ff">

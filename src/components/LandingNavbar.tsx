@@ -3,7 +3,32 @@ import { ChevronDown, Menu, X } from 'lucide-react';
 import { useTranslation, buildLocalizedPath, localizedPagePath } from '@/lib/i18n';
 import LanguageSelector from '@/components/LanguageSelector';
 import { usePlatform } from '@/contexts/PlatformContext';
-import { useEffect, useRef, useState, useCallback } from 'react';
+import type { MarketingAudience } from '@/lib/marketingAudience';
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
+
+interface LandingNavbarProps {
+  audience?: MarketingAudience;
+}
+
+interface NavbarAudienceCtaProps {
+  href: string;
+  label: string;
+  className: string;
+  onNavigate?: () => void;
+}
+
+function NavbarAudienceCta({
+  href,
+  label,
+  className,
+  onNavigate,
+}: NavbarAudienceCtaProps) {
+  return (
+    <Link to={href} onClick={onNavigate} className={className}>
+      {label}
+    </Link>
+  );
+}
 
 function navigateToPlatform(platform: 'tutors' | 'schools', locale: string) {
   const localeSegment = locale === 'lt' ? '' : `/${locale}`;
@@ -15,15 +40,38 @@ function navigateToPlatform(platform: 'tutors' | 'schools', locale: string) {
 const PILL_BRAND_GAP = 32; // ml-8 between the brand and the links
 const PILL_GROUP_GAP = 32; // breathing room between links and actions
 const PILL_PADDING = 40; // 0 20px
-const PILL_MAX_WIDTH = 1200; // never wider than the full-size bar
+const PILL_INITIAL_WIDTH = 1200;
+const PILL_EXPANDED_EXTRA_WIDTH = 96;
+const NAV_VIEWPORT_GUTTER = 16;
+const DESKTOP_NAV_MIN_WIDTH = 768;
 
-export default function LandingNavbar() {
+export function resolveLandingNavbarLayout(naturalWidth: number, viewportWidth: number) {
+  const availableWidth = Math.max(0, viewportWidth - NAV_VIEWPORT_GUTTER * 2);
+  return {
+    availableWidth,
+    pillWidth: Math.min(Math.ceil(naturalWidth), availableWidth),
+    compact: viewportWidth < DESKTOP_NAV_MIN_WIDTH || naturalWidth > availableWidth,
+  };
+}
+
+export function resolveLandingNavbarExpandedWidth(pillWidth: number, availableWidth: number) {
+  return Math.min(
+    Math.max(PILL_INITIAL_WIDTH, pillWidth + PILL_EXPANDED_EXTRA_WIDTH),
+    availableWidth,
+  );
+}
+
+export default function LandingNavbar({
+  audience = 'solo',
+}: LandingNavbarProps) {
   const { t, locale } = useTranslation();
   const { platform } = usePlatform();
   const [platformOpen, setPlatformOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
+  const [isCompactNav, setIsCompactNav] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth < DESKTOP_NAV_MIN_WIDTH,
+  );
   const dropdownRef = useRef<HTMLDivElement | null>(null);
   const brandRef = useRef<HTMLAnchorElement | null>(null);
   const linksRef = useRef<HTMLDivElement | null>(null);
@@ -32,31 +80,30 @@ export default function LandingNavbar() {
   // Locale decides how wide the pill has to be: "Start for free" and
   // "Essayer gratuitement" are not the same bar. Measure the real rendered
   // groups instead of guessing, so no locale wraps to a second row.
-  const [pillMaxWidth, setPillMaxWidth] = useState(PILL_MAX_WIDTH);
+  const [pillMaxWidth, setPillMaxWidth] = useState(PILL_INITIAL_WIDTH);
+  const [expandedMaxWidth, setExpandedMaxWidth] = useState(PILL_INITIAL_WIDTH);
 
   const measurePill = useCallback(() => {
     const brand = brandRef.current;
     const links = linksRef.current;
     const actions = actionsRef.current;
-    // `links` is display:none below md, where the pill never appears anyway.
-    if (!brand || !links || !actions || links.offsetParent === null) return;
+    if (!brand || !links || !actions) return;
     const natural =
       brand.offsetWidth +
       PILL_BRAND_GAP +
-      links.offsetWidth +
+      links.scrollWidth +
       PILL_GROUP_GAP +
-      actions.offsetWidth +
+      actions.scrollWidth +
       PILL_PADDING;
-    setPillMaxWidth(Math.min(Math.ceil(natural), PILL_MAX_WIDTH));
-  }, []);
-
-  const checkMobile = useCallback(() => {
-    setIsMobile(window.innerWidth < 768);
+    const layout = resolveLandingNavbarLayout(natural, window.innerWidth);
+    setPillMaxWidth(layout.pillWidth);
+    setExpandedMaxWidth(resolveLandingNavbarExpandedWidth(layout.pillWidth, layout.availableWidth));
+    setIsCompactNav(layout.compact);
   }, []);
 
   // Re-measure when the labels change, and again once the display webfont
   // swaps in — text metrics shift under us otherwise.
-  useEffect(() => {
+  useLayoutEffect(() => {
     measurePill();
     let cancelled = false;
     void document.fonts?.ready.then(() => {
@@ -67,10 +114,9 @@ export default function LandingNavbar() {
       cancelled = true;
       window.removeEventListener('resize', measurePill);
     };
-  }, [measurePill, locale, platform]);
+  }, [measurePill, locale, platform, audience]);
 
   useEffect(() => {
-    checkMobile();
     function handleClickOutside(e: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setPlatformOpen(false);
@@ -79,15 +125,19 @@ export default function LandingNavbar() {
     function handleScroll() {
       setScrolled(window.scrollY > 40);
     }
+    handleScroll();
     document.addEventListener('mousedown', handleClickOutside);
     window.addEventListener('scroll', handleScroll, { passive: true });
-    window.addEventListener('resize', checkMobile);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       window.removeEventListener('scroll', handleScroll);
-      window.removeEventListener('resize', checkMobile);
     };
-  }, [checkMobile]);
+  }, []);
+
+  useEffect(() => {
+    if (isCompactNav) setPlatformOpen(false);
+    else setMobileOpen(false);
+  }, [isCompactNav]);
 
   useEffect(() => {
     document.body.style.overflow = mobileOpen ? 'hidden' : '';
@@ -98,7 +148,9 @@ export default function LandingNavbar() {
   const orgAdminLoginHref = buildLocalizedPath('/login', locale);
   const brandName = isSchools ? t('nav.brandSchools') : 'Tutlio';
   const dropdownLabel = isSchools ? t('nav.forSchools') : t('nav.forTutors');
-  const pricingHref = buildLocalizedPath('/pricing', locale);
+  const isAgency = audience === 'agency';
+  const pricingHref = `${buildLocalizedPath('/pricing', locale)}?audience=${audience}`;
+  const primaryCtaLabel = t(isAgency ? 'pricing.bookDemo' : 'landing.startFree');
 
   const navLinks = [
     { to: buildLocalizedPath(localizedPagePath('about', locale), locale), label: t('nav.aboutUs') },
@@ -107,19 +159,19 @@ export default function LandingNavbar() {
     { to: buildLocalizedPath(localizedPagePath('contacts', locale), locale), label: t('common.contacts') },
   ];
 
-  const showPill = scrolled && !isMobile;
+  const showPill = scrolled && !isCompactNav;
 
   return (
     <>
-      <nav className={`fixed top-0 left-0 right-0 z-50 ${showPill ? '' : isMobile ? '' : 'bg-white'}`}>
+      <nav className={`fixed top-0 left-0 right-0 z-50 ${showPill ? '' : isCompactNav ? '' : 'bg-white'}`}>
         <div
           className="mx-auto flex items-center"
           style={{
-            maxWidth: showPill ? pillMaxWidth : PILL_MAX_WIDTH,
-            height: showPill ? 52 : (isMobile ? 60 : 72),
+            maxWidth: isCompactNav ? 'none' : showPill ? pillMaxWidth : expandedMaxWidth,
+            height: showPill ? 52 : (isCompactNav ? 60 : 72),
             padding: showPill ? '0 20px' : '0 20px',
             margin: showPill ? '10px auto' : '0 auto',
-            backgroundColor: showPill ? 'rgba(255,255,255,0.82)' : isMobile ? '#ffffff' : 'transparent',
+            backgroundColor: showPill ? 'rgba(255,255,255,0.82)' : isCompactNav ? '#ffffff' : 'transparent',
             backdropFilter: showPill ? 'blur(20px) saturate(1.4)' : 'none',
             WebkitBackdropFilter: showPill ? 'blur(20px) saturate(1.4)' : 'none',
             borderRadius: showPill ? 9999 : 0,
@@ -135,7 +187,12 @@ export default function LandingNavbar() {
 
           {/* Desktop nav. shrink-0 + nowrap keep every locale on one row; the
               pill is measured to fit rather than the labels squeezed to fit. */}
-          <div ref={linksRef} className="hidden md:flex items-center gap-6 ml-8 shrink-0">
+          <div
+            ref={linksRef}
+            inert={isCompactNav ? true : undefined}
+            aria-hidden={isCompactNav}
+            className={`flex w-max items-center gap-6 ml-8 shrink-0 ${isCompactNav ? 'invisible fixed -left-[10000px] top-0 pointer-events-none' : ''}`}
+          >
             {navLinks.map((link) => (
               <Link key={link.to} to={link.to} className="text-[13px] text-gray-500 hover:text-gray-900 transition-colors font-medium whitespace-nowrap">
                 {link.label}
@@ -163,36 +220,49 @@ export default function LandingNavbar() {
             </div>
           </div>
 
-          <div ref={actionsRef} className="flex items-center gap-3 ml-auto shrink-0">
-            <div className="hidden md:block">
+          <div
+            ref={actionsRef}
+            inert={isCompactNav ? true : undefined}
+            aria-hidden={isCompactNav}
+            className={`flex w-max items-center gap-3 ml-auto shrink-0 ${isCompactNav ? 'invisible fixed -left-[10000px] top-0 pointer-events-none' : ''}`}
+          >
+            <div>
               <LanguageSelector />
             </div>
-            <Link to={orgAdminLoginHref} className="hidden md:block text-[13px] text-gray-500 hover:text-gray-900 transition-colors font-medium whitespace-nowrap">
+            <Link to={orgAdminLoginHref} className="text-[13px] text-gray-500 hover:text-gray-900 transition-colors font-medium whitespace-nowrap">
               {t('common.login')}
             </Link>
-            <Link
-              to={pricingHref}
-              className="hidden sm:flex rounded-full bg-[#4f46e5] hover:bg-[#4338ca] text-white font-semibold items-center whitespace-nowrap transition-all duration-200 hover:scale-[1.03] hover:shadow-lg active:scale-[0.98] h-[34px] px-4 text-[12px]"
-            >
-              {t('landing.startFree')}
-            </Link>
-
-            {/* Hamburger */}
-            <button
-              type="button"
-              onClick={() => setMobileOpen(v => !v)}
-              className="md:hidden w-9 h-9 flex items-center justify-center rounded-lg hover:bg-black/5 transition-colors"
-              aria-label="Menu"
-            >
-              {mobileOpen ? <X className="w-5 h-5 text-gray-700" /> : <Menu className="w-5 h-5 text-gray-700" />}
-            </button>
+            <NavbarAudienceCta
+              href={pricingHref}
+              label={primaryCtaLabel}
+              className="flex rounded-full bg-[#4f46e5] hover:bg-[#4338ca] text-white font-semibold items-center whitespace-nowrap transition-all duration-200 hover:scale-[1.03] hover:shadow-lg active:scale-[0.98] h-[34px] px-4 text-[12px]"
+            />
           </div>
+
+          {isCompactNav && (
+            <div className="ml-auto flex items-center gap-3 shrink-0">
+              <NavbarAudienceCta
+                href={pricingHref}
+                label={primaryCtaLabel}
+                className="hidden sm:flex rounded-full bg-[#4f46e5] hover:bg-[#4338ca] text-white font-semibold items-center whitespace-nowrap transition-all duration-200 hover:scale-[1.03] hover:shadow-lg active:scale-[0.98] h-[34px] px-4 text-[12px]"
+              />
+
+              <button
+                type="button"
+                onClick={() => setMobileOpen(v => !v)}
+                className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-black/5 transition-colors"
+                aria-label="Menu"
+              >
+                {mobileOpen ? <X className="w-5 h-5 text-gray-700" /> : <Menu className="w-5 h-5 text-gray-700" />}
+              </button>
+            </div>
+          )}
         </div>
       </nav>
 
       {/* Mobile overlay */}
       <div
-        className={`fixed inset-0 z-40 bg-black/30 backdrop-blur-sm transition-opacity duration-300 md:hidden ${
+        className={`${isCompactNav ? '' : 'hidden'} fixed inset-0 z-40 bg-black/30 backdrop-blur-sm transition-opacity duration-300 ${
           mobileOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
         }`}
         onClick={() => setMobileOpen(false)}
@@ -200,7 +270,9 @@ export default function LandingNavbar() {
 
       {/* Mobile drawer */}
       <div
-        className={`fixed top-0 right-0 z-50 h-full w-[280px] bg-white shadow-2xl flex flex-col transition-transform duration-300 ease-out md:hidden ${
+        inert={!isCompactNav || !mobileOpen ? true : undefined}
+        aria-hidden={!isCompactNav || !mobileOpen}
+        className={`${isCompactNav ? '' : 'hidden'} fixed top-0 right-0 z-50 h-full w-[280px] bg-white shadow-2xl flex flex-col transition-transform duration-300 ease-out ${
           mobileOpen ? 'translate-x-0' : 'translate-x-full'
         }`}
       >
@@ -256,13 +328,12 @@ export default function LandingNavbar() {
           >
             {t('common.login')}
           </Link>
-          <Link
-            to={pricingHref}
-            onClick={() => setMobileOpen(false)}
+          <NavbarAudienceCta
+            href={pricingHref}
+            label={primaryCtaLabel}
+            onNavigate={() => setMobileOpen(false)}
             className="block w-full text-center py-2.5 text-[14px] font-semibold text-white bg-[#4f46e5] hover:bg-[#4338ca] rounded-full transition-colors"
-          >
-            {t('landing.startFree')}
-          </Link>
+          />
         </div>
       </div>
     </>

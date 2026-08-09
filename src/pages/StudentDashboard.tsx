@@ -5,6 +5,7 @@ import SessionFiles from '@/components/SessionFiles';
 import WhiteboardButton from '@/components/WhiteboardButton';
 import { supabase } from '@/lib/supabase';
 import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
+import { startPerlasPayment } from '@/lib/perlasPay';
 import { getCached, setCache } from '@/lib/dataCache';
 import {
     fetchStudentActiveLessonPackagesDeduped,
@@ -147,11 +148,7 @@ export default function StudentDashboard() {
             });
             const json = await res.json().catch(() => ({ error: t('stuSess.paymentConnectFailed') }));
             if (json.url && json.token) {
-                if ((window as any).PerlasPay) {
-                    (window as any).PerlasPay.init(json.url, json.token);
-                } else {
-                    window.location.href = `${json.url}pay/${json.token}`;
-                }
+                await startPerlasPayment(json.url, json.token);
                 setPerlasLoading(false);
                 return;
             }
@@ -571,10 +568,12 @@ export default function StudentDashboard() {
                             className="w-full flex items-center justify-between"
                         >
                             <div className="text-left">
-                                <p className="text-sm font-bold text-gray-900">Mokejimai</p>
+                                <p className="text-sm font-bold text-gray-900">{t('school.paymentsTitle')}</p>
                                 <p className="text-xs text-gray-500">
-                                    {installments.length > 1 ? `Dalimis (${installments.length})` : 'Vienas mokejimas'} ·
-                                    {' '}Apmoketa {installments.filter((i) => i.payment_status === 'paid').length}/{installments.length}
+                                    {installments.length > 1
+                                        ? `${t('school.installments')} (${installments.length})`
+                                        : t('school.payFull')} ·{' '}
+                                    {t('school.paidLabel')} {installments.filter((i) => i.payment_status === 'paid').length}/{installments.length}
                                 </p>
                             </div>
                             {paymentsExpanded ? <ChevronUp className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
@@ -585,10 +584,10 @@ export default function StudentDashboard() {
                                 {installments.map((i) => (
                                     <div key={i.id} className="rounded-xl border border-gray-100 p-3 flex items-center justify-between gap-3">
                                         <div>
-                                            <p className="text-sm font-semibold text-gray-900">Imoka #{i.installment_number} · {fmt(i.amount)}</p>
+                                            <p className="text-sm font-semibold text-gray-900">#{i.installment_number} · {fmt(i.amount)}</p>
                                             <p className="text-xs text-gray-500">
-                                                Terminas: {new Date(i.due_date).toLocaleDateString('lt-LT')}
-                                                {i.paid_at ? ` · Apmoketa: ${new Date(i.paid_at).toLocaleDateString('lt-LT')}` : ''}
+                                                {t('school.dueDateField')}: {format(new Date(i.due_date), 'P', { locale: dateFnsLocale })}
+                                                {i.paid_at ? ` · ${t('school.paidLabel')}: ${format(new Date(i.paid_at), 'P', { locale: dateFnsLocale })}` : ''}
                                             </p>
                                         </div>
                                         <div className="flex flex-col items-end gap-2 flex-shrink-0">
@@ -598,9 +597,9 @@ export default function StudentDashboard() {
                                                     i.payment_status === 'overdue' ? 'bg-red-50 text-red-700' :
                                                         i.payment_status === 'failed' ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'
                                             )}>
-                                                {i.payment_status === 'paid' ? 'Apmoketa' :
-                                                    i.payment_status === 'overdue' ? 'Pradelsta' :
-                                                        i.payment_status === 'failed' ? 'Nepavyko' : 'Laukia'}
+                                                {i.payment_status === 'paid' ? t('school.payStatusPaid') :
+                                                    i.payment_status === 'overdue' ? t('school.payStatusOverdue') :
+                                                        i.payment_status === 'failed' ? t('school.payStatusFailed') : t('school.payStatusPending')}
                                             </span>
                                             {i.payment_status !== 'paid' && schoolContractAllowsInstallmentPayment(i.contract_signing_status) && (
                                                 <button

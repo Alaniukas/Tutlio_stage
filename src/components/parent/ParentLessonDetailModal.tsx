@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { authHeaders } from '@/lib/apiHelpers';
+import { startPerlasPayment } from '@/lib/perlasPay';
 import { format, isAfter } from 'date-fns';
 import type { NavigateFunction } from 'react-router-dom';
 import type { Locale } from 'date-fns';
@@ -126,11 +127,7 @@ export function ParentLessonDetailModal({
         error?: string;
       };
       if (json.url && json.token) {
-        if ((window as any).PerlasPay) {
-          (window as any).PerlasPay.init(json.url, json.token);
-        } else {
-          window.location.href = `${json.url}pay/${json.token}`;
-        }
+        await startPerlasPayment(json.url, json.token);
         setPerlasLoading(false);
         return;
       }

@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useState, useEffect, useMemo } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   Calendar,
   CreditCard,
@@ -16,25 +16,49 @@ import {
   UserCheck,
   CircleHelp,
   Loader2,
+  ContactRound,
 } from 'lucide-react';
-import { useTranslation } from '@/lib/i18n';
+import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
 import { tutorPlanPriceLabels, showPerMonthSuffix } from '@/lib/pricingDisplay';
 import { usePlatform } from '@/contexts/PlatformContext';
 import LandingNavbar from '@/components/LandingNavbar';
 import LandingFooter from '@/components/LandingFooter';
 import EnterpriseContactModal from '@/components/EnterpriseContactModal';
 import EnterprisePlanCard from '@/components/pricing/EnterprisePlanCard';
+import { applyPageDocumentMeta } from '@/lib/documentMeta';
+import { getSeoMeta } from '@/lib/seoMeta';
+import { resolveMarketingAudience, storeMarketingAudience } from '@/lib/marketingAudience';
+
+function scrollToPricingPlans() {
+  const plans = document.getElementById('pricing-plans');
+  if (!plans) return;
+
+  plans.scrollIntoView({
+    behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    block: 'start',
+  });
+}
 
 export default function Pricing() {
   const { t, locale } = useTranslation();
   const { platform } = usePlatform();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [isYearly, setIsYearly] = useState(true);
+  const [isYearly, setIsYearly] = useState(false);
   const [enterpriseOpen, setEnterpriseOpen] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const audienceParam = searchParams.get('audience');
+  const pricingAudience = useMemo(
+    () => resolveMarketingAudience(audienceParam),
+    [audienceParam],
+  );
+  const isAgencyPricing = pricingAudience === 'agency';
 
   const checkoutAudience = platform === 'schools' || platform === 'teachers' ? 'schools' : 'tutor';
+
+  useEffect(() => {
+    storeMarketingAudience(pricingAudience);
+  }, [pricingAudience]);
 
   useEffect(() => {
     if (searchParams.get('canceled') === '1') {
@@ -43,6 +67,12 @@ export default function Pricing() {
       setSearchParams(next, { replace: true });
     }
   }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (platform !== 'tutors') return;
+    const meta = getSeoMeta(locale, 'pricing');
+    applyPageDocumentMeta(meta.title, meta.description);
+  }, [locale, platform]);
 
   const startCheckout = async (plan: 'monthly' | 'yearly' | 'subscription_only') => {
     setCheckoutLoading(plan);
@@ -65,24 +95,36 @@ export default function Pricing() {
     setCheckoutLoading(null);
   };
 
-  const features = [
-    { icon: Calendar, text: t('pricing.feature.calendar'), included: true },
-    { icon: CreditCard, text: t('pricing.feature.payments'), included: true },
-    { icon: Bell, text: t('pricing.feature.reminders'), included: true },
-    { icon: Upload, text: t('pricing.feature.files'), included: true },
-    { icon: MessageSquare, text: t('pricing.feature.comments'), included: true },
-    { icon: Users, text: t('pricing.feature.waitlist'), included: true },
-    { icon: TrendingUp, text: t('pricing.feature.finance'), included: true },
-    { icon: MessageSquare, text: t('pricing.feature.messaging'), included: true },
-    { icon: Package, text: t('pricing.feature.plans'), included: true },
-    { icon: Banknote, text: t('pricing.feature.autoPayments'), included: true },
-    { icon: FileText, text: t('pricing.feature.invoices'), included: true },
-    { icon: UserCheck, text: t('pricing.feature.parents'), included: true },
+  const digitalBusinessCardPath = buildLocalizedPath('/features/digital-business-card', locale);
+  const features: Array<{
+    icon: typeof Calendar;
+    text: string;
+    badge?: string;
+    href?: string;
+  }> = [
+    ...(!isAgencyPricing ? [{
+      icon: ContactRound,
+      text: t('pricing.feature.digitalBusinessCard'),
+      badge: t('featuresIndex.newBadge'),
+      href: digitalBusinessCardPath,
+    }] : []),
+    { icon: Calendar, text: t('pricing.feature.calendar') },
+    { icon: CreditCard, text: t('pricing.feature.payments') },
+    { icon: Bell, text: t('pricing.feature.reminders') },
+    { icon: Upload, text: t('pricing.feature.files') },
+    { icon: MessageSquare, text: t('pricing.feature.comments') },
+    { icon: Users, text: t('pricing.feature.waitlist') },
+    { icon: TrendingUp, text: t('pricing.feature.finance') },
+    { icon: MessageSquare, text: t('pricing.feature.messaging') },
+    { icon: Package, text: t('pricing.feature.plans') },
+    { icon: Banknote, text: t('pricing.feature.autoPayments') },
+    { icon: FileText, text: t('pricing.feature.invoices') },
+    { icon: UserCheck, text: t('pricing.feature.parents') },
   ];
 
   return (
     <div className="min-h-screen bg-white flex flex-col font-sans">
-      <LandingNavbar />
+      <LandingNavbar audience={pricingAudience} />
 
       <main className="flex-1 pt-[60px] md:pt-[72px]">
         {/* Hero */}
@@ -90,7 +132,12 @@ export default function Pricing() {
           <div className="absolute top-[10%] left-1/2 -translate-x-1/2 w-[700px] h-[400px] bg-white/40 rounded-full blur-[100px] pointer-events-none" />
           <div className="relative z-10 max-w-[1200px] mx-auto px-6 pt-16 pb-20 text-center">
             <h1 className="font-display text-[2.25rem] sm:text-[3rem] lg:text-[3.5rem] font-bold text-gray-900 tracking-tight leading-[1.1] mb-5">
-              {t('pricing.title')}
+              {isAgencyPricing ? (
+                <>
+                  <span className="block">{t('pricing.title')}</span>
+                  <span className="block">{t('pricing.titleAgencySuffix')}</span>
+                </>
+              ) : t('pricing.title')}
             </h1>
             <p className="text-[15px] lg:text-base text-gray-500 max-w-lg mx-auto mb-10 leading-relaxed">
               {t('pricing.subtitle')}
@@ -102,42 +149,42 @@ export default function Pricing() {
               </p>
             )}
 
-            {/* Billing toggle */}
-            <div className="flex items-center justify-center gap-3 mb-4">
-              <span className={`text-sm font-medium transition-colors ${!isYearly ? 'text-gray-900' : 'text-gray-400'}`}>
-                {t('pricing.monthly')}
-              </span>
-              <button
-                onClick={() => setIsYearly((v) => !v)}
-                className={`relative w-12 h-6 rounded-full transition-colors duration-200 ${isYearly ? 'bg-[#4f46e5]' : 'bg-gray-300'}`}
-                aria-label="Toggle billing period"
-              >
-                <span
-                  className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-transform duration-200 ${isYearly ? 'translate-x-6' : 'translate-x-0'}`}
-                />
-              </button>
-              <span className={`text-sm font-medium transition-colors ${isYearly ? 'text-gray-900' : 'text-gray-400'}`}>
-                {t('pricing.yearly')}
-              </span>
-              {isYearly && (
-                <span className="bg-emerald-500 text-white text-[11px] font-bold px-3 py-0.5 rounded-full">
-                  {t('pricing.save25')}
+            {!isAgencyPricing && (
+              <div className="flex items-center justify-center gap-3 mb-4">
+                <span className={`text-sm font-medium transition-colors ${!isYearly ? 'text-gray-900' : 'text-gray-400'}`}>
+                  {t('pricing.monthly')}
                 </span>
-              )}
-            </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={isYearly}
+                  onClick={() => setIsYearly((v) => !v)}
+                  className={`relative w-12 h-6 rounded-full transition-colors duration-200 ${isYearly ? 'bg-[#4f46e5]' : 'bg-gray-300'}`}
+                  aria-label="Toggle billing period"
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-transform duration-200 ${isYearly ? 'translate-x-6' : 'translate-x-0'}`}
+                  />
+                </button>
+                <span className="inline-flex items-start gap-2">
+                  <span className={`text-sm font-medium transition-colors ${isYearly ? 'text-gray-900' : 'text-gray-400'}`}>
+                    {t('pricing.yearly')}
+                  </span>
+                  <span className="-mt-2 rounded-full bg-emerald-500 px-3 py-0.5 text-[11px] font-bold text-white">
+                    {t('pricing.yearlyDiscountBadge')}
+                  </span>
+                </span>
+              </div>
+            )}
           </div>
         </section>
 
         {/* Cards */}
-        <section className="max-w-[1200px] mx-auto px-6 pb-20">
-          <div className="grid md:grid-cols-2 gap-6 max-w-[760px] mx-auto items-stretch pt-5">
+        <section id="pricing-plans" className="scroll-mt-24 max-w-[1200px] mx-auto px-6 pb-20">
+          {!isAgencyPricing && (
+            <div className="grid md:grid-cols-2 gap-6 max-w-[760px] mx-auto items-stretch pt-5">
             {/* Standard ??? monthly or yearly via toggle */}
             <div className="relative bg-[#4f46e5] rounded-2xl p-7 shadow-lg shadow-indigo-200/40 ring-2 ring-[#4f46e5] flex flex-col">
-              {isYearly && (
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-emerald-500 text-white text-[11px] font-bold px-4 py-1 rounded-full shadow-sm">
-                  {t('pricing.save25')}
-                </div>
-              )}
               <div className="mb-6">
                 <h3 className="text-xl font-bold text-white mb-2">
                   {isYearly ? t('pricing.yearly') : t('pricing.monthly')}
@@ -207,12 +254,15 @@ export default function Pricing() {
               </button>
             </div>
 
-          </div>
+            </div>
+          )}
 
           {/* Enterprise ??? full-width row with the license calculator */}
-          <div className="max-w-[960px] mx-auto mt-6">
-            <EnterprisePlanCard audience={checkoutAudience} onBookDemo={() => setEnterpriseOpen(true)} />
-          </div>
+          {isAgencyPricing && (
+            <div className="max-w-[960px] mx-auto pt-5">
+              <EnterprisePlanCard audience={checkoutAudience} onBookDemo={() => setEnterpriseOpen(true)} />
+            </div>
+          )}
         </section>
 
         {/* Features grid */}
@@ -223,13 +273,32 @@ export default function Pricing() {
             </h2>
             <div className="grid sm:grid-cols-2 gap-4 max-w-[800px] mx-auto">
               {features.map((feature, index) => (
-                <div key={index} className="flex items-center gap-4 bg-white border border-gray-100 rounded-xl p-5">
-                  <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center shrink-0">
-                    <feature.icon className="w-5 h-5 text-[#4f46e5]" />
+                feature.href ? (
+                  <Link
+                    key={feature.text}
+                    to={feature.href}
+                    className="group flex items-center gap-4 rounded-xl border border-violet-200 bg-gradient-to-r from-violet-50 to-white p-5 transition hover:border-violet-300 hover:shadow-md"
+                  >
+                    <div className="w-10 h-10 rounded-lg bg-violet-600 flex items-center justify-center shrink-0 shadow-sm">
+                      <feature.icon className="w-5 h-5 text-white" />
+                    </div>
+                    <p className="text-gray-800 text-[13px] font-semibold">{feature.text}</p>
+                    {feature.badge ? (
+                      <span className="ml-auto rounded-full bg-violet-600 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.1em] text-white">
+                        {feature.badge}
+                      </span>
+                    ) : null}
+                    <ArrowRight className="h-4 w-4 shrink-0 text-violet-500 transition-transform group-hover:translate-x-0.5" />
+                  </Link>
+                ) : (
+                  <div key={`${feature.text}-${index}`} className="flex items-center gap-4 bg-white border border-gray-100 rounded-xl p-5">
+                    <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center shrink-0">
+                      <feature.icon className="w-5 h-5 text-[#4f46e5]" />
+                    </div>
+                    <p className="text-gray-700 text-[13px] font-medium">{feature.text}</p>
+                    <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0 ml-auto" />
                   </div>
-                  <p className="text-gray-700 text-[13px] font-medium">{feature.text}</p>
-                  <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0 ml-auto" />
-                </div>
+                )
               ))}
             </div>
           </div>
@@ -263,15 +332,12 @@ export default function Pricing() {
             <p className="text-gray-500 text-[15px] mb-8 leading-relaxed">{t('pricing.readyToStartDesc')}</p>
             <button
               type="button"
-              disabled={!!checkoutLoading}
-              onClick={() => startCheckout('monthly')}
-              className="inline-flex items-center justify-center h-12 px-8 text-sm rounded-full bg-[#4f46e5] hover:bg-[#4338ca] text-white font-semibold transition-all duration-200 hover:scale-[1.03] hover:shadow-lg active:scale-[0.98] disabled:opacity-70"
+              onClick={isAgencyPricing ? () => setEnterpriseOpen(true) : scrollToPricingPlans}
+              className="inline-flex items-center justify-center h-12 px-8 text-sm rounded-full bg-[#4f46e5] hover:bg-[#4338ca] text-white font-semibold transition-all duration-200 hover:scale-[1.03] hover:shadow-lg active:scale-[0.98]"
             >
-              {checkoutLoading === 'monthly' && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
-              {t('pricing.start7DayTrial')}
+              {t(isAgencyPricing ? 'pricing.bookDemo' : 'pricing.start7DayTrial')}
               <ArrowRight className="w-4 h-4 ml-2" />
             </button>
-            <p className="text-[12px] text-gray-400 mt-4">{t('pricing.createAccountFirst')}</p>
           </div>
         </section>
       </main>

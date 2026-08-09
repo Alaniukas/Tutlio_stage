@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react';
 import LandingNavbar from '@/components/LandingNavbar';
 import LandingFooter from '@/components/LandingFooter';
+import type { LandingAudience } from '@/components/landing/v2/audience';
 import HeroSection from '@/components/landing/v2/HeroSection';
 import LogoWall from '@/components/landing/v2/LogoWall';
 import OldVsNewComparison from '@/components/landing/v2/OldVsNewComparison';
@@ -7,41 +9,57 @@ import FeaturesBento from '@/components/landing/v2/FeaturesBento';
 import PillarsSummary from '@/components/landing/v2/PillarsSummary';
 import VideoSection from '@/components/landing/v2/VideoSection';
 import CaseStudySection from '@/components/landing/v2/CaseStudy';
-import BookingLinkCta from '@/components/landing/v2/BookingLinkCta';
 import Testimonials from '@/components/landing/v2/Testimonials';
 import FaqSection from '@/components/landing/v2/FaqSection';
 import FinalCta from '@/components/landing/v2/FinalCta';
+import {
+  marketingAudienceFromLanding,
+  resolveLandingAudience,
+  storeMarketingAudience,
+} from '@/lib/marketingAudience';
 
 /**
- * The rebuilt landing page, parked at /new-landing while the current one stays
- * on /. Deliberately has none of Landing.tsx's entry logic — no installed-PWA
- * redirect and no /schools branch — so the URL always shows this page and
- * nothing else, which is the whole point of a preview.
- *
- * Crawlers never see it: middleware.ts has no SSR destination for this path, so
- * bots get /api/not-found (404 + noindex) and it stays out of the sitemap.
- *
- * To promote it, move this <main> into Landing.tsx and delete this file.
+ * Primary tutor landing page. The /new-landing route remains as a direct alias.
+ * Audience toggle drives hero + mid-page demos.
+ * Vizitinė kortelė is woven into the solo product animation (not a separate promo block).
  */
-export default function NewLanding() {
+export default function NewLanding({
+  initialAudience,
+}: {
+  initialAudience?: LandingAudience;
+}) {
+  const [audience, setAudience] = useState<LandingAudience>(() =>
+    resolveLandingAudience(initialAudience),
+  );
+  const marketingAudience = marketingAudienceFromLanding(audience);
+
+  // Platform landing pages have an explicit audience. Persist it so navbar and
+  // footer links that open pricing without a query retain the matching plans.
+  useEffect(() => {
+    if (initialAudience) {
+      storeMarketingAudience(marketingAudienceFromLanding(initialAudience));
+    }
+  }, [initialAudience]);
+
+  const handleAudienceChange = (nextAudience: LandingAudience) => {
+    setAudience(nextAudience);
+    storeMarketingAudience(marketingAudienceFromLanding(nextAudience));
+  };
+
   return (
     <div className="min-h-screen bg-white flex flex-col font-sans overflow-x-hidden">
-      <LandingNavbar />
+      <LandingNavbar audience={marketingAudience} />
       <main className="flex-1 pt-[60px] md:pt-[72px]">
-        <HeroSection />
+        <HeroSection audience={audience} onAudienceChange={handleAudienceChange} />
         <LogoWall />
         <OldVsNewComparison />
-        <FeaturesBento />
+        <FeaturesBento audience={audience} />
         <PillarsSummary />
-        {/* Video, success story and testimonials all read their content from
-            components/landing/v2/socialProof.ts. They currently show bracketed
-            placeholders — replace those with real, attributable content there. */}
-        <VideoSection />
+        <VideoSection audience={audience} />
         <CaseStudySection />
-        <BookingLinkCta />
         <Testimonials />
         <FaqSection />
-        <FinalCta />
+        <FinalCta audience={audience} />
       </main>
       <LandingFooter />
     </div>

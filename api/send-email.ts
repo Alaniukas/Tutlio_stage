@@ -9,6 +9,7 @@ if (typeof process !== 'undefined' && process.env.TUTLIO_DEV_API_LOCAL === '1') 
 
 import type { VercelRequest, VercelResponse } from './types';
 import { t, isValidLocale, localizedFromEmail, type Locale } from './_lib/i18n.js';
+import { isProKlaseOrg } from './_lib/marketMoney.js';
 import { Resend } from 'resend';
 import { createClient } from '@supabase/supabase-js';
 import { outlookEmailButton, headerInlineStyle } from './_lib/outlookEmail.js';
@@ -271,6 +272,8 @@ interface EmailBranding {
   logo_url: string | null;
   brand_color: string;
   brand_color_secondary?: string;
+  /** Hide the "powered by Tutlio" line under the logo (full white-label). */
+  hidePoweredBy?: boolean;
 }
 
 function wrap(content: string, locale: Locale = 'lt', branding?: EmailBranding | null): string {
@@ -281,7 +284,7 @@ function wrap(content: string, locale: Locale = 'lt', branding?: EmailBranding |
     : branding?.name
       ? `<span style="font-size:26px;font-weight:900;color:${fallbackColor};letter-spacing:-0.5px;">${escapeHtml(branding.name)}</span>`
       : `<span style="font-size:26px;font-weight:900;color:#4f46e5;letter-spacing:-0.5px;">Tutlio <span style="font-size:24px;">🎓</span></span>`;
-  const poweredBy = branding?.name
+  const poweredBy = branding?.name && !branding.hidePoweredBy
     ? `<p style="color:#9ca3af;font-size:11px;margin:8px 0 0;">powered by Tutlio</p>`
     : '';
   return `<!DOCTYPE html>
@@ -333,13 +336,24 @@ function packageItemsBreakdownRows(
   }).join('');
   return `<div class="info-card"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${rows}</table></div>`;
 }
-const footerFor = (locale: Locale) => `<div class="footer"><p>${t(locale, 'em.teamSignature')}</p><p style="margin:8px 0 0; font-size:11px; color:#9ca3af;">${t(locale, 'em.unsubscribe')}</p></div>`;
+const footerFor = (
+  locale: Locale,
+  unsubscribeEmail?: string | null,
+  teamSignature?: string | null,
+) => {
+  const email = String(unsubscribeEmail || '').trim().toLowerCase();
+  const unsubLine = email
+    ? `${t(locale, 'em.unsubscribeLead')} <a href="${getAppUrl()}/unsubscribe?email=${encodeURIComponent(email)}" style="color:#9ca3af; text-decoration:underline;">${t(locale, 'em.unsubscribeHere')}</a>`
+    : t(locale, 'em.unsubscribe');
+  const signature = String(teamSignature || '').trim() || t(locale, 'em.teamSignature');
+  return `<div class="footer"><p>${signature}</p><p style="margin:8px 0 0; font-size:11px; color:#9ca3af;">${unsubLine}</p></div>`;
+};
 
 const formatMoney = (value: string | number, currency?: string, loc: Locale = 'lt') => {
   const num = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(num)) return String(value);
   const resolvedCurrency = currency ?? (loc === 'pl' ? 'PLN' : 'EUR');
-  const intlLocale = loc === 'en' ? 'en-US' : loc === 'pl' ? 'pl-PL' : 'lt-LT';
+  const intlLocale = loc === 'en' ? 'en-US' : loc === 'pl' ? 'pl-PL' : loc === 'nl' ? 'nl-NL' : 'lt-LT';
   return new Intl.NumberFormat(intlLocale, {
     style: 'currency',
     currency: resolvedCurrency,
@@ -531,6 +545,11 @@ function sessionStudentNoShowPayer(d: any, locale: Locale) {
 }
 
 function sessionReminder(d: any, locale: Locale) {
+  const sessionId = d.sessionId ? encodeURIComponent(String(d.sessionId)) : '';
+  const dateParam = d.date ? encodeURIComponent(String(d.date)) : '';
+  const calendarUrl = d.isTutor
+    ? `${getAppUrl()}/calendar?${dateParam ? `date=${dateParam}&` : ''}sessionId=${sessionId}`
+    : `${getAppUrl()}/student/schedule?sessionId=${sessionId}`;
   return {
     subject: t(locale, 'em.reminderSub', { date: d.date, time: d.time }),
     html: wrap(`
@@ -548,13 +567,18 @@ function sessionReminder(d: any, locale: Locale) {
         ${d.tutorComment ? `<tr><td colspan="2" style="padding:16px 0 0 0;"><div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:16px;"><p style="color:#1e3a8a; font-size:13px; font-weight:700; margin:0 0 6px 0;">${t(locale, 'em.tutorComment')}</p><div style="color:#1e40af; font-size:14px; line-height:1.5; white-space:pre-wrap;">${d.tutorComment}</div></div></td></tr>` : ''}
         </table></div>
         <div style="text-align:center; margin-top:20px;">
-          ${outlookEmailButton(d.isTutor ? `${getAppUrl()}/dashboard` : `${getAppUrl()}/student/sessions`, t(locale, 'em.btnGoToAccount'), '#ea580c', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
+          ${outlookEmailButton(sessionId ? calendarUrl : (d.isTutor ? `${getAppUrl()}/dashboard` : `${getAppUrl()}/student/sessions`), t(locale, 'em.btnOpenLesson'), '#ea580c', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
         </div>
       </div>${footerFor(locale)}`, locale),
   };
 }
 
 function sessionReminderPayer(d: any, locale: Locale) {
+  const sessionId = d.sessionId ? encodeURIComponent(String(d.sessionId)) : '';
+  const studentId = d.studentId ? encodeURIComponent(String(d.studentId)) : '';
+  const calendarUrl = studentId
+    ? `${getAppUrl()}/parent/calendar?studentId=${studentId}&sessionId=${sessionId}`
+    : `${getAppUrl()}/parent/calendar?sessionId=${sessionId}`;
   return {
     subject: t(locale, 'em.reminderPayerSub', { date: d.date, time: d.time }),
     html: wrap(`
@@ -576,7 +600,8 @@ function sessionReminderPayer(d: any, locale: Locale) {
           <p style="color:#4b5563; font-size:14px; margin:0 0 6px;">📧 <a href="mailto:${d.tutorEmail || ''}" style="color:#6366f1; text-decoration:none;">${d.tutorEmail || t(locale, 'em.notSpecified')}</a></p>
           ${d.tutorPhone ? `<p style="color:#4b5563; font-size:14px; margin:0;">📱 <a href="tel:${d.tutorPhone}" style="color:#6366f1; text-decoration:none;">${d.tutorPhone}</a></p>` : ''}
         </div>
-      </div>${footerFor(locale)}`, locale),
+        ${sessionId ? `<div style="text-align:center; margin-top:20px;">${outlookEmailButton(calendarUrl, t(locale, 'em.btnOpenLesson'), '#ea580c', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}</div>` : ''}
+      </div>${footerFor(locale, d.unsubscribeEmail)}`, locale),
   };
 }
 
@@ -1111,7 +1136,7 @@ function paymentAfterLessonReminder(d: any, locale: Locale) {
     )}
         ${payBlock}
         ${bankTransferEmailButton(d, locale)}
-      </div>${footerFor(locale)}`, locale),
+      </div>${footerFor(locale, d.unsubscribeEmail)}`, locale),
   };
 }
 
@@ -1529,7 +1554,7 @@ function paymentReminderEmail(d: any, locale: Locale) {
         ${payBlock}
         ${bankTransferEmailButton(d, locale)}
       </div>
-      ${footerFor(locale)}
+      ${footerFor(locale, d.unsubscribeEmail)}
     `, locale),
   };
 }
@@ -1619,6 +1644,23 @@ function prepaidPackageRequest(d: any, locale: Locale) {
   const items: PackageEmailItem[] = Array.isArray(d.items) ? d.items : [];
   const isMulti = items.length > 1;
   const itemsBreakdown = packageItemsBreakdownRows(items, locale);
+  const proKlase = d.isProKlase === true || isProKlaseOrg(d.organizationId);
+  const headerSub = proKlase
+    ? t(locale, 'em.packageReqHeaderSubProKlase')
+    : t(locale, 'em.packageReqHeaderSub');
+  const bodyText = proKlase
+    ? t(locale, 'em.packageReqBodyProKlase')
+    : t(locale, 'em.packageReqBody', {
+        tutor: d.tutorName,
+        studentPart: d.studentName !== d.recipientName ? t(locale, 'em.packageReqStudentPart', { student: d.studentName }) : '',
+      });
+  const howBody = proKlase
+    ? t(locale, 'em.packageHowBodyProKlase')
+    : t(locale, 'em.packageHowBody', {
+        count: String(d.totalLessons),
+        subject: d.subjectName,
+        label: d.totalLessons === 1 ? t(locale, 'em.lessonSingular') : d.totalLessons < 10 ? t(locale, 'em.lessonFew') : t(locale, 'em.lessonMany'),
+      });
   const payBlock = prefersManualInstructions(d)
     ? manualOffPlatformPaymentHtml(d, locale)
     : `<div style="text-align:center; margin-top: 24px;">
@@ -1632,12 +1674,21 @@ function prepaidPackageRequest(d: any, locale: Locale) {
     html: wrap(`
       <div class="header" style="${headerInlineStyle('#8b5cf6', '#6366f1')}">
         <h1>${t(locale, 'em.packageReqHeader')}</h1>
-        <p>${t(locale, 'em.packageReqHeaderSub')}</p>
+        <p>${headerSub}</p>
+        ${proKlase
+          ? `<p style="color:rgba(255,255,255,0.92); font-size:13px; line-height:1.6; margin:12px 0 0;">
+              <strong>${t(locale, 'em.packageProKlaseEmailLabel')}</strong>
+              <a href="mailto:info@proklase.lt" style="color:#ffffff; text-decoration:underline;">info@proklase.lt</a>
+              &nbsp;·&nbsp;
+              <strong>${t(locale, 'em.packageProKlasePhoneLabel')}</strong>
+              <a href="tel:+37065687287" style="color:#ffffff; text-decoration:underline;">+370 656 87287</a>
+            </p>`
+          : ''}
       </div>
       <div class="body">
         <p class="greeting">${t(locale, 'em.hiName', { name: d.recipientName })}</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          ${t(locale, 'em.packageReqBody', { tutor: d.tutorName, studentPart: d.studentName !== d.recipientName ? t(locale, 'em.packageReqStudentPart', { student: d.studentName }) : '' })}
+          ${bodyText}
         </p>
         ${isMulti
           ? itemsBreakdown + table(
@@ -1653,12 +1704,12 @@ function prepaidPackageRequest(d: any, locale: Locale) {
         <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:12px; padding:16px; margin:20px 0;">
           <p style="color:#166534; font-size:14px; margin:0; line-height:1.6;">
             ${t(locale, 'em.packageHowTitle')}<br/>
-            ${t(locale, 'em.packageHowBody', { count: String(d.totalLessons), subject: d.subjectName, label: d.totalLessons === 1 ? t(locale, 'em.lessonSingular') : d.totalLessons < 10 ? t(locale, 'em.lessonFew') : t(locale, 'em.lessonMany') })}
+            ${howBody}
           </p>
         </div>
         ${payBlock}
       </div>
-      ${footerFor(locale)}
+      ${footerFor(locale, null, d.emailTeamSignature)}
     `, locale),
   };
 }
@@ -1860,17 +1911,41 @@ function manualPackageRequest(d: any, locale: Locale) {
   const items: PackageEmailItem[] = Array.isArray(d.items) ? d.items : [];
   const isMulti = items.length > 1;
   const itemsBreakdown = packageItemsBreakdownRows(items, locale);
+  const proKlase = d.isProKlase === true || isProKlaseOrg(d.organizationId);
+  const headerSub = proKlase
+    ? t(locale, 'em.packageReqHeaderSubProKlase')
+    : t(locale, 'em.manualPkgHeaderSub');
+  const bodyText = proKlase
+    ? t(locale, 'em.packageReqBodyProKlase')
+    : t(locale, 'em.manualPkgBody', { student: d.studentName, org: d.orgName });
+  const howBlock = proKlase
+    ? `${t(locale, 'em.packageHowTitle')}<br/>${t(locale, 'em.packageHowBodyProKlase')}`
+    : `${t(locale, 'em.manualPkgHowTitle')}<br/>
+            ${t(locale, 'em.manualPkgHowBody', { price: totalPrice, org: d.orgName })}
+            ${paymentUrl
+              ? ` ${t(locale, 'em.manualPkgUseLink')}`
+              : ` ${t(locale, 'em.manualPkgContactOrg')}`}
+            ${t(locale, 'em.manualPkgActivation')}`;
   return {
     subject: t(locale, 'em.manualPkgSub', { count: String(d.totalLessons), label: totalLessonsLabel, subject: d.subjectName }),
     html: wrap(`
       <div class="header" style="${headerInlineStyle('#8b5cf6', '#6366f1')}">
         <h1>${t(locale, 'em.manualPkgHeader')}</h1>
-        <p>${t(locale, 'em.manualPkgHeaderSub')}</p>
+        <p>${headerSub}</p>
+        ${proKlase
+          ? `<p style="color:rgba(255,255,255,0.92); font-size:13px; line-height:1.6; margin:12px 0 0;">
+              <strong>${t(locale, 'em.packageProKlaseEmailLabel')}</strong>
+              <a href="mailto:info@proklase.lt" style="color:#ffffff; text-decoration:underline;">info@proklase.lt</a>
+              &nbsp;·&nbsp;
+              <strong>${t(locale, 'em.packageProKlasePhoneLabel')}</strong>
+              <a href="tel:+37065687287" style="color:#ffffff; text-decoration:underline;">+370 656 87287</a>
+            </p>`
+          : ''}
       </div>
       <div class="body">
         <p class="greeting">${t(locale, 'em.hiName', { name: d.recipientName })}</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          ${t(locale, 'em.manualPkgBody', { student: d.studentName, org: d.orgName })}
+          ${bodyText}
         </p>
         ${isMulti
           ? itemsBreakdown + table(
@@ -1893,12 +1968,7 @@ function manualPackageRequest(d: any, locale: Locale) {
         }
         <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:12px; padding:16px; margin:20px 0;">
           <p style="color:#166534; font-size:14px; margin:0; line-height:1.6;">
-            ${t(locale, 'em.manualPkgHowTitle')}<br/>
-            ${t(locale, 'em.manualPkgHowBody', { price: totalPrice, org: d.orgName })}
-            ${paymentUrl
-              ? ` ${t(locale, 'em.manualPkgUseLink')}`
-              : ` ${t(locale, 'em.manualPkgContactOrg')}`}
-            ${t(locale, 'em.manualPkgActivation')}
+            ${howBlock}
           </p>
         </div>
         ${paymentUrl
@@ -1907,7 +1977,7 @@ function manualPackageRequest(d: any, locale: Locale) {
         </div>`
           : ''}
       </div>
-      ${footerFor(locale)}
+      ${footerFor(locale, null, d.emailTeamSignature)}
     `, locale),
   };
 }
@@ -2349,7 +2419,7 @@ function schoolInstallmentRequest(d: any, locale: Locale) {
         </div>
         ${payUrl ? `<div style="text-align:center; margin:24px 0;">${outlookEmailButton(payUrl, totalAmount > 0 ? 'Apmokėti dabar' : 'Patvirtinti registraciją', '#059669', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}</div>` : ''}
         <p style="color:#6b7280; font-size:13px;">Jei turite klausimų, susisiekite su mokykla: ${esc(schoolParentContactEmail(d))}.</p>
-      </div>${footerFor(locale)}`, locale),
+      </div>${footerFor(locale, d.unsubscribeEmail)}`, locale),
   };
 }
 
@@ -2953,12 +3023,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               if ((data as any).context === 'school' && (data as any).tutorName) (data as any).tutorName = esc(orgPublicName);
             }
             if (features.custom_branding) {
+              const proKlase = isProKlaseOrg(orgIdForBrandingLookup);
               orgBranding = {
                 name: orgPublicName || org.name,
                 logo_url: org.logo_url ?? null,
                 brand_color: org.brand_color || '#6366f1',
                 brand_color_secondary: (org as { brand_color_secondary?: string | null }).brand_color_secondary || undefined,
+                hidePoweredBy: proKlase,
               };
+              if (proKlase) {
+                (data as any).isProKlase = true;
+                (data as any).emailTeamSignature = 'Pro Klasės komanda';
+                (data as any).emailSenderName = 'ProKlasė Sistema';
+              }
+            } else if (isProKlaseOrg(orgIdForBrandingLookup)) {
+              // Pro Klasė without custom_branding flag still gets white-label copy/from/footer.
+              (data as any).isProKlase = true;
+              (data as any).emailTeamSignature = 'Pro Klasės komanda';
+              (data as any).emailSenderName = 'ProKlasė Sistema';
             }
           }
         }
@@ -2967,13 +3049,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Patch the email HTML post-generation to inject org branding into the wrap() header
     function applyBranding(result: { subject: string; html: string }): { subject: string; html: string } {
-      if (!orgBranding) return result;
+      let html = result.html;
+      const teamSig = String((data as any).emailTeamSignature || '').trim();
+      if (teamSig) {
+        html = html.replaceAll(t(locale, 'em.teamSignature'), teamSig);
+      }
+      if (!orgBranding) return { subject: result.subject, html };
       const logoHtml = orgBranding.logo_url
         ? `<img src="${orgBranding.logo_url}" alt="${escapeHtml(orgBranding.name)}" style="max-height:36px;max-width:160px;" />`
         : `<span style="font-size:26px;font-weight:900;color:${orgBranding.brand_color};letter-spacing:-0.5px;">${escapeHtml(orgBranding.name)}</span>`;
-      const poweredBy = `<p style="color:#9ca3af;font-size:11px;margin:8px 0 0;">powered by Tutlio</p>`;
+      const poweredBy = orgBranding.hidePoweredBy
+        ? ''
+        : `<p style="color:#9ca3af;font-size:11px;margin:8px 0 0;">powered by Tutlio</p>`;
       const defaultHeader = `<span style="font-size:26px;font-weight:900;color:#4f46e5;letter-spacing:-0.5px;">Tutlio <span style="font-size:24px;">🎓</span></span>`;
-      let html = result.html.replace(defaultHeader, `${logoHtml}${poweredBy}`);
+      html = html.replace(defaultHeader, `${logoHtml}${poweredBy}`);
       const a = orgBranding.brand_color;
       const b = orgBranding.brand_color_secondary || orgBranding.brand_color;
       const orgHeader = headerInlineStyle(a, b);
@@ -3001,6 +3090,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       html = html.replaceAll('color:#6366f1;', `color:${a};`);
       return { subject: result.subject, html };
+    }
+
+    const reminderUnsubTypes = new Set([
+      'session_reminder_payer',
+      'payment_reminder',
+      'payment_after_lesson_reminder',
+      'school_installment_request',
+    ]);
+    if (reminderUnsubTypes.has(type)) {
+      const toEmail = Array.isArray(to) ? to[0] : to;
+      if (toEmail) (data as any).unsubscribeEmail = String(toEmail).trim().toLowerCase();
     }
 
     let emailContent: { subject: string; html: string };
@@ -3075,7 +3175,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const emailPayload: Parameters<typeof resend.emails.send>[0] = {
-      from: localizedFromEmail(locale),
+      from: localizedFromEmail(locale, { senderName: (data as any).emailSenderName }),
       to: Array.isArray(to) ? to : [to],
       subject: unescapeHtml(emailContent.subject),
       html: emailContent.html,

@@ -1784,6 +1784,8 @@ export default function CompanyContracts() {
   const schoolContractFilterLabel = (key: SchoolContractFilter, count: number) =>
     `${({
       all: tr('school.filterAll'),
+      draft: tr('school.filterDraft'),
+      sent: tr('school.filterSent'),
       awaiting_school: tr('school.filterAwaitingSchool'),
       awaiting_parents: tr('school.filterAwaitingParents'),
       incomplete_data: tr('school.filterIncompleteData'),
@@ -1903,6 +1905,8 @@ export default function CompanyContracts() {
                     <SelectContent>
                       {([
                         'all',
+                        'draft',
+                        'sent',
                         'awaiting_school',
                         'awaiting_parents',
                         'incomplete_data',

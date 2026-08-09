@@ -18,6 +18,7 @@ import {
     trimManualPaymentBankDetails,
 } from './_lib/soloManualStudentPayments.js';
 import { requireCronAuth } from './_lib/cronAuth.js';
+import { isReminderOptedOut } from './_lib/reminderOptOut.js';
 
 const supabase = createClient(
     process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL!,
@@ -277,7 +278,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         : (studentObj?.email || '')
                     ).trim();
 
-                    if (rawPayerEmail) {
+                    if (rawPayerEmail && !(await isReminderOptedOut(supabase, rawPayerEmail))) {
                         const minutesToDeadline = Math.round((deadline.getTime() - now.getTime()) / 60000);
                         const deadlineHoursForEmail = Math.max(1, Math.round(minutesToDeadline / 60)) || 1;
                         const bankDetails = trimManualPaymentBankDetails(tutor.manual_payment_bank_details);

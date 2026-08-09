@@ -16,6 +16,7 @@ import { verifyRequestAuth } from './_lib/auth.js';
 import { deriveForTutor, EMPTY_DERIVED } from './_lib/publicPageDerived.js';
 import { isProKlaseOrg } from './_lib/marketMoney.js';
 import type { PublicPageRow } from './_lib/publicPageRow.js';
+import { safePublicSocialUrl } from '../src/lib/publicPage.js';
 
 function getSupabase(): SupabaseClient | null {
   const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -127,7 +128,7 @@ function buildUpdate(patch: Record<string, unknown>): { update: Record<string, u
     const incoming = patch.socials as Record<string, unknown>;
     const socials: Record<string, string> = {};
     for (const key of SOCIAL_KEYS) {
-      const url = safeUrl(incoming[key]);
+      const url = safePublicSocialUrl(key, incoming[key]);
       if (url) socials[key] = url;
     }
     u.socials = socials;

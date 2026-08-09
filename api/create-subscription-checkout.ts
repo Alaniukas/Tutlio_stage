@@ -235,7 +235,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const checkoutLocale =
       localeCode === 'en' ? 'en'
         : localeCode === 'pl' ? 'pl'
-          : 'lt';
+          : localeCode === 'nl' ? 'nl'
+            : 'lt';
 
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
       mode: 'subscription',

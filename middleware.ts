@@ -2,16 +2,33 @@ import { next, rewrite } from '@vercel/functions';
 
 // Kept dependency-free for the edge runtime; sync with api/_lib/seo-routing.ts
 // and src/lib/featurePages.ts is enforced by tests/lib/seo-visibility.test.ts.
-export const LOCALES = new Set(['en', 'lt', 'pl', 'lv', 'ee', 'fr', 'es', 'de', 'se', 'dk', 'fi', 'no']);
-export const FEATURES = new Set(['calendar', 'waitlist', 'payments', 'reminders', 'cancellation', 'comments']);
+export const LOCALES = new Set(['en', 'lt', 'pl', 'lv', 'ee', 'fr', 'es', 'de', 'se', 'dk', 'fi', 'no', 'nl']);
+export const FEATURES = new Set([
+  'digital-business-card',
+  'calendar',
+  'waitlist',
+  'payments',
+  'reminders',
+  'cancellation',
+  'comments',
+]);
 
-/** Crawlers and AI fetchers — humans always get the Vite SPA. */
+/** Recognized crawlers and AI fetchers. Unknown non-browser clients are also
+ * handled below via Fetch Metadata rather than depending only on this list. */
 export const BOT_UA =
-  /googlebot|google-inspectiontool|bingbot|slurp|duckduckbot|duckassist|baiduspider|yandexbot|applebot|facebookexternalhit|facebookbot|meta-external|twitterbot|linkedinbot|embedly|slackbot|discordbot|whatsapp|telegrambot|semrush|ahrefs|mj12bot|dotbot|petalbot|bytespider|gptbot|chatgpt-user|oai-searchbot|claudebot|claude-web|anthropic-ai|perplexity|cohere|amazonbot|ccbot|mistral|youbot|kagibot|diffbot/i;
+  /googlebot|google-inspectiontool|chrome-lighthouse|bingbot|slurp|duckduckbot|duckassist|baiduspider|yandexbot|applebot|facebookexternalhit|facebookbot|meta-external|twitterbot|linkedinbot|embedly|slackbot|discordbot|whatsapp|telegrambot|semrush|ahrefs|mj12bot|dotbot|petalbot|bytespider|gptbot|chatgpt-user|oai-searchbot|claudebot|claude-web|anthropic-ai|perplexity|cohere|amazonbot|ccbot|mistral|youbot|kagibot|diffbot/i;
 
 function isBot(request: Request): boolean {
   const ua = request.headers.get('user-agent') || '';
   return BOT_UA.test(ua);
+}
+
+/** Real browser document navigations send Fetch Metadata headers. Requests
+ * without them are treated as crawler-like, so an unfamiliar search/AI bot
+ * still receives semantic HTML instead of the noindex SPA shell. */
+export function isBrowserNavigation(request: Request): boolean {
+  return request.headers.get('sec-fetch-mode') === 'navigate'
+    && request.headers.get('sec-fetch-dest') === 'document';
 }
 
 export function defaultLocale(host: string): string {
@@ -113,7 +130,8 @@ export function sameDomainCanonicalPath(pathname: string, host: string): string 
   const base = noSlash || pathname;
   const stripped = defaultLocaleStripRedirect(base, host);
   const withSlug = canonicalSlugRedirect(stripped || base, host);
-  return withSlug || stripped || noSlash;
+  const withPublicPrefix = canonicalPublicPagePrefixRedirect(stripped || base, host);
+  return withSlug || withPublicPrefix || stripped || noSlash;
 }
 
 /**
@@ -167,6 +185,23 @@ export function canonicalSlugRedirect(pathname: string, host: string): string | 
 
   if (!canonical || canonical === slug) return null;
   return localeSeg ? `/${localeSeg}/${canonical}` : `/${canonical}`;
+}
+
+/** Canonicalize the public profile noun without needing a database lookup.
+ * The page's authored locale is validated later by public-page-render. */
+export function canonicalPublicPagePrefixRedirect(pathname: string, host: string): string | null {
+  const segments = pathname.split('/').filter(Boolean);
+  let localeSeg = '';
+  let rest = segments;
+  if (segments.length > 0 && LOCALES.has(segments[0])) {
+    localeSeg = segments[0];
+    rest = segments.slice(1);
+  }
+  if (rest.length !== 2 || (rest[0] !== 'tutor' && rest[0] !== 'korepetitorius')) return null;
+  const locale = localeSeg || defaultLocale(host);
+  const canonicalPrefix = locale === 'lt' ? 'korepetitorius' : 'tutor';
+  if (rest[0] === canonicalPrefix) return null;
+  return `/${[localeSeg, canonicalPrefix, rest[1]].filter(Boolean).join('/')}`;
 }
 
 export function ssrDestination(request: Request): string | null {
@@ -237,6 +272,11 @@ export function ssrDestination(request: Request): string | null {
     return `/api/legal-render?page=terms&locale=${locale}`;
   }
 
+  const publicPage = rest.match(/^\/(tutor|korepetitorius)\/([a-z0-9]+(?:-[a-z0-9]+)*)$/);
+  if (publicPage) {
+    return `/api/public-page-render?slug=${encodeURIComponent(publicPage[2])}&locale=${locale}&requestedPath=${encodeURIComponent(pathname)}`;
+  }
+
   return null;
 }
 
@@ -251,13 +291,13 @@ export default function middleware(request: Request) {
     return Response.redirect(new URL(`${canonicalPath}${url.search}`, request.url), 308);
   }
 
-  if (!isBot(request)) {
-    return next();
-  }
-
   if (isExcludedPath(url.pathname)) {
     return next();
   }
+
+  // Preserve the interactive SPA for real browsers. Recognized bots and
+  // crawler-like clients without Fetch Metadata receive the semantic renderer.
+  if (!isBot(request) && isBrowserNavigation(request)) return next();
 
   const crossDomainTarget = crossDomainLocaleRedirect(url.pathname, host);
   if (crossDomainTarget) {

@@ -186,7 +186,7 @@ export default function DashboardPage() {
     const [cancellationReason, setCancellationReason] = useState('');
     const [leaveFreeTimeOnCancel, setLeaveFreeTimeOnCancel] = useState(false);
     const [leaveFreeTimeOnReschedule, setLeaveFreeTimeOnReschedule] = useState(false);
-    const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+    const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
     const [noShowPickerOpen, setNoShowPickerOpen] = useState(false);
     const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
     const [currentUserId, setCurrentUserId] = useState('');
@@ -199,6 +199,13 @@ export default function DashboardPage() {
     const [isEditingTime, setIsEditingTime] = useState(false);
     const [editNewStartTime, setEditNewStartTime] = useState('');
     const [rescheduleReason, setRescheduleReason] = useState('');
+    const [modalActionNotice, setModalActionNotice] = useState<string | null>(null);
+
+    const notifyProKlaseCancelBlocked = () => {
+        const message = t('cal.proKlaseCancelAdminOnly');
+        setModalActionNotice(message);
+        setToastMessage({ message, type: 'warning' });
+    };
 
     // View comment (same as Calendar – add/edit without full edit)
     const [viewCommentText, setViewCommentText] = useState('');
@@ -820,6 +827,13 @@ export default function DashboardPage() {
         setSaving(false);
     };
 
+    const openSessionTimeEditor = () => {
+        if (!selectedSession) return;
+        setEditNewStartTime(format(new Date(selectedSession.start_time), "yyyy-MM-dd'T'HH:mm"));
+        setRescheduleReason('');
+        setIsEditingTime(true);
+    };
+
     const handleMarkCompleted = async () => {
         if (!selectedSession) return;
         setSaving(true);
@@ -876,6 +890,11 @@ export default function DashboardPage() {
                 return;
             }
             setSessions((prev) => prev.map((s) => (s.id === session.id ? { ...s, status } : s)));
+            if (selectedSession?.id === session.id) {
+                setSelectedSession({ ...selectedSession, status });
+                setIsModalOpen(false);
+            }
+            fetchData();
             if (status === 'no_show') {
                 void (async () => {
                     await fetch('/api/notify-session-no-show', {
@@ -1979,10 +1998,12 @@ export default function DashboardPage() {
                         setCancelConfirmId(null);
                         setIsEditingTime(false);
                         setNoShowPickerOpen(false);
+                        setModalActionNotice(null);
                     }
                 }}
             >
-                <DialogContent className="w-[95vw] sm:max-w-[480px] max-h-[90vh] overflow-y-auto">
+                <DialogContent className="w-[95vw] sm:max-w-[480px] max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden">
+                    <div className="overflow-y-auto flex-1 min-h-0 px-4 sm:px-6 pt-4 sm:pt-6">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
                             <CalendarDays className="w-5 h-5 text-indigo-600" />
@@ -2333,14 +2354,104 @@ export default function DashboardPage() {
                     {selectedSession?.id && (
                         <SessionFiles sessionId={selectedSession.id} role="tutor" />
                     )}
+                    </div>
 
-                    <DialogFooter className="flex flex-col gap-3 pt-4 mt-1 border-t border-gray-100 w-full sm:flex-col">
+                    {modalActionNotice && (
+                        <div className="mx-4 sm:mx-6 mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                            {modalActionNotice}
+                        </div>
+                    )}
+
+                    <DialogFooter className="flex flex-col gap-3 pt-4 px-4 sm:px-6 pb-4 sm:pb-6 mt-0 border-t border-gray-100 w-full sm:flex-col shrink-0 bg-background">
                         {cancelConfirmId !== selectedSession?.id && (
                         <>
-                        {selectedSession?.status === 'active' && (
+                        {isOrgTutor === true && requiresStatusConfirmation &&
+                            selectedSession?.status === 'active' &&
+                            isAfter(new Date(), new Date(selectedSession.end_time)) && (
+                            <div className="w-full rounded-xl border border-amber-300 bg-amber-50 p-3 space-y-2">
+                                <p className="text-sm font-semibold text-amber-900">{t('cal.confirmStatusPrompt')}</p>
+                                <p className="text-xs text-amber-800/80">{t('cal.confirmStatusDesc')}</p>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <Button
+                                        size="sm"
+                                        disabled={confirmingStatusId === selectedSession.id}
+                                        onClick={() => void confirmLessonStatus(selectedSession, 'completed')}
+                                        className="rounded-xl bg-green-600 hover:bg-green-700 text-white"
+                                    >
+                                        <CheckCircle className="w-4 h-4 mr-1" />
+                                        {t('cal.statusHappened')}
+                                    </Button>
+                                    {!hideProKlaseOrgTutorCancel && (
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        disabled={confirmingStatusId === selectedSession.id}
+                                        onClick={() => void confirmLessonStatus(selectedSession, 'completed', true)}
+                                        className="rounded-xl text-amber-800 border-amber-300 hover:bg-amber-100"
+                                    >
+                                        <Clock className="w-4 h-4 mr-1" />
+                                        {t('cal.statusHappenedLate')}
+                                    </Button>
+                                    )}
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        disabled={confirmingStatusId === selectedSession.id}
+                                        onClick={() => void confirmLessonStatus(selectedSession, 'no_show')}
+                                        className="rounded-xl text-rose-700 border-rose-200 hover:bg-rose-50"
+                                    >
+                                        <UserX className="w-4 h-4 mr-1" />
+                                        {t('cal.statusNoShowOpt')}
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        disabled={confirmingStatusId === selectedSession.id}
+                                        onClick={() => {
+                                            if (hideProKlaseOrgTutorCancel) {
+                                                notifyProKlaseCancelBlocked();
+                                                return;
+                                            }
+                                            void confirmLessonStatus(selectedSession, 'cancelled');
+                                        }}
+                                        className="rounded-xl text-gray-700 border-gray-300 hover:bg-gray-100"
+                                    >
+                                        <XCircle className="w-4 h-4 mr-1" />
+                                        {hideProKlaseOrgTutorCancel ? t('cal.cancelLessonTitle') : t('cal.statusCancelledOpt')}
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
+                        {selectedSession?.status === 'active' && isOrgTutor === true && (
+                            <div className="flex w-full flex-wrap gap-2">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={openSessionTimeEditor}
+                                    disabled={saving}
+                                    size="sm"
+                                    className="rounded-xl flex-1 text-indigo-700 border-indigo-200 hover:bg-indigo-50"
+                                >
+                                    <CalendarDays className="w-4 h-4 mr-1" />
+                                    {t('cal.moveLesson')}
+                                </Button>
+                                {hideProKlaseOrgTutorCancel && (
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        onClick={notifyProKlaseCancelBlocked}
+                                        size="sm"
+                                        className="rounded-xl flex-1 text-gray-700 border-gray-300 hover:bg-gray-100"
+                                    >
+                                        <XCircle className="w-4 h-4 mr-1" />
+                                        {t('cal.cancelLessonTitle')}
+                                    </Button>
+                                )}
+                            </div>
+                        )}
+                        {selectedSession?.status === 'active' && isOrgTutor !== true && (
                             <div className="flex w-full flex-col gap-2">
                                 <div className="grid grid-cols-2 gap-2">
-                                    {!hideProKlaseOrgTutorCancel && (
                                     <Button
                                         variant="outline"
                                         onClick={() => {
@@ -2355,7 +2466,6 @@ export default function DashboardPage() {
                                         <XCircle className="w-4 h-4 mr-1" />
                                         {t('cal.cancelLessonTitle')}
                                     </Button>
-                                    )}
                                     <Button
                                         variant="outline"
                                         onClick={handleMarkCompleted}

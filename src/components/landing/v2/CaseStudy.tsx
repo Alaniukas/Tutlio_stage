@@ -1,11 +1,10 @@
 import { Linkedin, Quote } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
-import { CASE_STUDY, PLACEHOLDER_CASE_STUDY, SHOW_PLACEHOLDER_SOCIAL_PROOF } from './socialProof';
+import { getCaseStudy } from './socialProof';
 
 export default function CaseStudySection() {
-  const { t } = useTranslation();
-  const study = CASE_STUDY ?? (SHOW_PLACEHOLDER_SOCIAL_PROOF ? PLACEHOLDER_CASE_STUDY : null);
-  if (!study) return null;
+  const { locale, t } = useTranslation();
+  const study = getCaseStudy(locale);
 
   return (
     <section className="bg-zinc-100">

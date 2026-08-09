@@ -32,7 +32,11 @@ function getSupabase() {
 
 function renderFeature(featureId: FeatureId, locale: Locale, domain: DomainKey, relatedHtml = ''): string {
   const cfg = FEATURES[featureId];
-  const registerPath = buildPath('/register', locale, domain);
+  const pricingPath = buildPath('/pricing', locale, domain);
+  const demoPath = buildPath('/tutor/demo', locale, domain);
+  const assetLocaleSuffix = locale === 'lt' ? '' : `-${locale}`;
+  const mobileBusinessCardPreview = `/landing/digital-business-card-mobile${assetLocaleSuffix}.png`;
+  const desktopBusinessCardPreview = `/landing/digital-business-card-desktop${assetLocaleSuffix}.png`;
 
   const detailsHtml = cfg.detailKeys
     .map(
@@ -54,10 +58,20 @@ function renderFeature(featureId: FeatureId, locale: Locale, domain: DomainKey, 
 
   return `
 <div class="hero">
+  ${cfg.badgeKey ? `<p style="display:inline-block;margin-bottom:12px;background:#4f46e5;color:#fff;padding:4px 10px;border-radius:999px;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em">${esc(t(locale, cfg.badgeKey))}</p>` : ''}
   <h1>${esc(t(locale, cfg.titleKey))}</h1>
   <p>${esc(t(locale, cfg.descKey))}</p>
-  <a href="${registerPath}" class="btn">${esc(t(locale, 'landing.startFree'))}</a>
+  <a href="${pricingPath}" class="btn">${esc(t(locale, 'landing.startFree'))}</a>
 </div>
+${featureId === 'digital-business-card' ? `<div class="section">
+  <h2>${esc(t(locale, 'landing.v2.bento4Title'))}</h2>
+  <p>${esc(t(locale, 'feature.digital-business-card.pageDesc'))}</p>
+  <picture>
+    <source media="(min-width:768px)" srcset="${desktopBusinessCardPreview}">
+    <img src="${mobileBusinessCardPreview}" alt="${esc(t(locale, 'feature.digital-business-card.pageTitle'))}" width="941" height="1672" loading="lazy" style="display:block;width:100%;height:auto;margin:28px auto;border-radius:24px">
+  </picture>
+  <a href="${demoPath}" class="btn">${esc(t(locale, 'feature.digital-business-card.demo.openExample'))}</a>
+</div>` : ''}
 <div class="section">
   <h2>${esc(t(locale, `feature.${featureId}.detailsTitle`))}</h2>
   <div class="grid">${detailsHtml}</div>
@@ -70,7 +84,7 @@ ${relatedHtml}
 <div class="section" style="text-align:center;padding:60px 24px">
   <h2>${esc(t(locale, 'landing.ctaTitle'))}</h2>
   <p>${esc(t(locale, 'landing.ctaDesc'))}</p>
-  <a href="${registerPath}" class="btn">${esc(t(locale, 'landing.startFree'))}</a>
+  <a href="${pricingPath}" class="btn">${esc(t(locale, 'landing.startFree'))}</a>
 </div>`;
 }
 
@@ -79,7 +93,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const featureId = (typeof req.query.feature === 'string' ? req.query.feature : '') as FeatureId;
   const cfg = FEATURES[featureId];
-  if (!cfg) return res.status(404).send('Not found');
+  if (!cfg) {
+    res.setHeader('X-Robots-Tag', 'noindex');
+    return res.status(404).send('Not found');
+  }
 
   const domain = detectDomain(req);
   const locale = detectLocale(req);
@@ -94,11 +111,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     answer: t(locale, `feature.${featureId}.faq.${k}A`),
   }));
 
-  const jsonLd = `${webPageJsonLd({ name: title, description, url: buildCanonicalUrl(path, locale) })}</script><script type="application/ld+json">${faqJsonLd(faqItems)}`;
+  const jsonLd = `${webPageJsonLd({ locale, name: title, description, url: buildCanonicalUrl(path, locale) })}</script><script type="application/ld+json">${faqJsonLd(faqItems)}`;
 
   const homeUrl = buildCanonicalUrl('/', locale);
   const breadcrumbs = [
     { name: 'Tutlio', url: homeUrl },
+    { name: t(locale, 'featuresIndex.title'), url: buildCanonicalUrl('/features', locale) },
     { name: t(locale, cfg.titleKey), url: buildCanonicalUrl(path, locale) },
   ];
 

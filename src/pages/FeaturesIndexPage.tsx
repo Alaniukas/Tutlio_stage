@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   CalendarDays, Bell, MessageSquare, Package, Banknote, FileText, Users,
-  FolderOpen, BarChart3, Clock, Palette, PenTool, ArrowRight, CheckCircle,
+  FolderOpen, BarChart3, Clock, Palette, PenTool, ArrowRight, CheckCircle, ContactRound,
 } from 'lucide-react';
 import LandingNavbar from '@/components/LandingNavbar';
 import LandingFooter from '@/components/LandingFooter';
@@ -32,6 +32,7 @@ const HIGHLIGHT_ICONS = {
 } as const;
 
 const DEEP_FEATURE_ICONS: Record<FeaturePageId, typeof CalendarDays> = {
+  'digital-business-card': ContactRound,
   calendar: CalendarDays,
   waitlist: Clock,
   payments: Banknote,
@@ -50,7 +51,6 @@ export default function FeaturesIndexPage() {
     );
   }, [t, locale]);
 
-  const registerPath = buildLocalizedPath('/register', locale);
   const pricingPath = buildLocalizedPath('/pricing', locale);
 
   return (
@@ -89,8 +89,17 @@ export default function FeaturesIndexPage() {
                 <Link
                   key={id}
                   to={href}
-                  className="group p-6 rounded-2xl border border-gray-100 bg-white hover:border-indigo-200 hover:shadow-lg transition-all duration-200"
+                  className={`group relative overflow-hidden rounded-2xl border p-6 transition-all duration-200 hover:border-indigo-200 hover:shadow-lg ${
+                    cfg.badgeKey
+                      ? 'border-violet-200 bg-gradient-to-br from-violet-50 via-white to-fuchsia-50 shadow-sm sm:col-span-2 lg:col-span-1'
+                      : 'border-gray-100 bg-white'
+                  }`}
                 >
+                  {cfg.badgeKey ? (
+                    <span className="absolute right-4 top-4 rounded-full bg-violet-600 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-white">
+                      {t(cfg.badgeKey)}
+                    </span>
+                  ) : null}
                   <div className="w-10 h-10 rounded-xl bg-[#4f46e5]/10 flex items-center justify-center mb-4 group-hover:bg-[#4f46e5]/15 transition-colors">
                     <Icon className="w-5 h-5 text-[#4f46e5]" />
                   </div>
@@ -171,7 +180,7 @@ export default function FeaturesIndexPage() {
           <p className="text-gray-500 text-[15px] mb-8 max-w-md mx-auto leading-relaxed">{t('landing.ctaDesc')}</p>
           <div className="flex flex-wrap justify-center gap-3">
             <Link
-              to={registerPath}
+              to={pricingPath}
               className="inline-flex items-center justify-center h-12 px-8 text-sm rounded-full bg-[#4f46e5] hover:bg-[#4338ca] text-white font-semibold transition-all duration-200 hover:scale-[1.03] hover:shadow-lg active:scale-[0.98]"
             >
               {t('landing.startFree')}

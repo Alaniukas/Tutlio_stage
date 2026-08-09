@@ -31,6 +31,7 @@ export default function LandingFooter() {
       title: t('landing.footerProduct'),
       links: [
         { to: lp('/features'), label: t('nav.features') },
+        { to: lp(FEATURE_PAGES['digital-business-card'].path), label: t('landing.feature.digital-business-card') },
         { to: lp(FEATURE_PAGES.calendar.path), label: t('landing.feature.calendar') },
         { to: lp(FEATURE_PAGES.waitlist.path), label: t('landing.feature.waitlist') },
         { to: lp(FEATURE_PAGES.payments.path), label: t('landing.feature.payments') },

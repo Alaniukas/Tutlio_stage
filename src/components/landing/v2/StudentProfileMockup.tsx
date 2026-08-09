@@ -1,19 +1,21 @@
 import { CircleCheck, Mail, Phone } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
+import { demoAvatarUrl, MiniAvatar } from './demoAvatars';
+import { getLandingDemoPersonas } from './demoPersonas';
 
 /**
  * Student records feeding into one profile: three student nodes tethered by
- * curved connectors to the profile card below. Contact values are drawn as
- * redacted bars — the point is that the data lives in one place, not what it says.
+ * curved connectors to the profile card below. Filled with sample data so the
+ * mock reads as a real student record, not a wireframe.
  *
  * The node layer is a fixed 320x160 coordinate space so the SVG paths and the
  * absolutely-positioned avatars stay locked together at any width.
  */
 
 const NODES = [
-  { initials: 'GP', cx: 30, cy: 26, ring: '#86efac', bg: 'bg-emerald-100', text: 'text-emerald-700' },
-  { initials: 'IM', cx: 138, cy: 82, ring: '#c4b5fd', bg: 'bg-violet-100', text: 'text-violet-700' },
-  { initials: 'LR', cx: 292, cy: 48, ring: '#7dd3fc', bg: 'bg-sky-100', text: 'text-sky-700' },
+  { seed: 'gabija-profile', nameIndex: 0, cx: 30, cy: 26, ring: '#86efac', bg: 'dcfce7' },
+  { seed: 'ieva-profile', nameIndex: 1, cx: 138, cy: 82, ring: '#c4b5fd', bg: 'ede9fe' },
+  { seed: 'lukas-profile', nameIndex: 2, cx: 292, cy: 48, ring: '#7dd3fc', bg: 'e0f2fe' },
 ] as const;
 
 /** Node bottom → card top, in the same 320x160 space. */
@@ -24,13 +26,15 @@ const CONNECTORS = [
 ] as const;
 
 const ROWS = [
-  { labelKey: 'landing.v2.profileNotes', bar: 'w-16' },
-  { labelKey: 'landing.v2.profileAttendance', bar: 'w-10' },
-  { labelKey: 'landing.v2.profilePayments', bar: 'w-20' },
+  { labelKey: 'landing.v2.profileNotes', valueKey: 'landing.v2.demo.profileNoteValue' },
+  { labelKey: 'landing.v2.profileAttendance', value: '97 % (28/29)' },
+  { labelKey: 'landing.v2.profilePayments', valueKey: 'landing.v2.demo.profilePaymentsValue' },
 ] as const;
 
 export default function StudentProfileMockup() {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
+  const personas = getLandingDemoPersonas(locale);
+  const nodeNames = [personas.students[0], personas.profileStudent, personas.students[1]];
 
   return (
     <div className="mx-auto w-full max-w-[380px]">
@@ -48,9 +52,13 @@ export default function StudentProfileMockup() {
         </svg>
 
         {NODES.map((node) => (
-          <span
-            key={node.initials}
-            className={`absolute flex items-center justify-center rounded-full text-[11px] font-semibold sm:text-xs ${node.bg} ${node.text}`}
+          <img
+            key={node.seed}
+            src={demoAvatarUrl(node.seed, node.bg)}
+            alt={nodeNames[node.nameIndex]}
+            loading="lazy"
+            decoding="async"
+            className="absolute rounded-full bg-white object-cover"
             style={{
               left: `${(node.cx / 320) * 100}%`,
               top: `${(node.cy / 160) * 100}%`,
@@ -59,9 +67,7 @@ export default function StudentProfileMockup() {
               transform: 'translate(-50%, -50%)',
               boxShadow: `0 0 0 2px ${node.ring}`,
             }}
-          >
-            {node.initials}
-          </span>
+          />
         ))}
 
         <span className="absolute left-[19%] top-[2%] rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700 sm:text-[11px]">
@@ -82,34 +88,37 @@ export default function StudentProfileMockup() {
         </p>
 
         <div className="mt-4 flex items-center gap-3 sm:gap-4">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-violet-100 text-sm font-semibold text-violet-700 sm:h-14 sm:w-14">
-            IM
-          </span>
+          <MiniAvatar seed="ieva-profile" alt={personas.profileStudent} size="lg" ring className="!h-12 !w-12 sm:!h-14 sm:!w-14" />
           <div className="min-w-0 flex-1">
             <p className="truncate font-display text-base font-semibold text-zinc-900 sm:text-lg">
-              Ieva Mockutė
+              {personas.profileStudent}
             </p>
             <div className="mt-1.5 flex items-center gap-2">
               <Phone className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
-              <span aria-hidden className="h-2 w-20 rounded-full bg-zinc-200" />
+              <span className="truncate text-xs text-zinc-600 sm:text-sm">{personas.profilePhone}</span>
             </div>
             <div className="mt-1.5 flex items-center gap-2">
               <Mail className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
-              <span aria-hidden className="h-2 w-24 rounded-full bg-zinc-200" />
+              <span className="truncate text-xs text-zinc-600 sm:text-sm">{personas.profileEmail}</span>
             </div>
           </div>
         </div>
 
         <div className="mt-4 space-y-3 border-t border-zinc-100 pt-4 sm:mt-5 sm:pt-5">
-          {ROWS.map(({ labelKey, bar }) => (
-            <div key={labelKey} className="flex items-center justify-between gap-3">
-              <p className="text-sm text-zinc-700 sm:text-base">{t(labelKey)}</p>
-              <span aria-hidden className={`h-2 shrink-0 rounded-full bg-zinc-200 ${bar}`} />
+          {ROWS.map((row) => (
+            <div key={row.labelKey} className="flex items-center justify-between gap-3">
+              <p className="shrink-0 text-sm text-zinc-700 sm:text-base">{t(row.labelKey)}</p>
+              <p className="truncate text-right text-sm font-medium text-zinc-900 sm:text-base">
+                {'valueKey' in row ? t(row.valueKey) : row.value}
+              </p>
             </div>
           ))}
           <div className="flex items-center justify-between gap-3">
             <p className="text-sm text-zinc-700 sm:text-base">{t('landing.v2.profileParent')}</p>
-            <CircleCheck className="h-5 w-5 shrink-0 text-zinc-900" />
+            <span className="inline-flex items-center gap-1.5 text-sm font-medium text-zinc-900">
+              <CircleCheck className="h-5 w-5 shrink-0 text-emerald-600" />
+              {t('landing.v2.profileParentActive')}
+            </span>
           </div>
         </div>
       </div>

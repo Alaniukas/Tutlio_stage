@@ -28,6 +28,7 @@ interface AvailabilitySlot {
   specific_date: string | null;
   end_date: string | null;
   subject_ids: string[];
+  public_bookable?: boolean;
 }
 
 function timeToMinutes(time: string) {
@@ -95,11 +96,13 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
   const [specificStart, setSpecificStart] = useState('09:00');
   const [specificEnd, setSpecificEnd] = useState('17:00');
   const [activeTab, setActiveTab] = useState<'recurring' | 'specific'>('recurring');
+  const [createPublicBookable, setCreatePublicBookable] = useState(false);
 
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
   const [editStart, setEditStart] = useState('');
   const [editEnd, setEditEnd] = useState('');
   const [editEndDate, setEditEndDate] = useState('');
+  const [editPublicBookable, setEditPublicBookable] = useState(false);
 
   const syncAvailabilityToGoogle = async (userId: string) => {
     try {
@@ -206,6 +209,7 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
         is_recurring: true,
         end_date: recurringEndDate || null,
         subject_ids: [],
+        public_bookable: createPublicBookable,
       },
     ]);
 
@@ -264,6 +268,7 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
         end_time: specificEnd,
         is_recurring: false,
         subject_ids: [],
+        public_bookable: createPublicBookable,
       },
     ]);
 
@@ -342,6 +347,7 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
     setEditStart(slot.start_time.slice(0, 5));
     setEditEnd(slot.end_time.slice(0, 5));
     setEditEndDate(slot.end_date || '');
+    setEditPublicBookable(Boolean(slot.public_bookable));
   };
 
   const cancelEditing = () => setEditingSlotId(null);
@@ -408,6 +414,7 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
       start_time: editStart,
       end_time: editEnd,
       end_date: editEndDate || null,
+      public_bookable: editPublicBookable,
     }).eq('id', slotId);
     if (error) {
       console.error('Error updating slot:', error);
@@ -487,6 +494,19 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
                 <p className="text-xs text-gray-400">{t('avail.leaveEmptyForever')}</p>
               </div>
 
+              <label className="flex items-start gap-3 rounded-xl border border-gray-100 bg-gray-50/80 p-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500"
+                  checked={createPublicBookable}
+                  onChange={(e) => setCreatePublicBookable(e.target.checked)}
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-gray-800">{t('avail.publicBookable')}</span>
+                  <span className="block text-xs text-gray-500 mt-0.5">{t('avail.publicBookableHint')}</span>
+                </span>
+              </label>
+
               <button
                 type="button"
                 onClick={addRecurringSlot}
@@ -539,6 +559,18 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
                               className="w-full rounded-lg border border-gray-200 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
                             />
                           </div>
+                          <label className="flex items-start gap-2.5 rounded-lg border border-gray-100 bg-gray-50/80 p-2.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500"
+                              checked={editPublicBookable}
+                              onChange={(e) => setEditPublicBookable(e.target.checked)}
+                            />
+                            <span className="min-w-0">
+                              <span className="block text-xs font-medium text-gray-800">{t('avail.publicBookable')}</span>
+                              <span className="block text-[11px] text-gray-500 mt-0.5">{t('avail.publicBookableHint')}</span>
+                            </span>
+                          </label>
                           <div className="flex gap-2">
                             <button
                               type="button"
@@ -567,6 +599,11 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
                               <span className="text-xs text-gray-500 bg-gray-50 px-2 py-0.5 rounded-lg">
                                 {slot.start_time.slice(0, 5)} – {slot.end_time.slice(0, 5)}
                               </span>
+                              {slot.public_bookable && (
+                                <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg">
+                                  {t('avail.publicBookableBadge')}
+                                </span>
+                              )}
                               {slot.end_date && (
                                 <span className="text-xs text-amber-600 font-medium">
                                   {t('avail.until')} {slot.end_date}
@@ -630,6 +667,19 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
                 </div>
               </div>
 
+              <label className="flex items-start gap-3 rounded-xl border border-gray-100 bg-gray-50/80 p-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500"
+                  checked={createPublicBookable}
+                  onChange={(e) => setCreatePublicBookable(e.target.checked)}
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-gray-800">{t('avail.publicBookable')}</span>
+                  <span className="block text-xs text-gray-500 mt-0.5">{t('avail.publicBookableHint')}</span>
+                </span>
+              </label>
+
               <button
                 type="button"
                 onClick={addSpecificSlot}
@@ -670,6 +720,18 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
                               <TimeSpinner value={editEnd} onChange={setEditEnd} minuteStep={1} />
                             </div>
                           </div>
+                          <label className="flex items-start gap-2.5 rounded-lg border border-gray-100 bg-gray-50/80 p-2.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500"
+                              checked={editPublicBookable}
+                              onChange={(e) => setEditPublicBookable(e.target.checked)}
+                            />
+                            <span className="min-w-0">
+                              <span className="block text-xs font-medium text-gray-800">{t('avail.publicBookable')}</span>
+                              <span className="block text-[11px] text-gray-500 mt-0.5">{t('avail.publicBookableHint')}</span>
+                            </span>
+                          </label>
                           <div className="flex gap-2">
                             <button
                               type="button"
@@ -696,6 +758,11 @@ export default function AvailabilityManager({ prefill = null }: AvailabilityMana
                               <span className="text-xs text-gray-500 bg-gray-50 px-2 py-0.5 rounded-lg">
                                 {slot.start_time.slice(0, 5)} – {slot.end_time.slice(0, 5)}
                               </span>
+                              {slot.public_bookable && (
+                                <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg">
+                                  {t('avail.publicBookableBadge')}
+                                </span>
+                              )}
                             </div>
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">

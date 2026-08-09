@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { TriangleAlert } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
+import { marketingAudienceFromLanding } from '@/lib/marketingAudience';
+import type { LandingAudience } from './audience';
 import HeroAnimation from './HeroAnimation';
+import TabletFrame from './TabletFrame';
 
 function AnimatedCount({ value }: { value: number }) {
   const [display, setDisplay] = useState(0);
@@ -36,8 +38,15 @@ function AnimatedCount({ value }: { value: number }) {
   return <span ref={ref}>{display.toLocaleString()}</span>;
 }
 
-export default function HeroSection() {
+export default function HeroSection({
+  audience,
+  onAudienceChange,
+}: {
+  audience: LandingAudience;
+  onAudienceChange: (a: LandingAudience) => void;
+}) {
   const { t, locale } = useTranslation();
+  const isSolo = audience === 'solo';
 
   const [lessonCount, setLessonCount] = useState<number | null>(null);
   useEffect(() => {
@@ -50,32 +59,68 @@ export default function HeroSection() {
     return () => { cancelled = true; };
   }, []);
 
+  const ctaHref = `${buildLocalizedPath('/pricing', locale)}?audience=${marketingAudienceFromLanding(audience)}`;
+
   return (
     <section className="bg-white">
       <div className="mx-auto w-full max-w-[1224px] px-5 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
         <div className="flex flex-col items-center gap-10 lg:flex-row lg:items-center lg:gap-16 xl:gap-20">
           <div className="flex flex-1 flex-col items-center gap-5 text-center sm:gap-6 lg:items-start lg:text-left">
-            <div className="inline-flex w-fit items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-4 py-2">
-              <TriangleAlert className="h-4 w-4 text-amber-500" />
-              <span className="text-sm font-medium text-zinc-700 sm:text-base">{t('landing.v2.heroPill')}</span>
+            <div
+              role="tablist"
+              aria-label={t('landing.v2.audienceLabel')}
+              className="flex flex-wrap items-baseline justify-center gap-x-4 gap-y-1 lg:justify-start"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={isSolo}
+                onClick={() => onAudienceChange('solo')}
+                className={`border-b-2 pb-0.5 text-[15px] transition-colors sm:text-base ${
+                  isSolo
+                    ? 'border-zinc-900 font-semibold text-zinc-900'
+                    : 'border-transparent font-normal text-zinc-400 hover:text-zinc-700'
+                }`}
+              >
+                {t('landing.v2.audienceSolo')}
+              </button>
+              <span className="text-zinc-300" aria-hidden>·</span>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={!isSolo}
+                onClick={() => onAudienceChange('biz')}
+                className={`border-b-2 pb-0.5 text-[15px] transition-colors sm:text-base ${
+                  !isSolo
+                    ? 'border-zinc-900 font-semibold text-zinc-900'
+                    : 'border-transparent font-normal text-zinc-400 hover:text-zinc-700'
+                }`}
+              >
+                {t('landing.v2.audienceBiz')}
+              </button>
             </div>
 
             <h1 className="font-display text-[32px] font-bold leading-[1.15] tracking-[-1.5px] text-zinc-900 sm:text-[40px] lg:text-[50px] lg:tracking-[-2px]">
-              {t('landing.heroTitle')}{t('landing.heroTitleHighlight')}
+              {t(isSolo ? 'landing.v2.heroTitleSolo' : 'landing.v2.heroTitleBiz')}
+              <span className="text-zinc-900">
+                {t(isSolo ? 'landing.v2.heroTitleSoloHighlight' : 'landing.v2.heroTitleBizHighlight')}
+              </span>
             </h1>
 
             <p className="max-w-[540px] text-[15px] leading-[1.7] text-zinc-600 sm:text-base lg:max-w-none">
-              {t('landing.v2.heroSub')}
+              {t(isSolo ? 'landing.v2.heroSubSolo' : 'landing.v2.heroSubBiz')}
             </p>
 
             <div className="flex flex-col items-center gap-4 pt-1 sm:flex-row lg:justify-start">
               <Link
-                to={buildLocalizedPath('/pricing', locale)}
+                to={ctaHref}
                 className="inline-block w-fit rounded-lg bg-zinc-900 px-7 py-3.5 text-center font-semibold text-white transition-colors hover:bg-zinc-800 sm:px-8 sm:py-4"
               >
-                {t('landing.heroCta')}
+                {t(isSolo ? 'landing.v2.heroCtaSolo' : 'landing.v2.heroCtaBiz')}
               </Link>
-              <span className="text-sm text-zinc-500">{t('landing.v2.heroTrial')}</span>
+              {isSolo && (
+                <span className="text-sm text-zinc-500">{t('landing.v2.heroTrial')}</span>
+              )}
             </div>
 
             {lessonCount !== null && lessonCount > 0 && (
@@ -86,9 +131,11 @@ export default function HeroSection() {
             )}
           </div>
 
-          <div className="w-full max-w-[420px] sm:max-w-[460px] lg:w-[480px] lg:max-w-none xl:w-[500px]">
-            <div className="aspect-[500/460]">
-              <HeroAnimation />
+          <div className="mx-auto w-full max-w-[320px] sm:max-w-[360px] lg:mx-0 lg:w-[380px] lg:max-w-none xl:w-[400px]">
+            <div className="aspect-[5/6]">
+              <TabletFrame>
+                <HeroAnimation audience={audience} />
+              </TabletFrame>
             </div>
           </div>
         </div>

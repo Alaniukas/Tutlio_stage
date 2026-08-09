@@ -11,6 +11,10 @@ import { t, isLocaleLoaded, loadLocaleDict } from '../../src/lib/i18n/core.js';
 
 const ROOT = process.cwd();
 
+beforeAll(async () => {
+  await Promise.all([loadLocaleDict('en'), loadLocaleDict('lt')]);
+});
+
 function mockRes() {
   const headers: Record<string, string> = {};
   const res = {
@@ -82,6 +86,11 @@ describe('plan pricing has a single source of truth', () => {
     );
     expect(lt.body).toContain('https://www.tutlio.lt/blog/rss.xml');
     expect(lt.body).not.toContain('https://www.tutlio.com/blog/rss.xml');
+    expect(lt.body).toMatch(/kalendor/i);
+    expect(lt.body).toMatch(/sąskait/i);
+    expect(lt.body).toMatch(/Stripe/i);
+    expect(lt.body).toMatch(/priminim/i);
+    expect(lt.body).toContain('SMS nėra');
 
     const pl = mockRes();
     llmsHandler(
@@ -92,6 +101,18 @@ describe('plan pricing has a single source of truth', () => {
     expect(pl.body).not.toContain('https://www.tutlio.com/blog/rss.xml');
   });
 
+  it('llms-full.txt answers calendar/invoices/payments/reminders for assistants', () => {
+    const res = mockRes();
+    llmsHandler(
+      { url: '/llms-full.txt', method: 'GET', headers: { host: 'www.tutlio.com' }, query: {} } as any,
+      res as any,
+    );
+    expect(res.body).toMatch(/Does Tutlio have a calendar/i);
+    expect(res.body).toContain('Invoices');
+    expect(res.body).toContain('email');
+    expect(res.body).toContain('Public Tutor Page');
+  });
+
   it('SoftwareApplication JSON-LD offers mirror the constants', () => {
     const jsonLd = JSON.parse(softwareAppJsonLd('en'));
     const prices = jsonLd.offers.map((o: { price: string }) => o.price);
@@ -100,6 +121,12 @@ describe('plan pricing has a single source of truth', () => {
       TUTOR_PLANS.yearly.pricePerMonthEur.toFixed(2),
       TUTOR_PLANS.subscriptionOnly.pricePerMonthEur.toFixed(2),
     ]);
+    expect(jsonLd.featureList).toContain(t('en', 'pricing.feature.invoices'));
+    expect(jsonLd.url).toBe('https://www.tutlio.com');
+
+    const ltLd = JSON.parse(softwareAppJsonLd('lt'));
+    expect(ltLd.url).toBe('https://www.tutlio.lt');
+    expect(ltLd.description).toBe(t('lt', 'landing.heroDesc').replace(/<[^>]+>/g, ''));
   });
 });
 
@@ -213,10 +240,10 @@ describe('middleware catch-all matcher (soft-404 elimination)', () => {
 });
 
 describe('lazy locale dictionaries', () => {
-  it('bundles the three domain-default locales eagerly', () => {
+  it('loads only dictionaries explicitly requested by the current process', () => {
     expect(isLocaleLoaded('lt')).toBe(true);
     expect(isLocaleLoaded('en')).toBe(true);
-    expect(isLocaleLoaded('pl')).toBe(true);
+    expect(isLocaleLoaded('pl')).toBe(false);
   });
 
   it('falls back to English until a lazy dictionary loads, then serves it', async () => {
@@ -229,5 +256,43 @@ describe('lazy locale dictionaries', () => {
     const after = t('fr', 'blog.subtitle');
     expect(after).not.toBe(t('en', 'blog.subtitle'));
     expect(after.length).toBeGreaterThan(0);
+  });
+});
+
+describe('public-page delivery performance', () => {
+  it('does not block every route on the optional Perlas payment bridge', () => {
+    const index = readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    const loader = readFileSync(path.join(ROOT, 'src/lib/perlasPay.ts'), 'utf8');
+    expect(index).not.toContain('mip-pay.dataop.lt/pay.js');
+    expect(loader).toContain('mip-pay.dataop.lt/pay.js');
+    expect(loader).toContain('script.async = true');
+  });
+
+  it('keeps secondary public routes out of the homepage entry chunk', () => {
+    const app = readFileSync(path.join(ROOT, 'src/App.tsx'), 'utf8');
+    const i18nCore = readFileSync(path.join(ROOT, 'src/lib/i18n/core.ts'), 'utf8');
+    expect(app).toContain("import Landing from '@/pages/Landing'");
+    for (const page of ['Pricing', 'Blog', 'BlogPost', 'FeaturePage', 'AboutUs', 'Contact']) {
+      expect(app).toContain(`const ${page} = lazy(`);
+    }
+    expect(i18nCore).not.toMatch(/import \{ (?:lt|en|pl) \} from '\.\/(?:lt|en|pl)'/);
+    expect(i18nCore).toContain("lt: () => import('./lt')");
+  });
+
+  it('keeps user-authored breadcrumb text inside the JSON-LD script', () => {
+    const html = renderShell({
+      locale: 'en',
+      domain: 'com',
+      path: '/tutor/test',
+      title: 'Test',
+      description: 'Test profile',
+      body: '<p>Profile</p>',
+      breadcrumbs: [
+        { name: 'Tutlio', url: 'https://www.tutlio.com/' },
+        { name: '</script><script>alert(1)</script>', url: 'https://www.tutlio.com/tutor/test' },
+      ],
+    });
+    expect(html).not.toContain('</script><script>alert(1)</script>');
+    expect(html).toContain('\\u003c/script\\u003e');
   });
 });

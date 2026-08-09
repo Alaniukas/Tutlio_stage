@@ -21,8 +21,21 @@ import {
   isValid,
   subDays,
 } from 'date-fns';
-import { lt } from 'date-fns/locale';
-import { enUS } from 'date-fns/locale';
+import {
+  da,
+  de,
+  enUS,
+  es,
+  et,
+  fi,
+  fr,
+  lt,
+  lv,
+  nb,
+  nl,
+  pl,
+  sv,
+} from 'date-fns/locale';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 
 import Layout from '@/components/Layout';
@@ -127,7 +140,24 @@ import {
   organizationSubjectTemplatesDeduped,
 } from '@/lib/preload';
 
-const locales = { lt, en: enUS };
+// React Big Calendar receives Tutlio's URL locale codes as its `culture`.
+// Keep the date-fns locale map keyed by those codes (some intentionally differ
+// from ISO language codes, e.g. ee/et, se/sv, dk/da and no/nb).
+const locales = {
+  lt,
+  en: enUS,
+  pl,
+  lv,
+  ee: et,
+  fr,
+  es,
+  de,
+  se: sv,
+  dk: da,
+  fi,
+  no: nb,
+  nl,
+};
 
 const localizer = dateFnsLocalizer({
   format,
@@ -213,6 +243,8 @@ interface Availability {
   start_date?: string | null;
   created_at?: string | null;
   subject_ids?: string[];
+  /** Visible on the public tutor page for external registration / enquiries. */
+  public_bookable?: boolean;
 }
 
 function parseStudentGrade(grade: string | null | undefined): number {
@@ -250,6 +282,13 @@ export default function CalendarPage() {
   const hideProKlaseOrgTutorFreeTime = hideProKlaseOrgTutorCancel;
   const hideProKlaseOrgTutorDelete = hideProKlaseOrgTutorCancel;
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
+  const [eventModalNotice, setEventModalNotice] = useState<string | null>(null);
+
+  const notifyProKlaseCancelBlocked = () => {
+    const message = t('cal.proKlaseCancelAdminOnly');
+    setEventModalNotice(message);
+    setToastMessage({ message, type: 'warning' });
+  };
   const [sessions, setSessions] = useState<Session[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -300,6 +339,7 @@ export default function CalendarPage() {
       setIsEditingSession(false);
       setGroupEditChoice(null);
       setGroupCancelChoice(null);
+      setEventModalNotice(null);
     }
   };
   const [isAvailabilityModalOpen, setIsAvailabilityModalOpen] = useState(false);
@@ -313,6 +353,24 @@ export default function CalendarPage() {
   const [selectedGroupSessions, setSelectedGroupSessions] = useState<Session[]>([]);
   const [isGroupSession, setIsGroupSession] = useState(false);
   const [cancelConfirmId, setCancelConfirmId] = useState<string | null>(null);
+
+  // Deep-link from lesson reminder emails: /calendar?sessionId=…
+  useEffect(() => {
+    const sessionId = searchParams.get('sessionId');
+    if (!sessionId || sessions.length === 0) return;
+    const sess = sessions.find((s) => s.id === sessionId);
+    if (!sess) return;
+    setIsGroupSession(false);
+    setSelectedGroupSessions([]);
+    setSelectedEvent(sess);
+    setIsEventModalOpen(true);
+    const start = sess.start_time instanceof Date ? sess.start_time : new Date(sess.start_time);
+    if (isValid(start)) setCurrentDate(startOfDay(start));
+    const next = new URLSearchParams(searchParams);
+    next.delete('sessionId');
+    next.delete('date');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, sessions, setSearchParams]);
 
   // Form states
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
@@ -378,12 +436,13 @@ export default function CalendarPage() {
 
   // Availability slot edit
   const [isSlotEditOpen, setIsSlotEditOpen] = useState(false);
-  const [editingSlot, setEditingSlot] = useState<{ ruleId: string; ruleStart: string; ruleEnd: string; ruleIsRecurring: boolean; ruleDate: string | null; ruleDayOfWeek: number | null; blockStart: Date; subjectIds: string[]; meetingLink?: string | null } | null>(null);
+  const [editingSlot, setEditingSlot] = useState<{ ruleId: string; ruleStart: string; ruleEnd: string; ruleIsRecurring: boolean; ruleDate: string | null; ruleDayOfWeek: number | null; blockStart: Date; subjectIds: string[]; meetingLink?: string | null; publicBookable?: boolean } | null>(null);
   const [slotEditStart, setSlotEditStart] = useState('');
   const [slotEditEnd, setSlotEditEnd] = useState('');
   // The selector is no longer shown, but preserve legacy restrictions when editing old rows.
   const [slotEditSubjects, setSlotEditSubjects] = useState<string[]>([]);
   const [slotEditMeetingLink, setSlotEditMeetingLink] = useState('');
+  const [slotEditPublicBookable, setSlotEditPublicBookable] = useState(false);
   const [slotSaving, setSlotSaving] = useState(false);
 
   // Assign student to availability slot
@@ -774,6 +833,7 @@ export default function CalendarPage() {
               ruleDayOfWeek: rule.day_of_week,
               ruleSubjectIds: uniqueSubjectIds(rule.subject_ids),
               ruleMeetingLink: rule.meeting_link || '',
+              rulePublicBookable: Boolean(rule.public_bookable),
             });
           }
         });
@@ -1013,10 +1073,14 @@ export default function CalendarPage() {
           ruleDayOfWeek: hit.ruleDayOfWeek,
           blockStart: hit.start_time,
           subjectIds: uniqueSubjectIds(hit.ruleSubjectIds),
+          meetingLink: hit.ruleMeetingLink,
+          publicBookable: Boolean(hit.rulePublicBookable),
         });
         setSlotEditStart(hit.ruleStart);
         setSlotEditEnd(hit.ruleEnd);
         setSlotEditSubjects(uniqueSubjectIds(hit.ruleSubjectIds));
+        setSlotEditMeetingLink(hit.ruleMeetingLink || '');
+        setSlotEditPublicBookable(Boolean(hit.rulePublicBookable));
         setIsSlotEditOpen(true);
         return;
       }
@@ -1127,6 +1191,7 @@ export default function CalendarPage() {
         end_time: specificEnd,
         is_recurring: false,
         subject_ids: [],
+        public_bookable: false,
       }).select('id').single();
 
       if (error || !inserted?.id) {
@@ -1148,11 +1213,13 @@ export default function CalendarPage() {
         blockStart,
         subjectIds: [],
         meetingLink: '',
+        publicBookable: false,
       });
       setSlotEditStart(specificStart);
       setSlotEditEnd(specificEnd);
       setSlotEditSubjects([]);
       setSlotEditMeetingLink('');
+      setSlotEditPublicBookable(false);
       setIsSlotEditOpen(true);
       fetchData();
     } finally {
@@ -1173,11 +1240,13 @@ export default function CalendarPage() {
         blockStart: event.start_time,
         subjectIds: uniqueSubjectIds(event.ruleSubjectIds),
         meetingLink: event.ruleMeetingLink,
+        publicBookable: Boolean(event.rulePublicBookable),
       });
       setSlotEditStart(event.ruleStart);
       setSlotEditEnd(event.ruleEnd);
       setSlotEditSubjects(uniqueSubjectIds(event.ruleSubjectIds));
       setSlotEditMeetingLink(event.ruleMeetingLink || '');
+      setSlotEditPublicBookable(Boolean(event.rulePublicBookable));
       setIsSlotEditOpen(true);
       return;
     }
@@ -2887,9 +2956,10 @@ export default function CalendarPage() {
       fetchData();
 
       // Show success message
-      alert(
-        t('cal.massCancelSuccess', { success: String(successCount), failPart: failCount > 0 ? t('cal.massCancelFailed', { count: String(failCount) }) : '' })
-      );
+      const failureMessage = failCount > 0
+        ? `\n${t('cal.massCancelFailed', { count: String(failCount) })}`
+        : '';
+      alert(`${t('cal.massCancelSuccess', { count: String(successCount) })}${failureMessage}`);
     } catch (err: any) {
       console.error('Error during mass cancel:', err);
       setMassCancelError(err.message || t('cal.massCancelError'));
@@ -3457,6 +3527,7 @@ export default function CalendarPage() {
     status: 'completed' | 'no_show' | 'cancelled',
     late = false,
   ) => {
+    if (status === 'no_show' && !window.confirm(t('dash.confirmNoShowPrompt'))) return;
     if (status === 'cancelled' && !window.confirm(t('cal.confirmStatusCancelPrompt'))) return;
     setNoShowSavingId(session.id);
     try {
@@ -3901,7 +3972,7 @@ export default function CalendarPage() {
         {/* Header */}
         <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center mb-4 flex-shrink-0 min-w-0">
         <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Kalendorius</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">{t('nav.calendar')}</h1>
           <p className="text-sm text-gray-500 mt-0.5">{t('cal.manageSchedule')}</p>
         </div>
         <div className="flex gap-2 flex-wrap w-full sm:w-auto min-w-0 sm:justify-end">
@@ -3912,13 +3983,13 @@ export default function CalendarPage() {
                 onClick={handleGoogleCalendarSync}
                 disabled={googleCalendarSyncing}
                 className="gap-2 rounded-2xl bg-green-600 hover:bg-green-700 text-white shadow-sm border border-green-500"
-                title="Sinchronizuoti su Google Calendar"
+                title={t('cal.syncGoogleCalendar')}
               >
                 <CalendarDays className="w-4 h-4" />
                 {googleCalendarSyncing ? (
-                  <span className="hidden sm:inline font-semibold">Sinchronizuojama...</span>
+                  <span className="hidden sm:inline font-semibold">{t('cal.syncingGoogleCalendar')}</span>
                 ) : (
-                  <span className="hidden sm:inline font-semibold">Sinchronizuoti Google Calendar</span>
+                  <span className="hidden sm:inline font-semibold">{t('cal.syncGoogleCalendar')}</span>
                 )}
               </Button>
               <Button
@@ -3926,7 +3997,7 @@ export default function CalendarPage() {
                 onClick={handleGoogleCalendarDisconnect}
                 disabled={googleCalendarSyncing}
                 className="gap-2 rounded-xl border-gray-200 text-gray-600 hover:bg-gray-50"
-                title="Atjungti Google Calendar"
+                title={t('cal.disconnectGoogleCalendar')}
               >
                 <XCircle className="w-4 h-4" />
               </Button>
@@ -3936,10 +4007,10 @@ export default function CalendarPage() {
               variant="outline"
               onClick={handleGoogleCalendarConnect}
               className="gap-2 rounded-xl border-blue-200 text-blue-700 hover:bg-blue-50"
-              title="Prijungti Google Calendar"
+              title={t('cal.connectGoogleCalendar')}
             >
               <CalendarDays className="w-4 h-4" />
-              <span className="hidden sm:inline">Prijungti Google Calendar</span>
+              <span className="hidden sm:inline">{t('cal.connectGoogleCalendar')}</span>
             </Button>
           )}
           <Button
@@ -4143,7 +4214,7 @@ export default function CalendarPage() {
               )}
             >
               <List className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Diena</span>
+              <span className="hidden sm:inline">{t('cal.day')}</span>
             </button>
           </div>
         </div>
@@ -4160,7 +4231,7 @@ export default function CalendarPage() {
             <div className="flex items-center justify-center py-32 text-gray-400">
               <div className="text-center">
                 <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-500 rounded-full animate-spin mx-auto mb-3" />
-                <p className="text-sm">Kraunamas kalendorius...</p>
+                <p className="text-sm">{t('cal.loadingCalendar')}</p>
               </div>
             </div>
           ) : (
@@ -4468,7 +4539,7 @@ export default function CalendarPage() {
 
             {/* Meeting link */}
             <div className="space-y-2">
-              <Label>Nuoroda (Zoom / Meet)</Label>
+              <Label>{t('cal.meetingLinkLabel')} (Zoom / Meet)</Label>
               <Input
                 placeholder="https://meet.google.com/..."
                 value={meetingLink}
@@ -4787,19 +4858,49 @@ export default function CalendarPage() {
                               );
                             }
                             if (session.status === 'active') {
-                              return (
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-8 px-2 text-xs text-rose-700 border-rose-200 hover:bg-rose-50"
-                                  disabled={noShowSavingId === session.id || saving}
-                                  onClick={() => void handleMarkStudentNoShowForSession(session)}
-                                >
-                                  <UserX className="w-3.5 h-3.5 mr-1" />
-                                  {noShowSavingId === session.id ? '…' : t('common.noShow')}
-                                </Button>
-                              );
+                              if (requiresStatusConfirmation && isAfter(new Date(), rowEnd)) {
+                                return (
+                                  <div className="flex flex-wrap gap-1 justify-end">
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      className="h-8 px-2 text-xs bg-green-600 hover:bg-green-700 text-white"
+                                      disabled={noShowSavingId === session.id || saving}
+                                      onClick={() => void handleConfirmSessionStatus(session, 'completed')}
+                                    >
+                                      <CheckCircle className="w-3.5 h-3.5 mr-1" />
+                                      {t('cal.statusHappened')}
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8 px-2 text-xs text-rose-700 border-rose-200 hover:bg-rose-50"
+                                      disabled={noShowSavingId === session.id || saving}
+                                      onClick={() => void handleConfirmSessionStatus(session, 'no_show')}
+                                    >
+                                      <UserX className="w-3.5 h-3.5 mr-1" />
+                                      {noShowSavingId === session.id ? '…' : t('cal.statusNoShowOpt')}
+                                    </Button>
+                                  </div>
+                                );
+                              }
+                              if (!requiresStatusConfirmation) {
+                                return (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 px-2 text-xs text-rose-700 border-rose-200 hover:bg-rose-50"
+                                    disabled={noShowSavingId === session.id || saving}
+                                    onClick={() => void handleMarkStudentNoShowForSession(session)}
+                                  >
+                                    <UserX className="w-3.5 h-3.5 mr-1" />
+                                    {noShowSavingId === session.id ? '…' : t('common.noShow')}
+                                  </Button>
+                                );
+                              }
+                              return null;
                             }
                             if (session.status === 'completed' && rowFuture) {
                               return (
@@ -5088,6 +5189,12 @@ export default function CalendarPage() {
             </div>
           )}
 
+          {eventModalNotice && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {eventModalNotice}
+            </div>
+          )}
+
           {cancelConfirmId !== selectedEvent?.id && (
           <div className="flex flex-col gap-2 pt-2">
             {selectedEvent?.status === 'completed' && !hideProKlaseOrgTutorCancel && (
@@ -5152,7 +5259,7 @@ export default function CalendarPage() {
                       variant="outline"
                       onClick={() => {
                         if (hideProKlaseOrgTutorCancel) {
-                          setToastMessage({ message: t('cal.proKlaseCancelAdminOnly'), type: 'warning' });
+                          notifyProKlaseCancelBlocked();
                           return;
                         }
                         void handleConfirmSessionStatus(selectedEvent, 'cancelled');
@@ -5161,7 +5268,7 @@ export default function CalendarPage() {
                       className="rounded-xl text-gray-700 border-gray-300 hover:bg-gray-100"
                     >
                       <XCircle className="w-4 h-4 mr-1" />
-                      {t('cal.statusCancelledOpt')}
+                      {hideProKlaseOrgTutorCancel ? t('cal.cancelLessonTitle') : t('cal.statusCancelledOpt')}
                     </Button>
                   </div>
                 </div>
@@ -5186,8 +5293,9 @@ export default function CalendarPage() {
                     isAfter(new Date(), selectedEvent.end_time)
                   ) && (
                   <Button
+                    type="button"
                     variant="outline"
-                    onClick={() => setToastMessage({ message: t('cal.proKlaseCancelAdminOnly'), type: 'warning' })}
+                    onClick={notifyProKlaseCancelBlocked}
                     size="sm"
                     className="rounded-xl flex-1 text-gray-700 border-gray-300 hover:bg-gray-100"
                   >
@@ -5658,7 +5766,7 @@ export default function CalendarPage() {
               onClick={() => setGroupCancelChoice(null)}
               className="rounded-xl"
             >
-              Atgal
+              {t('common.back')}
             </Button>
             <Button
               variant="destructive"
@@ -5869,6 +5977,19 @@ export default function CalendarPage() {
               <p className="text-xs text-gray-400">{t('cal.linkUsedAsDefault')}</p>
             </div>
 
+            <label className="flex items-start gap-3 rounded-xl border border-gray-100 bg-gray-50/80 p-3 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500"
+                checked={slotEditPublicBookable}
+                onChange={(e) => setSlotEditPublicBookable(e.target.checked)}
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-gray-800">{t('avail.publicBookable')}</span>
+                <span className="block text-xs text-gray-500 mt-0.5">{t('avail.publicBookableHint')}</span>
+              </span>
+            </label>
+
             <div className="space-y-2">
               <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('cal.subjectsForSlot')}</label>
               <div className="text-xs text-gray-400 mb-2">
@@ -5970,7 +6091,8 @@ export default function CalendarPage() {
                     start_time: slotEditStart,
                     end_time: slotEditEnd,
                     subject_ids: uniqueSubjectIds(slotEditSubjects),
-                    meeting_link: slotEditMeetingLink || null
+                    meeting_link: slotEditMeetingLink || null,
+                    public_bookable: slotEditPublicBookable,
                   }).eq('id', editingSlot.ruleId);
                   if (!error && currentUserId) {
                     try {
@@ -6252,7 +6374,7 @@ export default function CalendarPage() {
               {assignSaving ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Sukuriama...
+                  {t('compSch.creating')}
                 </>
               ) : (
                 <>
@@ -6288,7 +6410,7 @@ export default function CalendarPage() {
                   <div>
                     <Label className="text-sm font-semibold text-gray-700 flex items-center gap-1">
                       <CalendarDays className="w-4 h-4" />
-                      Nuo datos *
+                      {t('dateFilter.fromDate')} *
                     </Label>
                     <DateInput
                       value={massCancelStartDate}
@@ -6299,7 +6421,7 @@ export default function CalendarPage() {
                   <div>
                     <Label className="text-sm font-semibold text-gray-700 flex items-center gap-1">
                       <CalendarDays className="w-4 h-4" />
-                      Iki datos *
+                      {t('dateFilter.toDate')} *
                     </Label>
                     <DateInput
                       value={massCancelEndDate}
@@ -6346,7 +6468,7 @@ export default function CalendarPage() {
                   <div className="flex justify-between items-start mb-2">
                     <div>
                       <p className="text-sm font-semibold text-red-900">
-                        Laikotarpis: {format(new Date(massCancelStartDate), 'yyyy-MM-dd')} - {format(new Date(massCancelEndDate), 'yyyy-MM-dd')}
+                        {t('common.period')}: {format(new Date(massCancelStartDate), 'yyyy-MM-dd')} - {format(new Date(massCancelEndDate), 'yyyy-MM-dd')}
                       </p>
                       <p className="text-xs text-red-700 mt-1">
                         {t('cal.massCancelCount', { count: String(massCancelPreviewSessions.length) })}
@@ -6359,7 +6481,7 @@ export default function CalendarPage() {
                       className="text-xs"
                       disabled={massCancelLoading}
                     >
-                      ← Atgal
+                      ← {t('common.back')}
                     </Button>
                   </div>
                 </div>
@@ -6368,7 +6490,7 @@ export default function CalendarPage() {
                   <div className="flex items-start gap-2">
                     <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="text-sm font-semibold text-amber-900">Svarbu!</p>
+                      <p className="text-sm font-semibold text-amber-900">{t('lessonSet.important')}</p>
                       <p className="text-xs text-amber-800 mt-1">
                         {t('cal.massCancelNote')}
                       </p>
@@ -6434,7 +6556,7 @@ export default function CalendarPage() {
                     disabled={massCancelLoading}
                     className="flex-1 rounded-lg"
                   >
-                    Atgal
+                    {t('common.back')}
                   </Button>
                   <Button
                     onClick={handleMassCancelConfirm}

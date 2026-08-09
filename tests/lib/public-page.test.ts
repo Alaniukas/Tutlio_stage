@@ -5,7 +5,10 @@ import {
   initialsFrom,
   isValidSlug,
   publicPagePath,
+  publicPageCanonicalUrl,
   rowToPublicPage,
+  evaluatePublicPageSeo,
+  safePublicSocialUrl,
   slugify,
   type PublicPageRow,
 } from '@/lib/publicPage';
@@ -74,8 +77,10 @@ describe('public page slugs', () => {
   it('serves the localized prefix per canonical domain', () => {
     expect(publicPagePath('rasa', 'lt')).toBe('/korepetitorius/rasa');
     expect(publicPagePath('rasa', 'en')).toBe('/tutor/rasa');
+    expect(publicPagePath('claire', 'fr')).toBe('/fr/tutor/claire');
     // .pl takes the English slug, mirroring LOCALIZED_PAGE_PATHS.
     expect(publicPagePath('rasa', 'pl')).toBe('/tutor/rasa');
+    expect(publicPageCanonicalUrl('claire', 'fr')).toBe('https://www.tutlio.com/fr/tutor/claire');
   });
 });
 
@@ -101,6 +106,40 @@ describe('row → page mapping', () => {
   it('hides the reviews section while there are no reviews', () => {
     expect(rowToPublicPage(row(), EMPTY_DERIVED).reviewsEnabled).toBe(false);
     expect(rowToPublicPage(row(), EMPTY_DERIVED).ratingAvg).toBeNull();
+  });
+});
+
+describe('public page SEO quality', () => {
+  const complete = {
+    slug: 'rasa-zukauskaite',
+    ownerType: 'tutor' as const,
+    locale: 'lt',
+    displayName: 'Rasa Žukauskaitė',
+    headline: 'Matematikos korepetitorė 9–12 klasėms',
+    bio: 'Padedu mokiniams suprasti matematiką nuo pagrindų, pasiruošti kontroliniams darbams ir brandos egzaminui. Kiekvienam sudarau individualų mokymosi planą.',
+    published: true,
+    userId: 'u1',
+    organizationId: null,
+    offeringCount: 1,
+  };
+
+  it('keeps complete profiles indexable and reports every thin-page reason', () => {
+    expect(evaluatePublicPageSeo(complete)).toEqual({ indexable: true, reasons: [] });
+    const thin = evaluatePublicPageSeo({
+      ...complete,
+      headline: 'Math',
+      bio: 'Math',
+      offeringCount: 0,
+    });
+    expect(thin.indexable).toBe(false);
+    expect(thin.reasons).toEqual(expect.arrayContaining(['short-headline', 'short-bio', 'duplicate-copy', 'missing-offering']));
+  });
+
+  it('accepts only URLs belonging to the named social network', () => {
+    expect(safePublicSocialUrl('instagram', 'http://www.instagram.com/rasa')?.startsWith('https://')).toBe(true);
+    expect(safePublicSocialUrl('x', 'https://twitter.com/rasa')).toContain('twitter.com/rasa');
+    expect(safePublicSocialUrl('instagram', 'https://spam.example/rasa')).toBeNull();
+    expect(safePublicSocialUrl('unknown', 'https://example.com')).toBeNull();
   });
 });
 

@@ -109,6 +109,7 @@ interface AvailabilityRow {
   is_recurring: boolean | null;
   specific_date: string | null;
   end_date: string | null;
+  public_bookable?: boolean | null;
 }
 
 /**
@@ -131,8 +132,9 @@ export async function deriveForTutor(
       .order('created_at', { ascending: true }),
     supabase
       .from('availability')
-      .select('day_of_week, start_time, end_time, is_recurring, specific_date, end_date')
-      .eq('tutor_id', tutorId),
+      .select('day_of_week, start_time, end_time, is_recurring, specific_date, end_date, public_bookable')
+      .eq('tutor_id', tutorId)
+      .eq('public_bookable', true),
     supabase
       .from('profiles')
       .select('min_booking_hours, break_between_lessons')

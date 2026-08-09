@@ -25,6 +25,7 @@ import { authHeaders } from '@/lib/apiHelpers';
 import { schoolContractAllowsInstallmentPayment } from '@/lib/schoolContractPaymentGate';
 import { useTranslation } from '@/lib/i18n';
 import { useSchoolPaymentsData, type SchoolPaymentInstallment } from '@/hooks/useSchoolPaymentsData';
+import { format } from 'date-fns';
 
 interface NewInstallmentRow {
   amount: string;
@@ -32,7 +33,7 @@ interface NewInstallmentRow {
 }
 
 export default function CompanyPayments() {
-  const { t } = useTranslation();
+  const { t, dateFnsLocale } = useTranslation();
   const location = useLocation();
   const {
     orgId,
@@ -136,7 +137,7 @@ export default function CompanyPayments() {
           installmentNumber: installment.installment_number,
           totalInstallments,
           amount: Number(installment.amount).toFixed(2),
-          dueDate: new Date(installment.due_date).toLocaleDateString('lt-LT'),
+          dueDate: format(new Date(installment.due_date), 'P', { locale: dateFnsLocale }),
           installmentId: installment.id,
           additionalFeeAmount: Number(contract?.additional_fee_amount || 0) > 0
             ? Number(contract.additional_fee_amount).toFixed(2)
@@ -273,7 +274,7 @@ export default function CompanyPayments() {
                         className="inline-flex items-center gap-1 text-xs text-gray-600 hover:text-gray-900 px-2 py-1 rounded-lg hover:bg-gray-100 transition-colors"
                       >
                         {isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-                        {isCollapsed ? 'Išskleisti' : 'Suskleisti'}
+                        {isCollapsed ? t('stuSess.showMore') : t('stuSess.showLess')}
                       </button>
                     </div>
                   </div>
@@ -286,10 +287,10 @@ export default function CompanyPayments() {
                         <span className="text-sm font-medium text-gray-700 w-6 text-center">#{inst.installment_number}</span>
                         <div>
                           <p className="text-sm font-medium text-gray-900">&euro;{Number(inst.amount).toFixed(2)}</p>
-                          <p className="text-xs text-gray-400">{t('school.dueLabel')} {new Date(inst.due_date).toLocaleDateString('lt-LT')}</p>
+                          <p className="text-xs text-gray-400">{t('school.dueLabel')} {format(new Date(inst.due_date), 'P', { locale: dateFnsLocale })}</p>
                         </div>
                         {statusBadge(inst.payment_status)}
-                        {inst.paid_at && <span className="text-xs text-gray-400">{t('school.paidLabel')} {new Date(inst.paid_at).toLocaleDateString('lt-LT')}</span>}
+                        {inst.paid_at && <span className="text-xs text-gray-400">{t('school.paidLabel')} {format(new Date(inst.paid_at), 'P', { locale: dateFnsLocale })}</span>}
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         {inst.payment_status !== 'paid' && (

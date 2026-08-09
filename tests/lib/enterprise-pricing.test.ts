@@ -3,12 +3,25 @@ import { enterprisePlnTierDefs } from '@/lib/enterprisePricingPln';
 import { enterpriseEurTierDefs } from '@/lib/enterprisePricingEur';
 import {
   displayPricingForQuantity,
+  fallbackEnterpriseLicensePricing,
   formatMoney,
   tierForQuantity,
   totalCentsForQuantity,
   unitCentsForQuantity,
   type LicenseTier,
 } from '@/lib/enterprisePricing';
+
+describe('fallbackEnterpriseLicensePricing', () => {
+  it('keeps the self-serve selector available in EUR and PLN', () => {
+    const eur = fallbackEnterpriseLicensePricing('default');
+    const pln = fallbackEnterpriseLicensePricing('pl');
+
+    expect(eur).toMatchObject({ currency: 'eur', minLicenses: 1, maxSelfServe: 60 });
+    expect(pln).toMatchObject({ currency: 'pln', minLicenses: 1, maxSelfServe: 60 });
+    expect(eur.tiers).toHaveLength(6);
+    expect(pln.tiers).toHaveLength(6);
+  });
+});
 
 // Nomora-style volume tiers: 1-10 -> €4.50, 11-50 -> €2.80, 51+ -> €2.20
 const volumeTiers: LicenseTier[] = [

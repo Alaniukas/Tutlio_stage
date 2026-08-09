@@ -139,7 +139,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!isSsrMethod(req.method)) return rejectSsrMethod(res);
 
   const page = (typeof req.query.page === 'string' ? req.query.page : 'landing') as SchoolsPageId;
-  if (!SUB_PATHS[page]) return res.status(404).send('Not found');
+  if (!SUB_PATHS[page]) {
+    res.setHeader('X-Robots-Tag', 'noindex');
+    return res.status(404).send('Not found');
+  }
 
   const domain = detectDomain(req);
   const locale = detectLocale(req);
@@ -165,8 +168,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }))
     : [];
   const jsonLd = page === 'landing'
-    ? `${webPageJsonLd({ name: title, description, url: canonicalUrl })}</script><script type="application/ld+json">${faqJsonLd(schoolsFaq)}`
-    : webPageJsonLd({ name: title, description, url: canonicalUrl });
+    ? `${webPageJsonLd({ locale, name: title, description, url: canonicalUrl })}</script><script type="application/ld+json">${faqJsonLd(schoolsFaq)}`
+    : webPageJsonLd({ locale, name: title, description, url: canonicalUrl });
 
   const breadcrumbs = page === 'pricing'
     ? [

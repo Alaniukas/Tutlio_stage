@@ -1,5 +1,7 @@
-import { Sparkles, User, Users } from 'lucide-react';
+import { GraduationCap, PackageCheck, UserRoundCheck } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
+import { MiniAvatar } from './demoAvatars';
+import { getLandingDemoPersonas } from './demoPersonas';
 
 /**
  * Two overlapping, slightly-rotated cards: the monthly revenue summary and the
@@ -7,19 +9,21 @@ import { useTranslation } from '@/lib/i18n';
  */
 
 const BREAKDOWN = [
-  { icon: Users, tint: 'bg-blue-50 text-blue-600', labelKey: 'landing.v2.finGroup', metaKey: 'landing.v2.finGroupMeta', amount: '1 990 €' },
-  { icon: User, tint: 'bg-sky-50 text-sky-600', labelKey: 'landing.v2.finPrivate', metaKey: 'landing.v2.finPrivateMeta', amount: '1 490 €' },
-  { icon: Sparkles, tint: 'bg-amber-50 text-amber-600', labelKey: 'landing.v2.finPackages', metaKey: 'landing.v2.finPackagesMeta', amount: '60 €' },
+  { icon: GraduationCap, tint: 'bg-gradient-to-br from-indigo-50 to-blue-100 text-indigo-600 ring-indigo-100', labelKey: 'landing.v2.finGroup', metaKey: 'landing.v2.finGroupMeta', amount: '1 990 €' },
+  { icon: UserRoundCheck, tint: 'bg-gradient-to-br from-cyan-50 to-sky-100 text-sky-600 ring-sky-100', labelKey: 'landing.v2.finPrivate', metaKey: 'landing.v2.finPrivateMeta', amount: '1 490 €' },
+  { icon: PackageCheck, tint: 'bg-gradient-to-br from-amber-50 to-orange-100 text-amber-600 ring-amber-100', labelKey: 'landing.v2.finPackages', metaKey: 'landing.v2.finPackagesMeta', amount: '60 €' },
 ] as const;
 
-const PAYERS = [
-  { initials: 'EK', name: 'Eglė K.', tint: 'bg-violet-100 text-violet-700', paid: true },
-  { initials: 'MJ', name: 'Marius J.', tint: 'bg-emerald-100 text-emerald-700', paid: true },
-  { initials: 'RB', name: 'Rūta B.', tint: 'bg-amber-100 text-amber-700', paid: false },
+const PAYER_ROWS = [
+  { seed: 'emilija-m', paid: true },
+  { seed: 'lukas-k', paid: true },
+  { seed: 'sofija-g', paid: false },
 ] as const;
 
 export default function FinanceMockup() {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
+  const personas = getLandingDemoPersonas(locale);
+  const payers = PAYER_ROWS.map((row, index) => ({ ...row, name: personas.students[index] }));
 
   return (
     <div className="relative mx-auto h-[370px] w-full max-w-[520px] sm:h-[400px]">
@@ -48,7 +52,7 @@ export default function FinanceMockup() {
         <div className="mt-3 space-y-2.5 sm:mt-4 sm:space-y-3">
           {BREAKDOWN.map(({ icon: Icon, tint, labelKey, metaKey, amount }) => (
             <div key={labelKey} className="flex items-center gap-2.5 sm:gap-3">
-              <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg sm:h-8 sm:w-8 ${tint}`}>
+              <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-xl ring-1 ring-inset sm:h-8 sm:w-8 ${tint}`}>
                 <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
               </span>
               <div className="min-w-0 flex-1">
@@ -68,11 +72,9 @@ export default function FinanceMockup() {
           {t('landing.v2.finWhoPaid')}
         </p>
         <div className="mt-2.5 space-y-2.5">
-          {PAYERS.map(({ initials, name, tint, paid }) => (
+          {payers.map(({ name, seed, paid }) => (
             <div key={name} className="flex items-center gap-2.5">
-              <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold sm:h-8 sm:w-8 sm:text-xs ${tint}`}>
-                {initials}
-              </span>
+              <MiniAvatar seed={seed} alt={name} size="sm" className="ring-1 ring-white shadow-sm" />
               <p className="min-w-0 flex-1 truncate text-xs font-medium text-zinc-900 sm:text-sm">{name}</p>
               <span
                 className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${

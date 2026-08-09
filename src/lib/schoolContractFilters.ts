@@ -7,6 +7,8 @@ export type SchoolContractSigningStatus =
 
 export type SchoolContractFilter =
   | 'all'
+  | 'draft'
+  | 'sent'
   | 'signed'
   | 'awaiting_school'
   | 'awaiting_parents'
@@ -73,6 +75,8 @@ export function matchesContractFilter(
   isSchoolView: boolean,
 ): boolean {
   if (filter === 'all') return true;
+  if (filter === 'draft') return contract.signing_status === 'draft';
+  if (filter === 'sent') return contract.signing_status === 'sent';
   if (filter === 'signed') return contract.signing_status === 'signed';
   if (filter === 'awaiting_school') return contract.signing_status === 'awaiting_school_signature';
   if (filter === 'awaiting_parents') return contract.signing_status === 'signed_by_school';
@@ -89,6 +93,8 @@ export function countContractsByFilter(
 ): Record<SchoolContractFilter, number> {
   const filters: SchoolContractFilter[] = [
     'all',
+    'draft',
+    'sent',
     'signed',
     'awaiting_school',
     'awaiting_parents',

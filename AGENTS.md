@@ -451,7 +451,7 @@ Webhook: `api/stripe-webhook.ts` — apdoroja subscriptions, checkout, Connect, 
 
 | Failas | Paskirtis |
 |--------|-----------|
-| `src/lib/i18n/core.ts` | `t()` funkcija, 12 kalbų |
+| `src/lib/i18n/core.ts` | `t()` funkcija, 13 kalbų |
 | `src/lib/i18n/lt.ts`, `en.ts`, `pl.ts`… | Žodynai |
 | `src/lib/i18n/index.ts` | `useTranslation()` hook |
 | `src/contexts/LocaleContext.tsx` | React provider |

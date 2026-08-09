@@ -32,7 +32,7 @@ import SendPackageModal from '@/components/SendPackageModal';
 import SendInvoiceModal from '@/components/SendInvoiceModal';
 import { format, isAfter, isBefore } from 'date-fns';
 import { useTranslation } from '@/lib/i18n';
-import { cn, formatLithuanianPhone, normalizeUrl, validateLithuanianPhone } from '@/lib/utils';
+import { cn, formatLocalizedPhone, getLocalizedPhonePlaceholder, normalizeUrl, validateLocalizedPhone } from '@/lib/utils';
 import { recordJoinClick } from '@/lib/joinTracking';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
@@ -70,6 +70,7 @@ import SessionFiles from '@/components/SessionFiles';
 import WhiteboardButton from '@/components/WhiteboardButton';
 import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
 import { buildNoShowSessionPatch, type NoShowWhen } from '@/lib/noShowWhen';
+import { getLessonUnitTranslationKey } from '@/lib/lessonUnitTranslation';
 
 interface Student {
   id: string;
@@ -135,6 +136,7 @@ export default function StudentsPage() {
   const hideProKlaseOrgTutorCancel = orgPolicy.isOrgTutor && isProKlaseOrg(profile?.organization_id);
   const hideProKlaseOrgTutorFreeTime = hideProKlaseOrgTutorCancel;
   const { hasFeature, loading: orgFeaturesLoading, contactVisibility } = useOrgFeatures();
+  const requiresStatusConfirmation = hasFeature('tutor_lesson_status_confirmation');
   const stcache = getCached<any>('tutor_students');
   const [students, setStudents] = useState<Student[]>(stcache?.students ?? []);
   const [loading, setLoading] = useState(!stcache);
@@ -203,7 +205,9 @@ export default function StudentsPage() {
   const [editTutorComment, setEditTutorComment] = useState('');
   const [editShowCommentToStudent, setEditShowCommentToStudent] = useState(false);
   const [editSessionPrice, setEditSessionPrice] = useState<number>(0);
-  const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [confirmingStatusId, setConfirmingStatusId] = useState<string | null>(null);
+  const [modalActionNotice, setModalActionNotice] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
 
   // Individual pricing for student modal
   const [studentIndividualPricing, setStudentIndividualPricing] = useState<any[]>([]);
@@ -820,7 +824,7 @@ export default function StudentsPage() {
 
     if (!user) { setSaving(false); return; }
 
-    if (newStudent.phone?.trim() && !validateLithuanianPhone(newStudent.phone)) {
+    if (newStudent.phone?.trim() && !validateLocalizedPhone(newStudent.phone, locale)) {
       alert(t('stu.phoneFormat'));
       setSaving(false);
       return;
@@ -1030,6 +1034,54 @@ export default function StudentsPage() {
       syncSessionToGoogleCalendar(selectedSessionForModal.id);
     }
     setSavingSession(false);
+  };
+
+  const notifyProKlaseCancelBlocked = () => {
+    const message = t('cal.proKlaseCancelAdminOnly');
+    setModalActionNotice(message);
+    setToastMessage({ message, type: 'warning' });
+  };
+
+  const confirmLessonStatus = async (
+    session: Session,
+    status: 'completed' | 'no_show' | 'cancelled',
+    late = false,
+  ) => {
+    if (status === 'no_show' && !window.confirm(t('dash.confirmNoShowPrompt'))) return;
+    if (status === 'cancelled' && !window.confirm(t('dash.confirmCancelPrompt'))) return;
+    setConfirmingStatusId(session.id);
+    try {
+      const resp = await fetch('/api/confirm-session-status', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ sessionId: session.id, status, late }),
+      });
+      const json = await resp.json().catch(() => ({} as Record<string, unknown>));
+      if (!resp.ok) {
+        setToastMessage({
+          message: t('dash.confirmStatusError', { msg: String((json as any).error || resp.status) }),
+          type: 'error',
+        });
+        return;
+      }
+      if (selectedSessionForModal?.id === session.id) {
+        setSelectedSessionForModal({ ...selectedSessionForModal, status });
+        setIsSessionModalOpen(false);
+      }
+      fetchAllSessions();
+      syncSessionToGoogleCalendar(session.id);
+      if (status === 'no_show') {
+        void (async () => {
+          await fetch('/api/notify-session-no-show', {
+            method: 'POST',
+            headers: await authHeaders(),
+            body: JSON.stringify({ sessionId: session.id }),
+          });
+        })().catch(() => {});
+      }
+    } finally {
+      setConfirmingStatusId(null);
+    }
   };
 
   const handleSaveSessionEdits = async () => {
@@ -1371,10 +1423,10 @@ export default function StudentsPage() {
           {/* Header */}
           <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-start mb-6">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 mb-3">Mokiniai</h1>
+              <h1 className="text-2xl font-bold text-gray-900 mb-3">{t('nav.students')}</h1>
               <TabsList className="bg-gray-100/80 p-1">
-                <TabsTrigger value="mokiniai" className="text-sm px-4 sm:px-6">Mokiniai ({students.length})</TabsTrigger>
-                <TabsTrigger value="pamokos" className="text-sm px-4 sm:px-6">Visos pamokos</TabsTrigger>
+                <TabsTrigger value="mokiniai" className="text-sm px-4 sm:px-6">{t('nav.students')} ({students.length})</TabsTrigger>
+                <TabsTrigger value="pamokos" className="text-sm px-4 sm:px-6">{t('stuSess.allSessions')}</TabsTrigger>
               </TabsList>
             </div>
             {!checkingOrgStatus && !orgPolicy.isOrgTutor && (
@@ -1399,7 +1451,7 @@ export default function StudentsPage() {
                         <Input
                           value={newStudent.full_name}
                           onChange={(e) => setNewStudent({ ...newStudent, full_name: e.target.value })}
-                          placeholder="Jonas Jonaitis"
+                          placeholder={t('register.fullNamePlaceholder')}
                           className="rounded-xl"
                           required
                         />
@@ -1410,7 +1462,7 @@ export default function StudentsPage() {
                           type="email"
                           value={newStudent.email}
                           onChange={(e) => setNewStudent({ ...newStudent, email: e.target.value })}
-                          placeholder="jonas@example.com"
+                          placeholder={t('register.emailPlaceholder')}
                           className="rounded-xl"
                         />
                         <p className="text-xs text-gray-500 flex items-start gap-1.5">
@@ -1421,11 +1473,11 @@ export default function StudentsPage() {
                         </p>
                       </div>
                       <div className="space-y-2">
-                        <Label>Telefonas</Label>
+                        <Label>{t('common.phone')}</Label>
                         <Input
                           value={newStudent.phone}
-                          onChange={(e) => setNewStudent({ ...newStudent, phone: formatLithuanianPhone(e.target.value) })}
-                          placeholder="+370 600 00000"
+                          onChange={(e) => setNewStudent({ ...newStudent, phone: formatLocalizedPhone(e.target.value, locale) })}
+                          placeholder={getLocalizedPhonePlaceholder(locale)}
                           className="rounded-xl"
                         />
                       </div>
@@ -1435,11 +1487,11 @@ export default function StudentsPage() {
                       <div className="border-t border-gray-200 pt-4 space-y-3">
                         <div className="flex items-center gap-2 mb-2">
                           <Sparkles className="w-4 h-4 text-amber-500" />
-                          <Label className="text-sm font-semibold">Individuali kaina (neprivaloma)</Label>
+                          <Label className="text-sm font-semibold">{t('compStu.individualPriceOptional')}</Label>
                         </div>
 
                         <div className="space-y-2">
-                          <Label className="text-xs text-gray-600">Dalykas</Label>
+                          <Label className="text-xs text-gray-600">{t('cal.subjectInfo')}</Label>
                           <Select value={selectedSubjectForInvite} onValueChange={setSelectedSubjectForInvite}>
                             <SelectTrigger className="rounded-xl">
                               <SelectValue placeholder={t('stu.selectSubject')} />
@@ -1497,13 +1549,13 @@ export default function StudentsPage() {
                                   </SelectTrigger>
                                   <SelectContent>
                                     {[2, 6, 12, 24, 48].map((h) => (
-                                      <SelectItem key={h} value={h.toString()}>{h} val.</SelectItem>
+                                      <SelectItem key={h} value={h.toString()}>{h} {t('common.hours')}</SelectItem>
                                     ))}
                                   </SelectContent>
                                 </Select>
                               </div>
                               <div className="space-y-2">
-                                <Label className="text-xs text-gray-600">Bauda (%)</Label>
+                                <Label className="text-xs text-gray-600">{t('compTut.cancellationFee')}</Label>
                                 <Select
                                   value={customCancellationFee.toString()}
                                   onValueChange={(v) => setCustomCancellationFee(parseInt(v))}
@@ -1683,7 +1735,7 @@ export default function StudentsPage() {
                             <div className="mt-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
                               <div className="flex items-center justify-between gap-2 flex-wrap">
                                 <div>
-                                  <p className="text-xs text-gray-400 mb-1">Pakvietimo kodas</p>
+                                  <p className="text-xs text-gray-400 mb-1">{t('login.inviteCode')}</p>
                                   <div className="flex items-center gap-2">
                                     <code className="font-mono font-bold text-indigo-700 text-sm tracking-widest bg-indigo-50 px-2 py-0.5 rounded-lg">
                                       {student.invite_code}
@@ -1759,7 +1811,7 @@ export default function StudentsPage() {
               {isFilterActive && (
                 <>
                   {loadingAllSessions ? (
-                    <div className="text-center py-4 text-gray-500">Kraunamos statistikos...</div>
+                    <div className="text-center py-4 text-gray-500">{t('common.loading')}</div>
                   ) : (
                     (() => {
                       const stats = calculateSessionStats(allSessions as Session[], filterStartDate, filterEndDate);
@@ -1807,7 +1859,7 @@ export default function StudentsPage() {
                                     </span>
                                     <span className="inline-flex items-center gap-1 text-xs bg-red-50 text-red-700 px-2 py-0.5 rounded-lg border border-red-200">
                                       <XCircle className="w-3 h-3" />
-                                      {studentStat.totalCancelled} {t('stu.cancelledCount')}
+                                      {t('stu.cancelledCount', { count: studentStat.totalCancelled })}
                                     </span>
                                   </div>
                                 </div>
@@ -1889,7 +1941,7 @@ export default function StudentsPage() {
       <Dialog open={isStudentModalOpen} onOpenChange={setIsStudentModalOpen}>
         <DialogContent className="w-[95vw] sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl max-h-[90vh] overflow-y-auto p-5 sm:p-6">
           <DialogHeader>
-            <DialogTitle>Mokinio informacija</DialogTitle>
+            <DialogTitle>{t('compStu.studentInfo')}</DialogTitle>
           </DialogHeader>
           {selectedStudent && (
             <div className="space-y-5">
@@ -1962,7 +2014,7 @@ export default function StudentsPage() {
                         onClick={() => setIsEditingStudentName(true)}
                         className="flex-shrink-0"
                       >
-                        Redaguoti
+                        {t('common.edit')}
                       </Button>
                     )}
                   </div>
@@ -2018,7 +2070,7 @@ export default function StudentsPage() {
               )}
 
               {loadingSessions ? (
-                <p className="text-sm text-gray-500 text-center py-8">Kraunama istorija...</p>
+                <p className="text-sm text-gray-500 text-center py-8">{t('common.loading')}</p>
               ) : (
                 <div className="space-y-5">
                   <div className={cn('grid gap-3 text-sm sm:grid-cols-2', orgPolicy.hideMoney ? 'grid-cols-1' : 'grid-cols-2')}>
@@ -2047,8 +2099,7 @@ export default function StudentsPage() {
                       <div className="space-y-2">
                         {pendingStudentPackages.map((pkg: any) => {
                           const n = Number(pkg.total_lessons) || 0;
-                          const unit =
-                            n === 1 ? t('package.lessonUnit1') : n < 10 ? t('package.lessonUnit2to9') : t('package.lessonUnit10plus');
+                          const unit = t(getLessonUnitTranslationKey(locale, n));
                           const items = Array.isArray(pkg.lesson_package_items) ? pkg.lesson_package_items : [];
                           const isMulti = items.length > 1;
                           const subjectLabel = isMulti
@@ -2365,7 +2416,7 @@ export default function StudentsPage() {
                           upcoming.slice(0, 3).map(s => (
                             <div key={s.id} className="text-sm p-3 rounded-xl bg-indigo-50 border border-indigo-100 flex justify-between items-center gap-3">
                               <span className="text-indigo-900 font-medium min-w-0">
-                                {new Date(s.start_time).toLocaleDateString('lt-LT')} {new Date(s.start_time).toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' })}
+                                {format(new Date(s.start_time), 'Pp', { locale: dateFnsLocale })}
                               </span>
                               <span className="font-bold text-indigo-700 shrink-0 text-right">{s.topic || t('stu.selfStudy')}</span>
                             </div>
@@ -2400,7 +2451,7 @@ export default function StudentsPage() {
                               )}>
                                 <div className="flex flex-col gap-0.5 min-w-0">
                                   <span className="text-gray-900 font-medium">
-                                    {new Date(s.start_time).toLocaleDateString('lt-LT')} {new Date(s.start_time).toLocaleTimeString('lt-LT', { hour: '2-digit', minute: '2-digit' })}
+                                    {format(new Date(s.start_time), 'Pp', { locale: dateFnsLocale })}
                                   </span>
                                   {isCancelled && <span className="text-xs text-red-600 font-medium">{t('status.cancelled')}</span>}
                                   {isNoShow && <span className="text-xs text-rose-600 font-medium">{t('common.noShow')}</span>}
@@ -2428,7 +2479,7 @@ export default function StudentsPage() {
                     <div className="flex items-center justify-between mb-3">
                       <h4 className="font-semibold text-gray-900 flex items-center gap-2">
                         <Sparkles className="w-4 h-4 text-amber-500" />
-                        Individualios kainos
+                        {t('compStu.individualPrices')}
                       </h4>
                       {!addingNewPrice && (
                         <Button
@@ -2444,7 +2495,7 @@ export default function StudentsPage() {
                     </div>
 
                     {loadingIndividualPricing ? (
-                      <p className="text-sm text-gray-500 text-center py-4">Kraunama...</p>
+                      <p className="text-sm text-gray-500 text-center py-4">{t('common.loading')}</p>
                     ) : (
                       <>
                         {studentIndividualPricing.length === 0 && !addingNewPrice ? (
@@ -2465,7 +2516,7 @@ export default function StudentsPage() {
                                       style={{ backgroundColor: pricing.subject?.color || '#6366f1' }}
                                     />
                                     <span className="font-semibold text-gray-900 text-sm">
-                                      {pricing.subject?.name || 'Dalykas'}
+                                      {pricing.subject?.name || t('stu.subjectUnknown')}
                                     </span>
                                   </div>
                                   <div className="text-xs text-gray-600 space-y-0.5">
@@ -2496,7 +2547,7 @@ export default function StudentsPage() {
                         {addingNewPrice && (
                           <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3 mt-2">
                             <div>
-                              <Label className="text-xs font-semibold text-gray-700">Dalykas *</Label>
+                              <Label className="text-xs font-semibold text-gray-700">{t('cal.subjectInfo')} *</Label>
                               <Select
                                 value={newPriceSubject}
                                 onValueChange={setNewPriceSubject}
@@ -2559,16 +2610,16 @@ export default function StudentsPage() {
                                     <SelectValue />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    <SelectItem value="2">2 valandos</SelectItem>
-                                    <SelectItem value="6">6 valandos</SelectItem>
+                                    <SelectItem value="2">2 {t('common.hours')}</SelectItem>
+                                    <SelectItem value="6">6 {t('common.hours')}</SelectItem>
                                     <SelectItem value="12">{t('stu.hours12')}</SelectItem>
-                                    <SelectItem value="24">24 valandos</SelectItem>
-                                    <SelectItem value="48">48 valandos</SelectItem>
+                                    <SelectItem value="24">24 {t('common.hours')}</SelectItem>
+                                    <SelectItem value="48">48 {t('common.hours')}</SelectItem>
                                   </SelectContent>
                                 </Select>
                               </div>
                               <div>
-                                <Label className="text-xs font-semibold text-gray-700">Bauda (%)</Label>
+                                <Label className="text-xs font-semibold text-gray-700">{t('compTut.cancellationFee')}</Label>
                                 <Select
                                   value={String(newPriceCancellationFee)}
                                   onValueChange={(v) => setNewPriceCancellationFee(Number(v))}
@@ -2689,6 +2740,7 @@ export default function StudentsPage() {
             setIsEditingSession(false);
             setEditNewStartTime('');
             setNoShowPickerOpen(false);
+            setModalActionNotice(null);
           }
         }}
       >
@@ -3011,13 +3063,92 @@ export default function StudentsPage() {
             </div>
           )}
 
+          {modalActionNotice && (
+            <div className="mx-1 mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {modalActionNotice}
+            </div>
+          )}
+
           <DialogFooter className="flex-col sm:flex-row gap-2 pt-2">
             {cancelConfirmId !== selectedSessionForModal?.id && (
             <>
-            <div className="flex gap-2 flex-1 flex-wrap">
-              {selectedSessionForModal?.status === 'active' && (
-                <>
-                  {!hideProKlaseOrgTutorCancel && (
+            <div className="flex flex-col gap-2 flex-1 w-full">
+              {orgPolicy.isOrgTutor && requiresStatusConfirmation &&
+                selectedSessionForModal?.status === 'active' &&
+                isAfter(new Date(), new Date(selectedSessionForModal.end_time)) && (
+                <div className="w-full rounded-xl border border-amber-300 bg-amber-50 p-3 space-y-2">
+                  <p className="text-sm font-semibold text-amber-900">{t('cal.confirmStatusPrompt')}</p>
+                  <p className="text-xs text-amber-800/80">{t('cal.confirmStatusDesc')}</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      size="sm"
+                      disabled={confirmingStatusId === selectedSessionForModal.id}
+                      onClick={() => void confirmLessonStatus(selectedSessionForModal, 'completed')}
+                      className="rounded-xl bg-green-600 hover:bg-green-700 text-white"
+                    >
+                      <CheckCircle className="w-4 h-4 mr-1" />
+                      {t('cal.statusHappened')}
+                    </Button>
+                    {!hideProKlaseOrgTutorCancel && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={confirmingStatusId === selectedSessionForModal.id}
+                      onClick={() => void confirmLessonStatus(selectedSessionForModal, 'completed', true)}
+                      className="rounded-xl text-amber-800 border-amber-300 hover:bg-amber-100"
+                    >
+                      <Clock className="w-4 h-4 mr-1" />
+                      {t('cal.statusHappenedLate')}
+                    </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={confirmingStatusId === selectedSessionForModal.id}
+                      onClick={() => void confirmLessonStatus(selectedSessionForModal, 'no_show')}
+                      className="rounded-xl text-rose-700 border-rose-200 hover:bg-rose-50"
+                    >
+                      <UserX className="w-4 h-4 mr-1" />
+                      {t('cal.statusNoShowOpt')}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={confirmingStatusId === selectedSessionForModal.id}
+                      onClick={() => {
+                        if (hideProKlaseOrgTutorCancel) {
+                          notifyProKlaseCancelBlocked();
+                          return;
+                        }
+                        void confirmLessonStatus(selectedSessionForModal, 'cancelled');
+                      }}
+                      className="rounded-xl text-gray-700 border-gray-300 hover:bg-gray-100"
+                    >
+                      <XCircle className="w-4 h-4 mr-1" />
+                      {hideProKlaseOrgTutorCancel ? t('cal.cancelLessonTitle') : t('cal.statusCancelledOpt')}
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {selectedSessionForModal?.status === 'active' && orgPolicy.isOrgTutor && (
+                <div className="flex flex-wrap gap-2 w-full">
+                  {hideProKlaseOrgTutorCancel && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={notifyProKlaseCancelBlocked}
+                      disabled={savingSession}
+                      size="sm"
+                      className="rounded-xl flex-1 text-gray-700 border-gray-300 hover:bg-gray-100"
+                    >
+                      <XCircle className="w-4 h-4 mr-1" />
+                      {t('cal.cancelLessonTitle')}
+                    </Button>
+                  )}
+                </div>
+              )}
+              {selectedSessionForModal?.status === 'active' && !orgPolicy.isOrgTutor && (
+                <div className="flex gap-2 flex-wrap w-full">
                   <Button
                     variant="destructive"
                     onClick={() => {
@@ -3032,7 +3163,6 @@ export default function StudentsPage() {
                     <XCircle className="w-4 h-4 mr-1" />
                     {t('cal.cancelLessonTitle')}
                   </Button>
-                  )}
                   <Button
                     variant="outline"
                     onClick={handleMarkCompleted}
@@ -3053,12 +3183,13 @@ export default function StudentsPage() {
                     <UserX className="w-4 h-4 mr-1" />
                     {t('common.noShow')}
                   </Button>
-                </>
+                </div>
               )}
               {selectedSessionForModal &&
                 (selectedSessionForModal.status === 'completed' || selectedSessionForModal.status === 'no_show') &&
-                isAfter(new Date(selectedSessionForModal.end_time), new Date()) && (
-                  <>
+                isAfter(new Date(selectedSessionForModal.end_time), new Date()) &&
+                !orgPolicy.isOrgTutor && (
+                  <div className="flex gap-2 flex-wrap w-full">
                     <Button
                       variant="outline"
                       onClick={() => void handleRevertLessonToPlanned()}
@@ -3081,7 +3212,7 @@ export default function StudentsPage() {
                         {t('common.noShow')}
                       </Button>
                     )}
-                  </>
+                  </div>
                 )}
             </div>
             {orgPolicy.canToggleSessionPaid && (

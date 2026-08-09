@@ -6,6 +6,7 @@ import {
   buildCanonicalUrl,
   buildPlatformPath,
   buildPlatformCanonicalUrl,
+  buildPublicPageCanonicalUrl,
   localizedPagePath,
   generateHreflangLinks,
   generateHreflangLinksFor,
@@ -18,8 +19,10 @@ import {
   defaultLocaleStripRedirect,
   crossDomainLocaleRedirect,
   sameDomainCanonicalPath,
+  canonicalPublicPagePrefixRedirect,
+  isBrowserNavigation,
 } from '../../middleware.js';
-import { STATIC_PAGES, alternatesXmlFor } from '../../api/sitemap.js';
+import { STATIC_PAGES, alternatesXmlFor, publicPageBelongsInSitemap } from '../../api/sitemap.js';
 
 function botRequest(url: string, host: string): Request {
   return new Request(url, { headers: { host, 'user-agent': 'Googlebot' } });
@@ -72,8 +75,27 @@ describe('platform-prefixed (schools) URLs', () => {
 
   it('keeps the hreflang cluster complete for schools pages', () => {
     const links = generateHreflangLinksFor((l) => buildPlatformCanonicalUrl('/schools', '/', l));
-    expect(links).toHaveLength(13);
+    expect(links).toHaveLength(14);
     expect(links.find((l) => l.lang === 'x-default')?.href).toBe('https://www.tutlio.com/schools');
+  });
+});
+
+describe('public tutor/agency canonical URLs', () => {
+  it('uses one canonical domain and locale path for the page authored locale', () => {
+    expect(buildPublicPageCanonicalUrl('rasa', 'lt')).toBe('https://www.tutlio.lt/korepetitorius/rasa');
+    expect(buildPublicPageCanonicalUrl('anna', 'en')).toBe('https://www.tutlio.com/tutor/anna');
+    expect(buildPublicPageCanonicalUrl('claire', 'fr')).toBe('https://www.tutlio.com/fr/tutor/claire');
+    expect(buildPublicPageCanonicalUrl('ewa', 'pl')).toBe('https://www.tutlio.pl/tutor/ewa');
+  });
+
+  it('redirects the non-canonical profile noun for every visitor', () => {
+    expect(canonicalPublicPagePrefixRedirect('/tutor/rasa', 'www.tutlio.lt'))
+      .toBe('/korepetitorius/rasa');
+    expect(canonicalPublicPagePrefixRedirect('/korepetitorius/anna', 'www.tutlio.com'))
+      .toBe('/tutor/anna');
+    expect(canonicalPublicPagePrefixRedirect('/fr/korepetitorius/claire', 'www.tutlio.com'))
+      .toBe('/fr/tutor/claire');
+    expect(canonicalPublicPagePrefixRedirect('/fr/tutor/claire', 'www.tutlio.com')).toBeNull();
   });
 });
 
@@ -115,6 +137,23 @@ describe('middleware canonical-slug 308 redirects', () => {
 });
 
 describe('middleware SSR routing', () => {
+  it('distinguishes real browser navigations from unknown crawler-like clients', () => {
+    const browser = new Request('https://www.tutlio.com/fr', {
+      headers: {
+        host: 'www.tutlio.com',
+        'user-agent': 'Mozilla/5.0',
+        'sec-fetch-mode': 'navigate',
+        'sec-fetch-dest': 'document',
+      },
+    });
+    const unknownCrawler = new Request('https://www.tutlio.com/fr', {
+      headers: { host: 'www.tutlio.com', 'user-agent': 'NewSearchCrawler/1.0' },
+    });
+
+    expect(isBrowserNavigation(browser)).toBe(true);
+    expect(isBrowserNavigation(unknownCrawler)).toBe(false);
+  });
+
   it('routes /schools and /teachers to the schools renderer', () => {
     expect(ssrDestination(botRequest('https://www.tutlio.com/schools', 'www.tutlio.com')))
       .toBe('/api/schools-render?page=landing&locale=en');
@@ -145,9 +184,46 @@ describe('middleware SSR routing', () => {
     expect(ssrDestination(botRequest('https://www.tutlio.com/features/unknown', 'www.tutlio.com'))).toBeNull();
     expect(ssrDestination(botRequest('https://www.tutlio.com/schools/blog', 'www.tutlio.com'))).toBeNull();
   });
+
+  it('routes canonical public tutor pages to their renderer', () => {
+    expect(ssrDestination(botRequest('https://www.tutlio.com/tutor/anna', 'www.tutlio.com')))
+      .toBe('/api/public-page-render?slug=anna&locale=en&requestedPath=%2Ftutor%2Fanna');
+    expect(ssrDestination(botRequest('https://www.tutlio.com/fr/tutor/claire', 'www.tutlio.com')))
+      .toBe('/api/public-page-render?slug=claire&locale=fr&requestedPath=%2Ffr%2Ftutor%2Fclaire');
+  });
 });
 
 describe('sitemap', () => {
+  const completeProfile = {
+    slug: 'rasa-math',
+    locale: 'lt',
+    owner_type: 'tutor',
+    user_id: 'tutor-1',
+    organization_id: null,
+    display_name: 'Rasa Žukauskaitė',
+    headline: 'Matematikos korepetitorė 9–12 klasėms',
+    bio: 'Padedu mokiniams suprasti matematiką nuo pagrindų, pasiruošti kontroliniams darbams ir brandos egzaminui. Kiekvienam sudarau individualų mokymosi planą.',
+    published: true,
+  };
+
+  it('only admits complete, owned profiles with real offerings', () => {
+    expect(publicPageBelongsInSitemap(completeProfile, new Set(['tutor-1']))).toBe(true);
+    expect(publicPageBelongsInSitemap(completeProfile, new Set())).toBe(false);
+    expect(publicPageBelongsInSitemap({ ...completeProfile, bio: 'Trumpai apie mane.' }, new Set(['tutor-1']))).toBe(false);
+    expect(publicPageBelongsInSitemap({ ...completeProfile, user_id: null }, new Set(['tutor-1']))).toBe(false);
+    expect(publicPageBelongsInSitemap({ ...completeProfile, published: false }, new Set(['tutor-1']))).toBe(false);
+  });
+
+  it('allows a complete organization profile without a tutor subject', () => {
+    expect(publicPageBelongsInSitemap({
+      ...completeProfile,
+      slug: 'kalbu-studija',
+      owner_type: 'organization',
+      user_id: null,
+      organization_id: 'org-1',
+    }, new Set())).toBe(true);
+  });
+
   it('includes schools pages and domain-flavored about/contact slugs', () => {
     const urls = STATIC_PAGES.map((p) => p.urlFor('en'));
     expect(urls).toContain('https://www.tutlio.com/schools');
@@ -155,6 +231,7 @@ describe('sitemap', () => {
     expect(urls).toContain('https://www.tutlio.com/about');
     expect(urls).toContain('https://www.tutlio.com/contacts');
     expect(urls).toContain('https://www.tutlio.com/features');
+    expect(urls).toContain('https://www.tutlio.com/features/digital-business-card');
 
     const ltUrls = STATIC_PAGES.map((p) => p.urlFor('lt'));
     expect(ltUrls).toContain('https://www.tutlio.lt/apie-mus');

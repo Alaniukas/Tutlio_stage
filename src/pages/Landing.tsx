@@ -1,16 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import LandingNavbar from '@/components/LandingNavbar';
-import LandingFooter from '@/components/LandingFooter';
-import HeroSection from '@/components/landing/HeroSection';
-import StepsSection from '@/components/landing/StepsSection';
-import FeaturesSection from '@/components/landing/FeaturesSection';
-import IntegrationsSection from '@/components/landing/IntegrationsSection';
-import ShowcaseCards from '@/components/landing/ShowcaseCards';
-import CtaBanner from '@/components/landing/CtaBanner';
-import BlogSection from '@/components/landing/BlogSection';
 import { usePlatform } from '@/contexts/PlatformContext';
-import SchoolsLanding from '@/pages/SchoolsLanding';
+import NewLanding from '@/pages/NewLanding';
 import { supabase } from '@/lib/supabase';
 import { isStandalonePwa, loginPathForLastPortal } from '@/lib/pwaPortal';
 
@@ -47,22 +38,10 @@ export default function Landing() {
   }, [platform]);
 
   if (platform === 'schools' || platform === 'teachers') {
-    return <SchoolsLanding />;
+    // `/schools` is the public marketing surface. Keep `/school` reserved for
+    // the authenticated admin portal, which is routed separately in App.tsx.
+    return <NewLanding initialAudience="biz" />;
   }
 
-  return (
-    <div className="min-h-screen bg-white flex flex-col font-sans overflow-x-hidden">
-      <LandingNavbar />
-      <main className="flex-1 pt-[60px] md:pt-[72px]">
-        <HeroSection />
-        <StepsSection />
-        <FeaturesSection />
-        <IntegrationsSection />
-        <ShowcaseCards />
-        <CtaBanner />
-        <BlogSection />
-      </main>
-      <LandingFooter />
-    </div>
-  );
+  return <NewLanding />;
 }

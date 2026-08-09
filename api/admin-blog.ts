@@ -34,7 +34,7 @@ function requireAdmin(req: VercelRequest, res: VercelResponse): boolean {
   return true;
 }
 
-const LOCALES = ['lt', 'en', 'pl', 'lv', 'ee', 'fr', 'es', 'de', 'se', 'dk', 'fi', 'no'] as const;
+const LOCALES = ['lt', 'en', 'pl', 'lv', 'ee', 'fr', 'es', 'de', 'se', 'dk', 'fi', 'no', 'nl'] as const;
 const LOCALE_FIELDS = LOCALES.flatMap(l => [`title_${l}`, `excerpt_${l}`, `content_${l}`]);
 const SLUG_FIELDS = LOCALES.map(l => `slug_${l}`);
 const PUBLIC_LIST_FIELDS = ['id', 'slug', 'cover_image', 'tag', 'published_at',

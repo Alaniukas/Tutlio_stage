@@ -1,4 +1,8 @@
-import { PDFDocument, rgb, StandardFonts, type PDFImage, type PDFPage, type PDFFont, type RGB } from 'pdf-lib';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import fontkit from '@pdf-lib/fontkit';
+import { PDFDocument, rgb, type PDFImage, type PDFPage, type PDFFont, type RGB } from 'pdf-lib';
 
 export interface InvoicePdfBranding {
   brandName?: string;
@@ -59,13 +63,64 @@ const LINE_ITEM_FONT_SIZE = 9;
 const LINE_ITEM_LINE_HEIGHT = 13;
 const MIN_ROW_HEIGHT = 18;
 
+const FONT_FILES = {
+  regular: 'NotoSans-Regular.ttf',
+  bold: 'NotoSans-Bold.ttf',
+} as const;
+
+/** Candidate roots — Vercel serverless should use process.cwd(); local/tsx often uses import.meta.url. */
+export function invoiceFontCandidateDirs(): string[] {
+  const dirs: string[] = [];
+  const cwd = process.cwd();
+  dirs.push(join(cwd, 'api', '_lib', 'fonts'));
+  // Bundled / nested cwd variants seen on some Vercel builds
+  dirs.push(join(cwd, 'fonts'));
+  try {
+    dirs.push(join(dirname(fileURLToPath(import.meta.url)), 'fonts'));
+  } catch {
+    /* ignore */
+  }
+  return dirs;
+}
+
+export function resolveInvoiceFontPath(weight: 'regular' | 'bold'): string {
+  const fileName = FONT_FILES[weight];
+  for (const dir of invoiceFontCandidateDirs()) {
+    const full = join(dir, fileName);
+    if (existsSync(full)) return full;
+  }
+  throw new Error(
+    `Invoice PDF font missing: ${fileName}. Tried: ${invoiceFontCandidateDirs().join(' | ')}. ` +
+      'Ensure api/_lib/fonts/*.ttf are committed and listed in vercel.json includeFiles.',
+  );
+}
+
+let cachedRegular: Uint8Array | null = null;
+let cachedBold: Uint8Array | null = null;
+
+function loadInvoiceFontBytes(weight: 'regular' | 'bold'): Uint8Array {
+  if (weight === 'bold') {
+    if (!cachedBold) {
+      cachedBold = new Uint8Array(readFileSync(resolveInvoiceFontPath('bold')));
+    }
+    return cachedBold;
+  }
+  if (!cachedRegular) {
+    cachedRegular = new Uint8Array(readFileSync(resolveInvoiceFontPath('regular')));
+  }
+  return cachedRegular;
+}
+
 const LT_MAP: Record<string, string> = {
   'ą': 'a', 'č': 'c', 'ę': 'e', 'ė': 'e', 'į': 'i', 'š': 's', 'ų': 'u', 'ū': 'u', 'ž': 'z',
   'Ą': 'A', 'Č': 'C', 'Ę': 'E', 'Ė': 'E', 'Į': 'I', 'Š': 'S', 'Ų': 'U', 'Ū': 'U', 'Ž': 'Z',
 };
 const LT_RE = new RegExp(`[${Object.keys(LT_MAP).join('')}]`, 'g');
 
-/** Strip Lithuanian diacritics so pdf-lib StandardFonts (WinAnsi) can render the text. */
+/**
+ * Strip Lithuanian diacritics (legacy helper for WinAnsi / Helvetica).
+ * Invoice PDFs now use Noto Sans and render Unicode directly.
+ */
 export function asciify(text: string): string {
   return text.replace(LT_RE, (ch) => LT_MAP[ch] || ch);
 }
@@ -88,7 +143,7 @@ export function wrapInvoiceDescription(
     let current = '';
     for (const word of words) {
       const candidate = current ? `${current} ${word}` : word;
-      const width = font.widthOfTextAtSize(asciify(candidate), fontSize);
+      const width = font.widthOfTextAtSize(candidate, fontSize);
       if (width > maxWidth && current) {
         out.push(current);
         current = word;
@@ -115,9 +170,10 @@ type DrawCtx = {
 
 export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
+  doc.registerFontkit(fontkit);
+  const font = await doc.embedFont(loadInvoiceFontBytes('regular'), { subset: true });
+  const fontBold = await doc.embedFont(loadInvoiceFontBytes('bold'), { subset: true });
   let page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
 
   const defaultPrimary = rgb(0.24, 0.35, 0.59);
   const defaultSecondary = rgb(0.35, 0.45, 0.65);
@@ -158,7 +214,7 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
   }
 
   let y = headerTop - 16;
-  drawText(ctx, 'SASKAITA FAKTURA', MARGIN, y, { size: 16, bold: true, color: primary });
+  drawText(ctx, 'SĄSKAITA FAKTŪRA', MARGIN, y, { size: 16, bold: true, color: primary });
   y -= 22;
   drawText(ctx, `Nr. ${data.invoiceNumber}`, MARGIN, y, { size: 11, bold: true });
   drawText(ctx, `Data: ${data.issueDate}`, MARGIN + 250, y, { size: 9, color: ctx.gray });
@@ -192,8 +248,8 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
   const sellerX = MARGIN;
   const buyerX = MARGIN + halfWidth + 20;
 
-  drawText(ctx, 'PARDAVEJAS / PASLAUGU TEIKEJAS', sellerX, y, { size: 8, bold: true, color: ctx.gray });
-  drawText(ctx, 'PIRKEJAS / PASLAUGU GAVEJAS', buyerX, y, { size: 8, bold: true, color: ctx.gray });
+  drawText(ctx, 'PARDAVĖJAS / PASLAUGŲ TEIKĖJAS', sellerX, y, { size: 8, bold: true, color: ctx.gray });
+  drawText(ctx, 'PIRKĖJAS / PASLAUGŲ GAVĖJAS', buyerX, y, { size: 8, bold: true, color: ctx.gray });
   y -= 14;
 
   const sellerLines = buildEntityLines(data.seller);
@@ -230,7 +286,7 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
   });
 
   const tableHeaderTextY = tableHeaderBottom + 6;
-  drawText(ctx, 'Paslaugos aprasymas', colDesc, tableHeaderTextY, {
+  drawText(ctx, 'Paslaugos aprašymas', colDesc, tableHeaderTextY, {
     size: 8,
     bold: true,
     color: primary,
@@ -278,7 +334,7 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
   y -= 18;
 
   ensureSpace(80);
-  drawText(ctx, 'IS VISO:', colUnit - 30, y, { size: 11, bold: true });
+  drawText(ctx, 'IŠ VISO:', colUnit - 30, y, { size: 11, bold: true });
   drawText(ctx, `${formatEur(data.totalAmount)} EUR`, colTotal, y, {
     size: 11,
     bold: true,
@@ -287,7 +343,7 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
   y -= 18;
 
   if (data.deductedAmount != null && data.deductedAmount > 0) {
-    drawText(ctx, 'Jau apmoketa (isskaityta is jusu lesu):', colDesc + 130, y, {
+    drawText(ctx, 'Jau apmokėta (išskaityta iš jūsų lėšų):', colDesc + 130, y, {
       size: 9,
       color: ctx.gray,
     });
@@ -296,7 +352,7 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
   }
 
   if (data.amountDue != null) {
-    drawText(ctx, 'MOKETINA SUMA:', colUnit - 30, y, { size: 12, bold: true });
+    drawText(ctx, 'MOKĖTINA SUMA:', colUnit - 30, y, { size: 12, bold: true });
     drawText(ctx, `${formatEur(data.amountDue)} EUR`, colTotal, y, {
       size: 12,
       bold: true,
@@ -319,7 +375,7 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
 
   drawLine(ctx, MARGIN, y, PAGE_WIDTH - MARGIN);
   y -= 14;
-  drawText(ctx, 'Saskaita suformuota Tutlio platformoje | www.tutlio.lt', MARGIN, y, {
+  drawText(ctx, 'Sąskaita suformuota Tutlio platformoje | www.tutlio.lt', MARGIN, y, {
     size: 7,
     color: ctx.gray,
   });
@@ -355,7 +411,7 @@ function drawText(
 ) {
   const f = opts?.bold ? ctx.fontBold : ctx.font;
   const size = opts?.size || 9;
-  ctx.page.drawText(asciify(text), {
+  ctx.page.drawText(String(text ?? ''), {
     x,
     y: yPos,
     size,
@@ -375,7 +431,7 @@ function drawLine(ctx: DrawCtx, x1: number, yPos: number, x2: number) {
 
 function buildEntityLines(seller: InvoicePdfData['seller']): string[] {
   const lines: string[] = [seller.name];
-  if (seller.companyCode) lines.push(`Imones kodas: ${seller.companyCode}`);
+  if (seller.companyCode) lines.push(`Įmonės kodas: ${seller.companyCode}`);
   if (seller.vatCode) lines.push(`PVM kodas: ${seller.vatCode}`);
   if (seller.address) lines.push(seller.address);
   if (seller.activityNumber) lines.push(`Veiklos Nr.: ${seller.activityNumber}`);
@@ -387,7 +443,7 @@ function buildEntityLines(seller: InvoicePdfData['seller']): string[] {
 
 function buildBuyerLines(buyer: InvoicePdfData['buyer']): string[] {
   const lines: string[] = [buyer.name];
-  if (buyer.companyCode) lines.push(`Imones kodas: ${buyer.companyCode}`);
+  if (buyer.companyCode) lines.push(`Įmonės kodas: ${buyer.companyCode}`);
   if (buyer.vatCode) lines.push(`PVM kodas: ${buyer.vatCode}`);
   if (buyer.address) lines.push(buyer.address);
   if (buyer.email) lines.push(buyer.email);
@@ -395,6 +451,6 @@ function buildBuyerLines(buyer: InvoicePdfData['buyer']): string[] {
   return lines;
 }
 
-function formatEur(amount: number): string {
-  return amount.toFixed(2);
+function formatEur(n: number): string {
+  return n.toFixed(2).replace('.', ',');
 }

@@ -3,7 +3,7 @@ import StudentLayout from '@/components/StudentLayout';
 import { supabase } from '@/lib/supabase';
 import { useUser } from '@/contexts/UserContext';
 import { Eye, EyeOff, Trash2, AlertTriangle, Check, LogOut, Mail } from 'lucide-react';
-import { formatLithuanianPhone, validateLithuanianPhone } from '@/lib/utils';
+import { formatLocalizedPhone, validateLocalizedPhone } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useTranslation } from '@/lib/i18n';
 import { buildPlatformPath } from '@/lib/platform';
@@ -236,7 +236,7 @@ export default function StudentSettings() {
     const saveProfile = async () => {
         setSaving(true);
         setError(null);
-        if (phone && !validateLithuanianPhone(phone)) {
+        if (phone && !validateLocalizedPhone(phone, locale)) {
             setError(t('studentSettings.phoneFormatError'));
             setSaving(false);
             return;
@@ -302,7 +302,7 @@ export default function StudentSettings() {
                         </div>
                         <div>
                             <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">{t('common.phone')}</label>
-                            <input type="tel" value={phone} onChange={(e) => setPhone(formatLithuanianPhone(e.target.value))} className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 border border-transparent" />
+                            <input type="tel" value={phone} onChange={(e) => setPhone(formatLocalizedPhone(e.target.value, locale))} className="w-full px-4 py-3 bg-gray-50 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 border border-transparent" />
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                             <div>

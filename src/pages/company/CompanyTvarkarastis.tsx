@@ -2946,7 +2946,7 @@ export default function CompanyTvarkarastis() {
                   checked={createIsMakeup}
                   onChange={(e) => setCreateIsMakeup(e.target.checked)}
                 />
-                Kompensacinė pamoka (klientui nemokama)
+                {t('compSch.makeupLegend')} ({t('landing.v2.demo.free')})
               </label>
             )}
 
@@ -3195,12 +3195,12 @@ export default function CompanyTvarkarastis() {
                     )}
                     {selectedEvent.is_makeup && (
                       <span className="inline-flex items-center rounded-md border border-violet-300 bg-violet-50 px-1.5 py-0.5 text-[11px] font-semibold text-violet-800">
-                        Kompensacinė
+                        {t('compSch.makeupLegend')}
                       </span>
                     )}
                     {selectedEvent.cancellation_reason_code === 'tutor_no_show' && (
                       <span className="inline-flex items-center rounded-md border border-red-300 bg-red-50 px-1.5 py-0.5 text-[11px] font-semibold text-red-800">
-                        Korep. neatvyko
+                        {t('compSch.tutorNoShowLegend')}
                       </span>
                     )}
                   </div>

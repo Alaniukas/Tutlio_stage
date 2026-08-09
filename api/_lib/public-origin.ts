@@ -130,7 +130,7 @@ export function buildPublicPath(
   return `${platformPrefix}${localeSeg}${normalized}`;
 }
 
-const VALID_LOCALES = new Set(['lt','en','pl','lv','ee','fr','es','de','se','dk','fi','no']);
+const VALID_LOCALES = new Set(['lt','en','pl','lv','ee','fr','es','de','se','dk','fi','no','nl']);
 
 /** Resolve the email copy locale from the UI locale + request origin. */
 export function inviteEmailLocale(uiLocale: string | undefined, origin: string): string {

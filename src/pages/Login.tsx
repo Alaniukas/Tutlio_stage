@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase, setRememberMe } from '@/lib/supabase';
-import { getPasswordResetRedirectTo } from '@/lib/auth-redirects';
+import { getPasswordResetRedirectTo, safeInternalNextPath } from '@/lib/auth-redirects';
 import { detectAuthLocaleFromHost } from '@/lib/auth-locale';
 import { hasActiveSubscription, tutorHasPlatformSubscriptionAccess } from '@/lib/subscription';
 import { getOrgAdminDashboardPath } from '@/lib/orgAdminDashboardPath';
@@ -175,6 +175,7 @@ export default function Login() {
 
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const nextPath = safeInternalNextPath(searchParams.get('next'));
   const redirectOnceRef = useRef(false);
   const hashHandledRef = useRef(false);
   const redirectInFlightRef = useRef(false);
@@ -244,17 +245,17 @@ export default function Login() {
 
     if (portals.student && !portals.tutor) {
       setLastRolePortal('student');
-      navigate('/student');
+      navigate(nextPath?.startsWith('/student') ? nextPath : '/student');
       return true;
     }
 
     const homePath = await getHomePathForPortals(user.id, portals);
     if (homePath && homePath !== '/dashboard') {
-      navigate(homePath);
+      navigate(nextPath || homePath);
       return true;
     }
     if (portals.student && !portals.tutor) {
-      navigate('/student');
+      navigate(nextPath?.startsWith('/student') ? nextPath : '/student');
       return true;
     }
 
@@ -301,7 +302,7 @@ export default function Login() {
     // Tutor: if has org or subscription → dashboard. Otherwise stay on login so user can sign out
     const hasAccess = tutorHasPlatformSubscriptionAccess(profile);
     if (hasAccess) {
-      navigate('/dashboard');
+      navigate(nextPath || '/dashboard');
       return true;
     }
     const { data: { session: authSession } } = await supabase.auth.getSession();
@@ -313,7 +314,7 @@ export default function Login() {
         });
         const data = res.ok ? await res.json().catch(() => null) : null;
         if (hasActiveSubscription(data?.subscription_status) || ['canceled', 'past_due', 'unpaid'].includes(data?.subscription_status || '')) {
-          navigate('/dashboard');
+          navigate(nextPath || '/dashboard');
           return true;
         }
       } catch (_) {}
@@ -331,7 +332,17 @@ export default function Login() {
     if (saved.email) setEmail(saved.email);
     if (saved.password) setPassword(saved.password);
     setRememberMeState(saved.rememberMe);
-  }, []);
+    // Deep-link from reminder emails: open the matching portal login form.
+    if (nextPath?.startsWith('/student')) setRole('student');
+    else if (nextPath?.startsWith('/parent')) setRole('parent');
+    else if (
+      nextPath?.startsWith('/calendar')
+      || nextPath === '/dashboard'
+      || nextPath?.startsWith('/dashboard')
+    ) {
+      setRole('tutor');
+    }
+  }, [nextPath]);
 
   useEffect(() => {
     const code = searchParams.get('auth_error');
@@ -386,7 +397,7 @@ export default function Login() {
       // Clear logout intent when user is actively logging in
       sessionStorage.removeItem('tutlio_logout_intent');
       const { data, error } = await withTimeout(
-        supabase.auth.signInWithPassword({ email, password }),
+        supabase.auth.signInWithPassword({ email: email.trim(), password }),
         30000,
         'Login timeout',
       );
@@ -426,14 +437,14 @@ export default function Login() {
 
         if (role === 'parent') {
           setLoading(false);
-          navigate('/parent');
+          navigate(nextPath?.startsWith('/parent') ? nextPath : '/parent');
           return;
         }
 
         if (role === 'student') {
           setLastRolePortal('student');
           setLoading(false);
-          navigate('/student');
+          navigate(nextPath?.startsWith('/student') ? nextPath : '/student');
           return;
         }
 
@@ -488,7 +499,7 @@ export default function Login() {
         if (tutorData) {
           setLoading(false);
           await supabase.auth.getSession();
-          navigate('/dashboard');
+          navigate(nextPath || '/dashboard');
           return;
         }
 
@@ -496,7 +507,7 @@ export default function Login() {
         // User is already authenticated; downstream pages remain protected by RLS/API auth.
         console.warn('[Login] tutor profile not resolved after auth - allowing dashboard navigation');
         setLoading(false);
-        navigate('/dashboard');
+        navigate(nextPath || '/dashboard');
         return;
       }
 

@@ -5,6 +5,26 @@ export function getAppOrigin(viteAppUrl: string | undefined, windowOrigin: strin
   return String(viteAppUrl || windowOrigin).replace(/\/$/, '');
 }
 
+/** Only same-origin relative paths (blocks open redirects). */
+export function safeInternalNextPath(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  let path = String(raw).trim();
+  try {
+    // Gmail / clients sometimes double-encode query values.
+    if (path.includes('%')) path = decodeURIComponent(path);
+  } catch {
+    // keep raw
+  }
+  if (!path.startsWith('/') || path.startsWith('//') || path.includes('://')) return null;
+  return path;
+}
+
+export function loginHrefWithNext(nextPath: string): string {
+  const safe = safeInternalNextPath(nextPath);
+  if (!safe) return '/login';
+  return `/login?next=${encodeURIComponent(safe)}`;
+}
+
 /** redirect_to slaptažodžio atkūrimo el. laiške – per /auth/callback į /reset-password. */
 export function getPasswordResetRedirectTo(
   viteAppUrl: string | undefined,

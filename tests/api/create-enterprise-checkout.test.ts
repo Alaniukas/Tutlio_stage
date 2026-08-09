@@ -160,6 +160,7 @@ describe('POST /api/create-enterprise-checkout', () => {
     expect(params.metadata.organization_id).toBeUndefined();
     expect(params.success_url).toContain('/enterprise/success');
     expect(params.success_url).toContain('flow=new');
+    expect(params.cancel_url).toContain('audience=agency');
   });
 
   it('attaches the organization for a logged-in org admin and reuses the Stripe customer', async () => {

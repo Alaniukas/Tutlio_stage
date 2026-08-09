@@ -49,6 +49,8 @@ export function buildSchoolContractExportRows(
 // export was named "truksta-duomenu", whatever the filter).
 const CONTRACT_FILTER_FILENAME_SLUGS: Record<SchoolContractFilter | 'unsigned', string> = {
   all: 'visos',
+  draft: 'juodrasciai',
+  sent: 'issiustos',
   awaiting_school: 'nepasirasyta-mokyklos',
   awaiting_parents: 'nepasirasyta-tevu',
   incomplete_data: 'truksta-duomenu',

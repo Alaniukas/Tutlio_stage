@@ -6,6 +6,7 @@ import { useTranslation } from '@/lib/i18n';
 import { currentMarket } from '@/lib/market';
 import { formatMarketAmount } from '@/lib/stripeLessonPricing';
 import { CreditCard, FileText, Loader2, Package, CheckCircle, Landmark } from 'lucide-react';
+import { format } from 'date-fns';
 
 type PackageRow = {
   id: string;
@@ -32,7 +33,7 @@ type InvoiceRow = {
   pdf_storage_path: string | null;
 };
 
-function packageLabel(pkg: PackageRow): string {
+function packageLabel(pkg: PackageRow, fallback: string): string {
   const items = Array.isArray(pkg.lesson_package_items) ? pkg.lesson_package_items : [];
   const names = items
     .map((it) => {
@@ -41,7 +42,7 @@ function packageLabel(pkg: PackageRow): string {
     })
     .filter(Boolean) as string[];
   if (names.length > 0) return names.join(', ');
-  return pkg.subject?.name || 'Pamokų paketas';
+  return pkg.subject?.name || fallback;
 }
 
 /**
@@ -49,7 +50,7 @@ function packageLabel(pkg: PackageRow): string {
  * packages with a pay button + payment history + issued invoices.
  */
 export default function StudentPayments() {
-  const { t } = useTranslation();
+  const { t, dateFnsLocale } = useTranslation();
   const market = currentMarket();
   const fmt = (amount: number | null | undefined) => formatMarketAmount(amount, market);
   const [loading, setLoading] = useState(true);
@@ -137,7 +138,7 @@ export default function StudentPayments() {
                     <div className="min-w-0">
                       <p className="text-sm font-semibold text-gray-900 truncate flex items-center gap-1.5">
                         <Package className="w-4 h-4 text-amber-600 shrink-0" />
-                        {packageLabel(pkg)}
+                        {packageLabel(pkg, t('package.title'))}
                       </p>
                       <p className="text-xs text-gray-600 mt-0.5">
                         {t('stuPay.lessonsCount', { count: String(pkg.total_lessons) })}
@@ -171,10 +172,10 @@ export default function StudentPayments() {
                 history.map((pkg) => (
                   <div key={pkg.id} className="rounded-2xl border border-gray-100 bg-white p-4 flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{packageLabel(pkg)}</p>
+                      <p className="text-sm font-medium text-gray-900 truncate">{packageLabel(pkg, t('package.title'))}</p>
                       <p className="text-xs text-gray-500 mt-0.5">
                         {t('stuPay.lessonsCount', { count: String(pkg.total_lessons) })}
-                        {pkg.paid_at && <> · {new Date(pkg.paid_at).toLocaleDateString('lt-LT')}</>}
+                        {pkg.paid_at && <> · {format(new Date(pkg.paid_at), 'P', { locale: dateFnsLocale })}</>}
                       </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
@@ -206,7 +207,7 @@ export default function StudentPayments() {
                       <FileText className="w-4 h-4 text-gray-400 shrink-0" />
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-gray-900 truncate">{invoice.invoice_number || t('stuPay.invoiceFallback')}</p>
-                        <p className="text-xs text-gray-500">{new Date(invoice.created_at).toLocaleDateString('lt-LT')}</p>
+                        <p className="text-xs text-gray-500">{format(new Date(invoice.created_at), 'P', { locale: dateFnsLocale })}</p>
                       </div>
                     </div>
                     {invoice.total_amount != null && (

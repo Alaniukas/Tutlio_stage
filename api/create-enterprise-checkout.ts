@@ -109,7 +109,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const cancelPath = buildPublicPath('/pricing', localeCode, checkoutAudience, appOrigin);
     const flow = orgAdmin ? 'org' : 'new';
     const successUrl = `${appOrigin}${successPath}?session_id={CHECKOUT_SESSION_ID}&flow=${flow}`;
-    const cancelUrl = `${appOrigin}${cancelPath}?canceled=1`;
+    const cancelUrl = `${appOrigin}${cancelPath}?canceled=1&audience=agency`;
 
     const metadata: Record<string, string> = {
       tutlio_enterprise: '1',
@@ -121,7 +121,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         : { company_name: trimmedCompanyName }),
     };
 
-    const checkoutLocale = localeCode === 'en' ? 'en' : localeCode === 'pl' ? 'pl' : 'lt';
+    const checkoutLocale = localeCode === 'en' ? 'en' : localeCode === 'pl' ? 'pl' : localeCode === 'nl' ? 'nl' : 'lt';
 
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
       mode: 'subscription',

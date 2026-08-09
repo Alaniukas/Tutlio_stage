@@ -4,6 +4,7 @@ import ParentLayout from '@/components/ParentLayout';
 import StatusBadge from '@/components/StatusBadge';
 import { supabase } from '@/lib/supabase';
 import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
+import { startPerlasPayment } from '@/lib/perlasPay';
 import { dedupeAsync } from '@/lib/dataCache';
 import { authHeaders } from '@/lib/apiHelpers';
 import { format, addDays, getDay, startOfWeek, parse, addHours, isBefore, isAfter, parseISO, differenceInHours, startOfMonth, endOfMonth, startOfDay, endOfDay } from 'date-fns';
@@ -1614,11 +1615,7 @@ export default function StudentSchedule() {
             });
             const json = await res.json().catch(() => ({ error: t('stuSess.paymentConnectFailed') }));
             if (json.url && json.token) {
-                if ((window as any).PerlasPay) {
-                    (window as any).PerlasPay.init(json.url, json.token);
-                } else {
-                    window.location.href = `${json.url}pay/${json.token}`;
-                }
+                await startPerlasPayment(json.url, json.token);
                 setPerlasLoading(false);
                 return;
             }
@@ -1762,7 +1759,7 @@ export default function StudentSchedule() {
                     isParentRoute ? "flex-1 min-h-0" : "h-[calc(100vh-96px)]"
                 )}>
                     <div className="mb-4">
-                        <h1 className="text-2xl font-black text-gray-900 mb-1">Rezervacijos kalendorius</h1>
+                        <h1 className="text-2xl font-black text-gray-900 mb-1">{t('stuSched.bookLesson')}</h1>
                         <p className="text-gray-400 text-sm">{t('stuSched.selectFreeTime')}</p>
                     </div>
 
@@ -1813,10 +1810,10 @@ export default function StudentSchedule() {
                                 <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4 animate-bounce">
                                     <Check className="w-8 h-8 text-green-600" />
                                 </div>
-                                <h3 className="text-lg font-black text-gray-900 mb-1">Pavyko!</h3>
+                                <h3 className="text-lg font-black text-gray-900 mb-1">{t('register.success')}</h3>
                                 <p className="text-sm text-gray-600 mb-4">{successMsg}</p>
                                 <button onClick={() => setSuccessMsg('')} className="w-full py-3 rounded-2xl bg-green-600 text-white font-bold hover:bg-green-700 transition-colors">
-                                    Supratau
+                                    {t('stuSess.okBtn')}
                                 </button>
                             </div>
                         </div>
@@ -1841,7 +1838,7 @@ export default function StudentSchedule() {
                             <div className="flex items-center bg-gray-50 rounded-xl p-1 shrink-0">
                                 <button onClick={() => setCurrentView(Views.MONTH)} className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition-all', currentView === Views.MONTH ? 'bg-white text-violet-700 shadow-sm' : 'text-gray-500 hover:text-gray-700')}><LayoutGrid className="w-3.5 h-3.5" /><span className="hidden sm:inline">{t('stuSched.month')}</span></button>
                                 <button onClick={() => setCurrentView(Views.WEEK)} className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition-all', currentView === Views.WEEK ? 'bg-white text-violet-700 shadow-sm' : 'text-gray-500 hover:text-gray-700')}><CalendarDays className="w-3.5 h-3.5" /><span className="hidden sm:inline">{t('stuSched.week')}</span></button>
-                                <button onClick={() => setCurrentView(Views.DAY)} className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition-all', currentView === Views.DAY ? 'bg-white text-violet-700 shadow-sm' : 'text-gray-500 hover:text-gray-700')}><List className="w-3.5 h-3.5" /><span className="hidden sm:inline">Diena</span></button>
+                                <button onClick={() => setCurrentView(Views.DAY)} className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition-all', currentView === Views.DAY ? 'bg-white text-violet-700 shadow-sm' : 'text-gray-500 hover:text-gray-700')}><List className="w-3.5 h-3.5" /><span className="hidden sm:inline">{t('cal.day')}</span></button>
                             </div>
                         </div>
 
@@ -2132,7 +2129,7 @@ export default function StudentSchedule() {
                                                     <span className="font-bold text-amber-800">{waitlistCount + 1}</span>
                                                 </div>
                                                 <div className="flex justify-between">
-                                                    <span>Paskutinis laikas stoti:</span>
+                                                    <span>{t('lessonSet.bookingDeadline')}:</span>
                                                     <span className="font-bold text-amber-800">{format(deadline, 'yyyy-MM-dd HH:mm')}</span>
                                                 </div>
                                             </div>
@@ -2436,12 +2433,12 @@ export default function StudentSchedule() {
                     <div className="space-y-4 py-2">
                         {pendingPaymentSession && (
                             <div className="bg-gray-50 rounded-xl p-4 text-sm space-y-1 text-gray-700">
-                                <p><span className="font-medium">Data:</span> {format(pendingPaymentSession.start, 'yyyy-MM-dd HH:mm', { locale: dateFnsLocale })}</p>
+                                <p><span className="font-medium">{t('common.date')}:</span> {format(pendingPaymentSession.start, 'yyyy-MM-dd HH:mm', { locale: dateFnsLocale })}</p>
                                 {pendingPaymentSession.price != null && (() => {
                                     const { creditApplied, remaining } = lessonCreditBreakdown(pendingPaymentSession.price);
                                     return (
                                         <>
-                                            <p><span className="font-medium">Pamokos kaina:</span> {fmt(pendingPaymentSession.price)}</p>
+                                            <p><span className="font-medium">{t('studentDash.priceLabel')}:</span> {fmt(pendingPaymentSession.price)}</p>
                                             {creditApplied > 0 && (
                                                 <p className="text-emerald-700 font-medium">
                                                     {t('stuSched.creditRowApplied')}: {fmt(creditApplied)}

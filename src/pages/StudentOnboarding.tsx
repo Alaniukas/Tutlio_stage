@@ -2,8 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { Check, ArrowRight, AlertCircle, Eye, EyeOff, ChevronLeft, User, Users, Mail, Phone } from 'lucide-react';
-import { formatLithuanianPhone, validateLithuanianPhone } from '@/lib/utils';
-import { cn } from '@/lib/utils';
+import { cn, formatLocalizedPhone, getLocalizedPhonePlaceholder, validateLocalizedPhone } from '@/lib/utils';
 import { useTranslation } from '@/lib/i18n';
 
 type Step = 'verify' | 'profile' | 'account' | 'done';
@@ -32,13 +31,14 @@ function schoolParentPayerCompleteFromInvite(
     name: string,
     email: string,
     phoneRaw: string,
+    locale: string,
 ): boolean {
     if (!isSchool) return false;
     const n = name.trim();
     const e = email.trim();
-    const p = formatLithuanianPhone((phoneRaw || '').trim());
+    const p = formatLocalizedPhone((phoneRaw || '').trim(), locale);
     if (!n || !e || !p.trim()) return false;
-    return validateLithuanianPhone(p);
+    return validateLocalizedPhone(p, locale);
 }
 
 interface Subject {
@@ -155,8 +155,9 @@ export default function StudentOnboarding() {
                 payerName,
                 payerEmail,
                 payerPhone,
+                locale,
             ),
-        [isSchoolInvite, payerName, payerEmail, payerPhone],
+        [isSchoolInvite, payerName, payerEmail, payerPhone, locale],
     );
 
     const calculateAgeFromDate = (dateValue?: string | null): string => {
@@ -231,7 +232,7 @@ export default function StudentOnboarding() {
             setPayerType(isSchoolOrg ? 'parent' : 'self');
             setPayerName(isSchoolOrg ? (data.payer_name || '') : '');
             setPayerEmail(isSchoolOrg ? (data.payer_email || '') : '');
-            setPayerPhone(isSchoolOrg ? formatLithuanianPhone(data.payer_phone || '') : '');
+            setPayerPhone(isSchoolOrg ? formatLocalizedPhone(data.payer_phone || '', locale) : '');
             setAge(calculateAgeFromDate(data.child_birth_date));
 
             if (data.tutor_id) {
@@ -259,7 +260,7 @@ export default function StudentOnboarding() {
     const handleVerify = () => {
         if (!email.trim()) { showError(t('onboard.emailMandatory')); return; }
         if (!phone.trim()) { showError(t('onboard.phoneMandatory')); return; }
-        if (!validateLithuanianPhone(phone)) { showError(t('onboard.phoneFormatError')); return; }
+        if (!validateLocalizedPhone(phone, locale)) { showError(t('onboard.phoneFormatError')); return; }
         setError(null);
         setStudentData((prev) => prev ? { ...prev, email: email.trim(), phone: phone.trim() } : prev);
         setStep('profile');
@@ -272,8 +273,8 @@ export default function StudentOnboarding() {
             if (!payerName.trim()) { showError(t('onboard.parentNameReq')); return; }
             if (!payerEmail.trim()) { showError(t('onboard.parentEmailReq')); return; }
             if (!payerPhone.trim()) { showError(t('onboard.parentPhoneReq')); return; }
-            const pNorm = formatLithuanianPhone(payerPhone);
-            if (!validateLithuanianPhone(pNorm)) { showError(t('onboard.parentPhoneFormat')); return; }
+            const pNorm = formatLocalizedPhone(payerPhone, locale);
+            if (!validateLocalizedPhone(pNorm, locale)) { showError(t('onboard.parentPhoneFormat')); return; }
         }
         setError(null);
         setStep('account');
@@ -457,8 +458,8 @@ export default function StudentOnboarding() {
                                 <input
                                     type="tel"
                                     value={phone}
-                                    onChange={(e) => setPhone(formatLithuanianPhone(e.target.value))}
-                                    placeholder="+37060000000"
+                                    onChange={(e) => setPhone(formatLocalizedPhone(e.target.value, locale))}
+                                    placeholder={getLocalizedPhonePlaceholder(locale)}
                                     required
                                     className={`w-full px-4 py-3 rounded-2xl border text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 bg-gray-50 ${!phone.trim() && error ? 'border-red-400' : 'border-gray-200'}`}
                                 />
@@ -601,7 +602,7 @@ export default function StudentOnboarding() {
                                                 type="email"
                                                 value={payerEmail}
                                                 onChange={(e) => setPayerEmail(e.target.value)}
-                                                placeholder="tevas@pavyzdys.lt"
+                                                placeholder={locale === 'es' ? 'padre@ejemplo.es' : 'parent@example.com'}
                                                 className="w-full px-4 py-3 rounded-2xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 bg-gray-50"
                                             />
                                         </div>
@@ -612,8 +613,8 @@ export default function StudentOnboarding() {
                                             <input
                                                 type="tel"
                                                 value={payerPhone}
-                                                onChange={(e) => setPayerPhone(formatLithuanianPhone(e.target.value))}
-                                                placeholder="+370 600 00000"
+                                                onChange={(e) => setPayerPhone(formatLocalizedPhone(e.target.value, locale))}
+                                                placeholder={getLocalizedPhonePlaceholder(locale)}
                                                 required
                                                 className="w-full px-4 py-3 rounded-2xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 bg-gray-50"
                                             />

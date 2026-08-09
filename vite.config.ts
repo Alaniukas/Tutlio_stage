@@ -28,15 +28,33 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // Keep index.html network-fresh: precaching HTML pins stale hashed /assets/main-*.js
-        // references after deploy (white screen on tutlio.com until SW/cache clears).
-        globPatterns: ['**/*.{js,css,ico,png,svg,woff2}'],
+        // Keep HTML network-fresh and let hashed JS use the browser's normal
+        // on-demand cache. Precaching every private dashboard/whiteboard chunk
+        // made a marketing visit download ~20 MB in the background.
+        globPatterns: ['**/*.{css,ico,png,svg,woff2}'],
+        // Locale-specific marketing screenshots are loaded responsively on the
+        // feature page; precaching every language pair would add ~40 MB.
+        globIgnores: ['landing/digital-business-card-*.png'],
+        // Workbox's navigateFallback must exist in the precache manifest. Add
+        // only the SPA shell rather than every generated/static HTML file.
+        additionalManifestEntries: [{ url: 'index.html', revision: null }],
         maximumFileSizeToCacheInBytes: 7 * 1024 * 1024,
         navigateFallback: 'index.html',
         // SEO/crawler files must never be answered with the SPA shell from the SW.
         navigateFallbackDenylist: [/^\/api\//, /^\/(robots\.txt|sitemap\.xml|llms(-full)?\.txt)$/, /\/blog\/rss\.xml$/, /^\/preview-assign-student-modal\.html$/],
         importScripts: ['/push-sw.js'],
         runtimeCaching: [
+          // Preserve installed-PWA reloads without downloading every private
+          // route up front: cache only hashed chunks the user actually visits.
+          {
+            urlPattern: /\/assets\/.*\.js$/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'app-js',
+              expiration: { maxEntries: 120, maxAgeSeconds: 30 * 24 * 60 * 60 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
           // Storage object GET/POST must not be served stale from SW during whiteboard collaboration.
           {
             urlPattern: /^https:\/\/[^/]+\.supabase\.co\/storage\/v1\//i,

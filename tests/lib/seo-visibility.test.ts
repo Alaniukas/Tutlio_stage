@@ -15,10 +15,11 @@ import { DISALLOW_PATHS } from '../../api/robots.js';
 import { FEATURE_PAGES, FEATURE_PAGE_IDS } from '../../src/lib/featurePages.js';
 import { en } from '../../src/lib/i18n/en.js';
 import { lt } from '../../src/lib/i18n/lt.js';
+import { htmlLanguageCode } from '../../src/lib/i18n/core.js';
 
 // ISO 639-1 language codes valid as hreflang values for our markets.
 const VALID_LANGUAGE_CODES = new Set([
-  'lt', 'en', 'pl', 'lv', 'et', 'fr', 'es', 'de', 'sv', 'da', 'fi', 'no',
+  'lt', 'en', 'pl', 'lv', 'et', 'fr', 'es', 'de', 'sv', 'da', 'fi', 'no', 'nl',
 ]);
 
 describe('hreflang language codes', () => {
@@ -29,7 +30,7 @@ describe('hreflang language codes', () => {
   });
 
   it('keeps already-valid codes unchanged', () => {
-    for (const locale of ['lt', 'en', 'pl', 'lv', 'fr', 'es', 'de', 'fi', 'no'] as const) {
+    for (const locale of ['lt', 'en', 'pl', 'lv', 'fr', 'es', 'de', 'fi', 'no', 'nl'] as const) {
       expect(hreflangCode(locale)).toBe(locale);
     }
   });
@@ -37,6 +38,7 @@ describe('hreflang language codes', () => {
   it('produces a valid language code for every locale', () => {
     for (const locale of LOCALES) {
       expect(VALID_LANGUAGE_CODES.has(hreflangCode(locale))).toBe(true);
+      expect(htmlLanguageCode(locale)).toBe(hreflangCode(locale));
     }
   });
 
@@ -49,8 +51,8 @@ describe('hreflang language codes', () => {
     expect(langs).toContain('da');
     expect(langs).not.toContain('ee');
     expect(langs).not.toContain('dk');
-    // 12 locales + x-default
-    expect(links).toHaveLength(13);
+    // 13 locales + x-default
+    expect(links).toHaveLength(14);
 
     const et = links.find((l) => l.lang === 'et');
     expect(et?.href).toBe('https://www.tutlio.com/ee/pricing');

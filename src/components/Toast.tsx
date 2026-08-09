@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { CheckCircle, XCircle, AlertTriangle, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -29,7 +30,6 @@ export default function Toast({ message, type = 'success', duration = 4000, onCl
     const Icon = ICONS[type];
 
     useEffect(() => {
-        // Slide in
         requestAnimationFrame(() => setVisible(true));
 
         const timer = setTimeout(() => {
@@ -40,10 +40,12 @@ export default function Toast({ message, type = 'success', duration = 4000, onCl
         return () => clearTimeout(timer);
     }, [duration, onClose]);
 
-    return (
+    if (typeof document === 'undefined') return null;
+
+    return createPortal(
         <div
             className={cn(
-                'fixed top-6 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-3 px-5 py-3.5 rounded-2xl transition-all duration-400 w-[calc(100vw-2rem)] sm:min-w-[320px] max-w-[500px]',
+                'fixed top-6 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-3 px-5 py-3.5 rounded-2xl transition-all duration-400 w-[calc(100vw-2rem)] sm:min-w-[320px] max-w-[500px]',
                 STYLES[type],
                 visible && !leaving ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4',
             )}
@@ -51,6 +53,7 @@ export default function Toast({ message, type = 'success', duration = 4000, onCl
             <Icon className="w-5 h-5 flex-shrink-0" />
             <span className="text-sm font-medium flex-1">{message}</span>
             <button
+                type="button"
                 onClick={() => {
                     setLeaving(true);
                     setTimeout(onClose, 400);
@@ -59,6 +62,7 @@ export default function Toast({ message, type = 'success', duration = 4000, onCl
             >
                 <X className="w-4 h-4" />
             </button>
-        </div>
+        </div>,
+        document.body,
     );
 }

@@ -12,6 +12,7 @@ import {
 } from './_lib/soloManualStudentPayments.js';
 import { isOrgTutor } from './_lib/isOrgTutor.js';
 import { requireCronAuth } from './_lib/cronAuth.js';
+import { isReminderOptedOut } from './_lib/reminderOptOut.js';
 
 const supabase = createClient(
     process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL!,
@@ -143,6 +144,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
             const toEmail = (student?.payer_email || student?.email || '').trim();
             if (!toEmail) {
+                skipped.push(session.id);
+                continue;
+            }
+            if (await isReminderOptedOut(supabase, toEmail)) {
                 skipped.push(session.id);
                 continue;
             }

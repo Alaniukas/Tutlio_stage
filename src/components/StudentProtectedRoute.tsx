@@ -3,6 +3,7 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { resolveAccountPortals, setLastRolePortal, type AccountPortals } from '@/lib/account-portal';
 import { rpcGetStudentByUserIdDeduped } from '@/lib/preload';
 import { useUser } from '@/contexts/UserContext';
+import { loginHrefWithNext } from '@/lib/auth-redirects';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -132,5 +133,5 @@ export default function StudentProtectedRoute() {
         </>
     );
     if (allowInvoiceSuccess) return <Outlet />;
-    return <Navigate to="/login" replace />;
+    return <Navigate to={loginHrefWithNext(`${location.pathname}${location.search}`)} replace />;
 }

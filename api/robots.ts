@@ -24,6 +24,8 @@ const ALLOW_PATHS = [
   '/schools/',
   '/teachers',
   '/teachers/',
+  '/tutor/',
+  '/korepetitorius/',
   '/llms.txt',
   '/llms-full.txt',
 ];

@@ -85,9 +85,9 @@ function bootApp() {
     );
   };
 
-  // Non-default locales load their dictionary as a separate chunk. Wait for it
-  // before the first paint so deep links like /fr/pricing never flash English;
-  // for lt/en/pl (the bundled domain defaults) this renders synchronously.
+  // Every locale is a separate chunk. Wait for the requested dictionary before
+  // first paint so deep links never flash another language and visitors never
+  // download the two unrelated domain-default dictionaries.
   const initialLocale = detectLocale();
   if (isLocaleLoaded(initialLocale)) {
     renderApp();

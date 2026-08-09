@@ -4,6 +4,7 @@ import ParentLayout from '@/components/ParentLayout';
 import StatusBadge from '@/components/StatusBadge';
 import { supabase } from '@/lib/supabase';
 import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
+import { startPerlasPayment } from '@/lib/perlasPay';
 import { getCached, setCache, dedupeAsync } from '@/lib/dataCache';
 import { sendEmail } from '@/lib/email';
 import { authHeaders } from '@/lib/apiHelpers';
@@ -472,11 +473,7 @@ export default function StudentSessions() {
             });
             const json = await res.json().catch(() => ({ error: t('stuSess.paymentConnectFailed') }));
             if (json.url && json.token) {
-                if ((window as any).PerlasPay) {
-                    (window as any).PerlasPay.init(json.url, json.token);
-                } else {
-                    window.location.href = `${json.url}pay/${json.token}`;
-                }
+                await startPerlasPayment(json.url, json.token);
                 setPerlasLoading(false);
                 return;
             }
@@ -1287,7 +1284,7 @@ export default function StudentSessions() {
             </Dialog>
             <div className={`px-4 pt-6${isParentLessonsRoute ? ' pb-28' : ''}`}>
                 <h1 className="text-2xl font-black text-gray-900 mb-1">
-                    {isParentLessonsRoute ? (t('parent.sessionsTitle') || 'Pamokos') : 'Pamokos'}
+                    {isParentLessonsRoute ? t('parent.sessionsTitle') : t('stuSess.tabLessons')}
                 </h1>
                 <p className="text-gray-400 text-sm mb-3">{t('stuSess.allSessions')}</p>
 
@@ -1590,7 +1587,7 @@ export default function StudentSessions() {
                                             )}
                                         </div>
                                         <div className="flex-1 min-w-0">
-                                            <p className="font-bold text-gray-900 text-sm truncate">{ds?.topic || 'Pamoka'}</p>
+                                            <p className="font-bold text-gray-900 text-sm truncate">{ds?.topic || t('common.lesson')}</p>
                                             {ds?.start_time ? (
                                                 <p className="text-xs text-gray-500 mt-0.5">
                                                     {format(new Date(ds.start_time), 'EEEE, MMMM d', { locale: dateFnsLocale })} · {format(new Date(ds.start_time), 'HH:mm')}
@@ -1811,7 +1808,7 @@ export default function StudentSessions() {
                             ) : (
                                 <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-100 text-gray-400 text-sm">
                                     <Video className="w-4 h-4" />
-                                    <span>Susitikimo nuoroda nenurodyta</span>
+                                    <span>{t('stuSess.linkNotAvailable')}</span>
                                 </div>
                             )
                         )}
@@ -1899,7 +1896,7 @@ export default function StudentSessions() {
                                 className="flex-1 rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300"
                             >
                                 <RefreshCw className={cn("w-4 h-4 mr-2", rescheduleLoading && "animate-spin")} />
-                                Perkelti
+                                {t('studentDash.reschedule')}
                             </Button>
                             <Button
                                 variant="destructive"
@@ -1955,7 +1952,7 @@ export default function StudentSessions() {
                         return (
                             <div className="space-y-4 py-3">
                                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                                    <p className="text-sm font-semibold text-amber-800 mb-1">Ar tikrai nenorite perkelti pamokos?</p>
+                                    <p className="text-sm font-semibold text-amber-800 mb-1">{t('stuSess.rescheduleConfirm')}</p>
                                     <p className="text-sm text-amber-700">
                                         {t('stuSess.rescheduleNote')}
                                     </p>
@@ -2010,7 +2007,7 @@ export default function StudentSessions() {
                                         className="flex-1 rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300"
                                     >
                                         <RefreshCw className={cn("w-4 h-4 mr-2", rescheduleLoading && "animate-spin")} />
-                                        Perkelti
+                                        {t('studentDash.reschedule')}
                                     </Button>
                                     )}
                                     {hasPenalty && paymentType === 'per_lesson' && !selectedSession.paid && !manualPaymentsOnly ? (
@@ -2024,7 +2021,7 @@ export default function StudentSessions() {
                                             disabled={stripeLoading}
                                         >
                                             {stripeLoading ? (
-                                                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Jungiama...</>
+                                                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> {t('stuSess.processing')}</>
                                             ) : (
                                                 <>
                                                     <CreditCard className="w-4 h-4 mr-2" />
@@ -2079,7 +2076,7 @@ export default function StudentSessions() {
                                         rows={3}
                                     />
                                     {cancellationReason.length > 0 && cancellationReason.trim().length < 5 && (
-                                        <p className="text-xs text-red-500">Bent 5 simboliai ({cancellationReason.trim().length}/5)</p>
+                                        <p className="text-xs text-red-500">{t('cal.cancellationMin5')} ({cancellationReason.trim().length}/5)</p>
                                     )}
                                 </div>
                                 <div className="flex gap-3">
@@ -2221,7 +2218,7 @@ export default function StudentSessions() {
                                 </div>
                                 <div className="flex justify-center text-gray-400 text-lg font-bold">↓</div>
                                 <div className="bg-green-50 border border-green-100 rounded-xl p-3">
-                                    <p className="text-xs text-green-500 font-bold uppercase tracking-wider mb-1">Naujas laikas</p>
+                                    <p className="text-xs text-green-500 font-bold uppercase tracking-wider mb-1">{t('stuSess.chooseNewTime')}</p>
                                     <p className="font-bold text-gray-900 text-sm capitalize">
                                         {format(selectedNewSlot.start, 'EEEE, d MMMM', { locale: dateFnsLocale })}
                                     </p>
@@ -2231,9 +2228,9 @@ export default function StudentSessions() {
                                 </div>
                             </div>
                             <div className="flex gap-3">
-                                <Button variant="outline" onClick={() => setModalStep('picking')} className="flex-1 rounded-xl">Keisti</Button>
+                                <Button variant="outline" onClick={() => setModalStep('picking')} className="flex-1 rounded-xl">{t('common.edit')}</Button>
                                 <Button onClick={handleConfirmReschedule} disabled={saving} className="flex-1 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white">
-                                    {saving ? 'Perkeliama...' : 'Taip, perkelti'}
+                                    {saving ? t('stuSess.processing') : t('studentDash.reschedule')}
                                 </Button>
                             </div>
                         </div>
@@ -2295,7 +2292,7 @@ export default function StudentSessions() {
                                 <p className="text-sm text-gray-500 mt-1">{t('stuSess.rescheduledSuccessDesc')}</p>
                             </div>
                             <div className="bg-green-50 border border-green-100 rounded-xl p-4 text-left">
-                                <p className="text-xs text-green-500 font-bold uppercase tracking-wider mb-2">Naujas laikas</p>
+                                <p className="text-xs text-green-500 font-bold uppercase tracking-wider mb-2">{t('stuSess.chooseNewTime')}</p>
                                 <p className="font-bold text-gray-900 capitalize">
                                     {format(selectedNewSlot.start, 'EEEE, d MMMM', { locale: dateFnsLocale })}
                                 </p>
@@ -2307,7 +2304,7 @@ export default function StudentSessions() {
                                 onClick={() => { setIsCancelModalOpen(false); setIsModalOpen(false); }}
                                 className="w-full rounded-xl bg-green-600 hover:bg-green-700 text-white"
                             >
-                                Gerai
+                                {t('stuSess.okBtn')}
                             </Button>
                         </div>
                     )}

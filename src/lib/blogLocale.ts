@@ -29,6 +29,7 @@ export function blogPostPath(post: Record<string, unknown>, locale: Locale): str
 
 const DATE_LOCALE_MAP: Partial<Record<Locale, string>> = {
   lt: 'lt-LT', en: 'en-US', pl: 'pl-PL', lv: 'lv-LV', ee: 'et-EE',
+  nl: 'nl-NL',
 };
 
 export function formatBlogDate(date: string, locale: Locale, opts?: Intl.DateTimeFormatOptions): string {

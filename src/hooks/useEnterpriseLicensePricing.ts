@@ -1,13 +1,21 @@
 import { useEffect, useState } from 'react';
-import type { EnterpriseLicensePricing } from '@/lib/enterprisePricing';
+import {
+  fallbackEnterpriseLicensePricing,
+  type EnterpriseLicensePricing,
+} from '@/lib/enterprisePricing';
+import { currentMarket } from '@/lib/market';
 
 /** Loads enterprise license tier pricing from Stripe (via the public API). */
 export function useEnterpriseLicensePricing(enabled = true) {
-  const [pricing, setPricing] = useState<EnterpriseLicensePricing | null>(null);
+  const [pricing, setPricing] = useState<EnterpriseLicensePricing | null>(() =>
+    enabled ? fallbackEnterpriseLicensePricing(currentMarket()) : null,
+  );
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    if (!enabled || pricing) return;
+    if (!enabled) return;
+    setPricing((current) => current ?? fallbackEnterpriseLicensePricing(currentMarket()));
+    setFailed(false);
     let cancelled = false;
     fetch('/api/enterprise-license-pricing')
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error('pricing unavailable'))))
@@ -22,7 +30,7 @@ export function useEnterpriseLicensePricing(enabled = true) {
     return () => {
       cancelled = true;
     };
-  }, [enabled, pricing]);
+  }, [enabled]);
 
   return { pricing, failed };
 }

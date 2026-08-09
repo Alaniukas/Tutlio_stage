@@ -63,6 +63,8 @@ describe('schoolContractFilters', () => {
 
   it('matches granular filters', () => {
     expect(matchesContractFilter('signed', { ...baseContract, signing_status: 'signed' }, true)).toBe(true);
+    expect(matchesContractFilter('draft', { ...baseContract, signing_status: 'draft' }, true)).toBe(true);
+    expect(matchesContractFilter('sent', { ...baseContract, signing_status: 'sent' }, true)).toBe(true);
     expect(matchesContractFilter('awaiting_school', { ...baseContract, signing_status: 'awaiting_school_signature' }, true)).toBe(true);
     expect(matchesContractFilter('awaiting_parents', { ...baseContract, signing_status: 'signed_by_school' }, true)).toBe(true);
     expect(matchesContractFilter('incomplete_data', {
@@ -89,6 +91,46 @@ describe('schoolContractFilters', () => {
     expect(counts.signed).toBe(1);
     expect(counts.awaiting_school).toBe(1);
     expect(counts.awaiting_parents).toBe(1);
+    expect(counts.sent).toBe(1);
+    expect(counts.draft).toBe(0);
     expect(counts.incomplete_data).toBe(1);
+  });
+
+  it('complete draft/sent appear only under their status filters (not incomplete)', () => {
+    const contracts = [
+      { ...baseContract, signing_status: 'draft' as const },
+      { ...baseContract, signing_status: 'sent' as const },
+      { ...baseContract, signing_status: 'awaiting_school_signature' as const },
+      { ...baseContract, signing_status: 'signed_by_school' as const },
+      { ...baseContract, signing_status: 'signed' as const },
+    ];
+    const counts = countContractsByFilter(contracts, true);
+    expect(counts.all).toBe(5);
+    expect(counts.draft).toBe(1);
+    expect(counts.sent).toBe(1);
+    expect(counts.awaiting_school).toBe(1);
+    expect(counts.awaiting_parents).toBe(1);
+    expect(counts.signed).toBe(1);
+    expect(counts.incomplete_data).toBe(0);
+    // Status filters partition Visos (incomplete_data is orthogonal)
+    expect(
+      counts.draft + counts.sent + counts.awaiting_school + counts.awaiting_parents + counts.signed,
+    ).toBe(counts.all);
+  });
+
+  it('incomplete_data can overlap with awaiting statuses', () => {
+    const contracts = [
+      {
+        ...baseContract,
+        signing_status: 'awaiting_school_signature' as const,
+        student: { ...baseStudent, payer_phone: '' },
+      },
+      { ...baseContract, signing_status: 'sent' as const },
+    ];
+    const counts = countContractsByFilter(contracts, true);
+    expect(counts.awaiting_school).toBe(1);
+    expect(counts.incomplete_data).toBe(1);
+    expect(counts.sent).toBe(1);
+    expect(counts.all).toBe(2);
   });
 });

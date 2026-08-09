@@ -22,7 +22,7 @@
  * Still missing vs. the plan: the bot-facing SSR renderer.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import {
   Star, Clock, Tag, Globe, Check, ShieldCheck, Lock, ChevronRight, ChevronDown,
@@ -31,17 +31,31 @@ import {
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Calendar } from '@/components/ui/calendar';
 import { useTranslation } from '@/lib/i18n';
-import { applyPageDocumentMeta } from '@/lib/documentMeta';
+import { applyCanonicalDocumentMeta, applyPageDocumentMeta } from '@/lib/documentMeta';
 import { fmtMoney } from '@/lib/marketMoney';
 import {
-  chromeFor, formatShortDay, getDemoPage, groupSlotsByDay, resolveBrand, rowToPublicPage,
+  chromeFor, formatShortDay, getDemoPage, groupSlotsByDay, publicPageCanonicalUrl, resolveBrand, rowToPublicPage,
+  safePublicSocialUrl,
   type BackdropTheme, type ChromeCopy, type PublicPage, type PublicPageDerived,
   type PublicPageFormat, type PublicPageOffering, type PublicPageRow, type ResolvedBrand,
 } from '@/lib/publicPage';
 import { subscribeToPreview } from '@/lib/publicPageStore';
 import { authHeaders } from '@/lib/apiHelpers';
 import type { Locale } from '@/lib/i18n/core';
+
+function dayIsoToDate(dayIso: string): Date {
+  const [y, m, d] = dayIso.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function dateToDayIso(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
 
 type LoadState =
   | { status: 'loading' }
@@ -318,8 +332,12 @@ function BookingPanel({
   offering: PublicPageOffering | null; setOffering: (o: PublicPageOffering) => void;
 }) {
   const days = useMemo(() => groupSlotsByDay(page.slots), [page.slots]);
+  const availableDaySet = useMemo(() => new Set(days.map((d) => d.day)), [days]);
 
   const [dayIdx, setDayIdx] = useState(0);
+  const [calMonth, setCalMonth] = useState(() =>
+    dayIsoToDate(days[0]?.day ?? dateToDayIso(new Date())),
+  );
   const [slotStart, setSlotStart] = useState<string | null>(days[0]?.slots[0]?.start ?? null);
   const [format, setFormat] = useState<PublicPageFormat>(page.formats[0]);
   const [step, setStep] = useState<Step>('select');
@@ -334,7 +352,6 @@ function BookingPanel({
   const day = days[dayIdx];
   const detailsValid = name.trim().length > 1 && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
 
-  const fmtDay = (d: string) => formatShortDay(d, locale);
   const fmtTime = (iso: string) =>
     new Date(iso).toLocaleTimeString(locale === 'lt' ? 'lt-LT' : 'en-GB', { hour: '2-digit', minute: '2-digit' });
 
@@ -402,7 +419,7 @@ function BookingPanel({
           <div className="flex justify-between px-4 py-2.5">
             <span className="text-gray-500">{chrome.pickTime}</span>
             <span className="font-medium text-gray-900">
-              {slotStart ? `${fmtDay(slotStart.slice(0, 10))} ${fmtTime(slotStart)}` : chrome.anyTime}
+              {slotStart ? `${formatShortDay(slotStart.slice(0, 10), locale)} ${fmtTime(slotStart)}` : chrome.anyTime}
             </span>
           </div>
           <div className="flex justify-between px-4 py-2.5">
@@ -540,16 +557,46 @@ function BookingPanel({
       ) : (
         <div>
           <p className="text-[12.5px] font-semibold text-gray-500 mb-2">{chrome.pickDate}</p>
-          <div className="flex flex-wrap gap-2">
-            {days.map((d, i) => (
-              <SelectPill
-                key={d.day} selected={i === dayIdx} brand={brand}
-                onClick={() => { setDayIdx(i); setSlotStart(null); }}
-              >
-                {fmtDay(d.day)}
-              </SelectPill>
-            ))}
+          <div className="rounded-2xl border border-gray-200 bg-white">
+            <Calendar
+              mode="single"
+              captionLayout="label"
+              weekStartsOn={1}
+              selected={day ? dayIsoToDate(day.day) : undefined}
+              month={calMonth}
+              onMonthChange={setCalMonth}
+              onSelect={(date) => {
+                if (!date) return;
+                const iso = dateToDayIso(date);
+                const idx = days.findIndex((d) => d.day === iso);
+                if (idx < 0) return;
+                setDayIdx(idx);
+                setSlotStart(days[idx]?.slots[0]?.start ?? null);
+              }}
+              disabled={(date) => !availableDaySet.has(dateToDayIso(date))}
+              startMonth={dayIsoToDate(days[0].day)}
+              endMonth={dayIsoToDate(days[days.length - 1].day)}
+              className="mx-auto w-fit"
+              classNames={{
+                caption_label: 'text-sm font-semibold text-gray-900 not-sr-only',
+                selected: 'bg-transparent text-inherit',
+                today: 'bg-transparent',
+                day_button:
+                  'h-9 w-9 rounded-full p-0 font-semibold text-gray-800 hover:bg-gray-100 aria-selected:bg-[var(--public-cal-accent)] aria-selected:text-[var(--public-cal-accent-text)] aria-selected:hover:bg-[var(--public-cal-accent)]',
+                disabled: 'text-gray-300 opacity-60 font-normal',
+              }}
+              style={
+                {
+                  '--public-cal-accent': brand.accent,
+                  '--public-cal-accent-text': brand.accentText,
+                } as CSSProperties
+              }
+            />
           </div>
+
+          <p className="mt-1 text-center text-[12px] text-gray-500">
+            {day ? formatShortDay(day.day, locale) : null}
+          </p>
 
           <p className="text-[12.5px] font-semibold text-gray-500 mt-4 mb-2">{chrome.pickTime}</p>
           <div className="flex flex-wrap gap-2">
@@ -664,8 +711,18 @@ export default function PublicTutorPage() {
   }, [page]);
 
   useEffect(() => {
-    if (page) applyPageDocumentMeta(`${page.displayName} | Tutlio`, page.headline);
-  }, [page]);
+    if (!page) return;
+    const canonicalUrl = publicPageCanonicalUrl(page.slug, page.locale);
+    applyPageDocumentMeta(`${page.displayName} | Tutlio`, page.headline);
+    applyCanonicalDocumentMeta(canonicalUrl);
+
+    // Public pages have one authored locale. On production domains, converge
+    // every human-visible alias on the same URL that crawlers and the sitemap use.
+    if (!previewMode && /(^|\.)tutlio\.(com|lt|pl)$/i.test(window.location.hostname)) {
+      const currentUrl = `${window.location.origin}${window.location.pathname}`;
+      if (currentUrl !== canonicalUrl) window.location.replace(canonicalUrl);
+    }
+  }, [page, previewMode]);
 
   // Freeze the page behind the mobile sheet; desktop keeps the panel in flow.
   useEffect(() => {
@@ -784,11 +841,14 @@ export default function PublicTutorPage() {
     </div>
   );
 
-  const socials = page.socials && Object.keys(page.socials).length > 0 && (
+  const safeSocials = Object.entries(page.socials || {})
+    .map(([provider, value]) => [provider, safePublicSocialUrl(provider, value)] as const)
+    .filter((entry): entry is readonly [string, string] => Boolean(entry[1]));
+  const socials = safeSocials.length > 0 && (
     <div className="flex items-center justify-center gap-5">
-      {Object.entries(page.socials).map(([k, href]) => (
+      {safeSocials.map(([k, href]) => (
         <a
-          key={k} href={href} onClick={(e) => e.preventDefault()} aria-label={k}
+          key={k} href={href} target="_blank" rel="me ugc nofollow noopener noreferrer" aria-label={k}
           className="text-white/75 hover:text-white transition"
         >
           <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor" aria-hidden="true">

@@ -1107,10 +1107,8 @@ export default function CompanyTutors() {
         {!showLicenseUi && licenseInfoError && (
           <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-amber-900">
             <p className="text-sm font-semibold">{t('compTut.license')}</p>
-            <p className="text-xs mt-0.5">
-              Nepavyko įkelti licencijų informacijos. Patikrinkite naršyklės Network, ar `GET /api/org-license-info` grąžina 200.
-            </p>
-            <p className="text-[11px] mt-1 text-amber-800 break-all">Detalės: {licenseInfoError}</p>
+            <p className="text-xs mt-0.5">{t('common.error')}</p>
+            <p className="text-[11px] mt-1 text-amber-800 break-all">{licenseInfoError}</p>
           </div>
         )}
         {/* License subscription ended (count dropped to 0) — offer reactivation via portal */}
@@ -1290,7 +1288,7 @@ export default function CompanyTutors() {
                 <Input placeholder={t('compTut.namePlaceholder')} value={inviteeName} onChange={e => setInviteeName(e.target.value)} className="rounded-xl" />
               </div>
               <div className="space-y-1.5">
-                <Label className="text-sm font-medium text-gray-700">Prisijungimo nuoroda (pasirinktinai)</Label>
+                <Label className="text-sm font-medium text-gray-700">{t('compTut.personalMeetingLink')}</Label>
                 <Input
                   value={inviteMeetingLink}
                   onChange={(e) => setInviteMeetingLink(e.target.value)}
@@ -1298,7 +1296,7 @@ export default function CompanyTutors() {
                   placeholder="https://zoom.us/j/..."
                 />
                 <p className="text-xs text-gray-500">
-                  Numatytoji šio korepetitoriaus pamokų nuoroda (Zoom ir pan.). Jei nurodyta, rodoma mokiniams vietoj dalyko nuorodos.
+                  {t('compTut.personalMeetingLinkDesc')}
                 </p>
               </div>
             </div>
@@ -1447,12 +1445,12 @@ export default function CompanyTutors() {
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('compTut.invoiceRequisites')}</p>
                 {tutorInvoiceProfile ? (
                   <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-sm text-gray-700 space-y-1">
-                    {tutorInvoiceProfile.entity_type && <p><span className="text-gray-500">Tipas:</span> {tutorInvoiceProfile.entity_type}</p>}
-                    {tutorInvoiceProfile.activity_number && <p><span className="text-gray-500">Veiklos nr.:</span> {tutorInvoiceProfile.activity_number}</p>}
-                    {tutorInvoiceProfile.personal_code && <p><span className="text-gray-500">Asm. kodas:</span> {tutorInvoiceProfile.personal_code}</p>}
-                    {tutorInvoiceProfile.contact_email && <p><span className="text-gray-500">El. paštas:</span> {tutorInvoiceProfile.contact_email}</p>}
-                    {tutorInvoiceProfile.contact_phone && <p><span className="text-gray-500">Tel.:</span> {tutorInvoiceProfile.contact_phone}</p>}
-                    {tutorInvoiceProfile.invoice_series && <p><span className="text-gray-500">SF serija:</span> {tutorInvoiceProfile.invoice_series}</p>}
+                    {tutorInvoiceProfile.entity_type && <p><span className="text-gray-500">{t('invoiceSettings.entityType')}:</span> {tutorInvoiceProfile.entity_type}</p>}
+                    {tutorInvoiceProfile.activity_number && <p><span className="text-gray-500">{t('invoiceSettings.activityNumber')}:</span> {tutorInvoiceProfile.activity_number}</p>}
+                    {tutorInvoiceProfile.personal_code && <p><span className="text-gray-500">{t('invoiceSettings.personalCode')}:</span> {tutorInvoiceProfile.personal_code}</p>}
+                    {tutorInvoiceProfile.contact_email && <p><span className="text-gray-500">{t('invoiceSettings.contactEmail')}:</span> {tutorInvoiceProfile.contact_email}</p>}
+                    {tutorInvoiceProfile.contact_phone && <p><span className="text-gray-500">{t('invoiceSettings.contactPhone')}:</span> {tutorInvoiceProfile.contact_phone}</p>}
+                    {tutorInvoiceProfile.invoice_series && <p><span className="text-gray-500">{t('invoiceSettings.invoiceSeries')}:</span> {tutorInvoiceProfile.invoice_series}</p>}
                   </div>
                 ) : (
                   <p className="text-sm text-gray-500">{t('compTut.invoiceRequisitesEmpty')}</p>

@@ -491,9 +491,7 @@ async function seedOrg(supabase, org) {
     email: u.email,
     full_name: u.fullName,
     organization_id: u.organization_id,
-    ...(u.enable_manual_student_payments !== undefined
-      ? { enable_manual_student_payments: u.enable_manual_student_payments }
-      : {}),
+    enable_manual_student_payments: u.enable_manual_student_payments ?? false,
   }));
 
   const { error: profErr } = await supabase.from('profiles').upsert(profiles, { onConflict: 'id' });

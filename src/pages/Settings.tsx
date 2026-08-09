@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { User, Mail, Phone, Save, Lock, Building2, Eye, EyeOff, CreditCard, Calendar, CheckCircle2, XCircle, Sparkles, Shield } from 'lucide-react';
-import { formatLithuanianPhone, validateLithuanianPhone } from '@/lib/utils';
+import { formatLocalizedPhone, getLocalizedPhonePlaceholder, validateLocalizedPhone } from '@/lib/utils';
 import { hasActiveSubscription } from '@/lib/subscription';
 import { useTranslation } from '@/lib/i18n';
 import { TUTOR_PLANS, eur } from '@/lib/pricing';
@@ -33,7 +33,7 @@ interface TutorProfile {
 }
 
 export default function SettingsPage() {
-  const { t, dateFnsLocale } = useTranslation();
+  const { t, locale, dateFnsLocale } = useTranslation();
   const { user: ctxUser } = useUser();
   const [orgName, setOrgName] = useState<string | null>(null);
   const [profile, setProfile] = useState<TutorProfile>({
@@ -151,7 +151,7 @@ export default function SettingsPage() {
     setSaving(true);
     const user = ctxUser;
 
-    if (profile.phone && !validateLithuanianPhone(profile.phone)) {
+    if (profile.phone && !validateLocalizedPhone(profile.phone, locale)) {
       setProfileError(t('settings.phoneFormat'));
       setSaving(false);
       return;
@@ -409,8 +409,8 @@ export default function SettingsPage() {
                 </Label>
                 <Input
                   value={profile.phone}
-                  onChange={(e) => setProfile({ ...profile, phone: formatLithuanianPhone(e.target.value) })}
-                  placeholder="+370 600 00000"
+                  onChange={(e) => setProfile({ ...profile, phone: formatLocalizedPhone(e.target.value, locale) })}
+                  placeholder={getLocalizedPhonePlaceholder(locale)}
                   className="rounded-xl border-gray-200"
                 />
                 {profileError && <p className="text-sm text-red-500">{profileError}</p>}

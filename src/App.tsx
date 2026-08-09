@@ -9,20 +9,20 @@ import StudentProtectedRoute from '@/components/StudentProtectedRoute';
 import CompanyProtectedRoute from '@/components/CompanyProtectedRoute';
 import ParentProtectedRoute from '@/components/ParentProtectedRoute';
 
-// Marketing/SEO pages stay in the main bundle: they are the entry point for
-// every organic visitor and must paint instantly (Core Web Vitals).
+// Keep only the homepage in the entry bundle. Every other public route has its
+// own chunk: direct visitors download the page they requested, while crawler
+// HTML is supplied by the matching server renderer.
 import Landing from '@/pages/Landing';
-import NewLanding from '@/pages/NewLanding';
-import AboutUs from '@/pages/AboutUs';
-import Contact from '@/pages/Contact';
-import FeaturePage from '@/pages/FeaturePage';
-import FeaturesIndexPage from '@/pages/FeaturesIndexPage';
-import Pricing from '@/pages/Pricing';
-import Blog from '@/pages/Blog';
-import BlogPost from '@/pages/BlogPost';
-import PrivacyPolicy from '@/pages/PrivacyPolicy';
-import TermsOfService from '@/pages/TermsOfService';
-import DataProcessingAgreement from '@/pages/DataProcessingAgreement';
+const AboutUs = lazy(() => import('@/pages/AboutUs'));
+const Contact = lazy(() => import('@/pages/Contact'));
+const FeaturePage = lazy(() => import('@/pages/FeaturePage'));
+const FeaturesIndexPage = lazy(() => import('@/pages/FeaturesIndexPage'));
+const Pricing = lazy(() => import('@/pages/Pricing'));
+const Blog = lazy(() => import('@/pages/Blog'));
+const BlogPost = lazy(() => import('@/pages/BlogPost'));
+const PrivacyPolicy = lazy(() => import('@/pages/PrivacyPolicy'));
+const TermsOfService = lazy(() => import('@/pages/TermsOfService'));
+const DataProcessingAgreement = lazy(() => import('@/pages/DataProcessingAgreement'));
 
 // Everything behind auth (and one-off payment/callback pages) loads on demand
 // so marketing visitors never download the app.
@@ -38,6 +38,7 @@ const Register = lazy(() => import('@/pages/Register'));
 const ResetPassword = lazy(() => import('@/pages/ResetPassword'));
 const SchoolSign = lazy(() => import('@/pages/SchoolSign'));
 const SchoolSignReturn = lazy(() => import('@/pages/SchoolSignReturn'));
+const UnsubscribeReminders = lazy(() => import('@/pages/UnsubscribeReminders'));
 const DashboardPage = lazy(() => import('@/pages/Dashboard'));
 const CalendarPage = lazy(() => import('@/pages/Calendar'));
 const StudentsPage = lazy(() => import('@/pages/Students'));
@@ -73,7 +74,6 @@ const CompanyFinanceHub = lazy(() => import('@/pages/company/CompanyFinanceHub')
 const CompanyInstructions = lazy(() => import('@/pages/company/CompanyInstructions'));
 const CompanyDynamicPricing = lazy(() => import('@/pages/company/CompanyDynamicPricing'));
 const CompanyMessages = lazy(() => import('@/pages/company/CompanyMessages'));
-const CompanyPublicPage = lazy(() => import('@/pages/company/CompanyPublicPage'));
 const PreviewAssignStudentModal = lazy(() => import('@/pages/dev/PreviewAssignStudentModal'));
 const ParentDashboard = lazy(() => import('@/pages/ParentDashboard'));
 const ParentSessions = lazy(() => import('@/pages/ParentSessions'));
@@ -113,6 +113,17 @@ function LocaleFromRouteSync() {
     }
     trackPageview(location.pathname);
   }, [location.pathname, locale, setLocale]);
+
+  return null;
+}
+
+/** New routes start at the top; in-page scrolling remains owned by the page. */
+function ScrollToTopOnRouteChange() {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [pathname]);
 
   return null;
 }
@@ -205,6 +216,7 @@ export default function App({ basename }: { basename: string }) {
   return (
     <Router basename={basename || undefined}>
       <LocaleFromRouteSync />
+      <ScrollToTopOnRouteChange />
       <SupabaseAuthHashErrors />
       <ThemeColorManager />
       <Suspense fallback={<RouteLoadingFallback />}>
@@ -225,10 +237,10 @@ export default function App({ basename }: { basename: string }) {
         {/* Public Landing Pages - NO UserProvider wrapper */}
         <Route path="/" element={<Landing />} />
         <Route path="/:locale" element={<Landing />} />
-        {/* Rebuilt landing, parked for review. The static segment outranks the
-            /:locale route above, so /new-landing is never read as a locale. */}
-        <Route path="/new-landing" element={<NewLanding />} />
-        <Route path="/:locale/new-landing" element={<NewLanding />} />
+        {/* Direct alias for the default tutor landing. The static segment outranks
+            /:locale above, so /new-landing is never read as a locale. */}
+        <Route path="/new-landing" element={<Landing />} />
+        <Route path="/:locale/new-landing" element={<Landing />} />
         <Route path="/apie-mus" element={<AboutUs />} />
         <Route path="/:locale/apie-mus" element={<AboutUs />} />
         {/* English aliases — same canonical pages, kept in sync with bot SSR (middleware.ts). */}
@@ -279,6 +291,7 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/school-contract-complete" element={<SchoolContractComplete />} />
         <Route path="/school-sign" element={<SchoolSign />} />
         <Route path="/school-sign/return" element={<SchoolSignReturn />} />
+        <Route path="/unsubscribe" element={<UnsubscribeReminders />} />
         <Route path="/pasirasymas/sutarties/per/go-sign/:token" element={<SchoolSign />} />
         <Route path="/pasirasymas/sutarties/per/go-sign/:token/rezultatas" element={<SchoolSignReturn />} />
         <Route path="/stripe-success" element={<StripeSuccess />} />
@@ -380,7 +393,6 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/company/settings" element={<CompanySettings />} />
             <Route path="/company/finance" element={<CompanyFinanceHub />} />
             <Route path="/company/contracts" element={<CompanyContracts />} />
-            <Route path="/company/public-page" element={<CompanyPublicPage />} />
 
             <Route path="/school" element={<CompanyDashboard />} />
             <Route path="/school/tutors" element={<CompanyTutors />} />
@@ -395,7 +407,6 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/school/settings" element={<CompanySettings />} />
             <Route path="/school/finance" element={<CompanyFinanceHub />} />
             <Route path="/school/contracts" element={<CompanyContracts />} />
-            <Route path="/school/public-page" element={<CompanyPublicPage />} />
           </Route>
         </Route>
 

@@ -34,7 +34,7 @@ import {
   type MediaConsentFilter,
 } from '@/lib/schoolStudentsExport';
 import { downloadSchoolStudentsXlsx } from '@/lib/schoolStudentsXlsxExport';
-import { formatLithuanianPhone, validateLithuanianPhone, cn } from '@/lib/utils';
+import { formatLocalizedPhone, getLocalizedPhonePlaceholder, validateLocalizedPhone, cn } from '@/lib/utils';
 import { ORG_TUTOR_FILTER_SCROLL_CLASS, ORG_TUTOR_SELECT_SCROLL_CLASS } from '@/lib/orgUi';
 import { SessionList } from '@/components/SessionList';
 import {
@@ -136,10 +136,10 @@ function adminShowEmail(v: string | null | undefined) {
   return s || '—';
 }
 
-function adminShowPhone(v: string | null | undefined) {
+function adminShowPhone(v: string | null | undefined, locale: string) {
   const s = (v || '').trim();
   if (!s) return '—';
-  return formatLithuanianPhone(s);
+  return formatLocalizedPhone(s, locale);
 }
 
 function mediaConsentBadge(consent: string | null | undefined) {
@@ -1377,24 +1377,27 @@ export default function CompanyStudents() {
       !!newStudent.parent_secondary_phone.trim();
     if (isSchoolView && hasSecondParentAny) {
       if (!newStudent.parent_secondary_name.trim() || !newStudent.parent_secondary_email.trim() || !newStudent.parent_secondary_phone.trim()) {
-        setToastMessage({ message: 'Jei pildomas antras tėvas, reikia užpildyti vardą, el. paštą ir telefoną.', type: 'error' });
+        setToastMessage({
+          message: `${t('compStu.parentFullNameRequired')} · ${t('compStu.parentEmailRequired')} · ${t('compStu.parentPhoneRequired')}`,
+          type: 'error',
+        });
         return;
       }
-      if (!validateLithuanianPhone(newStudent.parent_secondary_phone)) {
+      if (!validateLocalizedPhone(newStudent.parent_secondary_phone, locale)) {
         setToastMessage({ message: t('compStu.phoneFormat'), type: 'error' });
         return;
       }
     }
     if (isSchoolView && newStudent.contact_parent === 'secondary' && !hasSecondParentAny) {
-      setToastMessage({ message: 'Pasirinktas kontaktinis antras tėvas, bet jo duomenys neužpildyti.', type: 'error' });
+      setToastMessage({ message: t('compStu.parentNameRequiredError'), type: 'error' });
       return;
     }
-    if (newStudent.payer_phone?.trim() && !validateLithuanianPhone(newStudent.payer_phone)) {
+    if (newStudent.payer_phone?.trim() && !validateLocalizedPhone(newStudent.payer_phone, locale)) {
       setToastMessage({ message: t('compStu.phoneFormat'), type: 'error' });
       return;
     }
 
-    if (newStudent.phone?.trim() && !validateLithuanianPhone(newStudent.phone)) {
+    if (newStudent.phone?.trim() && !validateLocalizedPhone(newStudent.phone, locale)) {
       setToastMessage({ message: t('compStu.phoneFormat'), type: 'error' });
       return;
     }
@@ -1640,11 +1643,11 @@ export default function CompanyStudents() {
       setToastMessage({ message: t('compStu.fullNameRequired'), type: 'error' });
       return;
     }
-    if (studentEditDraft.phone?.trim() && !validateLithuanianPhone(studentEditDraft.phone)) {
+    if (studentEditDraft.phone?.trim() && !validateLocalizedPhone(studentEditDraft.phone, locale)) {
       setToastMessage({ message: t('compStu.phoneFormat'), type: 'error' });
       return;
     }
-    if (studentEditDraft.payer_phone?.trim() && !validateLithuanianPhone(studentEditDraft.payer_phone)) {
+    if (studentEditDraft.payer_phone?.trim() && !validateLocalizedPhone(studentEditDraft.payer_phone, locale)) {
       setToastMessage({ message: t('compStu.phoneFormat'), type: 'error' });
       return;
     }
@@ -1654,16 +1657,19 @@ export default function CompanyStudents() {
       !!studentEditDraft.parent_secondary_phone.trim();
     if (isSchoolView && hasSecondParentAny) {
       if (!studentEditDraft.parent_secondary_name.trim() || !studentEditDraft.parent_secondary_email.trim() || !studentEditDraft.parent_secondary_phone.trim()) {
-        setToastMessage({ message: 'Jei pildomas antras tėvas, reikia užpildyti vardą, el. paštą ir telefoną.', type: 'error' });
+        setToastMessage({
+          message: `${t('compStu.parentFullNameRequired')} · ${t('compStu.parentEmailRequired')} · ${t('compStu.parentPhoneRequired')}`,
+          type: 'error',
+        });
         return;
       }
-      if (!validateLithuanianPhone(studentEditDraft.parent_secondary_phone)) {
+      if (!validateLocalizedPhone(studentEditDraft.parent_secondary_phone, locale)) {
         setToastMessage({ message: t('compStu.phoneFormat'), type: 'error' });
         return;
       }
     }
     if (isSchoolView && studentEditDraft.contact_parent === 'secondary' && !hasSecondParentAny) {
-      setToastMessage({ message: 'Pasirinktas kontaktinis antras tėvas, bet jo duomenys neužpildyti.', type: 'error' });
+      setToastMessage({ message: t('compStu.parentNameRequiredError'), type: 'error' });
       return;
     }
 
@@ -1717,7 +1723,7 @@ export default function CompanyStudents() {
             type: 'error',
           });
         } else if (emailJson.error === 'email_already_used') {
-          setToastMessage({ message: 'El. paštas jau naudojamas kitoje paskyroje.', type: 'error' });
+          setToastMessage({ message: t('onboard.emailAlreadyRegistered'), type: 'error' });
         } else {
           setToastMessage({
             message: t('compStu.errorPrefix', { msg: String(emailJson.error || emailJson.details || emailResp.status) }),
@@ -2013,7 +2019,7 @@ export default function CompanyStudents() {
         } else {
           const n = (json as { sent?: number }).sent ?? 0;
           setToastMessage({
-            message: n > 0 ? `Tėvų kvietimai išsiųsti: ${n}` : 'Nėra tėvų el. paštų arba kvietimai jau sukurti.',
+            message: n > 0 ? t('studentSettings.inviteParentSuccess') : t('studentSettings.inviteParentNoEmail'),
             type: n > 0 ? 'success' : 'error',
           });
         }
@@ -2244,8 +2250,8 @@ export default function CompanyStudents() {
                     <Label>{t('compStu.phoneLabel')}</Label>
                     <Input
                       value={newStudent.phone}
-                      onChange={(e) => setNewStudent({ ...newStudent, phone: formatLithuanianPhone(e.target.value) })}
-                      placeholder="+370 600 00000"
+                      onChange={(e) => setNewStudent({ ...newStudent, phone: formatLocalizedPhone(e.target.value, locale) })}
+                      placeholder={getLocalizedPhonePlaceholder(locale)}
                       className="rounded-xl"
                     />
                   </div>
@@ -2329,32 +2335,32 @@ export default function CompanyStudents() {
                   {isSchoolView && (
                     <div className="grid sm:grid-cols-3 gap-4">
                       <div className="space-y-2">
-                        <Label>Vaiko gimimo data</Label>
+                        <Label>{t('parent.childBirthDate')}</Label>
                         <DateInput
                           value={newStudent.child_birth_date}
                           onChange={(e) => setNewStudent({ ...newStudent, child_birth_date: e.target.value })}
                         />
                         {newStudent.child_birth_date && (
                           <p className="text-xs text-gray-500">
-                            Amžius: {calculateAgeFromDate(newStudent.child_birth_date) ?? '—'} m.
+                            {t('studentSettings.age')}: {calculateAgeFromDate(newStudent.child_birth_date) ?? '—'}
                           </p>
                         )}
                       </div>
                       <div className="space-y-2">
-                        <Label>Adresas</Label>
+                        <Label>{t('invoiceSettings.address')}</Label>
                         <Input
                           value={newStudent.student_address}
                           onChange={(e) => setNewStudent({ ...newStudent, student_address: e.target.value })}
-                          placeholder="Gatvė, namo nr."
+                          placeholder={t('invoiceSettings.address')}
                           className="rounded-xl"
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label>Miestas</Label>
+                        <Label>{t('perlasFinance.city')}</Label>
                         <Input
                           value={newStudent.student_city}
                           onChange={(e) => setNewStudent({ ...newStudent, student_city: e.target.value })}
-                          placeholder="Vilnius"
+                          placeholder={t('perlasFinance.city')}
                           className="rounded-xl"
                         />
                       </div>
@@ -2367,7 +2373,7 @@ export default function CompanyStudents() {
                         className={`rounded-xl border p-3 space-y-3 cursor-pointer ${newStudent.contact_parent === 'primary' ? 'border-indigo-400 bg-indigo-50/40' : 'border-gray-200'}`}
                         onClick={() => setNewStudent({ ...newStudent, contact_parent: 'primary' })}
                       >
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">1 tėvas (privalomas)</p>
+                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">1 · {t('school.parentSection')} *</p>
                         <div className="grid sm:grid-cols-3 gap-3">
                         <div className="space-y-2">
                         <Label>{t('compStu.parentFullNameRequired')}</Label>
@@ -2386,27 +2392,27 @@ export default function CompanyStudents() {
                           type="email"
                           value={newStudent.payer_email}
                           onChange={(e) => setNewStudent({ ...newStudent, payer_email: e.target.value })}
-                          placeholder="tevai@example.com"
+                          placeholder="parent@example.com"
                           className="rounded-xl"
                           required
                         />
                       </div>
 
                       <div className="space-y-2">
-                          <Label>Asmens kodas</Label>
+                          <Label>{t('invoiceSettings.personalCode')}</Label>
                           <Input
                             value={newStudent.payer_personal_code}
                             onChange={(e) => setNewStudent({ ...newStudent, payer_personal_code: e.target.value })}
-                            placeholder="Asmens kodas"
+                            placeholder={t('invoiceSettings.personalCode')}
                             className="rounded-xl"
                           />
                         </div>
                         <div className="space-y-2">
-                        <Label>Tėvų tel. nr.</Label>
+                        <Label>{t('compStu.parentPhoneRequired')}</Label>
                         <Input
                           value={newStudent.payer_phone}
-                          onChange={(e) => setNewStudent({ ...newStudent, payer_phone: formatLithuanianPhone(e.target.value) })}
-                          placeholder="+370 600 00000"
+                          onChange={(e) => setNewStudent({ ...newStudent, payer_phone: formatLocalizedPhone(e.target.value, locale) })}
+                          placeholder={getLocalizedPhonePlaceholder(locale)}
                           className="rounded-xl"
                         />
                       </div>
@@ -2416,31 +2422,31 @@ export default function CompanyStudents() {
                         className={`rounded-xl border p-3 space-y-3 cursor-pointer ${newStudent.contact_parent === 'secondary' ? 'border-indigo-400 bg-indigo-50/40' : 'border-gray-200'}`}
                         onClick={() => setNewStudent({ ...newStudent, contact_parent: 'secondary' })}
                       >
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">2 tėvas (pasirinktinai)</p>
+                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">2 · {t('school.parentSection')} ({t('common.optional')})</p>
                         <div className="grid sm:grid-cols-3 gap-3">
                           <Input
                             value={newStudent.parent_secondary_name}
                             onChange={(e) => setNewStudent({ ...newStudent, parent_secondary_name: e.target.value })}
-                            placeholder="Vardas Pavardė"
+                            placeholder={t('compStu.parentNamePlaceholder')}
                             className="rounded-xl"
                           />
                           <Input
                             type="email"
                             value={newStudent.parent_secondary_email}
                             onChange={(e) => setNewStudent({ ...newStudent, parent_secondary_email: e.target.value })}
-                            placeholder="tevai2@example.com"
+                            placeholder="parent2@example.com"
                             className="rounded-xl"
                           />
                           <Input
                             value={newStudent.parent_secondary_phone}
-                            onChange={(e) => setNewStudent({ ...newStudent, parent_secondary_phone: formatLithuanianPhone(e.target.value) })}
-                            placeholder="+370 600 00000"
+                            onChange={(e) => setNewStudent({ ...newStudent, parent_secondary_phone: formatLocalizedPhone(e.target.value, locale) })}
+                            placeholder={getLocalizedPhonePlaceholder(locale)}
                             className="rounded-xl"
                           />
                           <Input
                             value={newStudent.parent_secondary_personal_code}
                             onChange={(e) => setNewStudent({ ...newStudent, parent_secondary_personal_code: e.target.value })}
-                            placeholder="Asmens kodas"
+                            placeholder={t('invoiceSettings.personalCode')}
                             className="rounded-xl"
                           />
                           <label
@@ -2456,10 +2462,10 @@ export default function CompanyStudents() {
                               }}
                               className="rounded border-gray-300"
                             />
-                            Antro tėvo adresas toks pats kaip gyvenamoji vieta (1 tėvo / mokinio adresas)
+                            2 · {t('invoiceSettings.address')} = 1 · {t('invoiceSettings.address')}
                           </label>
                           <div className="sm:col-span-3 space-y-1" onClick={(e) => e.stopPropagation()}>
-                            <Label className="text-xs text-gray-500">Antro tėvo adresas</Label>
+                            <Label className="text-xs text-gray-500">2 · {t('invoiceSettings.address')}</Label>
                             <Input
                               value={
                                 newStudent.parent2_address_same_as_primary
@@ -2470,13 +2476,13 @@ export default function CompanyStudents() {
                                 setNewStudent((p) => ({ ...p, parent_secondary_address: e.target.value, parent2_address_same_as_primary: false }))
                               }
                               disabled={newStudent.parent2_address_same_as_primary}
-                              placeholder="Gatvė, miestas"
+                              placeholder={t('invoiceSettings.address')}
                               className="rounded-xl"
                             />
                           </div>
                         </div>
                       </div>
-                      <p className="text-xs text-gray-500">Kontaktinis tėvas parenkamas paspaudus ant atitinkamo tėvo bloko.</p>
+                      <p className="text-xs text-gray-500">{t('compStu.parentContactLabel')}</p>
                     </>
                   )}
 
@@ -2803,7 +2809,7 @@ export default function CompanyStudents() {
                           </div>
                           <div className="flex items-center gap-1.5">
                             <Phone className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-                            <span className="truncate">{adminShowPhone(student.phone)}</span>
+                            <span className="truncate">{adminShowPhone(student.phone, locale)}</span>
                           </div>
                           {shouldShowParentContacts(student) && (
                             <div className="pt-2 mt-2 border-t border-gray-100 space-y-1">
@@ -2943,7 +2949,7 @@ export default function CompanyStudents() {
                               </div>
                               <div className="flex items-center gap-1.5 mt-0.5">
                                 <Phone className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-                                <span>{adminShowPhone(student.phone)}</span>
+                                <span>{adminShowPhone(student.phone, locale)}</span>
                               </div>
                             </div>
                             {shouldShowParentContacts(student) && (
@@ -2955,7 +2961,7 @@ export default function CompanyStudents() {
                                 </div>
                                 <div className="flex items-center gap-1.5 mt-0.5">
                                   <Phone className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-                                  <span>{adminShowPhone(student.payer_phone)}</span>
+                                  <span>{adminShowPhone(student.payer_phone, locale)}</span>
                                 </div>
                               </div>
                             )}
@@ -3114,7 +3120,7 @@ export default function CompanyStudents() {
                           {t('compStu.emailInline')} <span className="text-gray-900">{adminShowEmail(selectedStudent.email)}</span>
                         </p>
                         <p>
-                          {t('compStu.phoneInline')} <span className="text-gray-900">{adminShowPhone(selectedStudent.phone)}</span>
+                          {t('compStu.phoneInline')} <span className="text-gray-900">{adminShowPhone(selectedStudent.phone, locale)}</span>
                         </p>
                       </div>
                       {shouldShowParentContacts(selectedStudent) && (
@@ -3129,7 +3135,7 @@ export default function CompanyStudents() {
                             {t('compStu.emailInline')} <span className="text-gray-900">{adminShowEmail(selectedStudent.payer_email)}</span>
                           </p>
                           <p>
-                            {t('compStu.phoneInline')} <span className="text-gray-900">{adminShowPhone(selectedStudent.payer_phone)}</span>
+                            {t('compStu.phoneInline')} <span className="text-gray-900">{adminShowPhone(selectedStudent.payer_phone, locale)}</span>
                           </p>
                         </div>
                       )}
@@ -3233,9 +3239,9 @@ export default function CompanyStudents() {
                     {canFullEditStudent && (
                       <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-3">
                         <div className="flex items-center justify-between gap-2">
-                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Redaguoti mokinio duomenis</p>
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('common.edit')} · {t('compStu.studentLabel')}</p>
                           <Button type="button" variant="outline" size="sm" onClick={() => setStudentEditOpen((v) => !v)}>
-                            {studentEditOpen ? 'Slėpti' : 'Atidaryti'}
+                            {studentEditOpen ? t('common.hide') : t('common.show')}
                           </Button>
                         </div>
 
@@ -3251,26 +3257,26 @@ export default function CompanyStudents() {
                               placeholder={t('compStu.emailLabel')}
                               className="rounded-xl bg-white"
                             />
-                            <Input value={studentEditDraft.phone} onChange={(e) => setStudentEditDraft((p) => ({ ...p, phone: formatLithuanianPhone(e.target.value) }))} placeholder={t('compStu.phoneLabel')} className="rounded-xl bg-white" />
+                            <Input value={studentEditDraft.phone} onChange={(e) => setStudentEditDraft((p) => ({ ...p, phone: formatLocalizedPhone(e.target.value, locale) }))} placeholder={t('compStu.phoneLabel')} className="rounded-xl bg-white" />
                             <DateInput value={studentEditDraft.child_birth_date} onChange={(e) => setStudentEditDraft((p) => ({ ...p, child_birth_date: e.target.value }))} />
-                            <Input value={studentEditDraft.student_address} onChange={(e) => setStudentEditDraft((p) => ({ ...p, student_address: e.target.value }))} placeholder="Adresas" className="rounded-xl bg-white" />
-                            <Input value={studentEditDraft.student_city} onChange={(e) => setStudentEditDraft((p) => ({ ...p, student_city: e.target.value }))} placeholder="Miestas" className="rounded-xl bg-white" />
+                            <Input value={studentEditDraft.student_address} onChange={(e) => setStudentEditDraft((p) => ({ ...p, student_address: e.target.value }))} placeholder={t('invoiceSettings.address')} className="rounded-xl bg-white" />
+                            <Input value={studentEditDraft.student_city} onChange={(e) => setStudentEditDraft((p) => ({ ...p, student_city: e.target.value }))} placeholder={t('perlasFinance.city')} className="rounded-xl bg-white" />
                             {studentEditDraft.child_birth_date && (
-                              <p className="text-xs text-gray-500 sm:col-span-2">Amžius: {calculateAgeFromDate(studentEditDraft.child_birth_date) ?? '—'} m.</p>
+                              <p className="text-xs text-gray-500 sm:col-span-2">{t('studentSettings.age')}: {calculateAgeFromDate(studentEditDraft.child_birth_date) ?? '—'}</p>
                             )}
                           </div>
                           <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
                             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                              {isSchoolView ? 'Kontaktinis tėvas' : t('compStu.payerLabel')}
+                              {isSchoolView ? t('compStu.parentContactLabel') : t('compStu.payerLabel')}
                             </p>
                             <div className="grid sm:grid-cols-2 gap-2">
                               <Input value={studentEditDraft.payer_name} onChange={(e) => setStudentEditDraft((p) => ({ ...p, payer_name: e.target.value }))} placeholder={t('compStu.parentFullNameRequired')} className="rounded-xl bg-white" />
                               <Input type="email" value={studentEditDraft.payer_email} onChange={(e) => setStudentEditDraft((p) => ({ ...p, payer_email: e.target.value }))} placeholder={t('compStu.parentEmailRequired')} className="rounded-xl bg-white" />
-                              <Input value={studentEditDraft.payer_phone} onChange={(e) => setStudentEditDraft((p) => ({ ...p, payer_phone: formatLithuanianPhone(e.target.value) }))} placeholder={isSchoolView ? 'Tėvų tel. nr.' : t('compStu.parentPhoneRequired')} className="rounded-xl bg-white" />
+                              <Input value={studentEditDraft.payer_phone} onChange={(e) => setStudentEditDraft((p) => ({ ...p, payer_phone: formatLocalizedPhone(e.target.value, locale) }))} placeholder={t('compStu.parentPhoneRequired')} className="rounded-xl bg-white" />
                               <Input
                                 value={studentEditDraft.payer_personal_code}
                                 onChange={(e) => setStudentEditDraft((p) => ({ ...p, payer_personal_code: e.target.value }))}
-                                placeholder={isSchoolView ? 'Kontaktinio tėvo asmens kodas' : 'Mokėtojo asmens kodas'}
+                                placeholder={t('invoiceSettings.personalCode')}
                                 className="rounded-xl bg-white"
                               />
                             </div>
@@ -3279,17 +3285,17 @@ export default function CompanyStudents() {
                             <>
                               <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
                                 <div className="flex items-center justify-between gap-2">
-                                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Antras tėvas (pasirinktinai)</p>
+                                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">2 · {t('school.parentSection')} ({t('common.optional')})</p>
                                   <Button type="button" variant="outline" size="sm" onClick={() => setStudentEditSecondParentOpen((v) => !v)}>
-                                    {studentEditSecondParentOpen ? 'Slėpti' : 'Rodyti'}
+                                    {studentEditSecondParentOpen ? t('common.hide') : t('common.show')}
                                   </Button>
                                 </div>
                                 {studentEditSecondParentOpen && (
                                   <div className="grid sm:grid-cols-2 gap-2">
-                                    <Input value={studentEditDraft.parent_secondary_name} onChange={(e) => setStudentEditDraft((p) => ({ ...p, parent_secondary_name: e.target.value }))} placeholder="2 tėvas: vardas pavardė" className="rounded-xl bg-white" />
-                                    <Input type="email" value={studentEditDraft.parent_secondary_email} onChange={(e) => setStudentEditDraft((p) => ({ ...p, parent_secondary_email: e.target.value }))} placeholder="2 tėvas: el. paštas" className="rounded-xl bg-white" />
-                                    <Input value={studentEditDraft.parent_secondary_phone} onChange={(e) => setStudentEditDraft((p) => ({ ...p, parent_secondary_phone: formatLithuanianPhone(e.target.value) }))} placeholder="2 tėvas: tel." className="rounded-xl bg-white" />
-                                    <Input value={studentEditDraft.parent_secondary_personal_code} onChange={(e) => setStudentEditDraft((p) => ({ ...p, parent_secondary_personal_code: e.target.value }))} placeholder="2 tėvas: asmens kodas" className="rounded-xl bg-white" />
+                                    <Input value={studentEditDraft.parent_secondary_name} onChange={(e) => setStudentEditDraft((p) => ({ ...p, parent_secondary_name: e.target.value }))} placeholder={t('compStu.parentNamePlaceholder')} className="rounded-xl bg-white" />
+                                    <Input type="email" value={studentEditDraft.parent_secondary_email} onChange={(e) => setStudentEditDraft((p) => ({ ...p, parent_secondary_email: e.target.value }))} placeholder="parent2@example.com" className="rounded-xl bg-white" />
+                                    <Input value={studentEditDraft.parent_secondary_phone} onChange={(e) => setStudentEditDraft((p) => ({ ...p, parent_secondary_phone: formatLocalizedPhone(e.target.value, locale) }))} placeholder={getLocalizedPhonePlaceholder(locale)} className="rounded-xl bg-white" />
+                                    <Input value={studentEditDraft.parent_secondary_personal_code} onChange={(e) => setStudentEditDraft((p) => ({ ...p, parent_secondary_personal_code: e.target.value }))} placeholder={t('invoiceSettings.personalCode')} className="rounded-xl bg-white" />
                                     <label className="sm:col-span-2 flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
                                       <input
                                         type="checkbox"
@@ -3297,10 +3303,10 @@ export default function CompanyStudents() {
                                         onChange={(e) => setStudentEditDraft((p) => ({ ...p, parent2_address_same_as_primary: e.target.checked }))}
                                         className="rounded border-gray-300"
                                       />
-                                      Antro tėvo adresas toks pats kaip gyvenamoji vieta (1 tėvo / mokinio adresas)
+                                      2 · {t('invoiceSettings.address')} = 1 · {t('invoiceSettings.address')}
                                     </label>
                                     <div className="sm:col-span-2 space-y-1">
-                                      <Label className="text-xs text-gray-500">Antro tėvo adresas</Label>
+                                      <Label className="text-xs text-gray-500">2 · {t('invoiceSettings.address')}</Label>
                                       <Input
                                         value={
                                           studentEditDraft.parent2_address_same_as_primary
@@ -3315,7 +3321,7 @@ export default function CompanyStudents() {
                                           }))
                                         }
                                         disabled={studentEditDraft.parent2_address_same_as_primary}
-                                        placeholder="Gatvė, miestas"
+                                        placeholder={t('invoiceSettings.address')}
                                         className="rounded-xl bg-white"
                                       />
                                     </div>
@@ -3323,12 +3329,12 @@ export default function CompanyStudents() {
                                 )}
                               </div>
                               <div className="sm:col-span-2">
-                                <Label className="text-xs text-gray-500">Kontaktinis tėvas sistemoje</Label>
+                                <Label className="text-xs text-gray-500">{t('compStu.parentContactLabel')}</Label>
                                 <Select value={studentEditDraft.contact_parent} onValueChange={(v: 'primary' | 'secondary') => setStudentEditDraft((p) => ({ ...p, contact_parent: v }))}>
                                   <SelectTrigger className="rounded-xl bg-white mt-1"><SelectValue /></SelectTrigger>
                                   <SelectContent>
-                                    <SelectItem value="primary">1 tėvas (kontaktinis)</SelectItem>
-                                    <SelectItem value="secondary">2 tėvas (kontaktinis)</SelectItem>
+                                    <SelectItem value="primary">1</SelectItem>
+                                    <SelectItem value="secondary">2</SelectItem>
                                   </SelectContent>
                                 </Select>
                               </div>
@@ -3336,13 +3342,11 @@ export default function CompanyStudents() {
                           )}
                             <div className="flex justify-end">
                               <Button type="button" size="sm" onClick={() => void handleSaveStudentInfo()} disabled={savingStudentInfo}>
-                                {savingStudentInfo ? t('common.loading') : 'Išsaugoti mokinio duomenis'}
+                                {savingStudentInfo ? t('common.loading') : t('school.saveChanges')}
                               </Button>
                             </div>
                           </>
-                        ) : (
-                          <p className="text-xs text-gray-500">Spausk „Atidaryti“, kad redaguotum duomenis.</p>
-                        )}
+                        ) : null}
                       </div>
                     )}
                     <div className="pt-1 flex items-center gap-2 flex-wrap">

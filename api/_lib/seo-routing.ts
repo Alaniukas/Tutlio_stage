@@ -1,7 +1,7 @@
 import type { VercelRequest } from '../types';
 
-export type Locale = 'lt' | 'en' | 'pl' | 'lv' | 'ee' | 'fr' | 'es' | 'de' | 'se' | 'dk' | 'fi' | 'no';
-export const LOCALES: Locale[] = ['lt', 'en', 'pl', 'lv', 'ee', 'fr', 'es', 'de', 'se', 'dk', 'fi', 'no'];
+export type Locale = 'lt' | 'en' | 'pl' | 'lv' | 'ee' | 'fr' | 'es' | 'de' | 'se' | 'dk' | 'fi' | 'no' | 'nl';
+export const LOCALES: Locale[] = ['lt', 'en', 'pl', 'lv', 'ee', 'fr', 'es', 'de', 'se', 'dk', 'fi', 'no', 'nl'];
 
 /**
  * Internal locale slugs are country-flavored (ee/se/dk), but hreflang and the
@@ -22,6 +22,7 @@ const HREFLANG_CODES: Record<Locale, string> = {
   dk: 'da',
   fi: 'fi',
   no: 'no',
+  nl: 'nl',
 };
 
 export function hreflangCode(locale: Locale): string {
@@ -104,6 +105,19 @@ export function buildPlatformPath(prefix: string, path: string, locale: Locale, 
 export function buildPlatformCanonicalUrl(prefix: string, path: string, locale: Locale): string {
   const domain = canonicalDomain(locale);
   return `${DOMAINS[domain]}${buildPlatformPath(prefix, path, locale, domain)}`;
+}
+
+/** Public tutor/agency pages use the Lithuanian noun on .lt and the
+ * international noun everywhere else. A public page has one authored locale,
+ * so its locale also determines its one canonical domain and URL. */
+export function publicPagePath(slug: string, locale: Locale, domain: DomainKey = canonicalDomain(locale)): string {
+  const prefix = locale === 'lt' ? '/korepetitorius' : '/tutor';
+  return buildPath(`${prefix}/${slug}`, locale, domain);
+}
+
+export function buildPublicPageCanonicalUrl(slug: string, locale: Locale): string {
+  const domain = canonicalDomain(locale);
+  return `${DOMAINS[domain]}${publicPagePath(slug, locale, domain)}`;
 }
 
 /**

@@ -5,6 +5,21 @@
     "devCommand": null,
     "trailingSlash": false,
     "functions": {
+        "api/generate-invoice.ts": {
+            "includeFiles": "api/_lib/fonts/**"
+        },
+        "api/invoice-pdf.ts": {
+            "includeFiles": "api/_lib/fonts/**"
+        },
+        "api/platform-invoice-pdf.ts": {
+            "includeFiles": "api/_lib/fonts/**"
+        },
+        "api/admin-b2c-invoices.ts": {
+            "includeFiles": "api/_lib/fonts/**"
+        },
+        "api/admin-b2b-invoices.ts": {
+            "includeFiles": "api/_lib/fonts/**"
+        },
         "api/page-render.ts": {
             "maxDuration": 30
         },
@@ -21,6 +36,9 @@
             "maxDuration": 30
         },
         "api/legal-render.ts": {
+            "maxDuration": 30
+        },
+        "api/public-page-render.ts": {
             "maxDuration": 30
         },
         "api/sitemap.ts": {

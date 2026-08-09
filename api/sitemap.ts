@@ -5,11 +5,13 @@ import {
   LOCALES,
   detectDomain,
   buildCanonicalUrl,
+  buildPublicPageCanonicalUrl,
   buildPlatformCanonicalUrl,
   localizedPagePath,
   canonicalDomain,
   hreflangCode,
 } from './_lib/seo-routing.js';
+import { evaluatePublicPageSeo } from '../src/lib/publicPage.js';
 
 function getSupabase() {
   const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -19,7 +21,7 @@ function getSupabase() {
 }
 
 /** Bump when marketing copy meaningfully changes — emitted as <lastmod>. */
-const STATIC_LASTMOD = '2026-06-12';
+const STATIC_LASTMOD = '2026-08-10';
 
 interface SitemapPage {
   urlFor: (locale: Locale) => string;
@@ -39,6 +41,7 @@ export const STATIC_PAGES: SitemapPage[] = [
   { urlFor: (l) => buildPlatformCanonicalUrl('/schools', '/', l), changefreq: 'weekly', priority: '0.8' },
   { urlFor: (l) => buildPlatformCanonicalUrl('/schools', '/pricing', l), changefreq: 'monthly', priority: '0.7' },
   plainPage('/features', 'monthly', '0.85'),
+  plainPage('/features/digital-business-card', 'monthly', '0.8'),
   plainPage('/features/calendar', 'monthly', '0.7'),
   plainPage('/features/waitlist', 'monthly', '0.7'),
   plainPage('/features/payments', 'monthly', '0.7'),
@@ -64,6 +67,30 @@ function postSlug(post: Record<string, unknown>, locale: Locale): string {
 function postLastmod(post: Record<string, unknown>): string | undefined {
   const raw = (post.updated_at as string) || (post.published_at as string) || '';
   return raw ? raw.split('T')[0] : undefined;
+}
+
+export function publicPageBelongsInSitemap(
+  page: Record<string, unknown>,
+  tutorIdsWithOfferings: ReadonlySet<string>,
+): boolean {
+  const ownerType = page.owner_type === 'tutor' || page.owner_type === 'organization'
+    ? page.owner_type
+    : null;
+  if (!ownerType) return false;
+  const userId = typeof page.user_id === 'string' ? page.user_id : null;
+  const organizationId = typeof page.organization_id === 'string' ? page.organization_id : null;
+  return evaluatePublicPageSeo({
+    slug: typeof page.slug === 'string' ? page.slug : '',
+    ownerType,
+    locale: typeof page.locale === 'string' ? page.locale : '',
+    displayName: typeof page.display_name === 'string' ? page.display_name : '',
+    headline: typeof page.headline === 'string' ? page.headline : '',
+    bio: typeof page.bio === 'string' ? page.bio : '',
+    published: page.published === true,
+    userId,
+    organizationId,
+    offeringCount: userId && tutorIdsWithOfferings.has(userId) ? 1 : 0,
+  }).indexable;
 }
 
 /**
@@ -105,13 +132,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const supabase = getSupabase();
 
   let blogPosts: Record<string, unknown>[] = [];
+  let publicPages: Record<string, unknown>[] = [];
+  const tutorIdsWithOfferings = new Set<string>();
   if (supabase) {
-    const { data } = await supabase
-      .from('blog_posts')
-      .select(`slug, ${SLUG_COLUMNS}, published_at, updated_at, ${TITLE_COLUMNS}`)
-      .eq('status', 'published')
-      .order('published_at', { ascending: false });
-    blogPosts = data || [];
+    const [blogResult, publicPageResult] = await Promise.all([
+      supabase
+        .from('blog_posts')
+        .select(`slug, ${SLUG_COLUMNS}, published_at, updated_at, ${TITLE_COLUMNS}`)
+        .eq('status', 'published')
+        .order('published_at', { ascending: false }),
+      supabase
+        .from('public_pages')
+        .select('slug, locale, updated_at, owner_type, user_id, organization_id, display_name, headline, bio, published')
+        .eq('published', true)
+        .order('updated_at', { ascending: false }),
+    ]);
+    blogPosts = blogResult.data || [];
+    // Older environments may not have the public_pages migration yet; the
+    // static/blog sitemap must remain available while that migration rolls out.
+    publicPages = publicPageResult.error ? [] : publicPageResult.data || [];
+
+    // A tutor profile is only useful to searchers once it has at least one
+    // actual server-owned subject. Fetch only owner ids, not subject content.
+    const tutorIds = [...new Set(publicPages
+      .filter((page) => page.owner_type === 'tutor' && typeof page.user_id === 'string')
+      .map((page) => String(page.user_id)))];
+    for (let offset = 0; offset < tutorIds.length; offset += 500) {
+      const { data } = await supabase
+        .from('subjects')
+        .select('tutor_id')
+        .in('tutor_id', tutorIds.slice(offset, offset + 500));
+      for (const subject of data || []) {
+        if (typeof subject.tutor_id === 'string') tutorIdsWithOfferings.add(subject.tutor_id);
+      }
+    }
   }
 
   const entries: string[] = [];
@@ -123,6 +177,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         urlEntry(page.urlFor(locale), page.changefreq, page.priority, alternatesXmlFor(page.urlFor), STATIC_LASTMOD),
       );
     }
+  }
+
+  // User-authored tutor/agency pages have exactly one authored locale. They
+  // are self-canonical and must not advertise fabricated translated variants.
+  for (const page of publicPages) {
+    if (!publicPageBelongsInSitemap(page, tutorIdsWithOfferings)) continue;
+    const slug = typeof page.slug === 'string' ? page.slug : '';
+    const locale = typeof page.locale === 'string' && LOCALES.includes(page.locale as Locale)
+      ? page.locale as Locale
+      : null;
+    if (!slug || !locale || canonicalDomain(locale) !== domain) continue;
+    const updatedAt = typeof page.updated_at === 'string' ? page.updated_at.split('T')[0] : undefined;
+    entries.push(urlEntry(buildPublicPageCanonicalUrl(slug, locale), 'weekly', '0.6', '', updatedAt));
   }
 
   // Blog listing: <loc> for this domain's translated locales, alternates

@@ -476,7 +476,7 @@ export default function OrgTutorFinanceSummary() {
                         </p>
                         {currentUserId && inv.issued_by_user_id !== currentUserId && (
                           <p className="text-[11px] text-indigo-600 truncate">
-                            Išrašė administratorius: {inv.issued_by_name || '—'}
+                            {t('companyLogin.loginSubtitle')}: {inv.issued_by_name || '—'}
                           </p>
                         )}
                       </div>

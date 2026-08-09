@@ -109,6 +109,10 @@ async function main() {
     email,
     full_name: 'Test Tutor',
     organization_id: null,
+    // This script is test-only and promises an end-to-end solo-tutor flow.
+    // Exempt the disposable QA profile from the Stripe subscription gate so
+    // protected pages such as Calendar are actually reachable after login.
+    manual_subscription_exempt: true,
     cancellation_hours: 24,
     preferred_locale: 'lt',
   };

@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { requireCronAuth } from './_lib/cronAuth.js';
 import { schoolContractAllowsInstallmentPayment } from './_lib/schoolContractPaymentGate.js';
+import { isReminderOptedOut } from './_lib/reminderOptOut.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
@@ -104,6 +105,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const org = inst.contract?.org;
     const recipient = student?.payer_email || student?.email;
     if (!recipient) continue;
+    if (await isReminderOptedOut(supabase, recipient)) {
+      console.warn('[school-installment-reminders] skip: opted out', recipient, inst.id);
+      continue;
+    }
 
     // Skip reminders for schools that can't receive card payments yet — the
     // on-demand "Pay now" link would only show an error.

@@ -3,21 +3,24 @@ import { ArrowRight, CalendarDays, Clock, CreditCard, GraduationCap } from 'luci
 import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
 import { FEATURE_PAGES } from '@/lib/featurePages';
 import Reveal from '../Reveal';
+import { getLandingDemoPersonas } from './demoPersonas';
 
 /* ---------- mini-UI previews: simplified product surfaces, not screenshots ---------- */
 
 function StudentsPreview() {
+  const { locale, t } = useTranslation();
+  const personas = getLandingDemoPersonas(locale);
   const rows = [
-    { initials: 'EM', name: 'Emilija M.', meta: '12', tone: 'bg-violet-100 text-violet-700', badge: 'bg-emerald-50 text-emerald-600' },
-    { initials: 'LK', name: 'Lukas K.', meta: '8', tone: 'bg-blue-100 text-blue-700', badge: 'bg-blue-50 text-blue-600' },
+    { name: personas.students[0], meta: '12', tone: 'bg-violet-100 text-violet-700', badge: 'bg-emerald-50 text-emerald-600' },
+    { name: personas.students[1], meta: '8', tone: 'bg-blue-100 text-blue-700', badge: 'bg-blue-50 text-blue-600' },
   ];
   return (
     <div className="flex h-full flex-col gap-1.5 p-1.5">
       <div className="grid flex-1 grid-cols-2 gap-1.5">
         {rows.map((r) => (
-          <div key={r.initials} className="flex flex-col items-center justify-center rounded-lg bg-zinc-50 p-2">
+          <div key={r.name} className="flex flex-col items-center justify-center rounded-lg bg-zinc-50 p-2">
             <span className={`flex h-10 w-10 items-center justify-center rounded-full text-[11px] font-bold ${r.tone}`}>
-              {r.initials}
+              {r.name.replace(/[^\p{L}]+/gu, '').slice(0, 2).toUpperCase()}
             </span>
             <span className="mt-1.5 text-[7px] font-semibold text-zinc-800">{r.name}</span>
             <span className={`mt-1 rounded-full px-1.5 py-0.5 text-[5px] font-medium ${r.badge}`}>{r.meta}</span>
@@ -25,10 +28,14 @@ function StudentsPreview() {
         ))}
       </div>
       <div className="flex items-center justify-around border-t border-zinc-100 bg-zinc-50/60 px-2 py-1.5">
-        {[['47', 'Students'], ['12', 'Parents'], ['94%', 'Retention']].map(([v, l]) => (
-          <div key={l} className="text-center">
-            <div className="text-[9px] font-bold text-zinc-800">{v}</div>
-            <div className="text-[5px] text-zinc-400">{l}</div>
+        {[
+          { key: 'students', value: '47', label: t('landing.insideStudents') },
+          { key: 'parents', value: '12', label: t('landing.v2.animBizParents') },
+          { key: 'retention', value: '94%', label: t('landing.v2.demo.retention') },
+        ].map((item) => (
+          <div key={item.key} className="text-center">
+            <div className="text-[9px] font-bold text-zinc-800">{item.value}</div>
+            <div className="text-[5px] text-zinc-400">{item.label}</div>
           </div>
         ))}
       </div>
@@ -37,17 +44,19 @@ function StudentsPreview() {
 }
 
 function CalendarPreview() {
+  const { t } = useTranslation();
+  const weekdays = t('landing.v2.demo.weekdays').split('|');
   const cells: (string | null)[][] = [
-    ['Physics', null, null],
-    [null, 'Math', 'English'],
-    [null, 'Chem', 'Spanish'],
-    ['Biology', null, null],
+    [t('landing.v2.demo.subjectPhysics'), null, null],
+    [null, t('landing.v2.demo.subjectMath'), t('landing.v2.demo.subjectEnglish')],
+    [null, t('landing.v2.demo.subjectChemistry'), t('landing.v2.demo.subjectHistory')],
+    [t('landing.v2.demo.subjectBiology'), null, null],
   ];
   const tones = ['bg-emerald-50 border-emerald-500', 'bg-blue-50 border-blue-500', 'bg-amber-50 border-amber-500'];
   return (
     <div className="grid h-full grid-cols-[16px_1fr_1fr_1fr] grid-rows-[18px_1fr_1fr_1fr_1fr]">
       <div className="border-b border-r border-zinc-100 bg-zinc-50" />
-      {['Mon', 'Tue', 'Wed'].map((d, i) => (
+      {weekdays.slice(0, 3).map((d, i) => (
         <div key={d} className={`flex items-center justify-center border-b border-zinc-100 bg-zinc-50 ${i < 2 ? 'border-r' : ''}`}>
           <span className="text-[6px] font-medium text-zinc-500">{d}</span>
         </div>
@@ -73,10 +82,12 @@ function CalendarPreview() {
 }
 
 function PaymentsPreview() {
+  const { locale, t } = useTranslation();
+  const personas = getLandingDemoPersonas(locale);
   const lines = [
-    ['Math (4×)', '220 €', 'bg-blue-500'],
-    ['Physics (2×)', '110 €', 'bg-violet-500'],
-    ['English (3×)', '165 €', 'bg-emerald-500'],
+    [`${t('landing.v2.demo.subjectMath')} (4×)`, '220 €', 'bg-blue-500'],
+    [`${t('landing.v2.demo.subjectPhysics')} (2×)`, '110 €', 'bg-violet-500'],
+    [`${t('landing.v2.demo.subjectEnglish')} (3×)`, '165 €', 'bg-emerald-500'],
   ];
   return (
     <div className="flex h-full flex-col">
@@ -84,9 +95,9 @@ function PaymentsPreview() {
         <div className="mb-2 flex items-center justify-between">
           <div>
             <div className="text-[8px] font-bold text-zinc-800">INV-2026-047</div>
-            <div className="text-[5px] text-zinc-400">Miller</div>
+            <div className="text-[5px] text-zinc-400">{personas.families[0]}</div>
           </div>
-          <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[5px] font-semibold text-emerald-600">Paid</span>
+          <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[5px] font-semibold text-emerald-600">{t('dash.paidLabel')}</span>
         </div>
         <div className="flex flex-1 flex-col justify-around">
           {lines.map(([label, amount, dot]) => (
@@ -101,7 +112,7 @@ function PaymentsPreview() {
         </div>
       </div>
       <div className="flex items-center justify-between bg-emerald-50/60 px-2 py-1.5">
-        <span className="text-[7px] font-medium text-emerald-700">Total</span>
+        <span className="text-[7px] font-medium text-emerald-700">{t('common.total')}</span>
         <span className="text-[10px] font-bold text-emerald-700">495 €</span>
       </div>
     </div>
@@ -109,17 +120,20 @@ function PaymentsPreview() {
 }
 
 function WaitlistPreview() {
+  const { locale, t } = useTranslation();
+  const personas = getLandingDemoPersonas(locale);
+  const weekdays = t('landing.v2.demo.weekdays').split('|');
   const queue = [
-    { name: 'Emilija M.', slot: 'Tue 16:00', state: 'offered' },
-    { name: 'Lukas K.', slot: 'Tue 16:00', state: 'queued' },
-    { name: 'Sofija G.', slot: 'Thu 17:00', state: 'queued' },
+    { name: personas.students[0], slot: `${weekdays[1]} 16:00`, state: 'offered' },
+    { name: personas.students[1], slot: `${weekdays[1]} 16:00`, state: 'queued' },
+    { name: personas.students[2], slot: `${weekdays[3]} 17:00`, state: 'queued' },
   ];
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-1 flex-col p-2">
         <div className="mb-2 flex items-center gap-1">
           <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-          <span className="text-[8px] font-bold text-zinc-800">Waitlist</span>
+          <span className="text-[8px] font-bold text-zinc-800">{t('landing.v2.wlPipeline')}</span>
           <span className="ml-auto rounded-full bg-amber-100 px-1.5 py-0.5 text-[5px] font-bold text-amber-700">3</span>
         </div>
         <div className="flex flex-1 flex-col justify-around">
@@ -133,7 +147,7 @@ function WaitlistPreview() {
               <div className="flex items-center justify-between">
                 <span className="text-[6px] font-semibold text-zinc-800">{i + 1}. {q.name}</span>
                 {q.state === 'offered' && (
-                  <span className="rounded bg-amber-500 px-1 py-px text-[4px] font-bold text-white">OFFERED</span>
+                  <span className="rounded bg-amber-500 px-1 py-px text-[4px] font-bold text-white">{t('landing.v2.wlOffered')}</span>
                 )}
               </div>
               <span className="text-[5px] text-zinc-400">{q.slot}</span>
@@ -142,7 +156,7 @@ function WaitlistPreview() {
         </div>
       </div>
       <div className="flex items-center justify-between bg-amber-50/70 px-2 py-1.5">
-        <span className="text-[7px] font-medium text-amber-800">Auto-filled</span>
+        <span className="text-[7px] font-medium text-amber-800">{t('landing.v2.demo.autoFilled')}</span>
         <span className="text-[10px] font-bold text-amber-800">2/3</span>
       </div>
     </div>

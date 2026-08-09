@@ -1,6 +1,6 @@
 import { Star } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
-import { PLACEHOLDER_TESTIMONIALS, SHOW_PLACEHOLDER_SOCIAL_PROOF, TESTIMONIALS } from './socialProof';
+import { getTestimonials } from './socialProof';
 
 /**
  * Testimonial marquee. Ratings render visually but are deliberately NOT emitted
@@ -8,10 +8,8 @@ import { PLACEHOLDER_TESTIMONIALS, SHOW_PLACEHOLDER_SOCIAL_PROOF, TESTIMONIALS }
  * real and verifiable, or the rich result is a fabricated one.
  */
 export default function Testimonials() {
-  const { t } = useTranslation();
-  const items = TESTIMONIALS.length > 0
-    ? TESTIMONIALS
-    : SHOW_PLACEHOLDER_SOCIAL_PROOF ? PLACEHOLDER_TESTIMONIALS : [];
+  const { locale, t } = useTranslation();
+  const items = getTestimonials(locale);
 
   if (items.length === 0) return null;
 
@@ -38,9 +36,15 @@ export default function Testimonials() {
                   >
                     <div className="flex items-center gap-3 sm:gap-4">
                       {item.photo ? (
-                        <img src={item.photo} alt="" className="h-10 w-10 rounded-full object-cover sm:h-12 sm:w-12" />
+                        <img
+                          src={item.photo}
+                          alt=""
+                          loading="lazy"
+                          decoding="async"
+                          className="h-10 w-10 rounded-full object-cover bg-zinc-100 sm:h-12 sm:w-12"
+                        />
                       ) : (
-                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-400 sm:h-12 sm:w-12">
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-500 sm:h-12 sm:w-12">
                           {item.name.replace(/[^\p{L}]/gu, '').slice(0, 2).toUpperCase() || '—'}
                         </span>
                       )}

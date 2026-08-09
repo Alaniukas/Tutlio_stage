@@ -10,7 +10,7 @@
  * below survive only as the two showcase URLs linked from marketing pages.
  *
  * Still prototype: CHROME is a two-locale object rather than real i18n keys
- * across all 12 locales.
+ * across all 13 locales.
  */
 
 import type { Locale } from './i18n/core';
@@ -24,6 +24,12 @@ function canonicalDomainFor(locale: Locale): DomainKey {
   return 'com';
 }
 
+const PUBLIC_PAGE_ORIGINS: Record<DomainKey, string> = {
+  lt: 'https://www.tutlio.lt',
+  com: 'https://www.tutlio.com',
+  pl: 'https://www.tutlio.pl',
+};
+
 /**
  * Localized public-page prefix. Keyed by DOMAIN, not locale — this matches
  * LOCALIZED_PAGE_PATHS in api/_lib/seo-routing.ts, so .pl gets the English
@@ -36,7 +42,14 @@ export const PUBLIC_PAGE_PREFIX: Record<DomainKey, string> = {
 };
 
 export function publicPagePath(slug: string, locale: Locale): string {
-  return `${PUBLIC_PAGE_PREFIX[canonicalDomainFor(locale)]}/${slug}`;
+  const domain = canonicalDomainFor(locale);
+  const localePrefix = domain === 'com' && locale !== 'en' ? `/${locale}` : '';
+  return `${localePrefix}${PUBLIC_PAGE_PREFIX[domain]}/${slug}`;
+}
+
+export function publicPageCanonicalUrl(slug: string, locale: Locale): string {
+  const domain = canonicalDomainFor(locale);
+  return `${PUBLIC_PAGE_ORIGINS[domain]}${publicPagePath(slug, locale)}`;
 }
 
 /** Slugs that can never belong to a tutor — checked in the editor API, not the DB. */
@@ -142,6 +155,117 @@ export interface PublicPage {
 /** Aggregate rating is only structured-data-eligible above this count. */
 export const MIN_REVIEWS_FOR_AGGREGATE = 3;
 
+/**
+ * Search engines should only receive profiles that are useful without any
+ * private application context. Publishing remains an owner's visibility
+ * choice; this separate gate decides whether the page is mature enough to be
+ * indexed and listed in the sitemap.
+ */
+export type PublicPageSeoReason =
+  | 'not-published'
+  | 'invalid-slug'
+  | 'invalid-locale'
+  | 'missing-owner'
+  | 'short-display-name'
+  | 'short-headline'
+  | 'short-bio'
+  | 'duplicate-copy'
+  | 'missing-offering';
+
+export interface PublicPageSeoCandidate {
+  slug: string;
+  ownerType: PublicPageOwnerType;
+  locale: string;
+  displayName: string;
+  headline: string;
+  bio: string;
+  published: boolean;
+  userId?: string | null;
+  organizationId?: string | null;
+  offeringCount: number;
+}
+
+export interface PublicPageSeoEligibility {
+  indexable: boolean;
+  reasons: PublicPageSeoReason[];
+}
+
+const PUBLIC_PAGE_SEO_LOCALES = new Set<Locale>([
+  'lt', 'en', 'pl', 'lv', 'ee', 'fr', 'es', 'de', 'se', 'dk', 'fi', 'no', 'nl',
+]);
+
+function comparableCopy(value: string): string {
+  return value.normalize('NFKC').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+/**
+ * Deliberately conservative thresholds: a one-line placeholder can still be
+ * shared with customers, but it must not become a thin search result. Tutor
+ * pages additionally need a real, server-derived subject/lesson offering.
+ */
+export function evaluatePublicPageSeo(candidate: PublicPageSeoCandidate): PublicPageSeoEligibility {
+  const reasons: PublicPageSeoReason[] = [];
+  const displayName = candidate.displayName.replace(/\s+/g, ' ').trim();
+  const headline = candidate.headline.replace(/\s+/g, ' ').trim();
+  const bio = candidate.bio.replace(/\s+/g, ' ').trim();
+
+  if (!candidate.published) reasons.push('not-published');
+  if (!isValidSlug(candidate.slug)) reasons.push('invalid-slug');
+  if (!PUBLIC_PAGE_SEO_LOCALES.has(candidate.locale as Locale)) reasons.push('invalid-locale');
+
+  const hasExpectedOwner = candidate.ownerType === 'tutor'
+    ? Boolean(candidate.userId) && !candidate.organizationId
+    : Boolean(candidate.organizationId) && !candidate.userId;
+  if (!hasExpectedOwner) reasons.push('missing-owner');
+
+  if (displayName.length < 3) reasons.push('short-display-name');
+  if (headline.length < 20) reasons.push('short-headline');
+  if (bio.length < 120) reasons.push('short-bio');
+
+  const displayComparable = comparableCopy(displayName);
+  const headlineComparable = comparableCopy(headline);
+  const bioComparable = comparableCopy(bio);
+  if (
+    (headlineComparable && headlineComparable === displayComparable)
+    || (bioComparable && (bioComparable === headlineComparable || bioComparable === displayComparable))
+  ) {
+    reasons.push('duplicate-copy');
+  }
+
+  if (candidate.ownerType === 'tutor' && candidate.offeringCount < 1) {
+    reasons.push('missing-offering');
+  }
+
+  return { indexable: reasons.length === 0, reasons };
+}
+
+const SOCIAL_HOSTS: Record<keyof PublicPageSocials, readonly string[]> = {
+  tiktok: ['tiktok.com'],
+  youtube: ['youtube.com', 'youtu.be'],
+  x: ['x.com', 'twitter.com'],
+  instagram: ['instagram.com'],
+  facebook: ['facebook.com', 'fb.com'],
+};
+
+/** Validates that a user-provided URL actually belongs to its named network. */
+export function safePublicSocialUrl(
+  provider: string,
+  value: unknown,
+): string | null {
+  if (!(provider in SOCIAL_HOSTS)) return null;
+  try {
+    const url = new URL(String(value ?? '').trim());
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+    const hostname = url.hostname.toLowerCase().replace(/^(?:www\.|m\.)/, '');
+    const allowed = SOCIAL_HOSTS[provider as keyof PublicPageSocials];
+    if (!allowed.some((host) => hostname === host || hostname.endsWith(`.${host}`))) return null;
+    url.protocol = 'https:';
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* DB row <-> PublicPage                                               */
 /* ------------------------------------------------------------------ */
@@ -173,6 +297,7 @@ export interface PublicPageRow {
   socials: PublicPageSocials | null;
   published: boolean;
   booking_enabled: boolean;
+  updated_at?: string;
 }
 
 /**
@@ -313,7 +438,7 @@ export function groupSlotsByDay(slots: PublicPageSlot[]): { day: string; slots: 
 }
 
 /* ------------------------------------------------------------------ */
-/* PROTOTYPE ONLY — replaced by i18n keys (12 locales) in Phase 1.     */
+/* PROTOTYPE ONLY — replaced by i18n keys (13 locales) in Phase 1.     */
 /* Page *content* (name, bio, subjects) stays fixture/DB data; only    */
 /* these UI chrome labels become translation keys.                     */
 /* ------------------------------------------------------------------ */

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Production SEO smoke check — verifies the crawler-facing contract on the
- * live domains after every deploy (SSR for bots, noindex SPA for humans,
+ * live domains after every deploy (SSR for crawlers, noindex SPA for browser
+ * navigations,
  * canonical redirects, hard 404s, sitemap/robots/feed/llms endpoints).
  *
  * Usage:
@@ -34,7 +35,17 @@ let failures = 0;
 const results = [];
 
 async function get(url, ua, redirect = 'manual') {
-  const res = await fetch(url, { headers: { 'User-Agent': ua }, redirect });
+  const headers = { 'User-Agent': ua };
+  // Vercel middleware uses Fetch Metadata to distinguish a real browser
+  // navigation from crawler-like HTTP clients whose UA may not be in a
+  // static allowlist. Node's fetch does not add these headers by itself.
+  if (ua === HUMAN) {
+    headers['Sec-Fetch-Mode'] = 'navigate';
+    headers['Sec-Fetch-Dest'] = 'document';
+    headers['Sec-Fetch-Site'] = 'none';
+    headers['Sec-Fetch-User'] = '?1';
+  }
+  const res = await fetch(url, { headers, redirect });
   const body = redirect === 'manual' && res.status >= 300 && res.status < 400 ? '' : await res.text();
   return { status: res.status, body, location: res.headers.get('location') || '' };
 }

@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { hasActiveSubscription, tutorHasPlatformSubscriptionAccess } from '@/lib/subscription';
 import { useUser } from '@/contexts/UserContext';
 import { isStandalonePwa, loginPathForLastPortal } from '@/lib/pwaPortal';
+import { loginHrefWithNext } from '@/lib/auth-redirects';
 
 export default function ProtectedRoute() {
   const location = useLocation();
@@ -224,6 +225,13 @@ export default function ProtectedRoute() {
   return status === 'tutor' ? (
     <Outlet />
   ) : (
-    <Navigate to={isStandalonePwa() ? loginPathForLastPortal() : '/login'} replace />
+    <Navigate
+      to={
+        isStandalonePwa()
+          ? loginPathForLastPortal()
+          : loginHrefWithNext(`${location.pathname}${location.search}`)
+      }
+      replace
+    />
   );
 }

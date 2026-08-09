@@ -5,6 +5,7 @@
  * always see the same content.
  */
 export type FeaturePageId =
+  | 'digital-business-card'
   | 'calendar'
   | 'waitlist'
   | 'payments'
@@ -18,9 +19,18 @@ export interface FeaturePageConfig {
   descKey: string;
   detailKeys: string[];
   faqKeys: string[];
+  badgeKey?: string;
 }
 
 export const FEATURE_PAGES: Record<FeaturePageId, FeaturePageConfig> = {
+  'digital-business-card': {
+    path: '/features/digital-business-card',
+    titleKey: 'feature.digital-business-card.pageTitle',
+    descKey: 'feature.digital-business-card.pageDesc',
+    detailKeys: ['oneLink', 'liveAvailability', 'instantEnquiries', 'professionalBrand'],
+    faqKeys: ['whatShows', 'howBookingWorks', 'whereShare'],
+    badgeKey: 'featuresIndex.newBadge',
+  },
   calendar: {
     path: '/features/calendar',
     titleKey: 'feature.calendar.pageTitle',

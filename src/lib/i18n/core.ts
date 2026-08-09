@@ -1,12 +1,9 @@
-import { lt } from './lt';
-import { en } from './en';
-import { pl } from './pl';
 import { resolvePlatformTranslation } from './platformOverrides';
 import { type Platform, DEFAULT_PLATFORM } from '@/lib/platform';
 
-export type Locale = 'lt' | 'en' | 'pl' | 'lv' | 'ee' | 'fr' | 'es' | 'de' | 'se' | 'dk' | 'fi' | 'no';
+export type Locale = 'lt' | 'en' | 'pl' | 'lv' | 'ee' | 'fr' | 'es' | 'de' | 'se' | 'dk' | 'fi' | 'no' | 'nl';
 
-export const SUPPORTED_LOCALES: Locale[] = ['lt', 'en', 'pl', 'lv', 'ee', 'fr', 'es', 'de', 'se', 'dk', 'fi', 'no'];
+export const SUPPORTED_LOCALES: Locale[] = ['lt', 'en', 'pl', 'lv', 'ee', 'fr', 'es', 'de', 'se', 'dk', 'fi', 'no', 'nl'];
 
 export const LOCALE_LABELS: Record<Locale, string> = {
   lt: 'LT',
@@ -21,6 +18,7 @@ export const LOCALE_LABELS: Record<Locale, string> = {
   dk: 'DK',
   fi: 'FI',
   no: 'NO',
+  nl: 'NL',
 };
 
 export const LOCALE_NAMES: Record<Locale, string> = {
@@ -36,22 +34,34 @@ export const LOCALE_NAMES: Record<Locale, string> = {
   dk: 'Dansk',
   fi: 'Suomi',
   no: 'Norsk',
+  nl: 'Nederlands',
 };
+
+/** Internal URL slugs retain historical country-like codes, but HTML `lang`
+ * and hreflang require real language codes. */
+const HTML_LANGUAGE_CODES: Record<Locale, string> = {
+  lt: 'lt', en: 'en', pl: 'pl', lv: 'lv', ee: 'et', fr: 'fr', es: 'es',
+  de: 'de', se: 'sv', dk: 'da', fi: 'fi', no: 'no', nl: 'nl',
+};
+
+export function htmlLanguageCode(locale: Locale): string {
+  return HTML_LANGUAGE_CODES[locale];
+}
 
 type Dict = Record<string, string>;
 
 /**
- * Domain-default locales (tutlio.lt / tutlio.com / tutlio.pl) ship in the main
- * bundle so the first paint is always in the right language for each domain.
- * The other nine dictionaries (~2.5 MB of source) load on demand via
- * loadLocaleDict() — most visitors never need them.
+ * Every dictionary loads on demand, including domain defaults. main.tsx waits
+ * for the URL's initial locale before rendering, so this removes roughly 1 MB
+ * of unrelated LT/EN/PL copy from the shared entry without causing a language
+ * flash. A visitor downloads one locale instead of all three defaults.
  */
-const translations: Partial<Record<Locale, Dict>> = { lt, en, pl };
+const translations: Partial<Record<Locale, Dict>> = {};
 
 const DICT_LOADERS: Record<Locale, () => Promise<Dict>> = {
-  lt: () => Promise.resolve(lt),
-  en: () => Promise.resolve(en),
-  pl: () => Promise.resolve(pl),
+  lt: () => import('./lt').then((m) => m.lt),
+  en: () => import('./en').then((m) => m.en),
+  pl: () => import('./pl').then((m) => m.pl),
   lv: () => import('./lv').then((m) => m.lv),
   ee: () => import('./ee').then((m) => m.ee),
   fr: () => import('./fr').then((m) => m.fr),
@@ -61,6 +71,7 @@ const DICT_LOADERS: Record<Locale, () => Promise<Dict>> = {
   dk: () => import('./dk').then((m) => m.dk),
   fi: () => import('./fi').then((m) => m.fi),
   no: () => import('./no').then((m) => m.no),
+  nl: () => import('./nl').then((m) => m.nl),
 };
 
 const pendingLoads = new Map<Locale, Promise<void>>();
@@ -97,8 +108,12 @@ function escapeHtmlParam(value: string): string {
 }
 
 function resolveTemplate(locale: Locale, key: string, platform: Platform): string {
-  // en/lt are always bundled, so the fallback chain never depends on a lazy load.
-  const text = translations[locale]?.[key] ?? en[key] ?? lt[key] ?? key;
+  let text = translations[locale]?.[key]
+    ?? translations.en?.[key]
+    ?? translations.lt?.[key];
+  if (text === undefined) {
+    text = Object.values(translations).find((dict) => dict?.[key])?.[key] ?? key;
+  }
   if (platform !== DEFAULT_PLATFORM) {
     return resolvePlatformTranslation(platform, locale, key, text);
   }

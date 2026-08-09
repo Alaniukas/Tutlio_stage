@@ -25,13 +25,13 @@ import {
 const LANDING_FAQ_KEYS = ['whatIs', 'whoFor', 'waitlist', 'freeTrial'] as const;
 
 function renderFeaturesIndex(locale: Locale, domain: DomainKey): string {
-  const registerPath = buildPath('/register', locale, domain);
   const pricingPath = buildPath('/pricing', locale, domain);
 
   const deepCards = FEATURE_PAGE_IDS.map((id) => {
     const cfg = FEATURE_PAGES[id];
     const href = buildPath(cfg.path, locale, domain);
     return `<a href="${href}" class="card" style="text-decoration:none;color:inherit;display:block">
+    ${cfg.badgeKey ? `<p style="display:inline-block;margin:0 0 10px;background:#4f46e5;color:#fff;padding:3px 9px;border-radius:999px;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em">${esc(t(locale, cfg.badgeKey))}</p>` : ''}
     <h3>${esc(t(locale, cfg.titleKey))}</h3>
     <p>${esc(t(locale, cfg.descKey))}</p>
     <p style="margin-top:12px;color:#4f46e5;font-weight:600;font-size:.9rem">${esc(t(locale, 'featuresIndex.readMore'))} →</p>
@@ -82,7 +82,7 @@ function renderFeaturesIndex(locale: Locale, domain: DomainKey): string {
 <div class="section" style="text-align:center;padding:60px 24px">
   <h2>${esc(t(locale, 'landing.ctaTitle'))}</h2>
   <p>${esc(t(locale, 'landing.ctaDesc'))}</p>
-  <a href="${registerPath}" class="btn">${esc(t(locale, 'landing.startFree'))}</a>
+  <a href="${pricingPath}" class="btn">${esc(t(locale, 'landing.startFree'))}</a>
   <p style="margin-top:16px"><a href="${pricingPath}">${esc(t(locale, 'common.prices'))}</a></p>
 </div>`;
 }
@@ -104,7 +104,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     answer: t(locale, `landing.faq.${f}A`),
   }));
 
-  const jsonLd = `${webPageJsonLd({ name: title, description, url: canonicalUrl })}</script><script type="application/ld+json">${faqJsonLd(faqItems)}`;
+  const jsonLd = `${webPageJsonLd({ locale, name: title, description, url: canonicalUrl })}</script><script type="application/ld+json">${faqJsonLd(faqItems)}`;
 
   const homeUrl = buildCanonicalUrl('/', locale);
   const breadcrumbs = [

@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CalendarCheck, Link2, Pause, Play } from 'lucide-react';
 import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
-
-const SLOTS = ['Pn 16:00', 'An 17:30', 'Kt 18:00'];
+import { getLandingDemoPersonas } from './demoPersonas';
 
 function usePrefersReducedMotion(): boolean {
   const [reduced, setReduced] = useState(false);
@@ -18,11 +17,14 @@ function usePrefersReducedMotion(): boolean {
 }
 
 /**
- * Browser vignette: a student opens the shared booking link, picks a slot and
- * the lesson is confirmed. Four steps, looping. Static at the final step under
- * prefers-reduced-motion.
+ * Browser vignette of a public tutor page: visitor opens the link, picks a
+ * free slot, and sends an enquiry. Four steps, looping.
  */
 function BookingAnimation() {
+  const { locale, t } = useTranslation();
+  const personas = getLandingDemoPersonas(locale);
+  const weekdays = t('landing.v2.demo.weekdays').split('|');
+  const slots = [`${weekdays[4]} 16:00`, `${weekdays[1]} 17:30`, `${weekdays[3]} 18:00`];
   const reducedMotion = usePrefersReducedMotion();
   const [step, setStep] = useState(0);
   const [playing, setPlaying] = useState(true);
@@ -61,27 +63,32 @@ function BookingAnimation() {
           </span>
           <span className="ml-2 flex h-5 flex-1 items-center gap-1 rounded border border-gray-200 bg-gray-100 px-2 text-[9px] text-gray-400">
             <Link2 className="h-2.5 w-2.5" />
-            tutlio.lt/book/…
+            {personas.publicProfileUrl}
           </span>
         </div>
 
         <div className="flex flex-col gap-3 bg-gray-50 p-4">
           <div className="flex items-center gap-2">
-            <span className="h-7 w-7 rounded-full bg-indigo-100" />
-            <span className="h-2.5 w-24 rounded-full bg-gray-200" />
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-violet-100 text-[10px] font-bold text-violet-700">
+              {personas.publicTutor.replace(/[^\p{L}]+/gu, '').slice(0, 2).toUpperCase()}
+            </span>
+            <div className="min-w-0">
+              <span className="block h-2.5 w-28 rounded-full bg-gray-300" />
+              <span className="mt-1 block text-[10px] font-medium text-gray-500">{personas.publicTutor} · {t('landing.v2.demo.subjectMath')}</span>
+            </div>
           </div>
 
           <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
             <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-              {SLOTS.length} · 60 min
+              {t('landing.v2.animSoloCardSlots')} · 60 min
             </div>
             <div className="flex flex-col gap-1.5">
-              {SLOTS.map((slot, i) => (
+              {slots.map((slot, i) => (
                 <div
                   key={slot}
                   className={`flex items-center justify-between rounded-md border px-2.5 py-2 text-[11px] font-medium transition-all duration-300 ${
                     i === picked
-                      ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                      ? 'border-violet-500 bg-violet-50 text-violet-700'
                       : 'border-gray-200 bg-white text-gray-600'
                   }`}
                 >
@@ -98,7 +105,7 @@ function BookingAnimation() {
             }`}
           >
             {confirmed && <CalendarCheck className="h-3.5 w-3.5" />}
-            {confirmed ? '✓' : '→'}
+            {confirmed ? t('cal.confirmed') : t('landing.v2.animSoloCardCta')}
           </div>
         </div>
 
@@ -125,7 +132,7 @@ function BookingAnimation() {
         <button
           type="button"
           onClick={() => setPlaying((p) => !p)}
-          aria-label={playing ? 'Pause animation' : 'Play animation'}
+          aria-label={playing ? t('landing.v2.animPause') : t('landing.v2.animPlay')}
           className="absolute bottom-4 left-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-gray-900 shadow-lg transition-colors hover:bg-white"
         >
           {playing ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="h-3.5 w-3.5 fill-current" />}
@@ -139,11 +146,11 @@ export default function BookingLinkCta() {
   const { t, locale } = useTranslation();
 
   return (
-    <section className="bg-zinc-50">
+    <section className="bg-white">
       <div className="mx-auto w-full max-w-[1224px] px-5 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
         <div className="flex flex-col items-center gap-8 lg:flex-row lg:justify-between lg:gap-12 xl:gap-16">
           <div className="flex max-w-[480px] flex-col gap-5 text-center sm:gap-6 lg:text-left">
-            <div className="mx-auto inline-flex w-fit items-center gap-2 rounded-full border border-zinc-200 bg-white px-4 py-2 lg:mx-0">
+            <div className="mx-auto inline-flex w-fit items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-4 py-2 lg:mx-0">
               <Link2 className="h-4 w-4 shrink-0 text-emerald-500" />
               <span className="text-sm font-medium text-zinc-700">{t('landing.v2.linkBadge')}</span>
             </div>
@@ -157,12 +164,20 @@ export default function BookingLinkCta() {
               </p>
             </div>
 
-            <Link
-              to={buildLocalizedPath('/register', locale)}
-              className="mx-auto inline-block w-fit rounded-lg bg-zinc-900 px-7 py-3.5 font-semibold text-white transition-colors hover:bg-zinc-800 sm:px-8 sm:py-4 lg:mx-0"
-            >
-              {t('landing.v2.linkCta')}
-            </Link>
+            <div className="flex flex-col items-center gap-3 sm:flex-row lg:justify-start">
+              <Link
+                to={buildLocalizedPath('/pricing', locale)}
+                className="inline-block w-fit rounded-lg bg-zinc-900 px-7 py-3.5 font-semibold text-white transition-colors hover:bg-zinc-800 sm:px-8 sm:py-4"
+              >
+                {t('landing.v2.linkCta')}
+              </Link>
+              <Link
+                to="/korepetitorius/demo"
+                className="text-sm font-semibold text-zinc-700 underline-offset-4 hover:underline"
+              >
+                {t('landing.v2.linkDemo')}
+              </Link>
+            </div>
           </div>
 
           <div className="w-full max-w-[400px] sm:max-w-[460px] lg:w-[480px] lg:max-w-none">

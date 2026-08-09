@@ -169,7 +169,7 @@ export async function runBlogAutoGenerate(
       return { ok: true, skipped: true, reason: 'auto generation disabled' };
     }
     if (settings.last_run_at) {
-      const intervalMs = (settings.interval_days || 2) * 24 * 60 * 60 * 1000;
+      const intervalMs = (settings.interval_days || 1) * 24 * 60 * 60 * 1000;
       const last = Date.parse(settings.last_run_at);
       if (Number.isFinite(last) && Date.now() - last < intervalMs) {
         return { ok: true, skipped: true, reason: 'interval not elapsed' };
