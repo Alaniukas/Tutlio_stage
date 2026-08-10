@@ -30,7 +30,7 @@ import { useTranslation } from '@/lib/i18n';
 import { useUser } from '@/contexts/UserContext';
 import { useTotalChatUnread } from '@/hooks/useChat';
 import { usePushSubscription } from '@/hooks/usePushSubscription';
-import { isWaitlistHiddenForOrg } from '@/lib/marketMoney';
+import { isWaitlistHiddenForOrg, isInstructionsHiddenForOrg } from '@/lib/marketMoney';
 import { useHideWaitlist } from '@/hooks/useHideWaitlist';
 
 interface LayoutProps {
@@ -59,9 +59,11 @@ export default function Layout({ children }: LayoutProps) {
   const mainRef = useRef<HTMLElement>(null);
 
   const navItems = useMemo(() => {
+    const orgId = profile?.organization_id || profileOrgId;
     const hideWaitlist =
       hideWaitlistFromFeatures ||
-      isWaitlistHiddenForOrg(profile?.organization_id || profileOrgId);
+      isWaitlistHiddenForOrg(orgId);
+    const hideInstructions = isInstructionsHiddenForOrg(orgId);
     const items = [
       { href: '/dashboard', label: t('nav.dashboard'), icon: LayoutDashboard },
       { href: '/calendar', label: t('nav.calendar'), icon: Calendar },
@@ -75,10 +77,12 @@ export default function Layout({ children }: LayoutProps) {
       { href: '/instructions', label: t('nav.instructions'), icon: HelpCircle },
     ];
     // Org tutors have neither a personal invoices page nor their own public
-    // page — the school owns both — but they can still see instructions.
+    // page — the school owns both — but they can still see instructions
+    // (except Pro Klasė, where instructions are fully removed).
     return items.filter((item) => {
       if (isOrgTutor && (item.href === '/invoices' || item.href === '/landing-editor')) return false;
       if (hideWaitlist && item.href === '/waitlist') return false;
+      if (hideInstructions && item.href === '/instructions') return false;
       return true;
     });
   }, [isOrgTutor, t, profile?.organization_id, profileOrgId, hideWaitlistFromFeatures]);
@@ -139,10 +143,11 @@ export default function Layout({ children }: LayoutProps) {
 
   const initials = tutorName.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?';
   const isCalendarRoute = location.pathname === '/calendar';
+  const hideInstructions = isInstructionsHiddenForOrg(profile?.organization_id || profileOrgId);
   return (
     <div className="h-dvh max-h-dvh bg-white flex overflow-hidden relative">
       <OrgSuspendedBanner />
-      <PwaInstallPrompt settingsPath="/instructions" />
+      <PwaInstallPrompt settingsPath={hideInstructions ? '/lesson-settings' : '/instructions'} />
       <div className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full blur-[80px] pointer-events-none z-0 bg-[color-mix(in_srgb,var(--org-brand)_12%,#ffffff)]" />
       <div className="absolute bottom-[-10%] left-[-10%] w-[600px] h-[600px] bg-slate-50/40 rounded-full blur-[100px] pointer-events-none z-0" />
 

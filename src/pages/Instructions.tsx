@@ -1,10 +1,11 @@
 import { Play } from 'lucide-react';
+import { Navigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import Layout from '@/components/Layout';
 import { useTranslation } from '@/lib/i18n';
 import { useUser } from '@/contexts/UserContext';
 import PwaInstallGuide from '@/components/PwaInstallGuide';
-import { isWaitlistHiddenForOrg } from '@/lib/marketMoney';
+import { isWaitlistHiddenForOrg, isInstructionsHiddenForOrg } from '@/lib/marketMoney';
 
 export default function Instructions() {
   const { t } = useTranslation();
@@ -12,6 +13,10 @@ export default function Instructions() {
 
   const isOrgTutor = !!profile?.organization_id;
   const hideWaitlist = isWaitlistHiddenForOrg(profile?.organization_id);
+
+  if (isInstructionsHiddenForOrg(profile?.organization_id)) {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   if (!isOrgTutor) {
     return (

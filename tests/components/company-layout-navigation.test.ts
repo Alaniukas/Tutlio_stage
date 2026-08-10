@@ -11,11 +11,11 @@ describe('organization sidebar navigation', () => {
     expect(paths.at(-1)).toBe('/school/instructions');
   });
 
-  it('keeps dynamic pricing for tutor organizations and instructions last', () => {
-    const paths = buildCompanyNavItems(false, '/company', translate, true).map((item) => item.href);
-
-    expect(paths).toContain('/company/dynamic-pricing');
-    expect(paths.at(-2)).toBe('/company/dynamic-pricing');
-    expect(paths.at(-1)).toBe('/company/instructions');
+  it('can hide instructions for Pro Klasė-style orgs', () => {
+    const paths = buildCompanyNavItems(false, '/company', translate, true, false, false).map(
+      (item) => item.href,
+    );
+    expect(paths).not.toContain('/company/instructions');
+    expect(paths.at(-1)).toBe('/company/dynamic-pricing');
   });
 });

@@ -1,11 +1,12 @@
 import { useState } from 'react';
+import { Navigate } from 'react-router-dom';
 import { Play, ChevronDown, ChevronUp } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import StudentLayout from '@/components/StudentLayout';
 import { useTranslation } from '@/lib/i18n';
 import PwaInstallGuide from '@/components/PwaInstallGuide';
 import { useStudentPolicy } from '@/contexts/StudentPolicyContext';
-import { isWaitlistHiddenForOrg } from '@/lib/marketMoney';
+import { isWaitlistHiddenForOrg, isInstructionsHiddenForOrg } from '@/lib/marketMoney';
 
 interface VideoSection {
   id: string;
@@ -16,10 +17,16 @@ interface VideoSection {
 
 export default function StudentInstructions() {
   const { t } = useTranslation();
-  const { bookingDisabled, organizationId, waitlistHidden } = useStudentPolicy();
+  const { resolved, bookingDisabled, organizationId, waitlistHidden } = useStudentPolicy();
   const hideWaitlist =
     bookingDisabled || waitlistHidden || isWaitlistHiddenForOrg(organizationId);
+  const hideInstructions =
+    !resolved || isInstructionsHiddenForOrg(organizationId);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
+
+  if (hideInstructions) {
+    return <Navigate to="/student" replace />;
+  }
 
   const OVERVIEW_VIDEO = {
     title: t('instructions.studentOverviewTitle'),

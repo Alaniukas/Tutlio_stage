@@ -17,7 +17,7 @@ import { useTranslation } from '@/lib/i18n';
 import { useTotalChatUnread } from '@/hooks/useChat';
 import { usePushSubscription } from '@/hooks/usePushSubscription';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
-import { isWaitlistHiddenForOrg } from '@/lib/marketMoney';
+import { isWaitlistHiddenForOrg, isInstructionsHiddenForOrg } from '@/lib/marketMoney';
 
 interface StudentLayoutProps {
     children: React.ReactNode;
@@ -82,6 +82,7 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
       waitlistHidden ||
       bookingDisabled ||
       isWaitlistHiddenForOrg(organizationId);
+    const hideInstructions = !resolved || isInstructionsHiddenForOrg(organizationId);
 
     const navItems = [
         { href: '/student', label: t('studentNav.home'), icon: LayoutDashboard },
@@ -239,7 +240,7 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
     return (
         <div className="min-h-screen bg-white flex flex-col relative overflow-x-hidden">
             <OrgSuspendedBanner />
-            <PwaInstallPrompt settingsPath="/student/instructions" />
+            <PwaInstallPrompt settingsPath={hideInstructions ? '/student/settings' : '/student/instructions'} />
             <div className="absolute top-0 right-0 w-96 h-96 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none bg-[color-mix(in_srgb,var(--org-brand)_12%,#ffffff)]" />
             <div className="absolute bottom-0 left-0 w-96 h-96 bg-slate-50/30 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 pointer-events-none" />
 
