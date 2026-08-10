@@ -165,6 +165,94 @@ describe('school contract signing lifecycle', () => {
     expect(pollMock).toHaveBeenCalledWith('txn-parent', { attempts: 1, delayMs: 0 });
   });
 
+  it('does not send payment email when all installments are already paid', async () => {
+    const fake = new FakeSupabase();
+    const objects = attachStorage(fake);
+    const schoolSignedPath = 'org-1/contracts/contract-1/signed/school.pdf';
+    objects.set(schoolSignedPath, Buffer.from('%PDF-school-signed'));
+
+    fake.db.school_contracts = [{
+      id: 'contract-paid',
+      organization_id: 'org-1',
+      student_id: 'student-1',
+      signing_status: 'signed_by_school',
+      pdf_url: 'org-1/contracts/contract-paid/Sutartis.pdf',
+      signed_contract_url: schoolSignedPath,
+      contract_number: 'SUT-PAID',
+      require_second_parent: false,
+      annual_fee: 240,
+      additional_fee_amount: null,
+      additional_fee_purpose: null,
+      organizations: {
+        name: 'VšĮ Mokykla',
+        email: 'info@school.lt',
+        features: {
+          school_contract_esign: true,
+          school_contract_signing_email: 'sutartys@school.lt',
+        },
+      },
+      student: {
+        id: 'student-1',
+        full_name: 'Martynaitis Armandas',
+        payer_name: 'Gintarė Martynaitienė',
+        payer_email: 'parent-paid@example.com',
+        payer_personal_code: '49001010000',
+        parent_secondary_name: null,
+        parent_secondary_email: null,
+        parent_secondary_personal_code: null,
+      },
+    }];
+    fake.db.school_contract_signatures = [
+      {
+        id: 'sig-school-paid',
+        contract_id: 'contract-paid',
+        role: 'school',
+        status: 'signed',
+        signed_pdf_path: schoolSignedPath,
+        token: 'school-token-paid',
+      },
+      {
+        id: 'sig-parent-paid',
+        contract_id: 'contract-paid',
+        role: 'parent_primary',
+        status: 'in_progress',
+        token: 'parent-token-paid',
+        gosign_transaction_id: 'txn-parent-paid',
+      },
+    ];
+    fake.db.school_payment_installments = [{
+      id: 'installment-already-paid',
+      contract_id: 'contract-paid',
+      installment_number: 1,
+      amount: 240,
+      due_date: '2026-07-23',
+      payment_status: 'paid',
+    }];
+
+    pollMock.mockResolvedValue({
+      status: 'Signed',
+      signerCertificate: 'certificate:txn-parent-paid',
+      signerCertificateTrusted: true,
+      signedFileContent: Buffer.from('%PDF-parent-signed').toString('base64'),
+      signedFileName: 'Sutartis-SUT-PAID.pdf',
+    });
+
+    const emailCalls: any[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      emailCalls.push(JSON.parse(String(init?.body || '{}')));
+      return { ok: true, status: 200, text: async () => '' } as Response;
+    }));
+
+    const result = await reconcileInProgressContractSignatures(fake as any, 'https://www.tutlio.lt');
+    expect(result).toMatchObject({ scanned: 1, signed: 1, failed: 0 });
+    expect(fake.db.school_contracts[0].signing_status).toBe('signed');
+    expect(emailCalls.map((call) => call.type)).toEqual(expect.arrayContaining([
+      'school_contract_fully_signed',
+      'school_contract_parent_signed_admin',
+    ]));
+    expect(emailCalls.some((call) => call.type === 'school_installment_request')).toBe(false);
+  });
+
   it('isolates one failed transaction so another cron run can retry it', async () => {
     const fake = new FakeSupabase();
     fake.db.school_contract_signatures = [

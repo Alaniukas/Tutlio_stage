@@ -1453,7 +1453,10 @@ export default function CompanyContracts() {
       .eq('contract_id', contract.id)
       .order('installment_number', { ascending: true });
     if (!installments || installments.length === 0) return;
-    const pending = installments.find((i: { payment_status?: string }) => i.payment_status !== 'paid') || installments[0];
+    // Do not fall back to a paid row — re-sending after late signature upload
+    // confused parents who already paid (e.g. July payment + August manual upload).
+    const pending = installments.find((i: { payment_status?: string }) => i.payment_status !== 'paid');
+    if (!pending) return;
     try {
       await sendFirstInstallmentPaymentLink({
         installmentId: pending.id,
@@ -1596,8 +1599,10 @@ export default function CompanyContracts() {
         setToast({ message: data?.error || `HTTP ${res.status}`, type: 'error' });
       } else {
         setToast({ message: tr('school.toastContractSigned'), type: 'success' });
-        // Payment email is sent only now (after signing).
-        await sendPaymentEmailForSignedContract(contract);
+        // Payment email only when newly signed and there is still something unpaid.
+        if (!data.alreadySigned && data.hasUnpaidInstallment !== false) {
+          await sendPaymentEmailForSignedContract(contract);
+        }
       }
     } catch (e: any) {
       setToast({ message: e?.message || tr('common.error'), type: 'error' });
@@ -1665,17 +1670,22 @@ export default function CompanyContracts() {
       return;
     }
     setToast({ message: tr('school.toastSignedContractUploaded'), type: 'success' });
+    let hasUnpaidInstallment: boolean | undefined;
     try {
       const hdrs = await authHeaders();
-      await fetch('/api/school-contract-mark-signed', {
+      const markRes = await fetch('/api/school-contract-mark-signed', {
         method: 'POST',
         headers: hdrs,
         body: JSON.stringify({ contractId: contract.id, manualUpload: true }),
       });
+      const markJson = await markRes.json().catch(() => ({}));
+      if (typeof markJson.hasUnpaidInstallment === 'boolean') {
+        hasUnpaidInstallment = markJson.hasUnpaidInstallment;
+      }
     } catch {
-      /* non-fatal */
+      /* non-fatal — contract file is already stored; signature close retries via reconcile */
     }
-    if (!wasSigned) {
+    if (!wasSigned && hasUnpaidInstallment !== false) {
       await sendPaymentEmailForSignedContract({ ...contract, signing_status: 'signed' });
     }
     reload();
