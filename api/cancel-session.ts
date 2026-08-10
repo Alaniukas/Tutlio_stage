@@ -13,7 +13,7 @@ import { lt } from 'date-fns/locale';
 import { deleteSessionFromGoogle, syncSessionToGoogle } from './_lib/google-calendar.js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { canStudentSideCancelSession, canTutorSideCancelSession } from './_lib/cancel-session-access.js';
-import { isProKlaseOrg } from './_lib/marketMoney.js';
+import { isProKlaseOrg, isWaitlistHiddenForOrg } from './_lib/marketMoney.js';
 import { releaseSessionSlotAsAvailability } from './_lib/release-session-availability.js';
 import { PRO_KLASE_TUTOR_NO_SHOW_PENALTY_EUR } from './_lib/proKlaseTutorPay.js';
 
@@ -539,6 +539,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // ── Background: waitlist auto-fill ────────────────────────────────────────
     void (async () => {
         try {
+            const { data: tutorProfile } = await supabase
+                .from('profiles')
+                .select('organization_id')
+                .eq('id', tutorId)
+                .maybeSingle();
+            if (isWaitlistHiddenForOrg((tutorProfile as any)?.organization_id)) {
+                console.log('[Waitlist API] Waitlist disabled for org - skipping auto-fill');
+                return;
+            }
+
             // Only skip auto-fill if session is starting in less than 1 hour.
             const oneHourBeforeSession = new Date(new Date(session.start_time).getTime() - 1 * 3600000);
             if (oneHourBeforeSession < new Date()) {

@@ -23,7 +23,7 @@ import { recordJoinClick } from '@/lib/joinTracking';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
-import { orgFeeProfile, type OrgFeeProfile } from '@/lib/marketMoney';
+import { isWaitlistHiddenForOrg, orgFeeProfile, type OrgFeeProfile } from '@/lib/marketMoney';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
 import { useUser } from '@/contexts/UserContext';
 import { fetchStudentActiveLessonPackagesDeduped, fetchSubjectNamesByIds } from '@/lib/studentLessonPackagesLight';
@@ -1560,7 +1560,11 @@ export default function StudentSessions() {
                 })()}
 
                 {/* Waitlist entries */}
-                {!loading && waitlistEntries.length > 0 && (
+                {!loading &&
+                  !portalPolicy.bookingDisabled &&
+                  !portalPolicy.waitlistHidden &&
+                  !isWaitlistHiddenForOrg(portalPolicy.organizationId) &&
+                  waitlistEntries.length > 0 && (
                     <div className="mb-6">
                         <div className="flex items-center gap-2 mb-3">
                             <ListOrdered className="w-4 h-4 text-amber-500" />

@@ -464,6 +464,7 @@ async function preloadDashboard(
 
     const licensedApprox = (tutorProfiles || []).filter((p: any) => p.has_active_license !== false).length;
     setCache('company_dashboard', {
+      organizationId: orgId,
       orgName: org?.name || '', entityType: org?.entity_type || 'company',
       tutorLicenseCap: Number(org?.tutor_license_count) || 0,
       licensedTutors: licensedApprox,

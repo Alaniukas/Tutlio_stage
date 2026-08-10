@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Layout from '@/components/Layout';
 import { supabase } from '@/lib/supabase';
 import { useUser } from '@/contexts/UserContext';
 import { authHeaders } from '@/lib/apiHelpers';
+import { isWaitlistHiddenForOrg } from '@/lib/marketMoney';
+import { useHideWaitlist } from '@/hooks/useHideWaitlist';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -56,7 +59,12 @@ interface Session {
 
 export default function WaitlistPage() {
   const { t, dateFnsLocale } = useTranslation();
-  const { user: ctxUser } = useUser();
+  const { user: ctxUser, profile } = useUser();
+  const navigate = useNavigate();
+  const isOrgTutor = !!profile?.organization_id;
+  const { hideWaitlist, resolved } = useHideWaitlist({ failClosedWhileLoading: isOrgTutor });
+  const blocked =
+    hideWaitlist || isWaitlistHiddenForOrg(profile?.organization_id);
   const [waitlist, setWaitlist] = useState<WaitlistEntry[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -78,10 +86,26 @@ export default function WaitlistPage() {
   };
 
   useEffect(() => {
-    if (!ctxUser) return;
+    if (blocked) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [blocked, navigate]);
+
+  useEffect(() => {
+    if (!ctxUser || blocked || !resolved) return;
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ctxUser?.id]);
+  }, [ctxUser?.id, blocked, resolved]);
+
+  if (blocked || !resolved) {
+    return (
+      <Layout>
+        <div className="flex justify-center py-16">
+          <div className="w-8 h-8 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
+        </div>
+      </Layout>
+    );
+  }
 
   const fetchData = async () => {
     if (!ctxUser) return;

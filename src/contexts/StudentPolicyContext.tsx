@@ -19,6 +19,8 @@ export interface StudentPortalPolicy {
   actionsDisabled: boolean;
   /** Org feature student_payments_page ("Mokėjimai" portal section). */
   paymentsPageEnabled: boolean;
+  /** Waitlist fully disabled (Pro Klasė / disable_waitlist / booking-off). */
+  waitlistHidden: boolean;
 }
 
 const DEFAULT: StudentPortalPolicy = {
@@ -28,6 +30,8 @@ const DEFAULT: StudentPortalPolicy = {
   bookingDisabled: false,
   actionsDisabled: false,
   paymentsPageEnabled: false,
+  // Fail closed: hide waitlist until policy resolves (avoids Pro Klasė flash).
+  waitlistHidden: true,
 };
 
 const CACHE_KEY = 'tutlio_student_policy';
@@ -42,7 +46,7 @@ function readCache(userId: string | null): StudentPortalPolicy | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CachedPolicy;
     if (parsed.userId !== userId) return null;
-    return { ...parsed.policy, resolved: true };
+    return { ...parsed.policy, resolved: true, waitlistHidden: parsed.policy.waitlistHidden ?? false };
   } catch {
     return null;
   }
@@ -118,6 +122,7 @@ export function StudentPolicyProvider({ children }: { children: ReactNode }) {
           bookingDisabled: entry?.bookingDisabled === true,
           actionsDisabled: entry?.actionsDisabled === true,
           paymentsPageEnabled: entry?.paymentsPageEnabled === true,
+          waitlistHidden: entry?.waitlistHidden === true,
         };
         setPolicy(next);
         writeCache(user.id, next);

@@ -4,12 +4,14 @@ import Layout from '@/components/Layout';
 import { useTranslation } from '@/lib/i18n';
 import { useUser } from '@/contexts/UserContext';
 import PwaInstallGuide from '@/components/PwaInstallGuide';
+import { isWaitlistHiddenForOrg } from '@/lib/marketMoney';
 
 export default function Instructions() {
   const { t } = useTranslation();
   const { profile } = useUser();
 
   const isOrgTutor = !!profile?.organization_id;
+  const hideWaitlist = isWaitlistHiddenForOrg(profile?.organization_id);
 
   if (!isOrgTutor) {
     return (
@@ -60,7 +62,7 @@ export default function Instructions() {
                   { key: 'nav.invoices', bullets: ['tutorInstr.pageInvoicesB1', 'tutorInstr.pageInvoicesB2', 'tutorInstr.pageInvoicesB3'] },
                   { key: 'nav.lessonSettings', bullets: ['tutorInstr.pageLessonSettingsB1', 'tutorInstr.pageLessonSettingsB2', 'tutorInstr.pageLessonSettingsB3'] },
                   { key: 'nav.settings', bullets: ['tutorInstr.pageSettingsB1', 'tutorInstr.pageSettingsB2', 'tutorInstr.pageSettingsB3'] },
-                ].map((p) => (
+                ].filter((p) => !(hideWaitlist && p.key === 'nav.waitlist')).map((p) => (
                   <div key={p.key} className="rounded-xl border border-gray-200 bg-white p-4">
                     <p className="font-semibold text-gray-900">{t(p.key)}</p>
                     <ul className="mt-2 space-y-1.5 text-gray-600 list-disc list-inside">
@@ -158,7 +160,7 @@ export default function Instructions() {
                   { key: 'nav.messages', bullets: ['orgTutorInstr.pageMessagesB1', 'orgTutorInstr.pageMessagesB2', 'orgTutorInstr.pageMessagesB3'] },
                   { key: 'nav.finance', bullets: ['orgTutorInstr.pageFinanceB1', 'orgTutorInstr.pageFinanceB2', 'orgTutorInstr.pageFinanceB3'] },
                   { key: 'nav.lessonSettings', bullets: ['orgTutorInstr.pageLessonSettingsB1', 'orgTutorInstr.pageLessonSettingsB2', 'orgTutorInstr.pageLessonSettingsB3'] },
-                ].map((p) => (
+                ].filter((p) => !(hideWaitlist && p.key === 'nav.waitlist')).map((p) => (
                   <div key={p.key} className="rounded-xl border border-gray-200 bg-white p-4">
                     <p className="font-semibold text-gray-900">{t(p.key)}</p>
                     <ul className="mt-2 space-y-1.5 text-gray-600 list-disc list-inside">

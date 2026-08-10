@@ -11,6 +11,8 @@ import { Button } from '@/components/ui/button';
 import { useTranslation } from '@/lib/i18n';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { fetchSelfBookingDisabledMap } from '@/lib/studentBookingPolicy';
+import { isWaitlistHiddenForOrg } from '@/lib/marketMoney';
+import { useStudentPolicy } from '@/contexts/StudentPolicyContext';
 
 interface ParsedNotes {
     start_time?: string;
@@ -39,6 +41,7 @@ export default function StudentWaitlist() {
   const { fmt } = useMarketMoney();
     const { user: ctxUser } = useUser();
     const navigate = useNavigate();
+    const { organizationId, bookingDisabled, waitlistHidden } = useStudentPolicy();
     const parentWaitlistStudentId = useMatch('/parent/child/:studentId/waitlist')?.params.studentId ?? '';
     const parentSessionsPath = parentWaitlistStudentId ? `/parent/child/${parentWaitlistStudentId}` : '/student';
     const [entries, setEntries] = useState<WaitlistEntry[]>([]);
@@ -56,10 +59,14 @@ export default function StudentWaitlist() {
     };
 
     useEffect(() => {
+        if (bookingDisabled || waitlistHidden || isWaitlistHiddenForOrg(organizationId)) {
+            navigate(parentWaitlistStudentId ? '/parent' : '/student', { replace: true });
+            return;
+        }
         if (!ctxUser) return;
         void fetchData();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [ctxUser?.id, parentWaitlistStudentId]);
+    }, [ctxUser?.id, parentWaitlistStudentId, bookingDisabled, waitlistHidden, organizationId]);
 
     const fetchData = async () => {
         if (!ctxUser) return;

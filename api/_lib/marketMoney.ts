@@ -61,6 +61,11 @@ export function isProKlaseOrg(orgIdOrSlug?: string | null): boolean {
   );
 }
 
+/** Pro Klasė never uses waitlist — hide UI and skip auto-fill everywhere. */
+export function isWaitlistHiddenForOrg(orgIdOrSlug?: string | null): boolean {
+  return isProKlaseOrg(orgIdOrSlug);
+}
+
 /** Resolve a custom fee deal by org slug or org UUID (either may be passed). */
 export function orgFeeProfile(slugOrId?: string | null): OrgFeeProfile | null {
   if (!slugOrId) return null;

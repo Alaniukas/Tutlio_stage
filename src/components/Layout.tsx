@@ -30,6 +30,8 @@ import { useTranslation } from '@/lib/i18n';
 import { useUser } from '@/contexts/UserContext';
 import { useTotalChatUnread } from '@/hooks/useChat';
 import { usePushSubscription } from '@/hooks/usePushSubscription';
+import { isWaitlistHiddenForOrg } from '@/lib/marketMoney';
+import { useHideWaitlist } from '@/hooks/useHideWaitlist';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -41,6 +43,9 @@ export default function Layout({ children }: LayoutProps) {
   const { profile, user: ctxUser, loading: userLoading } = useUser();
   const [profileOrgId, setProfileOrgId] = useState<string | null>(profile?.organization_id ?? null);
   const isOrgTutor = !!(profile?.organization_id || profileOrgId);
+  const { hideWaitlist: hideWaitlistFromFeatures } = useHideWaitlist({
+    failClosedWhileLoading: isOrgTutor,
+  });
   const chatUnreadTotal = useTotalChatUnread();
   usePushSubscription();
   const [tutorName, setTutorName] = useState('');
@@ -54,6 +59,9 @@ export default function Layout({ children }: LayoutProps) {
   const mainRef = useRef<HTMLElement>(null);
 
   const navItems = useMemo(() => {
+    const hideWaitlist =
+      hideWaitlistFromFeatures ||
+      isWaitlistHiddenForOrg(profile?.organization_id || profileOrgId);
     const items = [
       { href: '/dashboard', label: t('nav.dashboard'), icon: LayoutDashboard },
       { href: '/calendar', label: t('nav.calendar'), icon: Calendar },
@@ -68,9 +76,12 @@ export default function Layout({ children }: LayoutProps) {
     ];
     // Org tutors have neither a personal invoices page nor their own public
     // page — the school owns both — but they can still see instructions.
-    if (isOrgTutor) return items.filter(item => item.href !== '/invoices' && item.href !== '/landing-editor');
-    return items;
-  }, [isOrgTutor, t]);
+    return items.filter((item) => {
+      if (isOrgTutor && (item.href === '/invoices' || item.href === '/landing-editor')) return false;
+      if (hideWaitlist && item.href === '/waitlist') return false;
+      return true;
+    });
+  }, [isOrgTutor, t, profile?.organization_id, profileOrgId, hideWaitlistFromFeatures]);
 
   useEffect(() => {
     void preloadTutorData();
