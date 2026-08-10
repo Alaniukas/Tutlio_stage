@@ -105,12 +105,15 @@ function SubjectPresetList({
   onAdd,
   onRemove,
   orgCatalog,
+  hidePrice = false,
 }: {
   subjects: SubjectPreset[];
   onAdd: (s: SubjectPreset) => void;
   onRemove: (idx: number) => void;
   /** Subject catalog options from lesson settings */
   orgCatalog: { key: string; preset: SubjectPreset }[];
+  /** Dynamic pricing orgs — no per-subject list price */
+  hidePrice?: boolean;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -128,7 +131,7 @@ function SubjectPresetList({
 
   const add = () => {
     if (!name.trim()) return;
-    onAdd({ name: name.trim(), duration_minutes: duration, price, color });
+    onAdd({ name: name.trim(), duration_minutes: duration, price: hidePrice ? 0 : price, color });
     setName(''); setDuration(60); setPrice(25); setColor('#6366f1');
     setOpen(false);
   };
@@ -163,7 +166,9 @@ function SubjectPresetList({
         <div key={idx} className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2">
           <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
           <span className="flex-1 text-sm font-medium text-gray-800 truncate">{s.name}</span>
-          <span className="text-xs text-gray-500">{fmtMoney(s.price)} · {s.duration_minutes} min</span>
+          <span className="text-xs text-gray-500">
+            {hidePrice ? `${s.duration_minutes} min` : `${fmtMoney(s.price)} · ${s.duration_minutes} min`}
+          </span>
           <button onClick={() => onRemove(idx)} className="text-gray-400 hover:text-red-500 transition-colors">
             <X className="w-3.5 h-3.5" />
           </button>
@@ -185,7 +190,9 @@ function SubjectPresetList({
                     <SelectItem value="__none__">{t('compTut.selectDefault')}</SelectItem>
                     {catalogAvailable.map((o) => (
                       <SelectItem key={o.key} value={o.key}>
-                        {o.preset.name} · {fmtMoney(o.preset.price)} · {o.preset.duration_minutes} min
+                        {hidePrice
+                          ? `${o.preset.name} · ${o.preset.duration_minutes} min`
+                          : `${o.preset.name} · ${fmtMoney(o.preset.price)} · ${o.preset.duration_minutes} min`}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -210,15 +217,17 @@ function SubjectPresetList({
             className="rounded-xl text-sm"
             autoFocus={orgCatalog.length === 0}
           />
-          <div className="grid grid-cols-2 gap-2">
+          <div className={hidePrice ? 'space-y-1' : 'grid grid-cols-2 gap-2'}>
             <div className="space-y-1">
               <Label className="text-xs text-gray-500">{t('compTut.durationMin')}</Label>
               <Input type="number" value={duration} onChange={e => setDuration(Number(e.target.value) || 0)} className="rounded-xl text-sm" />
             </div>
+            {!hidePrice && (
             <div className="space-y-1">
               <Label className="text-xs text-gray-500">{t('compTut.priceEur')}</Label>
               <Input type="number" value={price} onChange={e => setPrice(Number(e.target.value) || 0)} className="rounded-xl text-sm" />
             </div>
+            )}
           </div>
           <div className="flex gap-1.5 flex-wrap">
             {COLORS.map(c => (
@@ -240,16 +249,17 @@ function SubjectPresetList({
 
 // ─── SubjectRow – in tutor detail modal ──────────────────────────────────────
 
-function SubjectRow({ subject, onSave, onDelete }: {
+function SubjectRow({ subject, onSave, onDelete, hidePrice = false }: {
   subject: Subject;
   onSave: (s: Subject) => void;
   onDelete: (id: string) => void;
+  hidePrice?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [price, setPrice] = useState(subject.price);
   const [duration, setDuration] = useState(subject.duration_minutes);
 
-  const save = () => { onSave({ ...subject, price, duration_minutes: duration }); setEditing(false); };
+  const save = () => { onSave({ ...subject, price: hidePrice ? subject.price : price, duration_minutes: duration }); setEditing(false); };
 
   return (
     <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-3 py-2.5">
@@ -257,10 +267,12 @@ function SubjectRow({ subject, onSave, onDelete }: {
       <p className="flex-1 text-sm font-medium text-gray-800 truncate">{subject.name}</p>
       {editing ? (
         <>
+          {!hidePrice && (
           <div className="flex items-center gap-1">
             <Input type="number" value={price} onChange={e => setPrice(Number(e.target.value) || 0)} className="w-16 h-7 text-xs rounded-lg px-2" />
             <span className="text-xs text-gray-400">{isPlMarket() ? 'zł' : '€'}</span>
           </div>
+          )}
           <div className="flex items-center gap-1">
             <Input type="number" value={duration} onChange={e => setDuration(Number(e.target.value) || 0)} className="w-16 h-7 text-xs rounded-lg px-2" />
             <span className="text-xs text-gray-400">min</span>
@@ -270,7 +282,9 @@ function SubjectRow({ subject, onSave, onDelete }: {
         </>
       ) : (
         <>
-          <span className="text-xs text-gray-500">{fmtMoney(subject.price)} · {subject.duration_minutes} min</span>
+          <span className="text-xs text-gray-500">
+            {hidePrice ? `${subject.duration_minutes} min` : `${fmtMoney(subject.price)} · ${subject.duration_minutes} min`}
+          </span>
           <button onClick={() => setEditing(true)} className="text-gray-400 hover:text-indigo-600 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
           <button onClick={() => onDelete(subject.id)} className="text-gray-400 hover:text-red-500 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
         </>
@@ -1008,11 +1022,12 @@ export default function CompanyTutors() {
 
   const handleAddSubject = async () => {
     if (!selectedTutor || !newSubjectName.trim()) return;
+    const subjectPrice = isProKlaseAdmin ? 0 : newSubjectPrice;
     if (
       tutorSubjectsContainLessonDuplicate(selectedTutor.subjects, {
         name: newSubjectName.trim(),
         duration_minutes: newSubjectDuration,
-        price: newSubjectPrice,
+        price: subjectPrice,
       })
     ) {
       alert(t('compSet.subjectDuplicateForTutor'));
@@ -1021,7 +1036,7 @@ export default function CompanyTutors() {
     setSavingSubject(true);
     const { data } = await supabase.from('subjects').insert({
       tutor_id: selectedTutor.id, name: newSubjectName.trim(),
-      duration_minutes: newSubjectDuration, price: newSubjectPrice, color: newSubjectColor,
+      duration_minutes: newSubjectDuration, price: subjectPrice, color: newSubjectColor,
     }).select().single();
     if (data) {
       if (orgId) {
@@ -1308,6 +1323,7 @@ export default function CompanyTutors() {
                 onAdd={s => setPresetSubjects(prev => [...prev, s])}
                 onRemove={idx => setPresetSubjects(prev => prev.filter((_, i) => i !== idx))}
                 orgCatalog={orgSubjectCatalogOptions}
+                hidePrice={isProKlaseAdmin}
               />
             </div>
 
@@ -1575,7 +1591,7 @@ export default function CompanyTutors() {
                 {selectedTutor.subjects.length > 0 && (
                   <div className="space-y-2 mb-3">
                     {selectedTutor.subjects.map(subj => (
-                      <SubjectRow key={subj.id} subject={subj} onSave={handleSaveSubject} onDelete={handleDeleteSubject} />
+                      <SubjectRow key={subj.id} subject={subj} onSave={handleSaveSubject} onDelete={handleDeleteSubject} hidePrice={isProKlaseAdmin} />
                     ))}
                   </div>
                 )}
@@ -1611,7 +1627,9 @@ export default function CompanyTutors() {
                             <SelectItem value="__none__">{t('compTut.selectDefault')}</SelectItem>
                             {catalogForAddSubject.map((o) => (
                               <SelectItem key={o.key} value={o.key}>
-                                {o.preset.name} · {fmtMoney(o.preset.price)} · {o.preset.duration_minutes} min
+                                {isProKlaseAdmin
+                                  ? `${o.preset.name} · ${o.preset.duration_minutes} min`
+                                  : `${o.preset.name} · ${fmtMoney(o.preset.price)} · ${o.preset.duration_minutes} min`}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -1645,15 +1663,17 @@ export default function CompanyTutors() {
                       className="rounded-xl text-sm"
                       autoFocus={orgSubjectCatalogOptions.length === 0}
                     />
-                    <div className="grid grid-cols-2 sm:grid-cols-2 gap-3">
+                    <div className={isProKlaseAdmin ? 'space-y-1' : 'grid grid-cols-2 sm:grid-cols-2 gap-3'}>
                       <div className="space-y-1">
                         <Label className="text-xs text-gray-600">{t('compTut.durationMin')}</Label>
                         <Input type="number" value={newSubjectDuration} onChange={e => setNewSubjectDuration(Number(e.target.value) || 0)} className="rounded-xl text-sm" />
                       </div>
+                      {!isProKlaseAdmin && (
                       <div className="space-y-1">
                         <Label className="text-xs text-gray-600">{t('compTut.priceEur')}</Label>
                         <Input type="number" value={newSubjectPrice} onChange={e => setNewSubjectPrice(Number(e.target.value) || 0)} className="rounded-xl text-sm" />
                       </div>
+                      )}
                     </div>
                     <div className="flex gap-1.5 flex-wrap">
                       {COLORS.map(c => (
@@ -1676,7 +1696,7 @@ export default function CompanyTutors() {
                   <p className="text-xs text-gray-400 italic">{t('compTut.noSubjects')}</p>
                 )}
 
-              {orgTemplates.length > 0 && (
+              {orgTemplates.length > 0 && !isProKlaseAdmin && (
                 <div className="pt-3 border-t border-gray-100">
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">{t('compTut.tutorPricing')}</p>
                   <p className="text-[11px] text-gray-400 mb-3">{t('compTut.tutorPricingHint')}</p>

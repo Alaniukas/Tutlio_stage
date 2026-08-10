@@ -36,6 +36,7 @@ import { cn } from '@/lib/utils';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { isSchoolOrg, hasProKlaseIntakeFeatures } from '@/lib/orgIntakeMode';
 import { ORG_TUTOR_FILTER_SCROLL_CLASS } from '@/lib/orgUi';
+import { isProKlaseOrg } from '@/lib/marketMoney';
 
 type TrialCommentMode = 'student_and_parent' | 'internal_only';
 
@@ -124,6 +125,8 @@ export default function CompanySettings() {
       orgFeaturesSnapshot['trial_creation_payment_email'] === true
     );
   }, [isSchoolOrgView, orgFeaturesSnapshot]);
+  /** Dynamic pricing orgs don't need per-subject list prices. */
+  const hideSubjectPrice = isProKlaseOrg(orgId);
   const [contactTutorStudentEmail, setContactTutorStudentEmail] = useState<TutorSeesContactMode>(
     sc?.contactTutorStudentEmail ?? DEFAULT_TUTOR_SEES_CONTACT
   );
@@ -484,7 +487,8 @@ export default function CompanySettings() {
     const subjectData = {
       name: newSubject.name.trim(),
       duration_minutes: newSubject.duration_minutes,
-      price: newSubject.price,
+      // Pro Klasė uses dynamic pricing — subject list price is unused.
+      price: hideSubjectPrice ? 0 : newSubject.price,
       color: newSubject.color,
       meeting_link: newSubject.meeting_link.trim() || null,
       grade_min: newSubject.grade_min,
@@ -1172,7 +1176,9 @@ export default function CompanySettings() {
                         </div>
                         <div className="flex items-center gap-3 mt-0.5 text-xs text-gray-500 flex-wrap">
                           <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{subject.duration_minutes} min</span>
-                          <span className="flex items-center gap-1"><Euro className="w-3 h-3" />{subject.price}</span>
+                          {!hideSubjectPrice && (
+                            <span className="flex items-center gap-1"><Euro className="w-3 h-3" />{subject.price}</span>
+                          )}
                           <span className="text-gray-400">{subject.tutor_name}</span>
                         </div>
                       </div>
@@ -1212,7 +1218,9 @@ export default function CompanySettings() {
                             </div>
                             <div className="flex items-center gap-3 mt-0.5 text-xs text-gray-500 flex-wrap">
                               <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{subject.duration_minutes} min</span>
-                              <span className="flex items-center gap-1"><Euro className="w-3 h-3" />{subject.price}</span>
+                              {!hideSubjectPrice && (
+                                <span className="flex items-center gap-1"><Euro className="w-3 h-3" />{subject.price}</span>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -1560,7 +1568,7 @@ export default function CompanySettings() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className={hideSubjectPrice ? 'space-y-2' : 'grid grid-cols-2 gap-4'}>
               <div className="space-y-2">
                 <Label>{t('compSet.duration')}</Label>
                 <Input
@@ -1570,6 +1578,7 @@ export default function CompanySettings() {
                   className="rounded-xl"
                 />
               </div>
+              {!hideSubjectPrice && (
               <div className="space-y-2">
                 <Label>{t('compSet.price')}</Label>
                 <Input
@@ -1579,6 +1588,7 @@ export default function CompanySettings() {
                   className="rounded-xl"
                 />
               </div>
+              )}
             </div>
 
             <div className="space-y-2">
