@@ -113,10 +113,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(403).json({ error: 'You do not have permission to invite tutors to this organization' });
     }
 
-    // Ensure organization exists and get name for email
+    // Ensure organization exists and get name/branding for email
     const { data: org, error: orgError } = await supabase
       .from('organizations')
-      .select('id, name')
+      .select('id, name, logo_url, brand_color, brand_color_secondary, features')
       .eq('id', organizationId)
       .maybeSingle();
 
@@ -185,6 +185,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           appOrigin,
         ),
         uiLocale: typeof bodyLocale === 'string' ? bodyLocale : undefined,
+        organizationId,
+        org: org as { name?: string; logo_url?: string; brand_color?: string; brand_color_secondary?: string; features?: unknown },
       });
       emailSent = emailResult.ok;
       const rawError = 'error' in emailResult ? emailResult.error : undefined;

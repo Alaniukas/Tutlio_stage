@@ -166,6 +166,7 @@ async function handlePaymentCallback(decoded: Record<string, unknown>, supabase:
     // Perlas gross (lesson + platform/bank fee) — enables the receipt breakdown rows.
     totalChargedEur: paidAmount > sessionPrice ? paidAmount : undefined,
     duration: durationMinutes,
+    ...(tutor?.organization_id ? { organizationId: tutor.organization_id } : {}),
   };
 
   const recipients = new Set<string>();
@@ -201,6 +202,7 @@ async function handlePaymentCallback(decoded: Record<string, unknown>, supabase:
             time: timeStr,
             subject: session.topic,
             price: session.price,
+            ...(tutor?.organization_id ? { organizationId: tutor.organization_id } : {}),
           },
         }),
       });

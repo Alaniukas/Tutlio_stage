@@ -119,6 +119,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               amountEur,
               reason: reason || type,
               financeUrl: `${appUrl}/finance`,
+              organizationId: orgId,
             },
           }),
         });

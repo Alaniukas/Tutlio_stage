@@ -61,23 +61,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   let orgName: string | null = null;
   let orgLocale: string | null = null;
+  let orgForBrand: {
+    name?: string | null;
+    logo_url?: string | null;
+    brand_color?: string | null;
+    brand_color_secondary?: string | null;
+    features?: unknown;
+  } | null = null;
   const orgId = (student.organization_id as string | null) ?? null;
   if (orgId) {
     const { data: orgRow, error: orgErr } = await supabase
       .from('organizations')
-      .select('name, preferred_locale')
+      .select('name, preferred_locale, logo_url, brand_color, brand_color_secondary, features')
       .eq('id', orgId)
       .maybeSingle();
     if (orgErr) {
       const { data: fallbackRow } = await supabase
         .from('organizations')
-        .select('name')
+        .select('name, logo_url, brand_color, brand_color_secondary, features')
         .eq('id', orgId)
         .maybeSingle();
       orgName = (fallbackRow?.name as string | null) ?? null;
+      orgForBrand = fallbackRow;
     } else {
       orgName = (orgRow?.name as string | null) ?? null;
       orgLocale = (orgRow?.preferred_locale as string | null) ?? null;
+      orgForBrand = orgRow;
     }
   }
 
@@ -98,6 +107,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     locale: inviteEmailLocale(explicitLocale || orgLocale || undefined, appOrigin),
     uiLocale: explicitLocale || orgLocale || undefined,
     orgName,
+    organizationId: orgId,
+    org: orgForBrand,
   });
 
   if ('error' in result) {

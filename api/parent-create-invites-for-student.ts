@@ -160,6 +160,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         locale: emailLocale,
         uiLocale: explicitLocale || orgLocale || undefined,
         orgName,
+        organizationId,
       });
       if ('error' in r) {
         results.push({ email: t.email, ok: false, error: r.error });

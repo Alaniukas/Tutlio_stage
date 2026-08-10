@@ -34,6 +34,9 @@ export async function insertParentInviteAndSendEmail(opts: {
   uiLocale?: string;
   /** Organization name for school-context invites. */
   orgName?: string | null;
+  /** Org id + row for white-label branding (Pro Klasė logo / from). */
+  organizationId?: string | null;
+  org?: import('./emailOrgBranding.js').OrgRowForEmailBranding | null;
 }): Promise<ParentInviteResult> {
   const {
     supabase,
@@ -47,6 +50,8 @@ export async function insertParentInviteAndSendEmail(opts: {
     locale,
     uiLocale,
     orgName,
+    organizationId,
+    org,
   } = opts;
 
   const trimmedEmail = parentEmail.trim().toLowerCase();
@@ -55,6 +60,26 @@ export async function insertParentInviteAndSendEmail(opts: {
   }
 
   const origin = (appUrl || 'https://tutlio.lt').replace(/\/$/, '');
+
+  let orgRow = org ?? null;
+  let orgId = organizationId ?? null;
+  if (!orgId && studentId) {
+    const { data: st } = await supabase
+      .from('students')
+      .select('organization_id')
+      .eq('id', studentId)
+      .maybeSingle();
+    orgId = (st?.organization_id as string | null) || null;
+  }
+  if (orgId && !orgRow) {
+    const { data: fetched } = await supabase
+      .from('organizations')
+      .select('name, logo_url, brand_color, brand_color_secondary, features')
+      .eq('id', orgId)
+      .maybeSingle();
+    orgRow = fetched;
+  }
+  const resolvedOrgName = orgName ?? (orgRow?.name as string | null) ?? null;
 
   let token = '';
   let code = '';
@@ -124,7 +149,9 @@ export async function insertParentInviteAndSendEmail(opts: {
     locale,
     publicHost: origin,
     isSchool: source === 'school_admin',
-    orgName: orgName ?? null,
+    orgName: resolvedOrgName,
+    organizationId: orgId,
+    org: orgRow,
   });
 
   if (emailResult.ok === false) {
