@@ -24,6 +24,8 @@ import {
   downloadPdfBytes,
   fetchSignatureRows,
   inputPdfPathForRole,
+  isSignatureTokenExpired,
+  renewParentSignatureAccess,
   signedPdfPathForRole,
   uploadSignedPdf,
 } from './_lib/schoolContractSigning.js';
@@ -59,28 +61,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!token) return json(res, 400, { error: 'Missing token' });
   if (action !== 'upload-url' && action !== 'finalize') return json(res, 400, { error: 'Unknown action' });
 
-  const { data: row } = await supabase
+  const { data: rowRaw } = await supabase
     .from('school_contract_signatures')
     .select('*')
     .eq('token', token)
     .maybeSingle();
-  if (!row || !String(row.role).startsWith('parent')) return json(res, 404, { error: 'Invalid link' });
+  if (!rowRaw || !String(rowRaw.role).startsWith('parent')) return json(res, 404, { error: 'Invalid link' });
 
   const { data: contract } = await supabase
     .from('school_contracts')
     .select(CONTRACT_SIGN_SELECT)
-    .eq('id', row.contract_id)
+    .eq('id', rowRaw.contract_id)
     .maybeSingle();
   if (!contract) return json(res, 404, { error: 'Contract not found' });
   if (!(contract as any).organizations?.features?.school_contract_esign) {
     return json(res, 403, { error: 'E-signing is not enabled for this organization' });
   }
 
+  const ready = String((contract as any).signing_status) === 'signed_by_school';
+  let row = rowRaw;
+  if (row.status !== 'signed' && ready && isSignatureTokenExpired(row)) {
+    row = await renewParentSignatureAccess(supabase, row);
+  }
+
   if (row.status === 'signed') return json(res, 200, { alreadySigned: true });
-  if (row.token_expires_at && new Date(row.token_expires_at).getTime() < Date.now()) {
+  if (isSignatureTokenExpired(row)) {
     return json(res, 410, { error: 'Nuoroda nebegalioja. Kreipkitės į mokyklą dėl naujos.' });
   }
-  if (String((contract as any).signing_status) !== 'signed_by_school') {
+  if (!ready) {
     return json(res, 409, { error: 'Sutartis šiuo metu neparuošta tėvų parašui.' });
   }
 

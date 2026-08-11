@@ -124,3 +124,57 @@ describe('pollAndAdvance after admin manual finalize', () => {
     expect(cancelMock).toHaveBeenCalledWith('txn-late');
   });
 });
+
+describe('parent signing link renewal and dead GoSign txs', () => {
+  it('renewParentSignatureAccess extends an expired parent token in place', async () => {
+    const { renewParentSignatureAccess, isSignatureTokenExpired } = await import('../../api/_lib/schoolContractSigning');
+    const fake = new FakeSupabase();
+    fake.db.school_contract_signatures = [{
+      id: 'sig-1',
+      role: 'parent_primary',
+      status: 'pending',
+      token_expires_at: '2020-01-01T00:00:00.000Z',
+    }];
+
+    expect(isSignatureTokenExpired(fake.db.school_contract_signatures[0])).toBe(true);
+    const renewed = await renewParentSignatureAccess(fake as any, fake.db.school_contract_signatures[0]);
+    expect(isSignatureTokenExpired(renewed)).toBe(false);
+    expect(new Date(renewed.token_expires_at).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('pollAndAdvance resets purged GoSign txs so the parent can restart', async () => {
+    pollMock.mockRejectedValueOnce(new Error('GoSign SOAP fault: Transaction already purged.'));
+    const fake = new FakeSupabase();
+    fake.db.school_contracts = [{
+      id: 'contract-1',
+      organization_id: 'org-1',
+      signing_status: 'signed_by_school',
+      pdf_url: 'org/c.pdf',
+      organizations: { name: 'School', email: 's@x.lt', features: { school_contract_esign: true } },
+      student: { full_name: 'Kid', payer_name: 'Parent', payer_email: 'p@x.lt' },
+    }];
+    fake.db.school_contract_signatures = [{
+      id: 'sig-purged',
+      contract_id: 'contract-1',
+      role: 'parent_primary',
+      status: 'in_progress',
+      token: 'parent-token',
+      gosign_transaction_id: 'txn-dead',
+      signing_url: 'https://gosign.example/dead',
+      token_expires_at: new Date(Date.now() + 86400000).toISOString(),
+    }];
+
+    const result = await pollAndAdvance(fake as any, 'parent-token', 'https://www.tutlio.lt', {
+      attempts: 1,
+      delayMs: 0,
+    });
+
+    expect(result).toMatchObject({ status: 'pending', contractStatus: 'signed_by_school' });
+    expect(fake.db.school_contract_signatures[0]).toMatchObject({
+      status: 'pending',
+      gosign_transaction_id: null,
+      signing_url: null,
+    });
+    expect(String(fake.db.school_contract_signatures[0].error_message || '')).toMatch(/purged/i);
+  });
+});
