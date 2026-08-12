@@ -36,11 +36,27 @@ import { validateUploadedSignedPdf } from './_lib/pdfSignatureCheck.js';
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 const REJECTION_MESSAGES: Record<string, string> = {
-  not_pdf: 'Įkeltas failas nėra PDF. Jei pasirašėte ADOC/ASiC formatu — grįžkite į Dokobit ir pasirinkite PDF formatą.',
+  not_pdf: 'Įkeltas failas nėra PDF. Jei pasirašėte ADOC/ASiC formatu — grįžkite į Dokobit ir atsisiųskite būtent PDF (ne ADOC / ASiC).',
   not_incremental:
-    'Įkėlėte ne tą failą arba pakeistą versiją. Atsisiųskite sutartį iš šio puslapio, pasirašykite ją Dokobit PDF formatu ir įkelkite gautą failą.',
-  no_new_signature: 'Šiame PDF naujo parašo nėra — panašu, kad įkėlėte dar nepasirašytą sutartį. Pirmiausia pasirašykite ją Dokobit portale.',
+    'Nepavyko atpažinti šios sutarties parašo faile. Atsisiųskite sutartį iš šio puslapio mygtuko „Atsisiųskite sutartį (PDF)“, pasirašykite Dokobit PDF formatu ir įkelkite tą patį gautą PDF čia.',
+  no_new_signature: 'Šiame PDF naujo parašo nėra — panašu, kad įkėlėte dar nepasirašytą sutartį. Pirmiausia pasirašykite ją Dokobit portale PDF formatu.',
 };
+
+async function downloadUploadedWithRetry(
+  download: () => Promise<Buffer>,
+  attempts = 6,
+): Promise<Buffer> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      return await download();
+    } catch (err) {
+      lastErr = err;
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 250 * (i + 1)));
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('upload missing');
+}
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.statusCode = status;
@@ -113,21 +129,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const claimedPath = typeof req.body?.path === 'string' ? req.body.path.trim() : '';
   if (claimedPath !== uploadPath) return json(res, 400, { error: 'Invalid upload path' });
 
-  // Reject oversized objects from metadata BEFORE buffering them into memory.
-  const uploadDir = uploadPath.slice(0, uploadPath.lastIndexOf('/'));
-  const uploadName = uploadPath.slice(uploadPath.lastIndexOf('/') + 1);
-  const { data: listed } = await supabase.storage
-    .from(SCHOOL_CONTRACTS_BUCKET)
-    .list(uploadDir, { search: uploadName, limit: 10 });
-  const uploadedMeta = (listed || []).find((f: { name: string }) => f.name === uploadName);
-  const metaSize = Number((uploadedMeta as any)?.metadata?.size ?? 0);
-  if (metaSize > MAX_UPLOAD_BYTES) {
-    return json(res, 413, { error: 'Failas per didelis (daugiausia 25 MB).' });
-  }
-
   let uploaded: Buffer;
   try {
-    uploaded = await downloadPdfBytes(supabase, uploadPath);
+    // Storage list/read can lag briefly after the browser PUT — retry instead of
+    // falsely telling the parent the upload disappeared.
+    uploaded = await downloadUploadedWithRetry(() => downloadPdfBytes(supabase, uploadPath));
   } catch {
     return json(res, 400, { error: 'Įkelto failo nerasta. Įkelkite failą dar kartą.' });
   }
@@ -145,6 +151,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const verdict = validateUploadedSignedPdf(uploaded, base);
   if (verdict.ok === false) {
+    console.warn('[school-contract-parent-upload] rejected', {
+      reason: verdict.reason,
+      contractId: String((contract as any).id),
+      role: row.role,
+      uploadedBytes: uploaded.length,
+      baseBytes: base.length,
+    });
     return json(res, 422, { error: REJECTION_MESSAGES[verdict.reason], code: verdict.reason });
   }
 

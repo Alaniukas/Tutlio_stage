@@ -2,13 +2,19 @@
  * Offline technical validation of a parent-uploaded signed contract PDF
  * (the Smart-ID / Dokobit path, where signing happens outside GoSign).
  *
- * PAdES requires every added signature to be appended as an incremental
- * update — otherwise the earlier (school) signature would be invalidated. That
- * gives us three cheap, deterministic checks with no external service:
- *   1. the file is a PDF at all;
+ * Preferred path (strict PAdES):
+ *   1. the file is a PDF;
  *   2. it starts with the exact bytes of the PDF the parent was given to sign
- *      (same contract, school signature untouched, not re-rendered/ADOC);
- *   3. it contains more signatures than the input did (a new one was added).
+ *      (same contract, school signature untouched);
+ *   3. the appended region contains a new CMS signature.
+ *
+ * Dokobit portal fallback:
+ *   Portal signing sometimes rewrites/flattens the PDF before applying PAdES, so
+ *   the result is no longer a byte-prefix of Tutlio's school PDF even when the
+ *   parent correctly signed that document. In that case we still accept when the
+ *   upload is a PDF with a real CMS signature AND either more signatures than
+ *   the school PDF or a new person signer (SURNAME,NAME) that was not on the
+ *   school PDF. Access remains gated by the unguessable signing token.
  */
 
 /** Each PDF signature dictionary carries exactly one /ByteRange entry. */
@@ -37,7 +43,7 @@ export function isIncrementalUpdateOf(candidate: Buffer, base: Buffer): boolean 
 /**
  * Best-effort signer names from the embedded CMS blobs: hex-decode every
  * /Contents <…> string and scan the DER for commonName (OID 2.5.4.3) values.
- * Display metadata only — never used as a validation gate.
+ * Display metadata only — never used as a validation gate by itself.
  */
 export function extractSignerNames(bytes: Buffer): string[] {
   const names = new Set<string>();
@@ -57,6 +63,11 @@ export function extractSignerNames(bytes: Buffer): string[] {
   // Lithuanian qualified certs put persons as "SURNAME,NAME" — surface those
   // first so callers can show a human over CA names like "RCSC IssuingCA".
   return [...names].sort((a, b) => Number(b.includes(',')) - Number(a.includes(',')));
+}
+
+/** Person CNs look like "ADOMAITYTĖ,AKVILĖ"; CA names usually have no comma. */
+export function personSignerNames(bytes: Buffer): string[] {
+  return extractSignerNames(bytes).filter((name) => name.includes(','));
 }
 
 function scanDerForCommonNames(der: Buffer): string[] {
@@ -88,13 +99,12 @@ function scanDerForCommonNames(der: Buffer): string[] {
 }
 
 /**
- * The appended (incremental-update) region must contain an actual CMS blob,
- * not merely the text "/ByteRange": a /Contents hex string of ≥1000 bytes
- * whose DER starts with a long-form SEQUENCE (0x30 0x82 …) — how every real
- * PKCS#7/CMS signature begins. Blocks "append a /ByteRange comment" uploads.
+ * A /Contents hex string of ≥1000 bytes whose DER starts with a long-form
+ * SEQUENCE (0x30 0x82 …) — how every real PKCS#7/CMS signature begins.
+ * Blocks "append a /ByteRange comment" uploads.
  */
-function tailHasCmsSignature(tail: Buffer): boolean {
-  const text = tail.toString('latin1');
+export function hasCmsSignatureBlob(bytes: Buffer): boolean {
+  const text = bytes.toString('latin1');
   for (const match of text.matchAll(/\/Contents\s*<([0-9A-Fa-f\s]+)>/g)) {
     const hex = match[1].replace(/\s+/g, '');
     if (hex.length < 2000 || hex.length % 2 !== 0) continue;
@@ -104,19 +114,55 @@ function tailHasCmsSignature(tail: Buffer): boolean {
 }
 
 export type UploadedPdfValidation =
-  | { ok: true; addedSignatures: number; totalSignatures: number; signerNames: string[] }
+  | {
+      ok: true;
+      mode: 'incremental' | 'dokobit_repackage';
+      addedSignatures: number;
+      totalSignatures: number;
+      signerNames: string[];
+    }
   | { ok: false; reason: 'not_pdf' | 'not_incremental' | 'no_new_signature' };
 
 export function validateUploadedSignedPdf(uploaded: Buffer, base: Buffer): UploadedPdfValidation {
   if (!isPdf(uploaded)) return { ok: false, reason: 'not_pdf' };
-  if (!isIncrementalUpdateOf(uploaded, base)) return { ok: false, reason: 'not_incremental' };
-  const tail = uploaded.subarray(base.length);
-  const addedSignatures = countPdfSignatures(tail);
-  if (addedSignatures < 1 || !tailHasCmsSignature(tail)) return { ok: false, reason: 'no_new_signature' };
+
+  if (isIncrementalUpdateOf(uploaded, base)) {
+    const tail = uploaded.subarray(base.length);
+    const addedSignatures = countPdfSignatures(tail);
+    if (addedSignatures < 1 || !hasCmsSignatureBlob(tail)) {
+      return { ok: false, reason: 'no_new_signature' };
+    }
+    return {
+      ok: true,
+      mode: 'incremental',
+      addedSignatures,
+      totalSignatures: countPdfSignatures(uploaded),
+      signerNames: extractSignerNames(tail),
+    };
+  }
+
+  // Dokobit (and similar portals) may rewrite the PDF before signing. Accept when
+  // there is a real CMS signature and evidence of a new signer vs the school PDF.
+  if (!hasCmsSignatureBlob(uploaded)) return { ok: false, reason: 'no_new_signature' };
+
+  const baseSigs = countPdfSignatures(base);
+  const uploadedSigs = countPdfSignatures(uploaded);
+  const basePeople = new Set(personSignerNames(base).map((n) => n.toLocaleUpperCase('lt-LT')));
+  const uploadedPeople = personSignerNames(uploaded);
+  const newPeople = uploadedPeople.filter((n) => !basePeople.has(n.toLocaleUpperCase('lt-LT')));
+  const hasMoreSignatures = uploadedSigs > baseSigs;
+
+  if (!hasMoreSignatures && newPeople.length === 0) {
+    return { ok: false, reason: 'not_incremental' };
+  }
+
   return {
     ok: true,
-    addedSignatures,
-    totalSignatures: countPdfSignatures(uploaded),
-    signerNames: extractSignerNames(tail),
+    mode: 'dokobit_repackage',
+    addedSignatures: hasMoreSignatures ? uploadedSigs - baseSigs : Math.max(1, newPeople.length),
+    totalSignatures: uploadedSigs,
+    signerNames: (newPeople.length > 0 ? newPeople : uploadedPeople).concat(
+      extractSignerNames(uploaded).filter((n) => !n.includes(',')),
+    ),
   };
 }
