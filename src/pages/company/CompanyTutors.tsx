@@ -38,6 +38,8 @@ interface Tutor {
   min_booking_hours: number;
   company_commission_percent?: number;
   personal_meeting_link?: string | null;
+  /** Free-text subjects/grades note, e.g. "MAT 2-6 kls, LT 1-8 kls". */
+  teaching_notes?: string | null;
   has_active_license?: boolean;
 }
 
@@ -49,6 +51,7 @@ interface Invite {
   used_by_profile_id: string | null;
   invitee_name: string | null;
   invitee_email: string | null;
+  teaching_notes?: string | null;
   created_at: string;
   tutor?: Tutor | null;
 }
@@ -96,6 +99,20 @@ const COLORS = [
 function generateToken(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+}
+
+/** Dark pill next to tutor/invite name — matches the admin “klasių pastaba” mock. */
+function TeachingNotesBadge({ notes }: { notes?: string | null }) {
+  const text = String(notes || '').trim();
+  if (!text) return null;
+  return (
+    <span
+      className="shrink-0 text-[11px] font-medium text-white bg-slate-700 px-2 py-0.5 rounded-full max-w-[16rem] truncate"
+      title={text}
+    >
+      {text}
+    </span>
+  );
 }
 
 // ─── SubjectPresetList – shared in both invite types ─────────────────────────
@@ -386,6 +403,7 @@ export default function CompanyTutors() {
   const [inviteMinBooking, setInviteMinBooking] = useState(1);
   const [inviteCommissionPercent, setInviteCommissionPercent] = useState(0);
   const [inviteMeetingLink, setInviteMeetingLink] = useState('');
+  const [inviteTeachingNotes, setInviteTeachingNotes] = useState('');
 
   // Organization default settings
   const [orgDefaults, setOrgDefaults] = useState({
@@ -413,6 +431,7 @@ export default function CompanyTutors() {
   const [archivingTutor, setArchivingTutor] = useState(false);
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
+  const [editTeachingNotes, setEditTeachingNotes] = useState('');
   const [showAddSubject, setShowAddSubject] = useState(false);
   const [newSubjectName, setNewSubjectName] = useState('');
   const [newSubjectDuration, setNewSubjectDuration] = useState(60);
@@ -590,9 +609,12 @@ export default function CompanyTutors() {
     };
     startLicenseInfoFetch();
 
+    const tutorSelect =
+      'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, personal_meeting_link, teaching_notes, has_active_license';
+
     const { data: tutorData } = await supabase
       .from('profiles')
-      .select('id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, personal_meeting_link, has_active_license')
+      .select(tutorSelect)
       .eq('organization_id', adminRow.organization_id);
 
     const { data: inviteData } = await supabase
@@ -604,7 +626,7 @@ export default function CompanyTutors() {
     const visibleTutors = await getOrgVisibleTutors(
       supabase as any,
       adminRow.organization_id,
-      'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, personal_meeting_link, has_active_license',
+      tutorSelect,
     );
     setTutors(visibleTutors as Tutor[]);
 
@@ -777,6 +799,7 @@ export default function CompanyTutors() {
 
     setInviteeName(''); setInviteeEmail(''); setInviteePhone('');
     setInviteMeetingLink('');
+    setInviteTeachingNotes('');
     setInviteError(null); setInviteSuccess(null);
     setSettingsExpanded(false);
     setInviteModalOpen(true);
@@ -809,6 +832,7 @@ export default function CompanyTutors() {
           min_booking_hours: inviteMinBooking,
           company_commission_percent: inviteCommissionPercent,
           personal_meeting_link: inviteMeetingLink.trim() || undefined,
+          teaching_notes: inviteTeachingNotes.trim() || undefined,
           locale,
         }),
       });
@@ -895,6 +919,7 @@ export default function CompanyTutors() {
     setSelectedTutor({ ...tutor, subjects: subjects || [], sessionCount, earnings });
     setEditName(tutor.full_name);
     setEditPhone(tutor.phone || '');
+    setEditTeachingNotes(tutor.teaching_notes || '');
     setShowAddSubject(false);
     setNewSubjectName('');
     setAddSubjectCatalogPick('');
@@ -939,6 +964,7 @@ export default function CompanyTutors() {
       min_booking_hours: editMinBooking,
       company_commission_percent: editCommissionPercent,
       personal_meeting_link: editMeetingLink.trim() || null,
+      teaching_notes: editTeachingNotes.trim() || null,
     }).eq('id', selectedTutor.id);
     await loadData();
     setTutorModalOpen(false);
@@ -1160,8 +1186,9 @@ export default function CompanyTutors() {
                     <span className="text-sm font-bold text-indigo-700">{tutor.full_name.charAt(0).toUpperCase()}</span>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 min-w-0">
                       <p className="text-sm font-semibold text-gray-900 truncate">{tutor.full_name}</p>
+                      <TeachingNotesBadge notes={tutor.teaching_notes} />
                     </div>
                     <p className="text-xs text-gray-500 truncate">{tutor.email}</p>
                   </div>
@@ -1225,7 +1252,10 @@ export default function CompanyTutors() {
                       <Mail className="w-4 h-4 text-amber-600" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-800">{invite.invitee_name || invite.invitee_email}</p>
+                      <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                        <p className="text-sm font-semibold text-gray-800 truncate">{invite.invitee_name || invite.invitee_email}</p>
+                        <TeachingNotesBadge notes={invite.teaching_notes} />
+                      </div>
                       <p className="text-xs text-gray-400">{invite.invitee_email} · {format(new Date(invite.created_at), 'd MMM yyyy', { locale: dateFnsLocale })}</p>
                       {invite.token && (
                         <p className="text-xs font-mono text-violet-600 mt-1 truncate" title={invite.token}>
@@ -1301,6 +1331,16 @@ export default function CompanyTutors() {
               <div className="space-y-1.5">
                 <Label className="text-sm font-medium text-gray-700">{t('compTut.nameLabel')}</Label>
                 <Input placeholder={t('compTut.namePlaceholder')} value={inviteeName} onChange={e => setInviteeName(e.target.value)} className="rounded-xl" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium text-gray-700">{t('compTut.teachingNotes')}</Label>
+                <Input
+                  placeholder={t('compTut.teachingNotesPlaceholder')}
+                  value={inviteTeachingNotes}
+                  onChange={(e) => setInviteTeachingNotes(e.target.value)}
+                  className="rounded-xl"
+                />
+                <p className="text-xs text-gray-500">{t('compTut.teachingNotesDesc')}</p>
               </div>
               <div className="space-y-1.5">
                 <Label className="text-sm font-medium text-gray-700">{t('compTut.personalMeetingLink')}</Label>
@@ -1454,6 +1494,16 @@ export default function CompanyTutors() {
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium text-gray-600">{t('compTut.phone')}</Label>
                   <Input value={editPhone} onChange={e => setEditPhone(e.target.value)} className="rounded-xl" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-gray-600">{t('compTut.teachingNotes')}</Label>
+                  <Input
+                    value={editTeachingNotes}
+                    onChange={(e) => setEditTeachingNotes(e.target.value)}
+                    placeholder={t('compTut.teachingNotesPlaceholder')}
+                    className="rounded-xl"
+                  />
+                  <p className="text-[11px] text-gray-500">{t('compTut.teachingNotesDesc')}</p>
                 </div>
               </div>
 

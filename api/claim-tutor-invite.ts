@@ -60,7 +60,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: invite, error: inviteErr } = await supabase
       .from('tutor_invites')
-      .select('id, organization_id, used, used_by_profile_id, subjects_preset, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, personal_meeting_link')
+      .select('id, organization_id, used, used_by_profile_id, subjects_preset, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, personal_meeting_link, teaching_notes')
       .eq('token', token)
       .maybeSingle();
 
@@ -98,6 +98,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       min_booking_hours: invite.min_booking_hours ?? 1,
       company_commission_percent: invite.company_commission_percent ?? 0,
       personal_meeting_link: invite.personal_meeting_link || null,
+      teaching_notes: invite.teaching_notes || null,
     };
 
     if (profile) {

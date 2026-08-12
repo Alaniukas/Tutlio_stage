@@ -78,6 +78,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       min_booking_hours,
       company_commission_percent,
       personal_meeting_link,
+      teaching_notes,
       locale: bodyLocale,
     } = req.body as {
       organizationId: string;
@@ -93,6 +94,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       min_booking_hours?: number;
       company_commission_percent?: number;
       personal_meeting_link?: string;
+      teaching_notes?: string;
       locale?: string;
     };
 
@@ -152,6 +154,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       min_booking_hours,
       company_commission_percent,
       personal_meeting_link: String(personal_meeting_link || '').trim() || null,
+      teaching_notes: String(teaching_notes || '').trim() || null,
     });
 
     if (inviteError) {
