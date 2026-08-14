@@ -14,6 +14,7 @@ interface ConversationListProps {
   loading: boolean;
   /** Parent inbox: copy and picker target tutors/org admins (not „pasirinkite mokinį“). */
   messageableAudience?: 'default' | 'parent';
+  readOnly?: boolean;
 }
 
 export default function ConversationList({
@@ -23,6 +24,7 @@ export default function ConversationList({
   onConversationCreated,
   loading,
   messageableAudience = 'default',
+  readOnly = false,
 }: ConversationListProps) {
   const { t } = useTranslation();
   const [search, setSearch] = useState('');
@@ -147,18 +149,20 @@ export default function ConversationList({
               className="w-full pl-9 pr-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300"
             />
           </div>
-          <button
-            onClick={() => setShowPicker((v) => !v)}
-            title={t('chat.newConversation')}
-            className={cn(
-              'p-2 rounded-xl border transition-colors flex-shrink-0',
-              showPicker
-                ? 'bg-indigo-50 border-indigo-200 text-indigo-600'
-                : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100',
-            )}
-          >
-            {showPicker ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-          </button>
+          {!readOnly ? (
+            <button
+              onClick={() => setShowPicker((v) => !v)}
+              title={t('chat.newConversation')}
+              className={cn(
+                'p-2 rounded-xl border transition-colors flex-shrink-0',
+                showPicker
+                  ? 'bg-indigo-50 border-indigo-200 text-indigo-600'
+                  : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100',
+              )}
+            >
+              {showPicker ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+            </button>
+          ) : null}
         </div>
       </div>
 

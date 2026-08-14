@@ -7,6 +7,8 @@
 
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
@@ -35,12 +37,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data: authData, error: authErr } = await supabase.auth.getUser(token);
     if (authErr || !authData?.user) return json(res, 401, { error: 'Unauthorized' });
 
-    const { data: adminRow } = await supabase
-      .from('organization_admins')
-      .select('organization_id')
-      .eq('user_id', authData.user.id)
-      .maybeSingle();
-    if (!adminRow) return json(res, 403, { error: 'Only the organization administrator can resend package emails' });
+    const adminAccess = await getOrgAdminAccessByUserId(supabase, authData.user.id);
+    if (!adminAccess || !hasOrgAdminPermission(adminAccess.role, adminAccess.permissions, 'finance.edit')) {
+      return json(res, 403, { error: 'Only an administrator with finance edit access can resend package emails' });
+    }
+    const adminRow = { organization_id: adminAccess.organizationId };
 
     const { data: pkg, error: pkgErr } = await supabase
       .from('lesson_packages')

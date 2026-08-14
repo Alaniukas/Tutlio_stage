@@ -23,6 +23,8 @@ import { isCronAuthorized } from './_lib/cronAuth.js';
 import { markdownToEmailHtml } from './_lib/blogMarkdownEmail.js';
 import { canonicalOriginForOrgLocale } from './_lib/public-origin.js';
 import { schoolInstallmentPaymentBreakdown } from './_lib/schoolBookingInvite.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission, type OrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 
 function randomToken() {
@@ -2727,16 +2729,52 @@ const USER_TRIGGERABLE_EMAIL_TYPES = new Set([
   'school_contract_fully_signed',
 ]);
 
-async function isAuthenticatedUser(req: VercelRequest): Promise<boolean> {
+async function getAuthenticatedUserId(req: VercelRequest): Promise<string | null> {
   const authHeader = typeof req.headers.authorization === 'string' ? req.headers.authorization : '';
-  if (!authHeader.startsWith('Bearer ')) return false;
+  if (!authHeader.startsWith('Bearer ')) return null;
   const token = authHeader.slice(7);
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return false;
+  if (!url || !key) return null;
   const sb = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
-  const { error } = await sb.auth.getUser(token);
-  return !error;
+  const { data, error } = await sb.auth.getUser(token);
+  return error ? null : data.user?.id || null;
+}
+
+function orgPermissionForEmailType(type: string): OrgAdminPermission {
+  if (type.startsWith('school_contract')) return 'contracts.edit';
+  if (type === 'school_installment_request' || [
+    'package_depleted_notification',
+    'payment_rejection_reminder',
+    'payment_review_needed',
+    'stripe_payment_forwarding',
+    'payment_success',
+    'payment_received_tutor',
+    'payment_failed',
+  ].includes(type)) return 'finance.edit';
+  if (type === 'invite_email' || type === 'tutor_student_assigned' || type.startsWith('waitlist_')) {
+    return 'students.edit';
+  }
+  return 'sessions.edit';
+}
+
+async function canOrgSeatSendEmail(userId: string, type: string): Promise<boolean> {
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return false;
+  const sb = createClient(url, key, supabaseServiceRoleClientOptions());
+  const access = await getOrgAdminAccessByUserId(sb, userId);
+  if (access) {
+    return hasOrgAdminPermission(access.role, access.permissions, orgPermissionForEmailType(type));
+  }
+
+  // A suspended seat must not fall through as a regular authenticated user.
+  const { data: membership } = await sb
+    .from('organization_admins')
+    .select('id')
+    .eq('user_id', userId)
+    .maybeSingle();
+  return !membership;
 }
 
 /** When `organizationId` is omitted from the payload, infer org from the logged-in user (tutor / org admin / student / parent). */
@@ -2806,7 +2844,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const isPrivileged = isAuthorizedRequest(req);
-    if (!isPrivileged && !(await isAuthenticatedUser(req))) {
+    const authenticatedUserId = isPrivileged ? null : await getAuthenticatedUserId(req);
+    if (!isPrivileged && !authenticatedUserId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
@@ -2816,6 +2855,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     if (!isPrivileged && !USER_TRIGGERABLE_EMAIL_TYPES.has(String(type))) {
       return res.status(403).json({ error: 'This email type requires server authorization' });
+    }
+    if (!isPrivileged && authenticatedUserId && !(await canOrgSeatSendEmail(authenticatedUserId, String(type)))) {
+      return res.status(403).json({ error: 'Insufficient organization permission' });
     }
     const apiKey = getResendApiKey();
     if (!apiKey) {

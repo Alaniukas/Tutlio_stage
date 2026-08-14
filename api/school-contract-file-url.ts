@@ -5,6 +5,8 @@ import {
   extractSchoolContractStoragePath,
   SCHOOL_CONTRACTS_BUCKET,
 } from './_lib/schoolContractPdfPath.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.statusCode = status;
@@ -33,13 +35,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const orgPrefix = path.split('/')[0] || '';
   if (!orgPrefix) return json(res, 400, { error: 'Invalid path' });
 
-  const { data: adminRow } = await supabase
-    .from('organization_admins')
-    .select('id')
-    .eq('user_id', auth.userId)
-    .eq('organization_id', orgPrefix)
-    .maybeSingle();
-  if (!adminRow) return json(res, 403, { error: 'Forbidden' });
+  const adminAccess = await getOrgAdminAccessByUserId(supabase, auth.userId);
+  if (
+    adminAccess?.organizationId !== orgPrefix
+    || !hasOrgAdminPermission(adminAccess?.role, adminAccess?.permissions, 'contracts.view')
+  ) return json(res, 403, { error: 'Forbidden' });
 
   const folderPath = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
   const fileName = path.includes('/') ? path.slice(path.lastIndexOf('/') + 1) : path;

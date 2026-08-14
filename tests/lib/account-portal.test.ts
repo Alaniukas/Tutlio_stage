@@ -3,6 +3,7 @@ import {
   canAccessLoginPortal,
   loginErrorKeyForPortalMismatch,
   profileQualifiesAsTutor,
+  profileQualifiesForTutorPortal,
   type AccountPortals,
 } from '../../src/lib/account-portal';
 
@@ -75,5 +76,11 @@ describe('profileQualifiesAsTutor', () => {
     expect(
       profileQualifiesAsTutor({ ...ghostProfile, subscription_status: 'active' }, true),
     ).toBe(true);
+  });
+
+  it('does not turn an organization admin profile into a tutor account', () => {
+    expect(
+      profileQualifiesForTutorPortal({ ...ghostProfile, organization_id: 'org-1' }, false, true),
+    ).toBe(false);
   });
 });

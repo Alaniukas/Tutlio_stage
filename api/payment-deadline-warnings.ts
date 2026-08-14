@@ -19,6 +19,8 @@ import {
 } from './_lib/soloManualStudentPayments.js';
 import { requireCronAuth } from './_lib/cronAuth.js';
 import { isReminderOptedOut } from './_lib/reminderOptOut.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
+import type { OrgAdminRole } from '../src/lib/orgAdminPermissions.js';
 
 const supabase = createClient(
     process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL!,
@@ -48,11 +50,32 @@ async function sendWarningEmail(payload: any) {
 async function getOrgAdminProfiles(
     organizationId: string,
 ): Promise<Array<{ email: string; full_name: string | null }>> {
-    const { data: orgAdmins } = await supabase
+    const orgAdminResult = await supabase
         .from('organization_admins')
-        .select('user_id')
+        .select('user_id, role, status, permissions, accepted_at')
         .eq('organization_id', organizationId);
-    const adminIds = (orgAdmins || []).map((a: { user_id: string }) => a.user_id).filter(Boolean);
+    let orgAdmins = orgAdminResult.data || [];
+    if (orgAdminResult.error?.code === '42703' || orgAdminResult.error?.code === 'PGRST204') {
+        const legacy = await supabase
+            .from('organization_admins')
+            .select('user_id')
+            .eq('organization_id', organizationId);
+        orgAdmins = (legacy.data || []).map((row: { user_id: string }) => ({
+            ...row,
+            role: 'owner',
+            status: 'active',
+            permissions: {},
+            accepted_at: new Date(0).toISOString(),
+        }));
+    }
+    const adminIds = orgAdmins
+        .filter((row: any) => (
+            row.status === 'active'
+            && Boolean(row.accepted_at)
+            && hasOrgAdminPermission(row.role as OrgAdminRole, row.permissions, 'finance.view')
+        ))
+        .map((row: any) => row.user_id)
+        .filter(Boolean);
     if (adminIds.length === 0) return [];
     const { data: adminProfiles } = await supabase
         .from('profiles')

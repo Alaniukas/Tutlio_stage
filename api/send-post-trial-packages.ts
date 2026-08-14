@@ -13,6 +13,7 @@ import { requireCronAuth } from './_lib/cronAuth.js';
 import { buildRollingOccurrenceDates } from './_lib/recurringOccurrences.js';
 import { endOfMonthYmd, nextMonthFirstYmd } from '../src/lib/monthlyPackagePlan.js';
 import { resolveOrganizationLessonPrice } from '../src/lib/organizationDynamicPricing.js';
+import { getOrgOwnerUserId } from './_lib/orgAdminAccess.js';
 
 const TRIAL_LOOKBACK_DAYS = 14;
 
@@ -233,13 +234,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       const lessonsPerWeek = Math.min(7, Math.max(1, Number(student.pricing_lessons_per_week) || activeTemplates.length || 1));
 
-      const { data: adminRow } = await supabase
-        .from('organization_admins')
-        .select('user_id')
-        .eq('organization_id', orgId)
-        .limit(1)
-        .maybeSingle();
-      if (!adminRow?.user_id) {
+      const ownerUserId = await getOrgOwnerUserId(supabase, orgId);
+      if (!ownerUserId) {
         failures.push({ pair: pairLabel, error: 'Organization has no admin to own the plan.' });
         continue;
       }
@@ -252,7 +248,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .from('recurring_monthly_package_plans')
         .insert({
           organization_id: orgId,
-          created_by: adminRow.user_id,
+          created_by: ownerUserId,
           tutor_id: candidate.tutorId,
           student_id: candidate.studentId,
           subject_id: null,

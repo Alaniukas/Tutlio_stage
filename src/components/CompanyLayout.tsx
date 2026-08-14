@@ -23,6 +23,7 @@ import {
   School,
   BadgeEuro,
   Globe,
+  ShieldCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import OrgSuspendedBanner from '@/components/OrgSuspendedBanner';
@@ -33,6 +34,16 @@ import { OrgEntityProvider, type OrgEntityType } from '@/contexts/OrgEntityConte
 import { useUser } from '@/contexts/UserContext';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { showDynamicPricingNav } from '@/lib/orgIntakeMode';
+import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
+import type { OrgAdminPermission } from '@/lib/orgAdminPermissions';
+
+interface CompanyNavItem {
+  href: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  exact?: boolean;
+  permission: OrgAdminPermission | null;
+}
 
 export function buildCompanyNavItems(
   isSchool: boolean,
@@ -40,35 +51,40 @@ export function buildCompanyNavItems(
   t: (key: string) => string,
   showDynamicPricing: boolean,
   showPublicPage = false,
-) {
-  const base = [
-    { href: `${orgBasePath}`, label: t('companyNav.overview'), icon: LayoutDashboard, exact: true },
-    { href: `${orgBasePath}/tutors`, label: isSchool ? t('companyNav.teachers') : t('companyNav.tutors'), icon: Users },
-    { href: `${orgBasePath}/students`, label: t('companyNav.students'), icon: GraduationCap },
-    { href: `${orgBasePath}/sessions`, label: t('companyNav.sessions'), icon: BookOpen },
-    { href: `${orgBasePath}/schedule`, label: t('companyNav.schedule'), icon: CalendarDays },
-    { href: `${orgBasePath}/messages`, label: t('companyNav.messages'), icon: MessageSquare },
-    { href: `${orgBasePath}/stats`, label: t('companyNav.stats'), icon: BarChart3 },
-    { href: `${orgBasePath}/settings`, label: t('companyNav.lessonSettings'), icon: Settings },
+  showTeam = false,
+): CompanyNavItem[] {
+  const base: CompanyNavItem[] = [
+    { href: `${orgBasePath}`, label: t('companyNav.overview'), icon: LayoutDashboard, exact: true, permission: 'dashboard.view' },
+    { href: `${orgBasePath}/tutors`, label: isSchool ? t('companyNav.teachers') : t('companyNav.tutors'), icon: Users, permission: 'tutors.view' },
+    { href: `${orgBasePath}/students`, label: t('companyNav.students'), icon: GraduationCap, permission: 'students.view' },
+    { href: `${orgBasePath}/sessions`, label: t('companyNav.sessions'), icon: BookOpen, permission: 'sessions.view' },
+    { href: `${orgBasePath}/schedule`, label: t('companyNav.schedule'), icon: CalendarDays, permission: 'sessions.view' },
+    { href: `${orgBasePath}/messages`, label: t('companyNav.messages'), icon: MessageSquare, permission: 'messages.view' },
+    { href: `${orgBasePath}/stats`, label: t('companyNav.stats'), icon: BarChart3, permission: 'stats.view' },
+    { href: `${orgBasePath}/settings`, label: t('companyNav.lessonSettings'), icon: Settings, permission: 'settings.view' },
   ];
   if (showPublicPage) {
-    base.push({ href: `${orgBasePath}/public-page`, label: t('companyNav.publicPage'), icon: Globe });
+    base.push({ href: `${orgBasePath}/public-page`, label: t('companyNav.publicPage'), icon: Globe, permission: 'settings.view' });
   }
   if (isSchool) {
-    base.push({ href: `${orgBasePath}/contracts`, label: t('companyNav.contracts'), icon: FileText });
+    base.push({ href: `${orgBasePath}/contracts`, label: t('companyNav.contracts'), icon: FileText, permission: 'contracts.view' });
   }
-  base.push({ href: `${orgBasePath}/finance`, label: t('companyNav.finance'), icon: CreditCard });
+  base.push({ href: `${orgBasePath}/finance`, label: t('companyNav.finance'), icon: CreditCard, permission: 'finance.view' });
   if (showDynamicPricing) {
-    base.push({ href: `${orgBasePath}/dynamic-pricing`, label: t('companyNav.dynamicPricing'), icon: BadgeEuro });
+    base.push({ href: `${orgBasePath}/dynamic-pricing`, label: t('companyNav.dynamicPricing'), icon: BadgeEuro, permission: 'settings.view' });
+  }
+  if (showTeam) {
+    base.push({ href: `${orgBasePath}/team`, label: t('companyNav.team'), icon: ShieldCheck, permission: null });
   }
   // Help stays last so the operational organization tools remain grouped.
-  base.push({ href: `${orgBasePath}/instructions`, label: t('companyNav.instructions'), icon: HelpCircle });
+  base.push({ href: `${orgBasePath}/instructions`, label: t('companyNav.instructions'), icon: HelpCircle, permission: null });
   return base;
 }
 
 export default function CompanyLayout() {
   const { t } = useTranslation();
   const { user: ctxUser } = useUser();
+  const { can, isOwner, membership } = useOrgAdminAccess();
   const chatUnreadTotal = useTotalChatUnread();
   const location = useLocation();
   const ENTITY_KEY = 'tutlio_entity_type';
@@ -98,11 +114,16 @@ export default function CompanyLayout() {
   const brandLabel = isSchool ? t('layout.tutlioSchool') : t('layout.tutlioCompany');
 
   const NAV_ITEMS = useMemo(
-    () => buildCompanyNavItems(isSchool, orgBasePath, t, showDynamicPricing, showPublicPage),
-    [t, isSchool, orgBasePath, showDynamicPricing, showPublicPage],
+    () => buildCompanyNavItems(isSchool, orgBasePath, t, showDynamicPricing, showPublicPage, isOwner)
+      .filter((item) => item.permission === null || can(item.permission)),
+    [t, isSchool, orgBasePath, showDynamicPricing, showPublicPage, isOwner, can],
   );
 
   useEffect(() => {
+    if (membership) {
+      if (!orgName && membership.organizationName) setOrgName(membership.organizationName);
+      setEntityType(membership.entityType);
+    }
     let cancelled = false;
     preloadOrgAdminData().then(() => {
       if (cancelled) return;
@@ -121,7 +142,7 @@ export default function CompanyLayout() {
       }
     })();
     return () => { cancelled = true; };
-  }, [ctxUser?.id]);
+  }, [ctxUser?.id, membership?.organizationId]);
 
   const handleLogout = async () => {
     sessionStorage.removeItem(ENTITY_KEY);

@@ -12,6 +12,7 @@ import { randomUUID } from 'crypto';
 import { Resend } from 'resend';
 import { getFromEmail, getResendApiKey, INTERNAL_NOTIFY_EMAILS } from './resendConfig.js';
 import { sendEnterpriseWelcomeEmail } from './sendEnterpriseWelcomeEmail.js';
+import { insertInitialOrgOwner } from './orgAdminAccess.js';
 
 type Supabase = SupabaseClient;
 
@@ -224,9 +225,7 @@ export async function handleEnterpriseCheckoutCompleted(params: EnterpriseChecko
   }
 
   // 4. Org admin link
-  const { error: adminError } = await supabase
-    .from('organization_admins')
-    .insert({ user_id: userId, organization_id: org.id });
+  const { error: adminError } = await insertInitialOrgOwner(supabase, userId, org.id);
   if (adminError) {
     await supabase.auth.admin.deleteUser(userId);
     await supabase.from('organizations').delete().eq('id', org.id);

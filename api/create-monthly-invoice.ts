@@ -14,6 +14,8 @@ import {
     tutorUsesManualStudentPayments,
     trimManualPaymentBankDetails,
 } from './_lib/soloManualStudentPayments.js';
+import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 const supabase = createClient(
@@ -174,6 +176,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         if (tutorErr || !tutor) {
             return res.status(404).json({ error: 'Korepetitorius nerastas', details: tutorErr?.message });
+        }
+
+        if (!auth.isInternal) {
+            if (!auth.userId) return res.status(401).json({ error: 'Unauthorized' });
+            const seat = await getOrgAdminSeatByUserId(supabase, auth.userId);
+            if (seat) {
+                if (
+                    seat.status !== 'active'
+                    || !hasOrgAdminPermission(seat.role, seat.permissions, 'finance.edit')
+                    || !tutor.organization_id
+                    || seat.organizationId !== tutor.organization_id
+                ) {
+                    return res.status(403).json({ error: 'Insufficient organization permission' });
+                }
+            } else if (auth.userId !== tutorId) {
+                return res.status(403).json({ error: 'Forbidden' });
+            }
         }
 
         // 2. Fetch sessions

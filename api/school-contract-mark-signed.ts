@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.statusCode = status;
@@ -41,13 +43,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const orgId = String((contract as any).organization_id || '').trim();
   if (!orgId) return json(res, 500, { error: 'Contract missing organization_id' });
 
-  const { data: adminRow } = await supabase
-    .from('organization_admins')
-    .select('id')
-    .eq('user_id', auth.userId)
-    .eq('organization_id', orgId)
-    .maybeSingle();
-  if (!adminRow) return json(res, 403, { error: 'Forbidden' });
+  const adminAccess = await getOrgAdminAccessByUserId(supabase, auth.userId);
+  if (
+    adminAccess?.organizationId !== orgId
+    || !hasOrgAdminPermission(adminAccess?.role, adminAccess?.permissions, 'contracts.edit')
+  ) return json(res, 403, { error: 'Forbidden' });
 
   const manualUpload = req.body?.manualUpload === true;
   if ((contract as any).org?.features?.school_contract_esign === true && !manualUpload) {

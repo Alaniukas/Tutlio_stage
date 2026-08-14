@@ -5,6 +5,8 @@ import { resolveInvoiceBranding } from './_lib/invoiceBranding.js';
 import { generateInvoicePdf, type InvoicePdfData } from './_lib/invoicePdf.js';
 import { isProKlaseOrg } from './_lib/marketMoney.js';
 import { proKlaseSessionPayEur } from './_lib/proKlaseTutorPay.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 /** EUR per lesson for org-tutor → company invoices (see profiles.company_commission_percent). */
 function orgTutorLessonPayEur(tutorPayRate: number | null | undefined, sessionPrice: number | null | undefined): number {
@@ -93,6 +95,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .single();
 
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
+
+    if (!auth.isInternal) {
+      const access = await getOrgAdminAccessByUserId(supabase, issuingUserId);
+      if (access) {
+        if (
+          !hasOrgAdminPermission(access.role, access.permissions, 'finance.edit')
+          || access.organizationId !== profile.organization_id
+        ) {
+          return res.status(403).json({ error: 'Insufficient organization permission' });
+        }
+      } else {
+        const { data: inactiveSeat } = await supabase
+          .from('organization_admins')
+          .select('id')
+          .eq('user_id', issuingUserId)
+          .maybeSingle();
+        if (inactiveSeat) return res.status(403).json({ error: 'Organization access is inactive' });
+        if (tutorId !== issuingUserId) {
+          return res.status(403).json({ error: 'Tutors can only generate their own invoices' });
+        }
+      }
+    }
 
     // Org feature invoice_detailed_line_items: line items carry the child's
     // name, per-subject quantity and the lesson dates. Org→payer invoices only

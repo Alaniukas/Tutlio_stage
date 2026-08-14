@@ -8,6 +8,8 @@ import ProtectedRoute from '@/components/ProtectedRoute';
 import StudentProtectedRoute from '@/components/StudentProtectedRoute';
 import CompanyProtectedRoute from '@/components/CompanyProtectedRoute';
 import ParentProtectedRoute from '@/components/ParentProtectedRoute';
+import OrgPermissionRoute from '@/components/OrgPermissionRoute';
+import { OrgAdminAccessProvider } from '@/contexts/OrgAdminAccessContext';
 
 // Keep only the homepage in the entry bundle. Every other public route has its
 // own chunk: direct visitors download the page they requested, while crawler
@@ -74,6 +76,7 @@ const CompanyFinanceHub = lazy(() => import('@/pages/company/CompanyFinanceHub')
 const CompanyInstructions = lazy(() => import('@/pages/company/CompanyInstructions'));
 const CompanyDynamicPricing = lazy(() => import('@/pages/company/CompanyDynamicPricing'));
 const CompanyMessages = lazy(() => import('@/pages/company/CompanyMessages'));
+const CompanyTeam = lazy(() => import('@/pages/company/CompanyTeam'));
 const PreviewAssignStudentModal = lazy(() => import('@/pages/dev/PreviewAssignStudentModal'));
 const ParentDashboard = lazy(() => import('@/pages/ParentDashboard'));
 const ParentSessions = lazy(() => import('@/pages/ParentSessions'));
@@ -198,7 +201,9 @@ function ParentLegacyChildToLessonsRedirect() {
 function CompanyProtectedWithUser() {
   return (
     <UserProvider>
-      <CompanyProtectedRoute />
+      <OrgAdminAccessProvider>
+        <CompanyProtectedRoute />
+      </OrgAdminAccessProvider>
     </UserProvider>
   );
 }
@@ -380,33 +385,35 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/school/login" element={<CompanyLogin />} />
         <Route element={<CompanyProtectedWithUser />}>
           <Route element={<CompanyLayout />}>
-            <Route path="/company" element={<CompanyDashboard />} />
-            <Route path="/company/tutors" element={<CompanyTutors />} />
-            <Route path="/company/students" element={<CompanyStudents />} />
-            <Route path="/company/waitlist" element={<CompanyWaitlist />} />
-            <Route path="/company/sessions" element={<CompanySessions />} />
-            <Route path="/company/schedule" element={<CompanyTvarkarastis />} />
-            <Route path="/company/messages" element={<CompanyMessages />} />
-            <Route path="/company/stats" element={<CompanyStats />} />
+            <Route path="/company" element={<OrgPermissionRoute permission="dashboard.view"><CompanyDashboard /></OrgPermissionRoute>} />
+            <Route path="/company/tutors" element={<OrgPermissionRoute permission="tutors.view" editPermission="tutors.edit"><CompanyTutors /></OrgPermissionRoute>} />
+            <Route path="/company/students" element={<OrgPermissionRoute permission="students.view" editPermission="students.edit"><CompanyStudents /></OrgPermissionRoute>} />
+            <Route path="/company/waitlist" element={<OrgPermissionRoute permission="students.view" editPermission="students.edit"><CompanyWaitlist /></OrgPermissionRoute>} />
+            <Route path="/company/sessions" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanySessions /></OrgPermissionRoute>} />
+            <Route path="/company/schedule" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanyTvarkarastis /></OrgPermissionRoute>} />
+            <Route path="/company/messages" element={<OrgPermissionRoute permission="messages.view" editPermission="messages.edit"><CompanyMessages /></OrgPermissionRoute>} />
+            <Route path="/company/stats" element={<OrgPermissionRoute permission="stats.view"><CompanyStats /></OrgPermissionRoute>} />
             <Route path="/company/instructions" element={<CompanyInstructions />} />
-            <Route path="/company/dynamic-pricing" element={<CompanyDynamicPricing />} />
-            <Route path="/company/settings" element={<CompanySettings />} />
-            <Route path="/company/finance" element={<CompanyFinanceHub />} />
-            <Route path="/company/contracts" element={<CompanyContracts />} />
+            <Route path="/company/dynamic-pricing" element={<OrgPermissionRoute permission="settings.view" editPermission="settings.edit"><CompanyDynamicPricing /></OrgPermissionRoute>} />
+            <Route path="/company/settings" element={<OrgPermissionRoute permission="settings.view" editPermission="settings.edit"><CompanySettings /></OrgPermissionRoute>} />
+            <Route path="/company/finance" element={<OrgPermissionRoute permission="finance.view" editPermission="finance.edit"><CompanyFinanceHub /></OrgPermissionRoute>} />
+            <Route path="/company/contracts" element={<OrgPermissionRoute permission="contracts.view" editPermission="contracts.edit"><CompanyContracts /></OrgPermissionRoute>} />
+            <Route path="/company/team" element={<OrgPermissionRoute ownerOnly><CompanyTeam /></OrgPermissionRoute>} />
 
-            <Route path="/school" element={<CompanyDashboard />} />
-            <Route path="/school/tutors" element={<CompanyTutors />} />
-            <Route path="/school/students" element={<CompanyStudents />} />
-            <Route path="/school/waitlist" element={<CompanyWaitlist />} />
-            <Route path="/school/sessions" element={<CompanySessions />} />
-            <Route path="/school/schedule" element={<CompanyTvarkarastis />} />
-            <Route path="/school/messages" element={<CompanyMessages />} />
-            <Route path="/school/stats" element={<CompanyStats />} />
+            <Route path="/school" element={<OrgPermissionRoute permission="dashboard.view"><CompanyDashboard /></OrgPermissionRoute>} />
+            <Route path="/school/tutors" element={<OrgPermissionRoute permission="tutors.view" editPermission="tutors.edit"><CompanyTutors /></OrgPermissionRoute>} />
+            <Route path="/school/students" element={<OrgPermissionRoute permission="students.view" editPermission="students.edit"><CompanyStudents /></OrgPermissionRoute>} />
+            <Route path="/school/waitlist" element={<OrgPermissionRoute permission="students.view" editPermission="students.edit"><CompanyWaitlist /></OrgPermissionRoute>} />
+            <Route path="/school/sessions" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanySessions /></OrgPermissionRoute>} />
+            <Route path="/school/schedule" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanyTvarkarastis /></OrgPermissionRoute>} />
+            <Route path="/school/messages" element={<OrgPermissionRoute permission="messages.view" editPermission="messages.edit"><CompanyMessages /></OrgPermissionRoute>} />
+            <Route path="/school/stats" element={<OrgPermissionRoute permission="stats.view"><CompanyStats /></OrgPermissionRoute>} />
             <Route path="/school/instructions" element={<CompanyInstructions />} />
             <Route path="/school/dynamic-pricing" element={<Navigate to="/school" replace />} />
-            <Route path="/school/settings" element={<CompanySettings />} />
-            <Route path="/school/finance" element={<CompanyFinanceHub />} />
-            <Route path="/school/contracts" element={<CompanyContracts />} />
+            <Route path="/school/settings" element={<OrgPermissionRoute permission="settings.view" editPermission="settings.edit"><CompanySettings /></OrgPermissionRoute>} />
+            <Route path="/school/finance" element={<OrgPermissionRoute permission="finance.view" editPermission="finance.edit"><CompanyFinanceHub /></OrgPermissionRoute>} />
+            <Route path="/school/contracts" element={<OrgPermissionRoute permission="contracts.view" editPermission="contracts.edit"><CompanyContracts /></OrgPermissionRoute>} />
+            <Route path="/school/team" element={<OrgPermissionRoute ownerOnly><CompanyTeam /></OrgPermissionRoute>} />
           </Route>
         </Route>
 

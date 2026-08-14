@@ -72,15 +72,34 @@ export default function CompanyLogin() {
       return;
     }
 
-    const { data: adminRow } = await supabase
+    const primaryAdmin = await supabase
       .from('organization_admins')
-      .select('id')
+      .select('id, status')
       .eq('user_id', data.user.id)
       .maybeSingle();
+    const statusColumnsMissing = primaryAdmin.error && (
+      primaryAdmin.error.code === '42703'
+      || primaryAdmin.error.code === 'PGRST204'
+      || primaryAdmin.error.message?.includes('does not exist')
+    );
+    const legacyAdmin = statusColumnsMissing
+      ? await supabase
+        .from('organization_admins')
+        .select('id')
+        .eq('user_id', data.user.id)
+        .maybeSingle()
+      : null;
+    const adminRow = primaryAdmin.data || legacyAdmin?.data;
 
     if (!adminRow) {
       await supabase.auth.signOut();
       setError(isSchoolLogin ? t('school.notSchoolAdmin') : t('companyLogin.noAdminAccount'));
+      setLoading(false);
+      return;
+    }
+    if ('status' in adminRow && adminRow.status !== 'active') {
+      await supabase.auth.signOut();
+      setError(t('orgTeam.suspended'));
       setLoading(false);
       return;
     }

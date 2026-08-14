@@ -4,6 +4,8 @@
 
 import type { VercelRequest, VercelResponse } from './types.js';
 import Stripe from 'stripe';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { createClient } from '@supabase/supabase-js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { marketFromRequest } from './_lib/market.js';
@@ -81,14 +83,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const { data: adminRow } = await supabase
-      .from('organization_admins')
-      .select('organization_id')
-      .eq('user_id', user.id)
-      .maybeSingle();
-    if (!adminRow?.organization_id) {
+    const adminAccess = await getOrgAdminAccessByUserId(supabase, user.id);
+    if (!adminAccess || !hasOrgAdminPermission(adminAccess.role, adminAccess.permissions, 'settings.edit')) {
       return res.status(403).json({ error: 'Only organization admin can manage licenses' });
     }
+    const adminRow = { organization_id: adminAccess.organizationId };
 
     const { data: org } = await supabase
       .from('organizations')

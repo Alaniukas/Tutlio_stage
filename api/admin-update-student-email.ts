@@ -7,6 +7,8 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { findAuthUserByEmail } from './_lib/findAuthUserByEmail.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 function json(res: VercelResponse, status: number, body: Record<string, unknown>) {
   return res.status(status).json(body);
@@ -44,14 +46,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    const { data: adminRow } = await supabase
-      .from('organization_admins')
-      .select('organization_id')
-      .eq('user_id', auth.userId)
-      .maybeSingle();
-    if (!adminRow?.organization_id) {
+    const adminAccess = await getOrgAdminAccessByUserId(supabase, auth.userId);
+    if (!adminAccess || !hasOrgAdminPermission(adminAccess.role, adminAccess.permissions, 'students.edit')) {
       return json(res, 403, { error: 'Only organization admin can update student email' });
     }
+    const adminRow = { organization_id: adminAccess.organizationId };
 
     const { data: student, error: studentErr } = await supabase
       .from('students')

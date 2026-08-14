@@ -3,6 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { insertParentInviteAndSendEmail } from './_lib/parentInvite.js';
 import { inviteEmailLocale, orgAwareOrigin, publicOriginFromRequest } from './_lib/public-origin.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 /** Raw Node response — avoids Express-style helpers missing under `vercel dev`. */
 function json(res: VercelResponse, status: number, body: unknown) {
@@ -104,13 +106,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let allowed = false;
     if (tutorId && tutorId === auth.userId) allowed = true;
     if (!allowed && organizationId) {
-      const { data: oa } = await supabase
-        .from('organization_admins')
-        .select('id')
-        .eq('user_id', auth.userId)
-        .eq('organization_id', organizationId)
-        .maybeSingle();
-      if (oa) allowed = true;
+      const adminAccess = await getOrgAdminAccessByUserId(supabase, auth.userId);
+      if (
+        adminAccess?.organizationId === organizationId
+        && hasOrgAdminPermission(adminAccess.role, adminAccess.permissions, 'students.edit')
+      ) allowed = true;
     }
 
     if (!allowed) {

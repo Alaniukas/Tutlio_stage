@@ -7,6 +7,8 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { sendTutorInviteEmail } from './_lib/sendTutorInviteResend.js';
 import { inviteEmailLocale, publicOriginFromRequest } from './_lib/public-origin.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 type SubjectPreset = {
   name: string;
@@ -102,14 +104,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Missing organizationId or inviteeEmail' });
     }
 
-    const { data: adminRow, error: adminErr } = await supabase
-      .from('organization_admins')
-      .select('organization_id')
-      .eq('user_id', user.id)
-      .eq('organization_id', organizationId)
-      .maybeSingle();
-
-    if (adminErr || !adminRow) {
+    const adminAccess = await getOrgAdminAccessByUserId(supabase, user.id);
+    if (
+      !adminAccess
+      || adminAccess.status !== 'active'
+      || adminAccess.organizationId !== organizationId
+      || !hasOrgAdminPermission(adminAccess.role, adminAccess.permissions, 'tutors.edit')
+    ) {
       return res.status(403).json({ error: 'You do not have permission to invite tutors to this organization' });
     }
 
@@ -206,4 +207,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'Internal server error', message: err?.message, requestId });
   }
 }
-

@@ -7,6 +7,9 @@ import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { summarizeStripeOnboarding } from './_lib/stripeAccountOnboarding.js';
+import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
+import { isAllowedRedirectUrl, publicOriginFromRequest } from './_lib/public-origin.js';
 
 function getStripe() {
     return new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-02-25.clover' as any });
@@ -27,19 +30,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!auth) return res.status(401).json({ error: 'Unauthorized' });
 
     const { action, entity, entityId, returnUrl } = req.body as {
-        action: 'onboard' | 'verify';
+        action: 'onboard' | 'verify' | 'manage';
         entity: 'tutor' | 'org';
         entityId: string;
         returnUrl?: string;
     };
 
-    if (!entity || !entityId) return res.status(400).json({ error: 'entity and entityId are required' });
+    if (!['onboard', 'verify', 'manage'].includes(action) || !['tutor', 'org'].includes(entity) || !entityId) {
+        return res.status(400).json({ error: 'Valid action, entity and entityId are required' });
+    }
 
     const table = entity === 'tutor' ? 'profiles' : 'organizations';
     const stripe = getStripe();
     const supabase = getSupabase();
 
     try {
+        if (!auth.isInternal) {
+            if (!auth.userId) return res.status(401).json({ error: 'Unauthorized' });
+            const seat = await getOrgAdminSeatByUserId(supabase, auth.userId);
+            if (seat) {
+                const requiredPermission = action === 'verify' ? 'finance.view' : 'finance.edit';
+                const allowed = seat.status === 'active'
+                    && hasOrgAdminPermission(seat.role, seat.permissions, requiredPermission)
+                    && (entity === 'org'
+                        ? seat.organizationId === entityId
+                        : Boolean((await supabase.from('profiles').select('organization_id').eq('id', entityId).maybeSingle()).data?.organization_id === seat.organizationId));
+                if (!allowed) return res.status(403).json({ error: 'Insufficient organization permission' });
+            } else if (entity !== 'tutor' || entityId !== auth.userId) {
+                return res.status(403).json({ error: 'Forbidden' });
+            }
+        }
+
         if (action === 'onboard') {
             const { data: row } = await supabase.from(table).select('stripe_account_id').eq('id', entityId).single();
 
@@ -71,7 +92,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
 
             // Create account onboarding link
-            const origin = returnUrl || 'https://tutlio.lt';
+            const requestOrigin = publicOriginFromRequest(req as any);
+            const origin = returnUrl && isAllowedRedirectUrl(returnUrl, requestOrigin)
+                ? returnUrl
+                : `${requestOrigin}${entity === 'org' ? '/company/finance' : '/finance'}`;
             const successUrl = `${origin}?stripe=success`;
             const refreshUrl = `${origin}?stripe=refresh`;
 

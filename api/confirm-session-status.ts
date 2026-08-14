@@ -16,6 +16,8 @@ import {
   deleteSessionWaitlists,
 } from './_lib/sessionStatusConfirmation.js';
 import { isProKlaseOrg } from './_lib/marketMoney.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 const NO_SHOW_WHEN = new Set(['before_lesson', 'during_lesson', 'after_lesson']);
 
@@ -72,14 +74,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Actor: the session's tutor, or an admin of the tutor's organization.
     let authorized = session.tutor_id === userId;
     if (!authorized && session.tutor_id) {
-      const [{ data: adminRow }, { data: tutorRow }] = await Promise.all([
-        supabase.from('organization_admins').select('organization_id').eq('user_id', userId).maybeSingle(),
+      const [adminRow, { data: tutorRow }] = await Promise.all([
+        getOrgAdminAccessByUserId(supabase, userId),
         supabase.from('profiles').select('organization_id').eq('id', session.tutor_id).maybeSingle(),
       ]);
       authorized = Boolean(
-        adminRow?.organization_id &&
+        adminRow &&
           tutorRow?.organization_id &&
-          adminRow.organization_id === tutorRow.organization_id,
+          adminRow.organizationId === tutorRow.organization_id &&
+          hasOrgAdminPermission(adminRow.role, adminRow.permissions, 'sessions.edit'),
       );
     }
     if (!authorized) return json(res, 403, { error: 'Not authorized to confirm this session' });
@@ -92,13 +95,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .maybeSingle();
       const orgId = (tutorRow as any)?.organization_id as string | null;
       if (orgId && isProKlaseOrg(orgId)) {
-        const { data: adminRow } = await supabase
-          .from('organization_admins')
-          .select('organization_id')
-          .eq('user_id', userId)
-          .eq('organization_id', orgId)
-          .maybeSingle();
-        if (!adminRow) {
+        const adminRow = await getOrgAdminAccessByUserId(supabase, userId);
+        if (
+          !adminRow
+          || adminRow.organizationId !== orgId
+          || !hasOrgAdminPermission(adminRow.role, adminRow.permissions, 'sessions.edit')
+        ) {
           return json(res, 403, { error: 'Only administration can cancel lessons for this organization' });
         }
       }

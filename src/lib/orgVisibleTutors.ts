@@ -60,15 +60,28 @@ export async function getOrgVisibleTutors(
   orgId: string,
   select: string,
 ): Promise<OrgTutorRow[]> {
-  const [{ data: adminUsers }, { data: linkedStudents }, { data: inviteData }, { data: profileRows }] = await Promise.all([
+  const [
+    { data: adminUsers },
+    { data: teammateAdmins },
+    visibleTutorIds,
+    { data: linkedStudents },
+    { data: inviteData },
+    { data: profileRows },
+  ] = await Promise.all([
     supabase.from('organization_admins').select('user_id').eq('organization_id', orgId),
+    supabase.rpc('get_my_org_admin_user_ids'),
+    supabase.rpc('get_my_org_visible_tutor_ids'),
     supabase.from('students').select('linked_user_id, email, tutor_id').eq('organization_id', orgId),
     supabase.from('tutor_invites').select('used_by_profile_id').eq('organization_id', orgId),
     supabase.from('profiles').select(select).eq('organization_id', orgId),
   ]);
 
-  const adminIds = new Set((adminUsers || []).map((a: any) => a.user_id));
+  const adminIds = new Set(
+    [...(adminUsers || []), ...(teammateAdmins || [])].map((a: any) => a.user_id),
+  );
 
-  const tutorIdSet = buildOrgTutorIdSet(linkedStudents, inviteData);
+  const tutorIdSet = !visibleTutorIds.error && (adminUsers || []).length > 0
+    ? new Set<string>((visibleTutorIds.data || []).map((row: any) => row.user_id).filter(Boolean))
+    : buildOrgTutorIdSet(linkedStudents, inviteData);
   return filterConfirmedOrgTutors((profileRows || []) as unknown as OrgTutorRow[], adminIds, tutorIdSet);
 }

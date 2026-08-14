@@ -26,6 +26,8 @@ import {
     recurringPlanPackageFields,
     type MonthlyPlanInput,
 } from './_lib/recurringPackagePlan.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 function isSafeHttpUrl(raw: string): boolean {
     try {
@@ -156,14 +158,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return json(res, 404, { error: 'Korepetitorius nerastas', details: tutorErr?.message });
         }
 
-        const { data: adminRow } = await supabase
-            .from('organization_admins')
-            .select('organization_id')
-            .eq('user_id', callerId)
-            .maybeSingle();
+        const adminRow = await getOrgAdminAccessByUserId(supabase, callerId);
 
         let callerAuthorized = callerId === tutorId;
-        if (!callerAuthorized && adminRow?.organization_id && tutor.organization_id === adminRow.organization_id) {
+        if (
+            !callerAuthorized
+            && adminRow
+            && tutor.organization_id === adminRow.organizationId
+            && hasOrgAdminPermission(adminRow.role, adminRow.permissions, 'finance.edit')
+        ) {
             callerAuthorized = true;
         }
         if (!callerAuthorized) {
@@ -190,7 +193,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         if (adminRow && callerId !== tutorId) {
-            if (!tutor.organization_id || (student as { organization_id?: string | null }).organization_id !== adminRow.organization_id) {
+            if (!tutor.organization_id || (student as { organization_id?: string | null }).organization_id !== adminRow.organizationId) {
                 return json(res, 403, { error: 'Forbidden' });
             }
         }

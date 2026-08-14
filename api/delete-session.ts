@@ -8,6 +8,8 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { isProKlaseOrg } from './_lib/marketMoney.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -87,19 +89,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Permission: own session OR org admin for tutor's org
     let allowed = tutorId === user.id;
     if (!allowed) {
-      const { data: adminRows } = await supabase
-        .from('organization_admins')
-        .select('organization_id')
-        .eq('user_id', user.id);
-
-      for (const row of adminRows || []) {
-        const orgId = (row as any).organization_id as string | null;
-        if (!orgId) continue;
-        const ok = await isTutorInOrg(supabase, tutorId, orgId);
-        if (ok) {
-          allowed = true;
-          break;
-        }
+      const adminAccess = await getOrgAdminAccessByUserId(supabase, user.id);
+      if (
+        adminAccess
+        && hasOrgAdminPermission(adminAccess.role, adminAccess.permissions, 'sessions.edit')
+      ) {
+        allowed = await isTutorInOrg(supabase, tutorId, adminAccess.organizationId);
       }
     }
 
@@ -114,13 +109,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .maybeSingle();
       const orgId = (tutorProfile as any)?.organization_id as string | null;
       if (orgId && isProKlaseOrg(orgId)) {
-        const { data: adminRow } = await supabase
-          .from('organization_admins')
-          .select('organization_id')
-          .eq('user_id', user.id)
-          .eq('organization_id', orgId)
-          .maybeSingle();
-        if (!adminRow) {
+        const adminRow = await getOrgAdminAccessByUserId(supabase, user.id);
+        if (
+          !adminRow
+          || adminRow.organizationId !== orgId
+          || !hasOrgAdminPermission(adminRow.role, adminRow.permissions, 'sessions.edit')
+        ) {
           return json(res, 403, { error: 'Org tutors cannot delete lessons for this organization' });
         }
       }

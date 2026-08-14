@@ -219,17 +219,9 @@ async function main() {
 
   const { error: adminErr } = await supabase.from('organization_admins').upsert(
     { user_id: DEMO.users.admin.id, organization_id: DEMO.orgId },
-    { onConflict: 'user_id,organization_id' },
+    { onConflict: 'user_id' },
   );
-  if (adminErr && adminErr.code !== '42P10') {
-    // fallback if no composite unique — delete+insert
-    await supabase.from('organization_admins').delete().eq('user_id', DEMO.users.admin.id);
-    const { error: ins } = await supabase.from('organization_admins').insert({
-      user_id: DEMO.users.admin.id,
-      organization_id: DEMO.orgId,
-    });
-    if (ins) throw new Error(`organization_admins: ${ins.message}`);
-  }
+  if (adminErr) throw new Error(`organization_admins: ${adminErr.message}`);
 
   console.log('Upserting students…');
   for (const s of DEMO.students) {

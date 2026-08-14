@@ -1,5 +1,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 async function authenticatedUserId(req: VercelRequest): Promise<string | null> {
   const authHeader = typeof req.headers.authorization === 'string' ? req.headers.authorization : '';
@@ -36,13 +38,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .eq('id', contractId)
     .maybeSingle();
   if (!contract?.organization_id) return res.status(404).json({ error: 'Contract not found' });
-  const { data: admin } = await supabase
-    .from('organization_admins')
-    .select('id')
-    .eq('user_id', userId)
-    .eq('organization_id', contract.organization_id)
-    .maybeSingle();
-  if (!admin) return res.status(403).json({ error: 'Forbidden' });
+  const adminAccess = await getOrgAdminAccessByUserId(supabase, userId);
+  if (
+    adminAccess?.organizationId !== contract.organization_id
+    || !hasOrgAdminPermission(adminAccess?.role, adminAccess?.permissions, 'contracts.edit')
+  ) return res.status(403).json({ error: 'Forbidden' });
 
   const token = randomToken();
   const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 14).toISOString();

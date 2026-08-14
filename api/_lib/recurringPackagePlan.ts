@@ -1,5 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { nextMonthFirstYmd } from '../../src/lib/monthlyPackagePlan.js';
+import { getOrgAdminAccessByUserId } from './orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../../src/lib/orgAdminPermissions.js';
 
 export type MonthlyPlanInput = {
   grade?: number;
@@ -94,13 +96,12 @@ export async function resolveRecurringPackagePlan(args: ResolveArgs): Promise<{
     return { data: null, error: 'Monthly packages require an organization, creator, and one subject.' };
   }
 
-  const { data: admin } = await supabase
-    .from('organization_admins')
-    .select('id')
-    .eq('organization_id', args.organizationId)
-    .eq('user_id', args.createdBy)
-    .maybeSingle();
-  if (!admin) {
+  const admin = await getOrgAdminAccessByUserId(supabase, args.createdBy);
+  if (
+    !admin
+    || admin.organizationId !== args.organizationId
+    || !hasOrgAdminPermission(admin.role, admin.permissions, 'finance.edit')
+  ) {
     return { data: null, error: 'Only an organization administrator can create a monthly package plan.' };
   }
 

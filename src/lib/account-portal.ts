@@ -61,6 +61,14 @@ export function profileQualifiesAsTutor(
   return true;
 }
 
+export function profileQualifiesForTutorPortal(
+  profile: TutorProfileGate | null | undefined,
+  hasStudentRow: boolean,
+  hasOrgAdminSeat: boolean,
+): boolean {
+  return !hasOrgAdminSeat && profileQualifiesAsTutor(profile, hasStudentRow);
+}
+
 export async function resolveAccountPortals(
   userId: string,
   options?: { email?: string | null; linkStudentByEmail?: boolean },
@@ -80,8 +88,10 @@ export async function resolveAccountPortals(
 
   let student = Boolean(studentResult?.data?.[0]);
   const parent = Boolean(parentResult?.data && !parentResult.error);
-  const tutor = profileQualifiesAsTutor(profileResult?.data, student);
   const orgAdmin = Boolean(orgAdminRow);
+  // Organization administration seats are intentionally single-role accounts.
+  // Their profile row stores display/locale data, not a tutor entitlement.
+  const tutor = profileQualifiesForTutorPortal(profileResult?.data, student, orgAdmin);
   if (!student && options?.linkStudentByEmail && email) {
     try {
       const { data: linkRows, error: rpcError } = await supabase.rpc('get_student_by_email_for_linking', {

@@ -1,5 +1,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') {
@@ -29,15 +31,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const { data: adminRow, error: adminErr } = await supabase
-      .from('organization_admins')
-      .select('organization_id')
-      .eq('user_id', requester.id)
-      .maybeSingle();
-
-    if (adminErr || !adminRow?.organization_id) {
+    const adminAccess = await getOrgAdminAccessByUserId(supabase, requester.id);
+    if (!adminAccess || !hasOrgAdminPermission(adminAccess.role, adminAccess.permissions, 'tutors.view')) {
       return res.status(403).json({ error: 'Only organization admin can view license info' });
     }
+    const adminRow = { organization_id: adminAccess.organizationId };
 
     const orgId = adminRow.organization_id;
 
@@ -63,4 +61,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'Internal server error' });
   }
 }
-

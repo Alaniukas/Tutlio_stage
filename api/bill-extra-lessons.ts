@@ -16,6 +16,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { requireCronAuth } from './_lib/cronAuth.js';
 import { resolveOrganizationLessonPrice } from '../src/lib/organizationDynamicPricing.js';
+import { getOrgOwnerUserId } from './_lib/orgAdminAccess.js';
 
 function ymdInVilnius(value = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -303,13 +304,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let invoicePdfBase64: string | null = null;
       let invoiceNumber: string | null = null;
       try {
-        const { data: adminRow } = await supabase
-          .from('organization_admins')
-          .select('user_id')
-          .eq('organization_id', orgId)
-          .limit(1)
-          .maybeSingle();
-        if (adminRow?.user_id) {
+        const ownerUserId = await getOrgOwnerUserId(supabase, orgId);
+        if (ownerUserId) {
           const invRes = await postJsonWithTimeout(`${origin}/api/generate-invoice`, {
             periodStart,
             periodEnd,
@@ -318,7 +314,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             studentId,
             packageIds: [extrasPkg.id],
             allowPendingStripePackages: true,
-            issuedByUserId: adminRow.user_id,
+            issuedByUserId: ownerUserId,
           });
           if (invRes.ok) {
             const invData = (await invRes.json().catch(() => null)) as any;

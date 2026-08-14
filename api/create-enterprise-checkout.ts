@@ -11,6 +11,8 @@ import { createClient } from '@supabase/supabase-js';
 import { buildPublicPath, publicOriginFromRequest, type CheckoutAudience } from './_lib/public-origin.js';
 import { marketFromRequest } from './_lib/market.js';
 import { getEnterpriseLicenseBounds, getEnterprisePriceId } from './_lib/enterprise-license.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 const supabase = createClient(
@@ -28,23 +30,26 @@ interface OrgAdminContext {
 }
 
 /** Resolve the logged-in user's org admin context, if any. */
-async function resolveOrgAdmin(authHeader: string | undefined): Promise<OrgAdminContext | null> {
+async function resolveOrgAdmin(authHeader: string | undefined): Promise<OrgAdminContext | 'forbidden' | null> {
   if (!authHeader?.toLowerCase().startsWith('bearer ')) return null;
   const { data: userData } = await supabase.auth.getUser(authHeader.replace(/^Bearer\s+/i, ''));
   const user = userData?.user;
   if (!user) return null;
 
-  const { data: adminRow } = await supabase
-    .from('organization_admins')
-    .select('organization_id')
-    .eq('user_id', user.id)
-    .maybeSingle();
-  if (!adminRow?.organization_id) return null;
+  const adminRow = await getOrgAdminAccessByUserId(supabase, user.id);
+  if (!adminRow || !hasOrgAdminPermission(adminRow.role, adminRow.permissions, 'settings.edit')) {
+    const { data: membership } = await supabase
+      .from('organization_admins')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle();
+    return membership ? 'forbidden' : null;
+  }
 
   const { data: org } = await supabase
     .from('organizations')
     .select('id, stripe_customer_id, license_subscription_id, license_subscription_status')
-    .eq('id', adminRow.organization_id)
+    .eq('id', adminRow.organizationId)
     .maybeSingle();
   if (!org) return null;
 
@@ -89,6 +94,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const orgAdmin = await resolveOrgAdmin(req.headers.authorization);
+    if (orgAdmin === 'forbidden') {
+      return res.status(403).json({ error: 'Insufficient organization permission' });
+    }
 
     const trimmedCompanyName = String(companyName || '').trim();
     if (!orgAdmin && !trimmedCompanyName) {

@@ -5,6 +5,8 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { canTutorSideCancelSession } from './_lib/cancel-session-access.js';
 import { releaseSessionSlotAsAvailability } from './_lib/release-session-availability.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -45,13 +47,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .maybeSingle();
     const orgId = (tutorRow as { organization_id?: string | null } | null)?.organization_id;
     if (orgId) {
-      const { data: orgAdmin } = await supabase
-        .from('organization_admins')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('organization_id', orgId)
-        .maybeSingle();
-      isOrgAdminForTutorOrg = !!orgAdmin;
+      const orgAdmin = await getOrgAdminAccessByUserId(supabase, userId);
+      isOrgAdminForTutorOrg = Boolean(
+        orgAdmin
+        && orgAdmin.organizationId === orgId
+        && hasOrgAdminPermission(orgAdmin.role, orgAdmin.permissions, 'sessions.edit'),
+      );
     }
     if (!canTutorSideCancelSession(userId, tutorId, isOrgAdminForTutorOrg)) {
       return res.status(403).json({ error: 'Forbidden' });

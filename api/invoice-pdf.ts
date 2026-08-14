@@ -3,6 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { resolveInvoiceBranding } from './_lib/invoiceBranding.js';
 import { generateInvoicePdf, type InvoicePdfData } from './_lib/invoicePdf.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -34,13 +36,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Authorization: must be the issuer or an org admin for the invoice's org
     if (invoice.issued_by_user_id !== userId) {
       if (invoice.organization_id) {
-        const { data: adminRow } = await supabase
-          .from('organization_admins')
-          .select('id')
-          .eq('user_id', userId)
-          .eq('organization_id', invoice.organization_id)
-          .maybeSingle();
-        if (!adminRow) return res.status(403).json({ error: 'Forbidden' });
+        const adminRow = await getOrgAdminAccessByUserId(supabase, userId);
+        if (
+          !adminRow
+          || adminRow.organizationId !== invoice.organization_id
+          || !hasOrgAdminPermission(adminRow.role, adminRow.permissions, 'finance.view')
+        ) {
+          return res.status(403).json({ error: 'Forbidden' });
+        }
       } else {
         return res.status(403).json({ error: 'Forbidden' });
       }

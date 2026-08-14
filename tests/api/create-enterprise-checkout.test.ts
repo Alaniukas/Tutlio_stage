@@ -165,7 +165,18 @@ describe('POST /api/create-enterprise-checkout', () => {
 
   it('attaches the organization for a logged-in org admin and reuses the Stripe customer', async () => {
     authGetUser.mockResolvedValue({ data: { user: { id: 'admin-1', email: 'admin@acme.lt' } }, error: null });
-    orgAdminMaybeSingle.mockResolvedValue({ data: { organization_id: 'org-1' }, error: null });
+    orgAdminMaybeSingle.mockResolvedValue({
+      data: {
+        id: 'seat-1',
+        user_id: 'admin-1',
+        organization_id: 'org-1',
+        role: 'owner',
+        status: 'active',
+        permissions: {},
+        accepted_at: '2026-08-01T00:00:00.000Z',
+      },
+      error: null,
+    });
     orgMaybeSingle.mockResolvedValue({
       data: {
         id: 'org-1',
@@ -195,7 +206,18 @@ describe('POST /api/create-enterprise-checkout', () => {
 
   it('returns 409 when the org already has an active license subscription', async () => {
     authGetUser.mockResolvedValue({ data: { user: { id: 'admin-1', email: 'admin@acme.lt' } }, error: null });
-    orgAdminMaybeSingle.mockResolvedValue({ data: { organization_id: 'org-1' }, error: null });
+    orgAdminMaybeSingle.mockResolvedValue({
+      data: {
+        id: 'seat-1',
+        user_id: 'admin-1',
+        organization_id: 'org-1',
+        role: 'owner',
+        status: 'active',
+        permissions: {},
+        accepted_at: '2026-08-01T00:00:00.000Z',
+      },
+      error: null,
+    });
     orgMaybeSingle.mockResolvedValue({
       data: {
         id: 'org-1',
@@ -233,6 +255,32 @@ describe('POST /api/create-enterprise-checkout', () => {
     const result = (res as any).getResult();
     expect(result.statusCode).toBe(400);
     expect(result.body?.code).toBe('COMPANY_NAME_REQUIRED');
+  });
+
+  it('rejects an organization seat without settings edit permission', async () => {
+    authGetUser.mockResolvedValue({ data: { user: { id: 'accountant-1', email: 'finance@acme.lt' } }, error: null });
+    orgAdminMaybeSingle.mockResolvedValue({
+      data: {
+        id: 'seat-2',
+        user_id: 'accountant-1',
+        organization_id: 'org-1',
+        role: 'accountant',
+        status: 'active',
+        permissions: { 'finance.view': true, 'finance.edit': true },
+        accepted_at: '2026-08-01T00:00:00.000Z',
+      },
+      error: null,
+    });
+
+    const handler = await loadHandler();
+    const res = mockRes();
+    await handler(
+      mockReq('POST', { licenseCount: 5, companyName: 'Should not create' }, { authorization: 'Bearer token-123' }) as any,
+      res as any,
+    );
+
+    expect((res as any).getResult().statusCode).toBe(403);
+    expect(stripeCreate).not.toHaveBeenCalled();
   });
 
   it('uses PLN enterprise price on tutlio.pl', async () => {

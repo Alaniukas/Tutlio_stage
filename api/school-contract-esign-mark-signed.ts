@@ -22,6 +22,8 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClientOptions.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import {
   CONTRACT_SIGN_SELECT,
   advanceAfterRoleSigned,
@@ -77,13 +79,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!contract) return json(res, 404, { error: 'Contract not found' });
 
   const orgId = String((contract as any).organization_id || '');
-  const { data: adminRow } = await supabase
-    .from('organization_admins')
-    .select('id')
-    .eq('user_id', auth.userId)
-    .eq('organization_id', orgId)
-    .maybeSingle();
-  if (!adminRow) return json(res, 403, { error: 'Forbidden' });
+  const adminAccess = await getOrgAdminAccessByUserId(supabase, auth.userId);
+  if (
+    adminAccess?.organizationId !== orgId
+    || !hasOrgAdminPermission(adminAccess?.role, adminAccess?.permissions, 'contracts.edit')
+  ) return json(res, 403, { error: 'Forbidden' });
 
   if ((contract as any).organizations?.features?.school_contract_esign !== true) {
     return json(res, 409, { error: 'Šiai organizacijai e-pasirašymas neįjungtas — naudokite įprastą žymėjimą.' });

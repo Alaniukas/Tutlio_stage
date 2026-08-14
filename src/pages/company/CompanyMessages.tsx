@@ -7,6 +7,7 @@ import ChatWindow from '@/components/chat/ChatWindow';
 import type { Conversation, MessageableStudent } from '@/hooks/useChat';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { ChevronDown } from 'lucide-react';
+import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 
 const ORG_CACHE_TTL = 300_000;
 let orgConvCache: {
@@ -18,6 +19,8 @@ let orgConvCache: {
 
 export default function CompanyMessages() {
   const { t } = useTranslation();
+  const { can } = useOrgAdminAccess();
+  const readOnly = !can('messages.edit');
   const { conversations: myConversations, loading: myLoading, refetch } = useConversations();
   const [orgConversations, setOrgConversations] = useState<Conversation[]>(orgConvCache?.data ?? []);
   const [orgLoading, setOrgLoading] = useState(!orgConvCache);
@@ -54,10 +57,7 @@ export default function CompanyMessages() {
 
     // Pre-compute org admin user_ids so we can exclude them from the "student" slot
     // when mapping each conversation to a tutor↔counterparty pair.
-    const { data: orgAdminRows } = await supabase
-      .from('organization_admins')
-      .select('user_id')
-      .eq('organization_id', adminRow.organization_id);
+    const { data: orgAdminRows } = await supabase.rpc('get_my_org_admin_user_ids');
     const adminIds = new Set<string>((orgAdminRows ?? []).map((r: any) => r.user_id).filter(Boolean));
 
     const { data: participantRows } = await supabase
@@ -314,6 +314,7 @@ export default function CompanyMessages() {
               onSelect={handleSelect}
               onConversationCreated={handleConversationCreated}
               loading={loading}
+              readOnly={readOnly}
             />
           </div>
 
@@ -324,6 +325,7 @@ export default function CompanyMessages() {
               onMessageSent={refetch}
               participantNames={participantNames}
               participantRoles={participantRoles}
+              readOnly={readOnly}
             />
           </div>
         </div>

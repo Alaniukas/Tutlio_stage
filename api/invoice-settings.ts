@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -65,14 +67,10 @@ async function handleGet(req: VercelRequest, res: VercelResponse) {
 
   /** Org admin issuing on behalf of a tutor: seller profile is the tutor's invoice_profiles row. */
   if (scope === 'tutor' && tutorIdParam) {
-    const { data: adminRow } = await supabase
-      .from('organization_admins')
-      .select('organization_id')
-      .eq('user_id', userId)
-      .maybeSingle();
+    const adminRow = await getOrgAdminAccessByUserId(supabase, userId);
 
-    if (!adminRow?.organization_id) {
-      return res.status(403).json({ error: 'Not an organization admin' });
+    if (!adminRow || !hasOrgAdminPermission(adminRow.role, adminRow.permissions, 'finance.view')) {
+      return res.status(403).json({ error: 'Insufficient organization permission' });
     }
 
     const { data: tutorProf } = await supabase
@@ -81,7 +79,7 @@ async function handleGet(req: VercelRequest, res: VercelResponse) {
       .eq('id', tutorIdParam)
       .maybeSingle();
 
-    if (!tutorProf || tutorProf.organization_id !== adminRow.organization_id) {
+    if (!tutorProf || tutorProf.organization_id !== adminRow.organizationId) {
       return res.status(403).json({ error: 'Tutor not in your organization' });
     }
 
@@ -96,20 +94,16 @@ async function handleGet(req: VercelRequest, res: VercelResponse) {
   }
 
   if (scope === 'organization') {
-    const { data: adminRow } = await supabase
-      .from('organization_admins')
-      .select('organization_id')
-      .eq('user_id', userId)
-      .maybeSingle();
+    const adminRow = await getOrgAdminAccessByUserId(supabase, userId);
 
-    if (!adminRow?.organization_id) {
-      return res.status(403).json({ error: 'Not an organization admin' });
+    if (!adminRow || !hasOrgAdminPermission(adminRow.role, adminRow.permissions, 'finance.view')) {
+      return res.status(403).json({ error: 'Insufficient organization permission' });
     }
 
     const { data, error } = await supabase
       .from('invoice_profiles')
       .select('*')
-      .eq('organization_id', adminRow.organization_id)
+      .eq('organization_id', adminRow.organizationId)
       .maybeSingle();
 
     if (error) return res.status(500).json({ error: error.message });
@@ -155,17 +149,13 @@ async function handleSave(req: VercelRequest, res: VercelResponse) {
   };
 
   if (isOrgScope) {
-    const { data: adminRow } = await supabase
-      .from('organization_admins')
-      .select('organization_id')
-      .eq('user_id', userId)
-      .maybeSingle();
+    const adminRow = await getOrgAdminAccessByUserId(supabase, userId);
 
-    if (!adminRow?.organization_id) {
-      return res.status(403).json({ error: 'Not an organization admin' });
+    if (!adminRow || !hasOrgAdminPermission(adminRow.role, adminRow.permissions, 'finance.edit')) {
+      return res.status(403).json({ error: 'Insufficient organization permission' });
     }
 
-    const orgId = adminRow.organization_id;
+    const orgId = adminRow.organizationId;
 
     const { data: existing } = await supabase
       .from('invoice_profiles')

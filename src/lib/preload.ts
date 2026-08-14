@@ -407,12 +407,7 @@ export async function preloadOrgAdminData() {
     }
 
     if (!getCached('company_dashboard')) {
-      const { data: adminUsers } = await supabase
-        .from('organization_admins')
-        .select('user_id')
-        .eq('organization_id', orgId);
-      const adminIds = new Set((adminUsers || []).map((a: { user_id: string }) => a.user_id));
-      preloadDashboard(org, orgId, adminIds, tutorIds, visibleTutors, sessionsRes.data || []);
+      preloadDashboard(org, orgId, tutorIds, visibleTutors, sessionsRes.data || []);
     }
 
     if (!getCached('company_stats')) {
@@ -424,7 +419,7 @@ export async function preloadOrgAdminData() {
 }
 
 async function preloadDashboard(
-  org: any, orgId: string, adminIds: Set<string>,
+  org: any, orgId: string,
   tutorIds: string[], tutorProfiles: any[], rawSessions: any[]
 ) {
   try {

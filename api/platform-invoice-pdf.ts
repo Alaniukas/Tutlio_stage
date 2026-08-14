@@ -5,6 +5,8 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { generateInvoicePdf, type InvoicePdfData } from './_lib/invoicePdf.js';
 import { TUTLIO_COMPANY } from './_lib/tutlioCompany.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -28,13 +30,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .maybeSingle();
     if (invErr || !invoice) return res.status(404).json({ error: 'Invoice not found' });
 
-    const { data: adminRow } = await supabase
-      .from('organization_admins')
-      .select('id')
-      .eq('user_id', auth.userId)
-      .eq('organization_id', invoice.organization_id)
-      .maybeSingle();
-    if (!adminRow) return res.status(403).json({ error: 'Forbidden' });
+    const adminRow = await getOrgAdminAccessByUserId(supabase, auth.userId);
+    if (
+      !adminRow
+      || adminRow.organizationId !== invoice.organization_id
+      || !hasOrgAdminPermission(adminRow.role, adminRow.permissions, 'finance.view')
+    ) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
 
     if (invoice.pdf_storage_path) {
       const { data: fileData, error: dlErr } = await supabase.storage

@@ -14,6 +14,8 @@ import {
   getTrialReservationDeadlineHours,
   trialReservationExpiryIso,
 } from './_lib/trialReservation.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -72,20 +74,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return json(res, 401, { error: 'Unauthorized' });
     }
 
-    const { data: adminRow } = await supabase
-      .from('organization_admins')
-      .select('organization_id')
-      .eq('user_id', authData.user.id)
-      .maybeSingle();
+    const adminRow = await getOrgAdminAccessByUserId(supabase, authData.user.id);
 
-    if (!adminRow) {
+    if (!adminRow || !hasOrgAdminPermission(adminRow.role, adminRow.permissions, 'students.edit')) {
       return json(res, 403, { error: 'Only the organization administrator can offer trial lessons' });
     }
 
     const { data: org } = await supabase
       .from('organizations')
       .select('id, name, features')
-      .eq('id', adminRow.organization_id)
+      .eq('id', adminRow.organizationId)
       .single();
 
     const features = (org?.features || {}) as Record<string, unknown>;
@@ -147,7 +145,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return json(res, 404, { error: 'Korepetitorius nerastas', details: tutorErr?.message });
     }
 
-    if (tutor.organization_id !== adminRow.organization_id) {
+    if (tutor.organization_id !== adminRow.organizationId) {
       return json(res, 403, { error: 'You do not have permission to manage this tutor' });
     }
 
@@ -194,14 +192,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data: orgStripe } = await supabase
       .from('organizations')
       .select('stripe_account_id, stripe_onboarding_complete, entity_type, slug')
-      .eq('id', adminRow.organization_id)
+      .eq('id', adminRow.organizationId)
       .single();
 
     if (!orgStripe?.stripe_onboarding_complete) {
       return json(res, 400, { error: 'Organization Stripe account is not connected' });
     }
 
-    const feeProfile = orgFeeProfile((orgStripe as { slug?: string | null }).slug) ?? orgFeeProfile(adminRow.organization_id);
+    const feeProfile = orgFeeProfile((orgStripe as { slug?: string | null }).slug) ?? orgFeeProfile(adminRow.organizationId);
     // A custom org fee profile is always charged on top (payer pays the fee), even for schools.
     const useSchoolOrgAbsorbedFees = orgStripe.entity_type === 'school' && !feeProfile;
 
@@ -525,4 +523,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return json(res, 500, { error: 'Internal Server Error', details: err?.message || String(err) });
   }
 }
-

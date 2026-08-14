@@ -3,6 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { markSchoolInstallmentPaidAndMaybeInvite } from './_lib/schoolBookingInvite.js';
 import { schoolContractAllowsInstallmentPayment } from './_lib/schoolContractPaymentGate.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.statusCode = status;
@@ -47,13 +49,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const orgId = String(contract.organization_id || '').trim();
   if (!orgId) return json(res, 500, { error: 'Contract missing organization_id' });
 
-  const { data: adminRow } = await supabase
-    .from('organization_admins')
-    .select('id')
-    .eq('user_id', auth.userId)
-    .eq('organization_id', orgId)
-    .maybeSingle();
-  if (!adminRow) return json(res, 403, { error: 'Forbidden' });
+  const adminAccess = await getOrgAdminAccessByUserId(supabase, auth.userId);
+  if (
+    !adminAccess
+    || adminAccess.organizationId !== orgId
+    || !hasOrgAdminPermission(adminAccess.role, adminAccess.permissions, 'finance.edit')
+  ) return json(res, 403, { error: 'Forbidden' });
 
   if (installment.payment_status === 'paid') {
     return json(res, 200, { success: true, installmentId, alreadyPaid: true });

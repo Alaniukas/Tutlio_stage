@@ -8,6 +8,8 @@ import {
   PRO_KLASE_MISSING_REPORT_PENALTY_EUR,
   PRO_KLASE_TUTOR_NO_SHOW_PENALTY_EUR,
 } from './_lib/proKlaseTutorPay.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 const ADJUSTMENT_TYPES = new Set([
   'penalty_tutor_no_show',
@@ -52,13 +54,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!tutorId) return json(res, 400, { error: 'Missing tutorId' });
     if (!ADJUSTMENT_TYPES.has(type)) return json(res, 400, { error: 'Invalid type' });
 
-    const { data: adminRow } = await supabase
-      .from('organization_admins')
-      .select('organization_id')
-      .eq('user_id', adminId)
-      .maybeSingle();
-    const orgId = adminRow?.organization_id as string | null;
-    if (!orgId || !isProKlaseOrg(orgId)) {
+    const adminAccess = await getOrgAdminAccessByUserId(supabase, adminId);
+    const orgId = adminAccess?.organizationId || null;
+    if (
+      !adminAccess
+      || !hasOrgAdminPermission(adminAccess.role, adminAccess.permissions, 'finance.edit')
+      || !orgId
+      || !isProKlaseOrg(orgId)
+    ) {
       return json(res, 403, { error: 'Not authorized for this organization' });
     }
 

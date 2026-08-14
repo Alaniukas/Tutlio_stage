@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
+import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -29,7 +31,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(404).json({ error: 'Billing batch not found' });
     }
 
-    if (batch.tutor_id !== auth.userId) {
+    const seat = await getOrgAdminSeatByUserId(supabase, auth.userId);
+    if (seat) {
+      const { data: tutor } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', batch.tutor_id)
+        .maybeSingle();
+      if (
+        seat.status !== 'active'
+        || !hasOrgAdminPermission(seat.role, seat.permissions, 'finance.edit')
+        || !tutor?.organization_id
+        || seat.organizationId !== tutor.organization_id
+      ) {
+        return res.status(403).json({ error: 'Insufficient organization permission' });
+      }
+    } else if (batch.tutor_id !== auth.userId) {
       return res.status(403).json({ error: 'Forbidden' });
     }
 

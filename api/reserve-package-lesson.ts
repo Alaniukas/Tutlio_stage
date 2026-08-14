@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
+import type { OrgAdminRole } from '../src/lib/orgAdminPermissions.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
@@ -147,11 +149,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let recipients: string[] = [];
       let recipientName = 'Administratore';
       if ((tutorRow as any)?.organization_id) {
-        const { data: orgAdmins } = await supabase
+        const orgAdminResult = await supabase
           .from('organization_admins')
-          .select('user_id')
-          .eq('organization_id', (tutorRow as any).organization_id);
-        const adminIds = (orgAdmins || []).map((a: any) => a.user_id).filter(Boolean);
+          .select('user_id, role, status, permissions, accepted_at')
+          .eq('organization_id', (tutorRow as any).organization_id)
+          .eq('status', 'active');
+        let orgAdmins = orgAdminResult.data || [];
+        if (orgAdminResult.error?.code === '42703' || orgAdminResult.error?.code === 'PGRST204') {
+          const legacy = await supabase
+            .from('organization_admins')
+            .select('user_id')
+            .eq('organization_id', (tutorRow as any).organization_id);
+          orgAdmins = (legacy.data || []).map((row: any) => ({
+            ...row,
+            role: 'owner',
+            status: 'active',
+            permissions: {},
+            accepted_at: new Date(0).toISOString(),
+          }));
+        }
+        const adminIds = orgAdmins
+          .filter((row: any) => (
+            Boolean(row.accepted_at)
+            && hasOrgAdminPermission(row.role as OrgAdminRole, row.permissions, 'finance.view')
+          ))
+          .map((a: any) => a.user_id)
+          .filter(Boolean);
         if (adminIds.length > 0) {
           const { data: adminProfiles } = await supabase
             .from('profiles')

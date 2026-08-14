@@ -17,6 +17,8 @@ import {
   type OrgFeeProfile,
 } from './_lib/marketMoney.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
+import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
+import { hasAnyOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
 
@@ -73,6 +75,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const tutor = session.profiles as any;
         const student = session.students as any;
+
+        if (!auth.isInternal && auth.userId) {
+            const seat = await getOrgAdminSeatByUserId(supabase, auth.userId);
+            if (seat && (
+                seat.status !== 'active'
+                || seat.organizationId !== tutor?.organization_id
+                || !hasAnyOrgAdminPermission(seat.role, seat.permissions, ['sessions.edit', 'finance.edit'])
+            )) {
+                return res.status(403).json({ error: 'Insufficient organization permission' });
+            }
+        }
+
         const isPenaltyPayment = typeof penaltyAmountOverride === 'number' && penaltyAmountOverride > 0;
         const studentPaymentModelRaw = String(student?.payment_model || '').trim();
         const allowsPerLessonPayment =

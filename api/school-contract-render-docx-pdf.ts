@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { renderDocxTemplateUrlToPdfBuffer } from './_lib/renderSchoolContractDocxToPdf.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import {
   schoolContractPdfStoragePath,
   SCHOOL_CONTRACTS_BUCKET,
@@ -71,14 +73,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: authData, error: authErr } = await userSb.auth.getUser(jwt);
   if (authErr || !authData.user) return json(res, 401, { error: 'Invalid token' });
 
-  const { data: adminRow } = await adminSb
-    .from('organization_admins')
-    .select('organization_id')
-    .eq('user_id', authData.user.id)
-    .eq('organization_id', organizationId)
-    .maybeSingle();
-
-  if (!adminRow?.organization_id) return json(res, 403, { error: 'Not authorized for this organization' });
+  const adminAccess = await getOrgAdminAccessByUserId(adminSb, authData.user.id);
+  if (
+    adminAccess?.organizationId !== organizationId
+    || !hasOrgAdminPermission(adminAccess?.role, adminAccess?.permissions, 'contracts.edit')
+  ) return json(res, 403, { error: 'Not authorized for this organization' });
 
   try {
     // The `school-contracts` bucket is private, so the stored public URL returns

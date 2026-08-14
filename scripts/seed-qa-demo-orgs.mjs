@@ -433,16 +433,9 @@ function sessionTimes(org, studentIndex0, studentIndex1) {
 async function ensureOrgAdmin(supabase, userId, orgId) {
   const { error: adminErr } = await supabase.from('organization_admins').upsert(
     { user_id: userId, organization_id: orgId },
-    { onConflict: 'user_id,organization_id' },
+    { onConflict: 'user_id' },
   );
-  if (adminErr && adminErr.code !== '42P10') {
-    await supabase.from('organization_admins').delete().eq('user_id', userId);
-    const { error: ins } = await supabase.from('organization_admins').insert({
-      user_id: userId,
-      organization_id: orgId,
-    });
-    if (ins) throw new Error(`organization_admins: ${ins.message}`);
-  }
+  if (adminErr) throw new Error(`organization_admins: ${adminErr.message}`);
 }
 
 async function seedOrg(supabase, org) {

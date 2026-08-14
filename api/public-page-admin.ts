@@ -17,6 +17,8 @@ import { deriveForTutor, EMPTY_DERIVED } from './_lib/publicPageDerived.js';
 import { isProKlaseOrg } from './_lib/marketMoney.js';
 import type { PublicPageRow } from './_lib/publicPageRow.js';
 import { safePublicSocialUrl } from '../src/lib/publicPage.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 function getSupabase(): SupabaseClient | null {
   const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -294,6 +296,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const owner = await resolveOwner(supabase, userId);
   if ('error' in owner) return res.status(403).json({ error: owner.error });
+
+  if (owner.kind === 'organization') {
+    const access = await getOrgAdminAccessByUserId(supabase, userId);
+    const permission = req.method === 'GET' ? 'settings.view' : 'settings.edit';
+    if (
+      !access
+      || access.organizationId !== owner.orgId
+      || !hasOrgAdminPermission(access.role, access.permissions, permission)
+    ) {
+      return res.status(403).json({ error: 'insufficient-permission' });
+    }
+  }
 
   try {
     if (req.method === 'GET') {

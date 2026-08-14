@@ -11,6 +11,8 @@ import {
   tutorUsesManualStudentPayments,
   trimManualPaymentBankDetails,
 } from './_lib/soloManualStudentPayments.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -61,13 +63,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const isOwner = batch.tutor_id === userId;
     let isOrgAdmin = false;
     if (!isOwner && tutor.organization_id) {
-      const { data: adminRow } = await supabase
-        .from('organization_admins')
-        .select('organization_id')
-        .eq('user_id', userId)
-        .eq('organization_id', tutor.organization_id)
-        .maybeSingle();
-      isOrgAdmin = !!adminRow;
+      const adminRow = await getOrgAdminAccessByUserId(supabase, userId);
+      isOrgAdmin = Boolean(
+        adminRow
+        && adminRow.organizationId === tutor.organization_id
+        && hasOrgAdminPermission(adminRow.role, adminRow.permissions, 'finance.edit'),
+      );
     }
     if (!isOwner && !isOrgAdmin) {
       return json(res, 403, { error: 'Neturite teisės siųsti šios sąskaitos priminimo' });

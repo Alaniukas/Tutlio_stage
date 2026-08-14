@@ -23,9 +23,10 @@ interface ChatWindowProps {
   onMessageSent?: () => void;
   participantNames?: Map<string, string>;
   participantRoles?: Map<string, string>;
+  readOnly?: boolean;
 }
 
-export default function ChatWindow({ conversation, onBack, onMessageSent, participantNames, participantRoles }: ChatWindowProps) {
+export default function ChatWindow({ conversation, onBack, onMessageSent, participantNames, participantRoles, readOnly = false }: ChatWindowProps) {
   const { t } = useTranslation();
   const { user } = useUser();
   const orgPolicy = useOrgTutorPolicy();
@@ -82,7 +83,7 @@ export default function ChatWindow({ conversation, onBack, onMessageSent, partic
   }, [emailPrefsOpen]);
 
   const persistEmailNotify = async (enabled: boolean, hours: number) => {
-    if (!conversation?.conversation_id || !user?.id) return;
+    if (readOnly || !conversation?.conversation_id || !user?.id) return;
     setEmailNotifyLoading(true);
     const ok = await updateChatEmailNotifyPrefs(conversation.conversation_id, {
       email_notify_enabled: enabled,
@@ -347,7 +348,7 @@ export default function ChatWindow({ conversation, onBack, onMessageSent, partic
                   type="checkbox"
                   className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4"
                   checked={emailNotifyEnabled}
-                  disabled={emailNotifyLoading}
+                  disabled={readOnly || emailNotifyLoading}
                   onChange={(e) => {
                     const v = e.target.checked;
                     setEmailNotifyEnabled(v);
@@ -362,7 +363,7 @@ export default function ChatWindow({ conversation, onBack, onMessageSent, partic
                 <select
                   className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 bg-gray-50/80 text-gray-900 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 outline-none disabled:opacity-50"
                   value={emailNotifyDelayHours}
-                  disabled={emailNotifyLoading || !emailNotifyEnabled}
+                  disabled={readOnly || emailNotifyLoading || !emailNotifyEnabled}
                   onChange={(e) => {
                     const h = Number(e.target.value);
                     setEmailNotifyDelayHours(h);
@@ -434,6 +435,9 @@ export default function ChatWindow({ conversation, onBack, onMessageSent, partic
             <p className="text-xs text-amber-800 mt-0.5">{t('cal.licenseFrozenDesc')}</p>
           </div>
         )}
+        {readOnly ? (
+          <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">{t('orgTeam.readOnlyDescription')}</p>
+        ) : (
         <div className="flex items-end gap-2">
           <ChatFileUpload onFileSelect={handleFileSelect} uploading={uploading} />
           <textarea
@@ -464,6 +468,7 @@ export default function ChatWindow({ conversation, onBack, onMessageSent, partic
             <Send className="w-[18px] h-[18px]" />
           </button>
         </div>
+        )}
       </div>
     </div>
   );

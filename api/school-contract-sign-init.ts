@@ -8,6 +8,8 @@ import { verifyRequestAuth } from './_lib/auth.js';
 import { isGoSignConfigured, goSignNotConfiguredMessage } from './_lib/gosignConfig.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { CONTRACT_SIGN_SELECT, ensureSignatureRow, beginGoSignForRow } from './_lib/schoolContractSigning.js';
+import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.statusCode = status;
@@ -46,13 +48,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const orgId = String((contract as any).organization_id || '');
-  const { data: adminRow } = await supabase
-    .from('organization_admins')
-    .select('id')
-    .eq('user_id', auth.userId)
-    .eq('organization_id', orgId)
-    .maybeSingle();
-  if (!adminRow) return json(res, 403, { error: 'Forbidden' });
+  const adminAccess = await getOrgAdminAccessByUserId(supabase, auth.userId);
+  if (
+    adminAccess?.organizationId !== orgId
+    || !hasOrgAdminPermission(adminAccess?.role, adminAccess?.permissions, 'contracts.edit')
+  ) return json(res, 403, { error: 'Forbidden' });
 
   const status = String((contract as any).signing_status || '');
   // Parent review/confirmation is mandatory, even when no fields were missing.

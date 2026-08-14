@@ -6,6 +6,8 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { sendPushForUserId } from './_lib/sendPush.js';
+import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
+import { hasOrgAdminPermission, normalizeOrgAdminPermissions } from '../src/lib/orgAdminPermissions.js';
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -121,6 +123,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
+  const senderSeat = await getOrgAdminSeatByUserId(sb, auth.userId);
+  if (senderSeat && (
+    senderSeat.status !== 'active'
+    || !hasOrgAdminPermission(senderSeat.role, senderSeat.permissions, 'messages.edit')
+  )) {
+    return res.status(403).json({ error: 'Insufficient organization permission' });
+  }
+
   const { data: msg, error: msgErr } = await sb
     .from('chat_messages')
     .select('id, sender_id, conversation_id, content, message_type, metadata')
@@ -183,6 +193,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   let chatOrgId: string | null = null;
   const allUserIds = participants.map((p) => p.user_id as string);
+  const { data: adminRows } = allUserIds.length > 0
+    ? await sb
+      .from('organization_admins')
+      .select('user_id, role, status, permissions, accepted_at')
+      .in('user_id', allUserIds)
+    : { data: [] as Array<{ user_id: string; role: any; status: string; permissions: unknown; accepted_at: string | null }> };
+  const adminByUserId = new Map((adminRows || []).map((row) => [row.user_id, row]));
   if (allUserIds.length > 0) {
     const { data: profRows } = await sb.from('profiles').select('organization_id').in('id', allUserIds).not('organization_id', 'is', null).limit(1);
     if (profRows && profRows.length > 0) chatOrgId = (profRows[0] as any).organization_id;
@@ -190,6 +207,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   for (const p of participants) {
     if (p.user_id === auth.userId) continue;
+
+    const recipientAdmin = adminByUserId.get(p.user_id as string);
+    if (recipientAdmin && (
+      recipientAdmin.status !== 'active'
+      || !recipientAdmin.accepted_at
+      || !hasOrgAdminPermission(
+        recipientAdmin.role,
+        normalizeOrgAdminPermissions(recipientAdmin.permissions),
+        'messages.view',
+      )
+    )) {
+      continue;
+    }
 
     const path = await messagesPathForUser(sb, p.user_id as string);
     const messagesUrl = `${publicAppUrl}${path}`;

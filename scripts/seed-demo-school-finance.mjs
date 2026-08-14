@@ -167,11 +167,10 @@ async function ensureDemoSchoolBase(supabase) {
   );
   if (profErr) throw new Error(`profiles: ${profErr.message}`);
 
-  await supabase.from('organization_admins').delete().eq('user_id', ADMIN_ID);
-  const { error: adminErr } = await supabase.from('organization_admins').insert({
+  const { error: adminErr } = await supabase.from('organization_admins').upsert({
     user_id: ADMIN_ID,
     organization_id: ORG_ID,
-  });
+  }, { onConflict: 'user_id' });
   if (adminErr) throw new Error(`organization_admins: ${adminErr.message}`);
 
   const studentRows = [
