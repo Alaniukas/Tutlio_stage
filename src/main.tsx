@@ -76,6 +76,11 @@ function bootApp() {
   const basename = getPlatformBasename(platform);
 
   const renderApp = () => {
+    try {
+      sessionStorage.removeItem('tutlio_sw_shell_recovery');
+    } catch {
+      /* ignore */
+    }
     createRoot(document.getElementById('root')!).render(
       <PlatformProvider platform={platform}>
         <LocaleProvider>

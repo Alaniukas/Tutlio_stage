@@ -1,9 +1,12 @@
 import { useState } from 'react';
+import { Navigate } from 'react-router-dom';
 import { Play, ChevronDown, ChevronUp } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import StudentLayout from '@/components/StudentLayout';
 import { useTranslation } from '@/lib/i18n';
 import PwaInstallGuide from '@/components/PwaInstallGuide';
+import { useStudentPolicy } from '@/contexts/StudentPolicyContext';
+import { isWaitlistHiddenForOrg, isInstructionsHiddenForOrg } from '@/lib/marketMoney';
 
 interface VideoSection {
   id: string;
@@ -14,7 +17,16 @@ interface VideoSection {
 
 export default function StudentInstructions() {
   const { t } = useTranslation();
+  const { resolved, bookingDisabled, organizationId, waitlistHidden } = useStudentPolicy();
+  const hideWaitlist =
+    bookingDisabled || waitlistHidden || isWaitlistHiddenForOrg(organizationId);
+  const hideInstructions =
+    !resolved || isInstructionsHiddenForOrg(organizationId);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
+
+  if (hideInstructions) {
+    return <Navigate to="/student" replace />;
+  }
 
   const OVERVIEW_VIDEO = {
     title: t('instructions.studentOverviewTitle'),
@@ -28,7 +40,11 @@ export default function StudentInstructions() {
     { id: 'booking', titleKey: 'instructions.studentBookingVideo', videoUrl: 'https://www.youtube.com/embed/YOUR_STUDENT_BOOKING_VIDEO_ID', descKey: 'instructions.studentBookingVideoDesc' },
     { id: 'waitlist', titleKey: 'instructions.studentWaitlistVideo', videoUrl: 'https://www.youtube.com/embed/YOUR_STUDENT_WAITLIST_VIDEO_ID', descKey: 'instructions.studentWaitlistVideoDesc' },
     { id: 'settings', titleKey: 'instructions.studentSettingsVideo', videoUrl: 'https://www.youtube.com/embed/YOUR_STUDENT_SETTINGS_VIDEO_ID', descKey: 'instructions.studentSettingsVideoDesc' },
-  ];
+  ].filter((section) => {
+    if (bookingDisabled && section.id === 'booking') return false;
+    if (hideWaitlist && section.id === 'waitlist') return false;
+    return true;
+  });
 
   const toggleSection = (id: string) => {
     setExpandedSections(prev => {

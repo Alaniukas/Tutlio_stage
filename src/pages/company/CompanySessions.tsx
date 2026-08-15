@@ -38,6 +38,8 @@ import { isAttendanceFlagged } from '@/lib/attendance';
 import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
 import { DateRangeFilter } from '@/components/DateRangeFilter';
 import { DateTimeSpinner } from '@/components/TimeSpinner';
+import { useHideWaitlist } from '@/hooks/useHideWaitlist';
+import { isWaitlistHiddenForOrg } from '@/lib/marketMoney';
 
 interface Session {
   id: string;
@@ -113,6 +115,10 @@ export default function CompanySessions() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
+  // Sync cache avoids first-paint flash before useOrgFeatures resolves.
+  const cachedOrgId = getCached<{ organizationId?: string }>('company_dashboard')?.organizationId ?? null;
+  const { hideWaitlist: hideWaitlistResolved } = useHideWaitlist({ failClosedWhileLoading: true });
+  const hideWaitlist = hideWaitlistResolved || isWaitlistHiddenForOrg(cachedOrgId);
 
   const statusOptions = useMemo(
     () => [
@@ -558,12 +564,14 @@ export default function CompanySessions() {
             <h1 className="text-2xl font-bold text-gray-900">{t('compSess.lessonsTitle')}</h1>
             <p className="text-sm text-gray-500 mt-0.5">{t('compSess.totalCount', { count: sessions.length })}</p>
           </div>
+          {!hideWaitlist && (
           <Button variant="outline" className="gap-2 rounded-xl border-indigo-200 text-indigo-700 hover:bg-indigo-50 shrink-0" asChild>
             <Link to={`${orgBasePath}/waitlist`}>
               <ListOrdered className="w-4 h-4" />
               {t('compSess.waitlist')}
             </Link>
           </Button>
+          )}
         </div>
 
         {/* Filters */}

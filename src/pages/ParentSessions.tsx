@@ -36,8 +36,8 @@ export default function ParentSessions() {
   const [studentName, setStudentName] = useState('');
   const [loading, setLoading] = useState(true);
   const [validChild, setValidChild] = useState(false);
-  /** Org feature disable_student_booking — show a neutral calendar label instead of "Book". */
-  const [bookingDisabled, setBookingDisabled] = useState(false);
+  /** Org feature disable_student_booking — null until resolved (hide waitlist meanwhile). */
+  const [bookingDisabled, setBookingDisabled] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (!user || !studentId) return;
@@ -129,15 +129,17 @@ export default function ParentSessions() {
           <Button variant="outline" size="sm" className="rounded-lg" asChild>
             <Link to={schedulePath}>
               <CalendarDays className="w-4 h-4 mr-1.5" />
-              {bookingDisabled ? t('nav.calendar') : t('parent.bookSchedule')}
+              {bookingDisabled === true ? t('nav.calendar') : t('parent.bookSchedule')}
             </Link>
           </Button>
+          {bookingDisabled === false && (
           <Button variant="outline" size="sm" className="rounded-lg" asChild>
             <Link to={waitlistPath}>
               <ListOrdered className="w-4 h-4 mr-1.5" />
               {t('parent.waitlistTitle')}
             </Link>
           </Button>
+          )}
           <Button variant="outline" size="sm" className="rounded-lg" asChild>
             <Link to={messagesLink}>
               <MessageCircle className="w-4 h-4 mr-1.5" />

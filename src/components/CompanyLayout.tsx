@@ -34,6 +34,7 @@ import { OrgEntityProvider, type OrgEntityType } from '@/contexts/OrgEntityConte
 import { useUser } from '@/contexts/UserContext';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { showDynamicPricingNav } from '@/lib/orgIntakeMode';
+import { isInstructionsHiddenForOrg } from '@/lib/marketMoney';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import type { OrgAdminPermission } from '@/lib/orgAdminPermissions';
 
@@ -51,6 +52,7 @@ export function buildCompanyNavItems(
   t: (key: string) => string,
   showDynamicPricing: boolean,
   showPublicPage = false,
+  showInstructions = true,
   showTeam = false,
 ): CompanyNavItem[] {
   const base: CompanyNavItem[] = [
@@ -77,7 +79,9 @@ export function buildCompanyNavItems(
     base.push({ href: `${orgBasePath}/team`, label: t('companyNav.team'), icon: ShieldCheck, permission: null });
   }
   // Help stays last so the operational organization tools remain grouped.
-  base.push({ href: `${orgBasePath}/instructions`, label: t('companyNav.instructions'), icon: HelpCircle, permission: null });
+  if (showInstructions) {
+    base.push({ href: `${orgBasePath}/instructions`, label: t('companyNav.instructions'), icon: HelpCircle, permission: null });
+  }
   return base;
 }
 
@@ -108,15 +112,30 @@ export default function CompanyLayout() {
     !orgFeaturesLoading && showDynamicPricingNav(entityType, hasFeature);
   /** Public "vizitinė kortelė" is solo-tutor only for now. */
   const showPublicPage = false;
+  const cachedOrgId = (dashCache?.organizationId as string | undefined) ?? null;
+  // Fail-closed while resolving: Pro Klasė must never flash the instructions nav item.
+  const showInstructions =
+    !orgFeaturesLoading &&
+    !isInstructionsHiddenForOrg(organizationId) &&
+    !isInstructionsHiddenForOrg(cachedOrgId);
   /** Pagal org tipą, ne `pathname.startsWith('/school')` — kitaip `/schools` (landing) klaidingai atitinka `/school`. */
   const orgBasePath = isSchool ? '/school' : '/company';
   const BrandIcon = isSchool ? School : Building2;
   const brandLabel = isSchool ? t('layout.tutlioSchool') : t('layout.tutlioCompany');
 
   const NAV_ITEMS = useMemo(
-    () => buildCompanyNavItems(isSchool, orgBasePath, t, showDynamicPricing, showPublicPage, isOwner)
+    () =>
+      buildCompanyNavItems(
+        isSchool,
+        orgBasePath,
+        t,
+        showDynamicPricing,
+        showPublicPage,
+        showInstructions,
+        isOwner,
+      )
       .filter((item) => item.permission === null || can(item.permission)),
-    [t, isSchool, orgBasePath, showDynamicPricing, showPublicPage, isOwner, can],
+    [t, isSchool, orgBasePath, showDynamicPricing, showPublicPage, showInstructions, isOwner, can],
   );
 
   useEffect(() => {
@@ -264,7 +283,11 @@ export default function CompanyLayout() {
             <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6">
               <Outlet />
             </main>
-            <PwaInstallPrompt settingsPath={`${orgBasePath}/instructions`} />
+            <PwaInstallPrompt
+              settingsPath={
+                showInstructions ? `${orgBasePath}/instructions` : `${orgBasePath}/settings`
+              }
+            />
           </div>
         </div>
       </div>

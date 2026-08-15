@@ -28,27 +28,28 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // Keep HTML network-fresh and let hashed JS use the browser's normal
-        // on-demand cache. Precaching every private dashboard/whiteboard chunk
-        // made a marketing visit download ~20 MB in the background.
-        globPatterns: ['**/*.{css,ico,png,svg,woff2}'],
+        // Precache ONLY the SPA shell (content-hashed) + static assets.
+        // Never pin index.html with a null Workbox revision: that treats the
+        // shell as immutable, so after deploy the SW keeps an old HTML that
+        // points at deleted /assets/main-*.js and users see a white screen.
+        // Including index.html in globPatterns gives it a real revision each build.
+        // Never glob all HTML or JS — that would pin every lazy route / marketing
+        // HTML and download ~20 MB of private chunks on a marketing visit.
+        globPatterns: ['index.html', '**/*.{css,ico,png,svg,woff2}'],
         // Locale-specific marketing screenshots are loaded responsively on the
         // feature page; precaching every language pair would add ~40 MB.
-        globIgnores: ['landing/digital-business-card-*.png'],
-        // Workbox's navigateFallback must exist in the precache manifest. Add
-        // only the SPA shell rather than every generated/static HTML file.
-        additionalManifestEntries: [{ url: 'index.html', revision: null }],
+        globIgnores: ['landing/digital-business-card-*.png', 'preview-assign-student-modal.html'],
         maximumFileSizeToCacheInBytes: 7 * 1024 * 1024,
         navigateFallback: 'index.html',
         // SEO/crawler files must never be answered with the SPA shell from the SW.
         navigateFallbackDenylist: [/^\/api\//, /^\/(robots\.txt|sitemap\.xml|llms(-full)?\.txt)$/, /\/blog\/rss\.xml$/, /^\/preview-assign-student-modal\.html$/],
         importScripts: ['/push-sw.js'],
         runtimeCaching: [
-          // Preserve installed-PWA reloads without downloading every private
-          // route up front: cache only hashed chunks the user actually visits.
+          // Cache visited hashed chunks, but revalidate so a post-deploy shell
+          // does not keep serving a permanently stale module graph.
           {
             urlPattern: /\/assets\/.*\.js$/i,
-            handler: 'CacheFirst',
+            handler: 'StaleWhileRevalidate',
             options: {
               cacheName: 'app-js',
               expiration: { maxEntries: 120, maxAgeSeconds: 30 * 24 * 60 * 60 },

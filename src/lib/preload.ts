@@ -326,7 +326,7 @@ export async function preloadOrgAdminData() {
     const visibleTutors = await getOrgVisibleTutors(
       supabase,
       orgId,
-      'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, has_active_license',
+      'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, personal_meeting_link, teaching_notes, has_active_license',
     );
     const tutorIds = visibleTutors.map((t: any) => t.id);
 
@@ -459,6 +459,7 @@ async function preloadDashboard(
 
     const licensedApprox = (tutorProfiles || []).filter((p: any) => p.has_active_license !== false).length;
     setCache('company_dashboard', {
+      organizationId: orgId,
       orgName: org?.name || '', entityType: org?.entity_type || 'company',
       tutorLicenseCap: Number(org?.tutor_license_count) || 0,
       licensedTutors: licensedApprox,

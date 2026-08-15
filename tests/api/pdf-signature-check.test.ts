@@ -43,9 +43,26 @@ describe('pdfSignatureCheck', () => {
     const verdict = validateUploadedSignedPdf(SIGNED_BY_PARENT, BASE);
     expect(verdict.ok).toBe(true);
     if (verdict.ok) {
+      expect(verdict.mode).toBe('incremental');
       expect(verdict.addedSignatures).toBe(1);
       expect(verdict.totalSignatures).toBe(2);
       expect(verdict.signerNames).toContain('SKVARČIENĖ,MARGARITA');
+    }
+  });
+
+  it('accepts a Dokobit-style rewritten PDF that adds a new person signer', () => {
+    // Portal rewrote the bytes (not a prefix of BASE) but includes school + parent CNs.
+    const rewritten = Buffer.concat([
+      Buffer.from('%PDF-1.7\nrewritten-by-dokobit\n', 'latin1'),
+      sigBlock(['RCSC IssuingCA', 'MOKYKLOS,DIREKTORE']),
+      sigBlock(['SK ID Solutions EID-Q 2024E', 'SKUDŽINSKIENĖ,ASTA']),
+    ]);
+    const verdict = validateUploadedSignedPdf(rewritten, BASE);
+    expect(verdict.ok).toBe(true);
+    if (verdict.ok) {
+      expect(verdict.mode).toBe('dokobit_repackage');
+      expect(verdict.totalSignatures).toBe(2);
+      expect(verdict.signerNames).toContain('SKUDŽINSKIENĖ,ASTA');
     }
   });
 
@@ -54,9 +71,12 @@ describe('pdfSignatureCheck', () => {
     expect(validateUploadedSignedPdf(zip, BASE)).toEqual({ ok: false, reason: 'not_pdf' });
   });
 
-  it('rejects a re-rendered or wrong file as not_incremental', () => {
-    const rerendered = Buffer.concat([Buffer.from('%PDF-1.7\nDIFFERENT\n', 'latin1'), sigBlock(['X,Y'])]);
-    expect(validateUploadedSignedPdf(rerendered, BASE)).toEqual({ ok: false, reason: 'not_incremental' });
+  it('rejects a re-rendered file with no new person signer as not_incremental', () => {
+    const samePeopleOnly = Buffer.concat([
+      Buffer.from('%PDF-1.7\nDIFFERENT\n', 'latin1'),
+      sigBlock(['RCSC IssuingCA', 'MOKYKLOS,DIREKTORE']),
+    ]);
+    expect(validateUploadedSignedPdf(samePeopleOnly, BASE)).toEqual({ ok: false, reason: 'not_incremental' });
     // The unchanged downloaded file (no new bytes) is also not an update.
     expect(validateUploadedSignedPdf(Buffer.from(BASE), BASE)).toEqual({ ok: false, reason: 'not_incremental' });
   });

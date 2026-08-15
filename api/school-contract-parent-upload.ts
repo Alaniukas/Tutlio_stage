@@ -24,6 +24,8 @@ import {
   downloadPdfBytes,
   fetchSignatureRows,
   inputPdfPathForRole,
+  isSignatureTokenExpired,
+  renewParentSignatureAccess,
   signedPdfPathForRole,
   uploadSignedPdf,
 } from './_lib/schoolContractSigning.js';
@@ -34,11 +36,27 @@ import { validateUploadedSignedPdf } from './_lib/pdfSignatureCheck.js';
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 const REJECTION_MESSAGES: Record<string, string> = {
-  not_pdf: 'Įkeltas failas nėra PDF. Jei pasirašėte ADOC/ASiC formatu — grįžkite į Dokobit ir pasirinkite PDF formatą.',
+  not_pdf: 'Įkeltas failas nėra PDF. Jei pasirašėte ADOC/ASiC formatu — grįžkite į Dokobit ir atsisiųskite būtent PDF (ne ADOC / ASiC).',
   not_incremental:
-    'Įkėlėte ne tą failą arba pakeistą versiją. Atsisiųskite sutartį iš šio puslapio, pasirašykite ją Dokobit PDF formatu ir įkelkite gautą failą.',
-  no_new_signature: 'Šiame PDF naujo parašo nėra — panašu, kad įkėlėte dar nepasirašytą sutartį. Pirmiausia pasirašykite ją Dokobit portale.',
+    'Nepavyko atpažinti šios sutarties parašo faile. Atsisiųskite sutartį iš šio puslapio mygtuko „Atsisiųskite sutartį (PDF)“, pasirašykite Dokobit PDF formatu ir įkelkite tą patį gautą PDF čia.',
+  no_new_signature: 'Šiame PDF naujo parašo nėra — panašu, kad įkėlėte dar nepasirašytą sutartį. Pirmiausia pasirašykite ją Dokobit portale PDF formatu.',
 };
+
+async function downloadUploadedWithRetry(
+  download: () => Promise<Buffer>,
+  attempts = 6,
+): Promise<Buffer> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      return await download();
+    } catch (err) {
+      lastErr = err;
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 250 * (i + 1)));
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('upload missing');
+}
 
 function json(res: VercelResponse, status: number, body: unknown) {
   res.statusCode = status;
@@ -59,28 +77,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!token) return json(res, 400, { error: 'Missing token' });
   if (action !== 'upload-url' && action !== 'finalize') return json(res, 400, { error: 'Unknown action' });
 
-  const { data: row } = await supabase
+  const { data: rowRaw } = await supabase
     .from('school_contract_signatures')
     .select('*')
     .eq('token', token)
     .maybeSingle();
-  if (!row || !String(row.role).startsWith('parent')) return json(res, 404, { error: 'Invalid link' });
+  if (!rowRaw || !String(rowRaw.role).startsWith('parent')) return json(res, 404, { error: 'Invalid link' });
 
   const { data: contract } = await supabase
     .from('school_contracts')
     .select(CONTRACT_SIGN_SELECT)
-    .eq('id', row.contract_id)
+    .eq('id', rowRaw.contract_id)
     .maybeSingle();
   if (!contract) return json(res, 404, { error: 'Contract not found' });
   if (!(contract as any).organizations?.features?.school_contract_esign) {
     return json(res, 403, { error: 'E-signing is not enabled for this organization' });
   }
 
+  const ready = String((contract as any).signing_status) === 'signed_by_school';
+  let row = rowRaw;
+  if (row.status !== 'signed' && ready && isSignatureTokenExpired(row)) {
+    row = await renewParentSignatureAccess(supabase, row);
+  }
+
   if (row.status === 'signed') return json(res, 200, { alreadySigned: true });
-  if (row.token_expires_at && new Date(row.token_expires_at).getTime() < Date.now()) {
+  if (isSignatureTokenExpired(row)) {
     return json(res, 410, { error: 'Nuoroda nebegalioja. Kreipkitės į mokyklą dėl naujos.' });
   }
-  if (String((contract as any).signing_status) !== 'signed_by_school') {
+  if (!ready) {
     return json(res, 409, { error: 'Sutartis šiuo metu neparuošta tėvų parašui.' });
   }
 
@@ -105,21 +129,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const claimedPath = typeof req.body?.path === 'string' ? req.body.path.trim() : '';
   if (claimedPath !== uploadPath) return json(res, 400, { error: 'Invalid upload path' });
 
-  // Reject oversized objects from metadata BEFORE buffering them into memory.
-  const uploadDir = uploadPath.slice(0, uploadPath.lastIndexOf('/'));
-  const uploadName = uploadPath.slice(uploadPath.lastIndexOf('/') + 1);
-  const { data: listed } = await supabase.storage
-    .from(SCHOOL_CONTRACTS_BUCKET)
-    .list(uploadDir, { search: uploadName, limit: 10 });
-  const uploadedMeta = (listed || []).find((f: { name: string }) => f.name === uploadName);
-  const metaSize = Number((uploadedMeta as any)?.metadata?.size ?? 0);
-  if (metaSize > MAX_UPLOAD_BYTES) {
-    return json(res, 413, { error: 'Failas per didelis (daugiausia 25 MB).' });
-  }
-
   let uploaded: Buffer;
   try {
-    uploaded = await downloadPdfBytes(supabase, uploadPath);
+    // Storage list/read can lag briefly after the browser PUT — retry instead of
+    // falsely telling the parent the upload disappeared.
+    uploaded = await downloadUploadedWithRetry(() => downloadPdfBytes(supabase, uploadPath));
   } catch {
     return json(res, 400, { error: 'Įkelto failo nerasta. Įkelkite failą dar kartą.' });
   }
@@ -137,6 +151,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const verdict = validateUploadedSignedPdf(uploaded, base);
   if (verdict.ok === false) {
+    console.warn('[school-contract-parent-upload] rejected', {
+      reason: verdict.reason,
+      contractId: String((contract as any).id),
+      role: row.role,
+      uploadedBytes: uploaded.length,
+      baseBytes: base.length,
+    });
     return json(res, 422, { error: REJECTION_MESSAGES[verdict.reason], code: verdict.reason });
   }
 

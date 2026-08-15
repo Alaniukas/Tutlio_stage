@@ -20,6 +20,69 @@ import {
 
 export const SIGNATURE_TOKEN_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
+/** Parent invite links stay valid while the contract still awaits their signature. */
+export function isSignatureTokenExpired(row: { token_expires_at?: string | null }): boolean {
+  return Boolean(row.token_expires_at && new Date(row.token_expires_at).getTime() < Date.now());
+}
+
+/**
+ * Extend an expired parent signing token in place (same token → same email link).
+ * Safe: the token is unguessable; we only renew when the contract still needs this parent.
+ */
+export async function renewParentSignatureAccess(
+  supabase: SupabaseClient,
+  row: any,
+): Promise<any> {
+  if (!row || row.status === 'signed') return row;
+  if (!String(row.role || '').startsWith('parent')) return row;
+  if (!isSignatureTokenExpired(row)) return row;
+
+  const nextExpiry = new Date(Date.now() + SIGNATURE_TOKEN_TTL_MS).toISOString();
+  const { data, error } = await supabase
+    .from('school_contract_signatures')
+    .update({
+      token_expires_at: nextExpiry,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', row.id)
+    .neq('status', 'signed')
+    .select('*')
+    .maybeSingle();
+  if (error) throw new Error(`Could not renew signing link: ${error.message}`);
+  return data || { ...row, token_expires_at: nextExpiry };
+}
+
+/** GoSign faults that can never succeed on retry for the same transaction id. */
+export function isUnrecoverableGoSignError(message: string): boolean {
+  return /already purged|Failed to get signed document data|transaction not found|unknown transaction|does not exist/i.test(
+    message || '',
+  );
+}
+
+/**
+ * Clear a dead GoSign transaction so the parent can start a fresh signing attempt.
+ * Also renews the invite token TTL.
+ */
+export async function resetDeadGoSignSignature(
+  supabase: SupabaseClient,
+  row: any,
+  message: string,
+): Promise<void> {
+  const nextExpiry = new Date(Date.now() + SIGNATURE_TOKEN_TTL_MS).toISOString();
+  await supabase
+    .from('school_contract_signatures')
+    .update({
+      status: 'pending',
+      gosign_transaction_id: null,
+      signing_url: null,
+      error_message: String(message || 'GoSign transaction unusable').slice(0, 500),
+      token_expires_at: nextExpiry,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', row.id)
+    .in('status', ['pending', 'in_progress']);
+}
+
 export const CONTRACT_SIGN_SELECT =
   'id, organization_id, student_id, signing_status, pdf_url, signed_contract_url, contract_number, require_second_parent, annual_fee, additional_fee_amount, additional_fee_purpose, ' +
   'organizations(name, email, features), ' +
@@ -118,6 +181,74 @@ export async function fetchSignatureRows(supabase: SupabaseClient, contractId: s
     .select('*')
     .eq('contract_id', contractId);
   return data || [];
+}
+
+/**
+ * When an admin marks a contract fully signed outside the live GoSign/Dokobit
+ * chain (photo/PDF upload, "parašas gautas" without file, etc.), open signature
+ * rows must not stay `pending`/`in_progress` — otherwise UI/cron keep treating
+ * parents as unfinished and late GoSign results can race finalize emails.
+ */
+export async function closeOpenSignaturesAsManuallyMarked(
+  supabase: SupabaseClient,
+  params: {
+    contractId: string;
+    adminUserId?: string | null;
+    signedPdfPath?: string | null;
+    /** Optional GoSign cancel; failures are ignored. */
+    cancelGoSign?: (transactionId: string) => Promise<void>;
+  },
+): Promise<{ closed: number; goSignCancelAttempts: number }> {
+  const { data: openRows, error } = await supabase
+    .from('school_contract_signatures')
+    .select('id, gosign_transaction_id, signed_pdf_path, signed_at, manually_marked_at')
+    .eq('contract_id', params.contractId)
+    .in('status', ['pending', 'in_progress']);
+  if (error) throw new Error(`Could not load open signatures: ${error.message}`);
+  const rows = openRows || [];
+  if (rows.length === 0) return { closed: 0, goSignCancelAttempts: 0 };
+
+  const now = new Date().toISOString();
+  const ids = rows.map((r: any) => String(r.id));
+  const patch: Record<string, unknown> = {
+    status: 'signed',
+    signed_at: now,
+    gosign_transaction_id: null,
+    signing_url: null,
+    error_message: null,
+    manually_marked_at: now,
+    updated_at: now,
+  };
+  if (params.adminUserId) patch.manually_marked_by = params.adminUserId;
+  if (params.signedPdfPath) patch.signed_pdf_path = params.signedPdfPath;
+
+  const { data: updated, error: updErr } = await supabase
+    .from('school_contract_signatures')
+    .update(patch)
+    .in('id', ids)
+    .in('status', ['pending', 'in_progress'])
+    .select('id');
+  if (updErr) throw new Error(`Could not close open signatures: ${updErr.message}`);
+
+  let goSignCancelAttempts = 0;
+  if (params.cancelGoSign) {
+    for (const row of rows) {
+      const txn = String((row as any).gosign_transaction_id || '').trim();
+      if (!txn) continue;
+      goSignCancelAttempts += 1;
+      try {
+        await params.cancelGoSign(txn);
+      } catch (e) {
+        console.warn(
+          '[schoolContractSigning] GoSign cancel after manual close failed:',
+          txn,
+          (e as Error)?.message || e,
+        );
+      }
+    }
+  }
+
+  return { closed: (updated || []).length, goSignCancelAttempts };
 }
 
 /**
@@ -348,17 +479,56 @@ export async function pollAndAdvance(
       done: contractStatus === 'signed',
     };
   }
+
+  // Admin already finalized via manual upload/mark — absorb orphan GoSign rows
+  // without re-running finalize emails (payment invite to already-paid parents).
+  if (String((contract as any).signing_status) === 'signed') {
+    await closeOpenSignaturesAsManuallyMarked(supabase, {
+      contractId,
+      signedPdfPath: (contract as any).signed_contract_url || null,
+      cancelGoSign: async (transactionId) => {
+        const { cancelSigning } = await import('./gosignClient.js');
+        await cancelSigning(transactionId);
+      },
+    });
+    return {
+      status: 'signed',
+      role: row.role,
+      contractId,
+      contractStatus: 'signed',
+      done: true,
+    };
+  }
+
   if (!row.gosign_transaction_id) {
-    if (row.token_expires_at && new Date(row.token_expires_at).getTime() < Date.now()) {
+    if (isSignatureTokenExpired(row)) {
+      // Same email link can still work while the contract awaits this parent.
+      if (
+        String((contract as any).signing_status) === 'signed_by_school'
+        && String(row.role || '').startsWith('parent')
+      ) {
+        await renewParentSignatureAccess(supabase, row);
+        return { status: 'pending', role: row.role, contractId, contractStatus: (contract as any).signing_status };
+      }
       return { status: 'expired', role: row.role, contractId };
     }
     return { status: 'pending', role: row.role, contractId, contractStatus: (contract as any).signing_status };
   }
 
-  const result = await pollSigningResult(row.gosign_transaction_id, {
-    attempts: options.attempts ?? 6,
-    delayMs: options.delayMs ?? 1500,
-  });
+  let result;
+  try {
+    result = await pollSigningResult(row.gosign_transaction_id, {
+      attempts: options.attempts ?? 6,
+      delayMs: options.delayMs ?? 1500,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (isUnrecoverableGoSignError(message)) {
+      await resetDeadGoSignSignature(supabase, row, message);
+      return { status: 'pending', role: row.role, contractId, contractStatus: (contract as any).signing_status };
+    }
+    throw err;
+  }
   if (result.status === 'InProgress') return { status: 'in_progress', role: row.role, contractId };
   if (result.status === 'Canceled') {
     await supabase
@@ -513,7 +683,10 @@ async function sendFirstPendingInstallmentEmail(
     .eq('contract_id', contract.id)
     .order('installment_number', { ascending: true });
   if (error || !installments || installments.length === 0) return;
-  const pending = installments.find((item: any) => item.payment_status !== 'paid') || installments[0];
+  // Never fall back to a paid installment — that re-invites parents who already paid
+  // (common when school later marks/uploads a signature on an already-paid contract).
+  const pending = installments.find((item: any) => item.payment_status !== 'paid');
+  if (!pending) return;
   const settings = contractSigningSettings(contract);
   await sendInternalEmail(appOrigin, 'school_installment_request', recipient, {
     schoolName: contract.organizations?.name || '',

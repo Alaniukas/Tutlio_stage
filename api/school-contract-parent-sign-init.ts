@@ -15,6 +15,8 @@ import {
   contractPdfFileName,
   fetchSignatureRows,
   inputPdfPathForRole,
+  isSignatureTokenExpired,
+  renewParentSignatureAccess,
 } from './_lib/schoolContractSigning.js';
 import { SCHOOL_CONTRACTS_BUCKET, extractSchoolContractStoragePath } from './_lib/schoolContractPdfPath.js';
 
@@ -43,28 +45,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         : '';
   if (!token) return json(res, 400, { error: 'Missing token' });
 
-  const { data: row } = await supabase
+  const { data: rowRaw } = await supabase
     .from('school_contract_signatures')
     .select('*')
     .eq('token', token)
     .maybeSingle();
-  if (!row || !String(row.role).startsWith('parent')) return json(res, 404, { error: 'Invalid link' });
+  if (!rowRaw || !String(rowRaw.role).startsWith('parent')) return json(res, 404, { error: 'Invalid link' });
 
   const { data: contract } = await supabase
     .from('school_contracts')
     .select(CONTRACT_SIGN_SELECT)
-    .eq('id', row.contract_id)
+    .eq('id', rowRaw.contract_id)
     .maybeSingle();
   if (!contract) return json(res, 404, { error: 'Contract not found' });
   if (!(contract as any).organizations?.features?.school_contract_esign) {
     return json(res, 403, { error: 'E-signing is not enabled for this organization' });
   }
 
+  const ready = String((contract as any).signing_status) === 'signed_by_school';
+  let row = rowRaw;
+  // Keep the same email link working while the school-signed contract still awaits this parent.
+  if (row.status !== 'signed' && ready && isSignatureTokenExpired(row)) {
+    row = await renewParentSignatureAccess(supabase, row);
+  }
+
   const st = (contract as any).student || {};
-  const expired = row.token_expires_at && new Date(row.token_expires_at).getTime() < Date.now();
+  const expired = isSignatureTokenExpired(row);
 
   if (req.method === 'GET') {
-    const ready = String((contract as any).signing_status) === 'signed_by_school';
     // Download link for the Smart-ID (Dokobit) path: the exact PDF this signer
     // must sign (the previous signer's output).
     let pdfUrl: string | undefined;
@@ -98,7 +106,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // POST → begin signing
   if (row.status === 'signed') return json(res, 200, { alreadySigned: true });
   if (expired) return json(res, 410, { error: 'Signing link expired' });
-  if (String((contract as any).signing_status) !== 'signed_by_school') {
+  if (!ready) {
     return json(res, 409, { error: 'Contract is not ready for parent signature yet' });
   }
 

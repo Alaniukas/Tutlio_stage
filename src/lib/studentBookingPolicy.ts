@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { isWaitlistHiddenForOrg } from '@/lib/marketMoney';
 
 /**
  * Org feature `disable_student_booking`: self-booking is turned off for the
@@ -17,6 +18,8 @@ export interface StudentPortalPolicyEntry {
   actionsDisabled: boolean;
   /** Org feature student_payments_page ("Mokėjimai" portal section). */
   paymentsPageEnabled: boolean;
+  /** Waitlist fully disabled for this org (Pro Klasė / disable_waitlist). */
+  waitlistHidden: boolean;
 }
 
 /**
@@ -34,6 +37,7 @@ export async function fetchStudentPortalPolicyMap(
     bookingDisabled: false,
     actionsDisabled: false,
     paymentsPageEnabled: false,
+    waitlistHidden: false,
   });
   try {
     const { data: rows } = await supabase
@@ -70,17 +74,26 @@ export async function fetchStudentPortalPolicyMap(
     }
 
     const orgIds = [...new Set(Object.values(orgOfStudent).filter((v): v is string => !!v))];
-    const policyByOrg: Record<string, { bookingDisabled: boolean; actionsDisabled: boolean; paymentsPageEnabled: boolean }> = {};
+    const policyByOrg: Record<
+      string,
+      { bookingDisabled: boolean; actionsDisabled: boolean; paymentsPageEnabled: boolean; waitlistHidden: boolean }
+    > = {};
     if (orgIds.length > 0) {
       const { data: orgs } = await supabase
         .from('organizations')
         .select('id, features')
         .in('id', orgIds);
       for (const o of (orgs ?? []) as Array<{ id: string; features: Record<string, unknown> | null }>) {
+        const bookingDisabled = o.features?.disable_student_booking === true;
+        const waitlistHidden =
+          o.features?.disable_waitlist === true ||
+          isWaitlistHiddenForOrg(o.id) ||
+          bookingDisabled;
         policyByOrg[o.id] = {
-          bookingDisabled: o.features?.disable_student_booking === true,
+          bookingDisabled,
           actionsDisabled: o.features?.disable_student_reschedule_cancel === true,
           paymentsPageEnabled: o.features?.student_payments_page === true,
+          waitlistHidden,
         };
       }
     }
@@ -93,6 +106,8 @@ export async function fetchStudentPortalPolicyMap(
         bookingDisabled: policy?.bookingDisabled === true,
         actionsDisabled: policy?.actionsDisabled === true,
         paymentsPageEnabled: policy?.paymentsPageEnabled === true,
+        waitlistHidden:
+          policy?.waitlistHidden === true || isWaitlistHiddenForOrg(orgId),
       };
     }
   } catch {

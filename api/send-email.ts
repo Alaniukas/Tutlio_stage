@@ -10,6 +10,11 @@ if (typeof process !== 'undefined' && process.env.TUTLIO_DEV_API_LOCAL === '1') 
 import type { VercelRequest, VercelResponse } from './types';
 import { t, isValidLocale, localizedFromEmail, type Locale } from './_lib/i18n.js';
 import { isProKlaseOrg } from './_lib/marketMoney.js';
+import {
+  applyOrgBrandingToHtml,
+  resolveEmailOrgBranding,
+  type EmailBranding,
+} from './_lib/emailOrgBranding.js';
 import { Resend } from 'resend';
 import { createClient } from '@supabase/supabase-js';
 import { outlookEmailButton, headerInlineStyle } from './_lib/outlookEmail.js';
@@ -268,15 +273,6 @@ const baseStyles = `
     .footer p { color: #9ca3af; font-size: 12px; margin: 4px 0; }
   </style>
 `;
-
-interface EmailBranding {
-  name: string;
-  logo_url: string | null;
-  brand_color: string;
-  brand_color_secondary?: string;
-  /** Hide the "powered by Tutlio" line under the logo (full white-label). */
-  hidePoweredBy?: boolean;
-}
 
 function wrap(content: string, locale: Locale = 'lt', branding?: EmailBranding | null): string {
   const brandName = branding?.name || 'Tutlio';
@@ -3064,25 +3060,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               (data as any).schoolName = esc(orgPublicName);
               if ((data as any).context === 'school' && (data as any).tutorName) (data as any).tutorName = esc(orgPublicName);
             }
-            if (features.custom_branding) {
-              const proKlase = isProKlaseOrg(orgIdForBrandingLookup);
-              orgBranding = {
-                name: orgPublicName || org.name,
-                logo_url: org.logo_url ?? null,
-                brand_color: org.brand_color || '#6366f1',
-                brand_color_secondary: (org as { brand_color_secondary?: string | null }).brand_color_secondary || undefined,
-                hidePoweredBy: proKlase,
-              };
-              if (proKlase) {
-                (data as any).isProKlase = true;
-                (data as any).emailTeamSignature = 'Pro Klasės komanda';
-                (data as any).emailSenderName = 'ProKlasė Sistema';
-              }
-            } else if (isProKlaseOrg(orgIdForBrandingLookup)) {
-              // Pro Klasė without custom_branding flag still gets white-label copy/from/footer.
+            // Whitelabel for every recipient (student / parent / tutor / admin).
+            // Pro Klasė always gets full branding (logo + from + signature).
+            const resolved = resolveEmailOrgBranding(orgIdForBrandingLookup, org);
+            orgBranding = resolved.branding;
+            if (resolved.isProKlase) {
               (data as any).isProKlase = true;
-              (data as any).emailTeamSignature = 'Pro Klasės komanda';
-              (data as any).emailSenderName = 'ProKlasė Sistema';
+              if (resolved.emailTeamSignature) (data as any).emailTeamSignature = resolved.emailTeamSignature;
+              if (resolved.emailSenderName) (data as any).emailSenderName = resolved.emailSenderName;
             }
           }
         }
@@ -3091,46 +3076,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Patch the email HTML post-generation to inject org branding into the wrap() header
     function applyBranding(result: { subject: string; html: string }): { subject: string; html: string } {
-      let html = result.html;
-      const teamSig = String((data as any).emailTeamSignature || '').trim();
-      if (teamSig) {
-        html = html.replaceAll(t(locale, 'em.teamSignature'), teamSig);
+      let html = applyOrgBrandingToHtml(result.html, {
+        branding: orgBranding,
+        emailTeamSignature: (data as any).emailTeamSignature,
+        locale,
+      });
+      if (orgBranding) {
+        // Legacy templates sometimes use indigo text without the shared helper's full set.
+        html = html.replaceAll('color:#6366f1;', `color:${orgBranding.brand_color};`);
       }
-      if (!orgBranding) return { subject: result.subject, html };
-      const logoHtml = orgBranding.logo_url
-        ? `<img src="${orgBranding.logo_url}" alt="${escapeHtml(orgBranding.name)}" style="max-height:36px;max-width:160px;" />`
-        : `<span style="font-size:26px;font-weight:900;color:${orgBranding.brand_color};letter-spacing:-0.5px;">${escapeHtml(orgBranding.name)}</span>`;
-      const poweredBy = orgBranding.hidePoweredBy
-        ? ''
-        : `<p style="color:#9ca3af;font-size:11px;margin:8px 0 0;">powered by Tutlio</p>`;
-      const defaultHeader = `<span style="font-size:26px;font-weight:900;color:#4f46e5;letter-spacing:-0.5px;">Tutlio <span style="font-size:24px;">🎓</span></span>`;
-      html = html.replace(defaultHeader, `${logoHtml}${poweredBy}`);
-      const a = orgBranding.brand_color;
-      const b = orgBranding.brand_color_secondary || orgBranding.brand_color;
-      const orgHeader = headerInlineStyle(a, b);
-      const headerPairs: [string, string][] = [
-        ['#6366f1', '#8b5cf6'], ['#6366f1', '#4f46e5'], ['#8b5cf6', '#6366f1'], ['#7c3aed', '#6d28d9'],
-        ['#ef4444', '#f97316'], ['#ef4444', '#b91c1c'],
-        ['#f59e0b', '#f97316'], ['#f59e0b', '#d97706'],
-        ['#10b981', '#059669'], ['#059669', '#10b981'], ['#059669', '#047857'],
-        ['#3b82f6', '#2563eb'],
-        ['#0d9488', '#14b8a6'],
-        ['#b45309', '#92400e'],
-        ['#64748b', '#475569'],
-      ];
-      for (const [c1, c2] of headerPairs) {
-        html = html.replaceAll(headerInlineStyle(c1, c2), orgHeader);
-      }
-      const accentColors = ['#4f46e5', '#6366f1', '#7c3aed', '#6d28d9', '#8b5cf6',
-        '#10b981', '#059669', '#047857', '#ef4444', '#b91c1c', '#f97316',
-        '#f59e0b', '#d97706', '#3b82f6', '#2563eb', '#0d9488', '#14b8a6',
-        '#b45309', '#92400e', '#64748b', '#475569', '#dc2626', '#ea580c'];
-      for (const c of accentColors) {
-        html = html.replaceAll(`bgcolor="${c}"`, `bgcolor="${a}"`);
-        html = html.replaceAll(`background-color:${c};`, `background-color:${a};`);
-        html = html.replaceAll(`background:${c};`, `background:${a};`);
-      }
-      html = html.replaceAll('color:#6366f1;', `color:${a};`);
       return { subject: result.subject, html };
     }
 

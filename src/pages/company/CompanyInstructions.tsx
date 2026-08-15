@@ -1,10 +1,27 @@
+import { Navigate, useLocation } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Play } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import PwaInstallGuide from '@/components/PwaInstallGuide';
+import { getCached } from '@/lib/dataCache';
+import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { isInstructionsHiddenForOrg } from '@/lib/marketMoney';
 
 export default function CompanyInstructions() {
   const { t } = useTranslation();
+  const location = useLocation();
+  const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
+  const { organizationId, loading } = useOrgFeatures();
+  const cachedOrgId =
+    getCached<{ organizationId?: string }>('company_dashboard')?.organizationId ?? null;
+  const hideInstructions =
+    loading ||
+    isInstructionsHiddenForOrg(organizationId) ||
+    isInstructionsHiddenForOrg(cachedOrgId);
+
+  if (hideInstructions) {
+    return <Navigate to={orgBasePath} replace />;
+  }
 
   const videoUrl = 'https://www.youtube.com/embed/FSOmO86hiQE';
 

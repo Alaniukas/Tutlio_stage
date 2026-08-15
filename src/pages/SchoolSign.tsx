@@ -100,7 +100,7 @@ export default function SchoolSign() {
     try {
       const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
       if (!isPdf) {
-        setUploadErr('Įkelkite PDF failą (jei pasirašėte ADOC/ASiC formatu, Dokobit pasirinkite PDF formatą).');
+        setUploadErr('Įkelkite PDF failą. Jei Dokobit pasiūlė kitą formatą — atsisiųskite dar kartą kaip PDF.');
         return;
       }
       const r1 = await fetch('/api/school-contract-parent-upload', {
@@ -200,15 +200,15 @@ export default function SchoolSign() {
           </div>
 
           <div className="border border-gray-200 rounded-xl p-4">
-            <p className="font-semibold text-gray-900 mb-1">2. Smart-ID (per Dokobit)</p>
+            <p className="font-semibold text-gray-900 mb-1">2. Per Dokobit (Smart-ID ar mobilusis parašas)</p>
             <p className="text-sm text-gray-500 mb-3">
-              GoSign Smart-ID nepalaiko, todėl pasirašoma Dokobit portale, o pasirašytą failą įkelsite čia pat.
+              Atsisiųskite sutartį čia, pasirašykite Dokobit, tada grįžkite ir įkelkite pasirašytą failą.
             </p>
             <ol className="text-sm text-gray-600 mb-3 list-decimal pl-5 space-y-1">
               <li>
                 {info.pdfUrl ? (
                   <a className="text-indigo-600 font-medium underline" href={info.pdfUrl} target="_blank" rel="noreferrer">
-                    Atsisiųskite sutartį (PDF)
+                    Atsisiųskite sutartį
                   </a>
                 ) : (
                   <button
@@ -216,21 +216,23 @@ export default function SchoolSign() {
                     className="text-indigo-600 font-medium underline"
                     onClick={() => window.location.reload()}
                   >
-                    Atsisiųskite sutartį (PDF) — perkrauti nuorodą
+                    Atsisiųskite sutartį — perkrauti nuorodą
                   </button>
                 )}
+                {' '}(naudokite tik šį failą).
               </li>
               <li>
-                Prisijunkite prie{' '}
+                Atidarykite{' '}
                 <a className="text-indigo-600 underline" href="https://www.dokobit.com/lt" target="_blank" rel="noreferrer">
                   dokobit.com
-                </a>{' '}
-                su Smart-ID ir įkelkite atsisiųstą PDF.
+                </a>
+                , įkelkite tą failą ir pasirašykite.
               </li>
               <li>
-                <strong>Svarbu:</strong> pasirašydami palikite PDF formatą (ne ADOC / ASiC).
+                <strong>Svarbu:</strong> kai Dokobit klausia formato, rinkitės <strong>PDF</strong>.
+                Atsisiųskite pasirašytą failą kaip PDF.
               </li>
-              <li>Atsisiųskite pasirašytą PDF iš Dokobit ir įkelkite jį čia:</li>
+              <li>Grįžkite į šį puslapį ir įkelkite tą pasirašytą PDF:</li>
             </ol>
             {uploadErr && (
               <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-3">{uploadErr}</p>

@@ -48,6 +48,7 @@ const PRO_KLASE_FEATURES = {
   tutor_frequency_search: true,
   auto_trial_first_lesson: true,
   disable_student_booking: true,
+  disable_waitlist: true,
   hide_trial_offer_button: true,
   org_admin_calendar_view: true,
   post_trial_auto_package: true,

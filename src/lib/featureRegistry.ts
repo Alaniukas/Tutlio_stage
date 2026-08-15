@@ -295,6 +295,19 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     pricingTier: 'premium',
   },
 
+  disable_waitlist: {
+    id: 'disable_waitlist',
+    name: 'Išjungti laukimo eilę',
+    nameEn: 'Disable waitlist',
+    description:
+      'Organizacijoje visiškai paslepiama laukimo eilė (admin, korepetitorius, mokinys, tėvai) ir atšaukus pamoką neatliekamas automatinis eilės užpildymas.',
+    descriptionEn:
+      'Completely hides the waitlist across admin, tutor, student and parent portals, and skips waitlist auto-fill on cancellation.',
+    category: 'advanced',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
+
   auto_trial_first_lesson: {
     id: 'auto_trial_first_lesson',
     name: 'Pirmoji pamoka automatiškai bandomoji',

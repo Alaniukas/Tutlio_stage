@@ -1,13 +1,19 @@
 /**
  * Tutor invitation email via Resend (directly from invite-tutor).
  * Not via HTTP to /api/send-email — Vercel serverless terminates fire-and-forget fetch after response.
- * Matches send-email.ts `tutor_invite` (LT only, Outlook-safe layout).
+ * Matches send-email.ts `tutor_invite` (Outlook-safe layout) + org white-label branding.
  */
 import { Resend } from 'resend';
 import { getResendApiKey, resendNotConfiguredMessage } from './resendConfig.js';
 import { t, isValidLocale, localizedFromEmail, type Locale } from './i18n.js';
 import { buildTutorRegisterInviteUrl } from './public-origin.js';
 import { outlookEmailButton, headerInlineStyle } from './outlookEmail.js';
+import {
+  applyOrgBrandingToHtml,
+  resolveEmailOrgBranding,
+  type EmailBranding,
+  type OrgRowForEmailBranding,
+} from './emailOrgBranding.js';
 
 const baseStyles = `
   <style>
@@ -55,6 +61,9 @@ export type TutorInviteEmailData = {
   emailLocale?: string;
   /** UI locale for URL path prefix (lt, en, pl, …). */
   uiLocale?: string;
+  organizationId?: string | null;
+  /** Org row for white-label (logo / colors / Pro Klasė from). */
+  org?: OrgRowForEmailBranding | null;
 };
 
 export async function sendTutorInviteEmail(
@@ -71,10 +80,12 @@ export async function sendTutorInviteEmail(
     uiLocale: data.uiLocale,
   });
   const greetingName = data.inviteeName || data.inviteeEmail || t(locale, 'em.tutorInviteDefault');
-  const orgLabel = data.orgName || 'Tutlio';
+  const resolved = resolveEmailOrgBranding(data.organizationId, data.org || { name: data.orgName });
+  const orgLabel = resolved.publicName || data.orgName || resolved.branding?.name || 'Tutlio';
+  const branding: EmailBranding | null = resolved.branding;
 
   const subject = t(locale, 'em.tutorInviteSub', { org: orgLabel });
-  const html = wrap(
+  let html = wrap(
     `
       <div class="header" style="${headerInlineStyle('#6366f1', '#8b5cf6')}"><h1>${t(locale, 'em.tutorInviteHeader')}</h1><p>${t(locale, 'em.tutorInviteHeaderSub')}</p></div>
       <div class="body">
@@ -87,10 +98,15 @@ export async function sendTutorInviteEmail(
       </div>${footerFor(locale)}`,
     locale
   );
+  html = applyOrgBrandingToHtml(html, {
+    branding,
+    emailTeamSignature: resolved.emailTeamSignature,
+    locale,
+  });
 
   const resend = new Resend(apiKey);
   const { error } = await resend.emails.send({
-    from: localizedFromEmail(locale),
+    from: localizedFromEmail(locale, { senderName: resolved.emailSenderName }),
     to: [to],
     subject,
     html,

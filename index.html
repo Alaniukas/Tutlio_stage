@@ -24,6 +24,34 @@
 </head>
 <body>
   <div id="root"></div>
+  <!-- If a stale service worker serves an old shell whose /assets/main-*.js 404s,
+       main.tsx never boots. Clear SW/caches once and reload. -->
+  <script>
+    (function () {
+      var KEY = 'tutlio_sw_shell_recovery';
+      try {
+        if (sessionStorage.getItem(KEY) === '1') return;
+      } catch (e) {}
+      setTimeout(function () {
+        var root = document.getElementById('root');
+        if (!root || root.childElementCount > 0) return;
+        try { sessionStorage.setItem(KEY, '1'); } catch (e) {}
+        var done = function () { location.reload(); };
+        var tasks = [];
+        if ('caches' in window) {
+          tasks.push(caches.keys().then(function (keys) {
+            return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+          }));
+        }
+        if ('serviceWorker' in navigator) {
+          tasks.push(navigator.serviceWorker.getRegistrations().then(function (regs) {
+            return Promise.all(regs.map(function (r) { return r.unregister(); }));
+          }));
+        }
+        Promise.all(tasks).then(done).catch(done);
+      }, 6000);
+    })();
+  </script>
   <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>

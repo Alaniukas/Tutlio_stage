@@ -17,6 +17,7 @@ import { useTranslation } from '@/lib/i18n';
 import { useTotalChatUnread } from '@/hooks/useChat';
 import { usePushSubscription } from '@/hooks/usePushSubscription';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
+import { isWaitlistHiddenForOrg, isInstructionsHiddenForOrg } from '@/lib/marketMoney';
 
 interface StudentLayoutProps {
     children: React.ReactNode;
@@ -60,7 +61,7 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
     );
 
     /** Org portal flags — resolved pre-mount by StudentPolicyProvider, so the nav is correct on first paint. */
-    const { bookingDisabled, paymentsPageEnabled } = useStudentPolicy();
+    const { resolved, bookingDisabled, paymentsPageEnabled, organizationId, waitlistHidden } = useStudentPolicy();
 
     /**
      * Tutor selector shows one entry per distinct tutor. Detach + re-add can
@@ -76,6 +77,13 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
         return [...byTutor.values()];
     }, [studentProfiles, activeStudentProfileId]);
 
+    const hideWaitlist =
+      !resolved ||
+      waitlistHidden ||
+      bookingDisabled ||
+      isWaitlistHiddenForOrg(organizationId);
+    const hideInstructions = !resolved || isInstructionsHiddenForOrg(organizationId);
+
     const navItems = [
         { href: '/student', label: t('studentNav.home'), icon: LayoutDashboard },
         { href: '/student/sessions', label: t('studentNav.sessions'), icon: BookOpen },
@@ -86,7 +94,11 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
             ? [{ href: '/student/payments', label: t('studentNav.payments'), icon: CreditCard }]
             : []),
         { href: '/student/settings', label: t('studentNav.settings'), icon: Settings },
-    ].filter((item) => !(bookingDisabled && (item.href === '/student/schedule' || item.href === '/student/waitlist')));
+    ].filter((item) => {
+        if (bookingDisabled && item.href === '/student/schedule') return false;
+        if (hideWaitlist && item.href === '/student/waitlist') return false;
+        return true;
+    });
     const navGridClass =
         navItems.length <= 4 ? 'grid-cols-4' : navItems.length === 5 ? 'grid-cols-5' : 'grid-cols-6';
 
@@ -228,7 +240,7 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
     return (
         <div className="min-h-screen bg-white flex flex-col relative overflow-x-hidden">
             <OrgSuspendedBanner />
-            <PwaInstallPrompt settingsPath="/student/instructions" />
+            <PwaInstallPrompt settingsPath={hideInstructions ? '/student/settings' : '/student/instructions'} />
             <div className="absolute top-0 right-0 w-96 h-96 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none bg-[color-mix(in_srgb,var(--org-brand)_12%,#ffffff)]" />
             <div className="absolute bottom-0 left-0 w-96 h-96 bg-slate-50/30 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 pointer-events-none" />
 

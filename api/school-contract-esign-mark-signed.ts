@@ -41,9 +41,9 @@ import { validateUploadedSignedPdf } from './_lib/pdfSignatureCheck.js';
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 const REJECTION_MESSAGES: Record<string, string> = {
-  not_pdf: 'Įkeltas failas nėra PDF. Jei pasirašyta ADOC/ASiC formatu — Dokobit pasirinkite PDF formatą.',
+  not_pdf: 'Įkeltas failas nėra PDF. Jei pasirašyta ADOC/ASiC formatu — Dokobit atsisiųskite būtent PDF.',
   not_incremental:
-    'Įkeltas ne tas failas arba pakeista versija. Failas turi būti pasirašytas ant tiksliai tos PDF versijos, kurią pasirašantysis gavo iš Tutlio.',
+    'Nepavyko atpažinti šios sutarties parašo faile. Reikia Dokobit PDF, pasirašyto ant Tutlio išduotos sutarties versijos.',
   no_new_signature: 'Šiame PDF naujo parašo nėra — panašu, kad įkelta dar nepasirašyta sutartis.',
 };
 

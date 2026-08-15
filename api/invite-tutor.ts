@@ -80,6 +80,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       min_booking_hours,
       company_commission_percent,
       personal_meeting_link,
+      teaching_notes,
       locale: bodyLocale,
     } = req.body as {
       organizationId: string;
@@ -95,6 +96,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       min_booking_hours?: number;
       company_commission_percent?: number;
       personal_meeting_link?: string;
+      teaching_notes?: string;
       locale?: string;
     };
 
@@ -114,10 +116,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(403).json({ error: 'You do not have permission to invite tutors to this organization' });
     }
 
-    // Ensure organization exists and get name for email
+    // Ensure organization exists and get name/branding for email
     const { data: org, error: orgError } = await supabase
       .from('organizations')
-      .select('id, name')
+      .select('id, name, logo_url, brand_color, brand_color_secondary, features')
       .eq('id', organizationId)
       .maybeSingle();
 
@@ -153,6 +155,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       min_booking_hours,
       company_commission_percent,
       personal_meeting_link: String(personal_meeting_link || '').trim() || null,
+      teaching_notes: String(teaching_notes || '').trim() || null,
     });
 
     if (inviteError) {
@@ -186,6 +189,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           appOrigin,
         ),
         uiLocale: typeof bodyLocale === 'string' ? bodyLocale : undefined,
+        organizationId,
+        org: org as { name?: string; logo_url?: string; brand_color?: string; brand_color_secondary?: string; features?: unknown },
       });
       emailSent = emailResult.ok;
       const rawError = 'error' in emailResult ? emailResult.error : undefined;
