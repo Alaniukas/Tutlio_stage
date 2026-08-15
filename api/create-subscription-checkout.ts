@@ -55,12 +55,27 @@ async function resolveYearlyPriceId(
 
 // Legacy trial promo codes still accepted, but the 7-day trial is now applied
 // by default to every individual subscription checkout (no code needed).
-const TRIAL_CODES = ['TRIAL7D', 'TRIAL', 'BANDYMAS'] as const;
-const TRIAL_PERIOD_DAYS = 7;
+const LEGACY_TRIAL_CODES = ['TRIAL7D', 'TRIAL', 'BANDYMAS'] as const;
+// Internal trial-extension codes are handled here instead of as Stripe coupons,
+// because coupons change price and cannot extend a subscription trial.
+const EXTENDED_TRIAL_CODES = ['TRIAL14D'] as const;
+const DEFAULT_TRIAL_PERIOD_DAYS = 7;
+const EXTENDED_TRIAL_PERIOD_DAYS = 14;
+
+function trialPeriodDaysForCode(code?: string): number | undefined {
+  if (!code?.trim()) return undefined;
+  const normalizedCode = code.trim().toUpperCase();
+  if (EXTENDED_TRIAL_CODES.includes(normalizedCode as (typeof EXTENDED_TRIAL_CODES)[number])) {
+    return EXTENDED_TRIAL_PERIOD_DAYS;
+  }
+  if (LEGACY_TRIAL_CODES.includes(normalizedCode as (typeof LEGACY_TRIAL_CODES)[number])) {
+    return DEFAULT_TRIAL_PERIOD_DAYS;
+  }
+  return undefined;
+}
 
 function isTrialCode(code?: string): boolean {
-  if (!code?.trim()) return false;
-  return TRIAL_CODES.includes(code.trim().toUpperCase() as (typeof TRIAL_CODES)[number]);
+  return trialPeriodDaysForCode(code) !== undefined;
 }
 
 /** trial_used check for logged-in users; anonymous sign-up checkouts are eligible. */
@@ -98,12 +113,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Neteisingas planas' });
     }
 
-    // 7-day trial by default for individual plans. Explicit requests (button /
-    // legacy code) error when the trial was already used; the default
-    // application just skips it silently.
-    const explicitTrial = startTrial === true || isTrialCode(couponCode);
-    let wantsTrial = false;
-    if (startTrial !== false) {
+    // 7-day trial by default for individual plans; TRIAL14D extends it to 14
+    // days. Explicit requests (button / trial code) error when the trial was
+    // already used; the default application just skips it silently.
+    const codeTrialDays = trialPeriodDaysForCode(couponCode);
+    const explicitTrial = startTrial === true || codeTrialDays !== undefined;
+    let trialDays = 0;
+    if (startTrial !== false || codeTrialDays !== undefined) {
       const trialUsed = await hasUsedTrial(req.headers.authorization);
       if (trialUsed && explicitTrial) {
         return res.status(400).json({
@@ -111,14 +127,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             'Free trial has already been used with this account. You can subscribe without trial or use a different account.',
         });
       }
-      wantsTrial = !trialUsed;
+      if (!trialUsed) {
+        trialDays = codeTrialDays ?? DEFAULT_TRIAL_PERIOD_DAYS;
+      }
     }
+    const wantsTrial = trialDays > 0;
 
     const appOrigin = publicOriginFromRequest(req);
     const checkoutAudience: CheckoutAudience = audience === 'schools' ? 'schools' : 'tutor';
     const localeCode = typeof locale === 'string' && locale.trim() ? locale.trim() : undefined;
     const pricingPath = buildPublicPath('/pricing', localeCode, checkoutAudience, appOrigin);
-    const cancelUrl = `${appOrigin}${pricingPath}?canceled=1`;
+    const cancelParams = new URLSearchParams({ canceled: '1' });
+    if (codeTrialDays === EXTENDED_TRIAL_PERIOD_DAYS) {
+      cancelParams.set('promo', EXTENDED_TRIAL_CODES[0]);
+    }
+    const cancelUrl = `${appOrigin}${pricingPath}?${cancelParams.toString()}`;
 
     const toDashboard = successRedirect === 'dashboard';
     const toRegistration = successRedirect === 'registration';
@@ -251,11 +274,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (wantsTrial) {
       // Stripe native trial — no promotion code in Dashboard required
       sessionParams.subscription_data = {
-        trial_period_days: TRIAL_PERIOD_DAYS,
-        metadata: { tutlio_trial_days: String(TRIAL_PERIOD_DAYS) },
+        trial_period_days: trialDays,
+        metadata: { tutlio_trial_days: String(trialDays) },
       };
       sessionParams.payment_method_collection = 'always';
-      sessionParams.metadata = { ...(sessionParams.metadata || {}), tutlio_trial: '7d' };
+      sessionParams.metadata = { ...(sessionParams.metadata || {}), tutlio_trial: `${trialDays}d` };
     }
 
     // Discount codes combine with the trial (legacy trial codes are not Stripe codes).
@@ -284,7 +307,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(200).json({
       url: session.url,
       trialApplied: wantsTrial,
-      trialDays: wantsTrial ? TRIAL_PERIOD_DAYS : 0,
+      trialDays,
     });
   } catch (error: any) {
     console.error('Error creating subscription checkout:', error);

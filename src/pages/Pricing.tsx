@@ -28,6 +28,12 @@ import EnterprisePlanCard from '@/components/pricing/EnterprisePlanCard';
 import { applyPageDocumentMeta } from '@/lib/documentMeta';
 import { getSeoMeta } from '@/lib/seoMeta';
 import { resolveMarketingAudience, storeMarketingAudience } from '@/lib/marketingAudience';
+import {
+  DEFAULT_SUBSCRIPTION_TRIAL_DAYS,
+  EXTENDED_SUBSCRIPTION_TRIAL_DAYS,
+  normalizeExtendedTrialPromoCode,
+  withSubscriptionTrialDays,
+} from '@/lib/subscriptionTrialPromo';
 
 function scrollToPricingPlans() {
   const plans = document.getElementById('pricing-plans');
@@ -48,6 +54,11 @@ export default function Pricing() {
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const audienceParam = searchParams.get('audience');
+  const promoCode = normalizeExtendedTrialPromoCode(searchParams.get('promo'));
+  const trialDays = promoCode
+    ? EXTENDED_SUBSCRIPTION_TRIAL_DAYS
+    : DEFAULT_SUBSCRIPTION_TRIAL_DAYS;
+  const trialCopy = (key: string) => withSubscriptionTrialDays(t(key), trialDays);
   const pricingAudience = useMemo(
     () => resolveMarketingAudience(audienceParam),
     [audienceParam],
@@ -81,7 +92,12 @@ export default function Pricing() {
       const res = await fetch('/api/create-subscription-checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan, locale, audience: checkoutAudience }),
+        body: JSON.stringify({
+          plan,
+          locale,
+          audience: checkoutAudience,
+          ...(promoCode ? { couponCode: promoCode } : {}),
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.url) {
@@ -142,6 +158,12 @@ export default function Pricing() {
             <p className="text-[15px] lg:text-base text-gray-500 max-w-lg mx-auto mb-10 leading-relaxed">
               {t('pricing.subtitle')}
             </p>
+
+            {promoCode && !isAgencyPricing && (
+              <p className="text-sm font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-2.5 max-w-md mx-auto mb-6">
+                {t('subscribe.extendedTrialCodeApplied')}
+              </p>
+            )}
 
             {checkoutError && (
               <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 max-w-md mx-auto mb-6">
@@ -210,7 +232,7 @@ export default function Pricing() {
               <ul className="space-y-2.5 mb-7 flex-1">
                 <li className="flex items-center gap-2 text-white text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-300 shrink-0" />{t('pricing.allFeatures')}</li>
                 <li className="flex items-center gap-2 text-white text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-300 shrink-0" />{t('pricing.unlimitedStudents')}</li>
-                <li className="flex items-center gap-2 text-white text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-300 shrink-0" />{t('pricing.freeTrial')}</li>
+                <li className="flex items-center gap-2 text-white text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-300 shrink-0" />{trialCopy('pricing.freeTrial')}</li>
                 <li className="flex items-center gap-2 text-white text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-300 shrink-0" />{isYearly ? t('pricing.saveYearly') : t('pricing.cancelAnytime')}</li>
               </ul>
               <button
@@ -312,7 +334,7 @@ export default function Pricing() {
           <div className="space-y-3 max-w-[700px] mx-auto">
             {[
               { q: t('pricing.faq.cancelQ'), a: t('pricing.faq.cancelA') },
-              { q: t('pricing.faq.trialQ'), a: t('pricing.faq.trialA') },
+              { q: trialCopy('pricing.faq.trialQ'), a: trialCopy('pricing.faq.trialA') },
               { q: t('pricing.faq.limitQ'), a: t('pricing.faq.limitA') },
               { q: t('pricing.faq.switchQ'), a: t('pricing.faq.switchA') },
               { q: t('pricing.faq.paymentQ'), a: t('pricing.faq.paymentA') },
@@ -335,7 +357,9 @@ export default function Pricing() {
               onClick={isAgencyPricing ? () => setEnterpriseOpen(true) : scrollToPricingPlans}
               className="inline-flex items-center justify-center h-12 px-8 text-sm rounded-full bg-[#4f46e5] hover:bg-[#4338ca] text-white font-semibold transition-all duration-200 hover:scale-[1.03] hover:shadow-lg active:scale-[0.98]"
             >
-              {t(isAgencyPricing ? 'pricing.bookDemo' : 'pricing.start7DayTrial')}
+              {isAgencyPricing
+                ? t('pricing.bookDemo')
+                : trialCopy('pricing.start7DayTrial')}
               <ArrowRight className="w-4 h-4 ml-2" />
             </button>
           </div>

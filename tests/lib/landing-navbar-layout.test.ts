@@ -8,7 +8,7 @@ describe('landing navbar locale-aware layout', () => {
   it('lets long translated navigation expand beyond the old 1200px cap', () => {
     expect(resolveLandingNavbarLayout(1660, 1760)).toEqual({
       availableWidth: 1728,
-      pillWidth: 1660,
+      pillWidth: 1684,
       compact: false,
     });
   });
@@ -23,6 +23,14 @@ describe('landing navbar locale-aware layout', () => {
 
   it('keeps the compact navigation below the desktop breakpoint', () => {
     expect(resolveLandingNavbarLayout(600, 767).compact).toBe(true);
+  });
+
+  it('reserves clearance for a translated CTA at borderline viewport widths', () => {
+    expect(resolveLandingNavbarLayout(820, 870)).toEqual({
+      availableWidth: 838,
+      pillWidth: 838,
+      compact: true,
+    });
   });
 
   it('keeps an expanded width available for the scroll animation', () => {

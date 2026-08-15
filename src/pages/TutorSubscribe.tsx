@@ -32,6 +32,10 @@ import { tutorPlanPriceLabels } from '@/lib/pricingDisplay';
 import { isPlMarket } from '@/lib/market';
 import { SUBSCRIPTION_PLN } from '@/lib/subscriptionPricing';
 import { TUTOR_PLANS, eur } from '@/lib/pricing';
+import {
+  EXTENDED_SUBSCRIPTION_TRIAL_CODE,
+  normalizeExtendedTrialPromoCode,
+} from '@/lib/subscriptionTrialPromo';
 
 // Legacy trial codes — recognized so they aren't sent to Stripe as discount
 // codes; the 7-day trial itself is applied by default server-side.
@@ -57,6 +61,8 @@ export default function TutorSubscribe() {
   const trialAvailable = trialUsed !== true;
   const effectiveCoupon = couponCode.trim().toUpperCase();
   const isTrialCoupon = TRIAL_CODES.includes(effectiveCoupon as (typeof TRIAL_CODES)[number]);
+  const isExtendedTrialCoupon = normalizeExtendedTrialPromoCode(effectiveCoupon)
+    === EXTENDED_SUBSCRIPTION_TRIAL_CODE;
 
   useEffect(() => {
     const requestedPlan = searchParams.get('plan');
@@ -480,7 +486,9 @@ export default function TutorSubscribe() {
             </div>
             {effectiveCoupon && (
               <p className="text-xs text-indigo-200 mt-2">
-                {t('subscribe.couponApplied')}
+                {isExtendedTrialCoupon
+                  ? t('subscribe.extendedTrialCodeApplied')
+                  : t('subscribe.couponApplied')}
               </p>
             )}
           </div>
@@ -510,7 +518,12 @@ export default function TutorSubscribe() {
                 <p className="text-white font-semibold mb-1">{t('subscribe.cancelInfo')}</p>
                 <p className="text-indigo-200 text-sm">
                   {trialAvailable
-                    ? t('subscribe.trialPaymentInfo', { price: selectedPlanPriceHint })
+                    ? t(
+                        isExtendedTrialCoupon
+                          ? 'subscribe.extendedTrialPaymentInfo'
+                          : 'subscribe.trialPaymentInfo',
+                        { price: selectedPlanPriceHint },
+                      )
                     : t('subscribe.safePaymentInfo')}
                 </p>
               </div>

@@ -7,7 +7,6 @@ import type { BlogTocItem } from '@/lib/blogToc';
 export function BlogSidebar({ toc, activeId }: { toc: BlogTocItem[]; activeId?: string }) {
   const { t, locale } = useTranslation();
   const pricingPath = buildLocalizedPath('/pricing', locale);
-  const registerPath = buildLocalizedPath('/register', locale);
 
   return (
     <aside className="space-y-5 lg:sticky lg:top-24">
@@ -44,7 +43,7 @@ export function BlogSidebar({ toc, activeId }: { toc: BlogTocItem[]; activeId?: 
         <h3 className="text-lg font-bold leading-snug mb-2">{t('blog.ctaTitle')}</h3>
         <p className="text-indigo-100 text-sm leading-relaxed mb-5">{t('blog.ctaSubtitle')}</p>
         <Link
-          to={registerPath}
+          to={pricingPath}
           className="inline-flex w-full items-center justify-center rounded-xl bg-white px-4 py-3 text-sm font-bold text-indigo-700 hover:bg-indigo-50 transition-colors"
         >
           {t('blog.ctaPrimary')}

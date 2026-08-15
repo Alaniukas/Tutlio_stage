@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
-import { ArrowRight, ExternalLink } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import LandingNavbar from '@/components/LandingNavbar';
 import LandingFooter from '@/components/LandingFooter';
 import { useTranslation, buildLocalizedPath } from '@/lib/i18n';
@@ -10,7 +10,6 @@ import { FEATURE_PAGES, isFeaturePageId } from '@/lib/featurePages';
 
 function DigitalBusinessCardShowcase({ locale }: { locale: Locale }) {
   const { t } = useTranslation();
-  const demoPath = buildLocalizedPath('/tutor/demo', locale);
   const assetLocaleSuffix = locale === 'lt' ? '' : `-${locale}`;
   const mobilePreview = `/landing/digital-business-card-mobile${assetLocaleSuffix}.png`;
   const desktopPreview = `/landing/digital-business-card-desktop${assetLocaleSuffix}.png`;
@@ -45,17 +44,6 @@ function DigitalBusinessCardShowcase({ locale }: { locale: Locale }) {
           </picture>
         </div>
 
-        <div className="mt-6 text-center">
-          <Link
-            to={demoPath}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 text-sm font-semibold text-violet-200 transition hover:text-white"
-          >
-            {t('feature.digital-business-card.demo.openExample')}
-            <ExternalLink className="h-4 w-4" />
-          </Link>
-        </div>
       </div>
     </section>
   );

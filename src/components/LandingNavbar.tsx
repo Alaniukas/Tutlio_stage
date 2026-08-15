@@ -43,14 +43,18 @@ const PILL_PADDING = 40; // 0 20px
 const PILL_INITIAL_WIDTH = 1200;
 const PILL_EXPANDED_EXTRA_WIDTH = 96;
 const NAV_VIEWPORT_GUTTER = 16;
+// Keep the trailing CTA comfortably inside the pill. This also absorbs small
+// differences between measured and painted text metrics across locale fonts.
+const NAV_EDGE_CLEARANCE = 24;
 const DESKTOP_NAV_MIN_WIDTH = 768;
 
 export function resolveLandingNavbarLayout(naturalWidth: number, viewportWidth: number) {
   const availableWidth = Math.max(0, viewportWidth - NAV_VIEWPORT_GUTTER * 2);
+  const requiredWidth = Math.ceil(naturalWidth) + NAV_EDGE_CLEARANCE;
   return {
     availableWidth,
-    pillWidth: Math.min(Math.ceil(naturalWidth), availableWidth),
-    compact: viewportWidth < DESKTOP_NAV_MIN_WIDTH || naturalWidth > availableWidth,
+    pillWidth: Math.min(requiredWidth, availableWidth),
+    compact: viewportWidth < DESKTOP_NAV_MIN_WIDTH || requiredWidth > availableWidth,
   };
 }
 

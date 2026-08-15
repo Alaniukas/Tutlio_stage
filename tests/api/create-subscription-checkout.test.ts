@@ -174,6 +174,61 @@ describe('POST /api/create-subscription-checkout (default 7-day trial)', () => {
     expect(stripeCouponsList).not.toHaveBeenCalled();
   });
 
+  it('extends the free trial to 14 days when TRIAL14D is supplied', async () => {
+    const handler = await loadHandler();
+    const res = mockRes();
+    await handler(mockReq('POST', { plan: 'monthly', couponCode: ' trial14d ' }) as any, res as any);
+
+    const result = (res as any).getResult();
+    expect(result.statusCode).toBe(200);
+    expect(result.body).toMatchObject({ trialApplied: true, trialDays: 14 });
+
+    const params = stripeSessionCreate.mock.calls[0][0];
+    expect(params.subscription_data?.trial_period_days).toBe(14);
+    expect(params.subscription_data?.metadata?.tutlio_trial_days).toBe('14');
+    expect(params.metadata?.tutlio_trial).toBe('14d');
+    expect(params.cancel_url).toContain('/pricing?canceled=1&promo=TRIAL14D');
+    expect(params.allow_promotion_codes).toBe(true);
+    expect(stripePromotionCodesList).not.toHaveBeenCalled();
+    expect(stripeCouponsList).not.toHaveBeenCalled();
+  });
+
+  it('preserves TRIAL14D in a localized Stripe cancellation return URL', async () => {
+    const handler = await loadHandler();
+    const res = mockRes();
+    await handler(
+      mockReq(
+        'POST',
+        { plan: 'monthly', couponCode: 'TRIAL14D', locale: 'fr' },
+        { host: 'www.tutlio.com', 'x-forwarded-host': 'www.tutlio.com' },
+      ) as any,
+      res as any,
+    );
+
+    expect((res as any).getResult().statusCode).toBe(200);
+    expect(stripeSessionCreate.mock.calls[0][0].cancel_url)
+      .toBe('https://www.tutlio.com/fr/pricing?canceled=1&promo=TRIAL14D');
+  });
+
+  it('rejects TRIAL14D when the account has already used its free trial', async () => {
+    authGetUser.mockResolvedValue({ data: { user: { id: 'user-1', email: 'a@b.lt' } }, error: null });
+    profileSingle.mockResolvedValue({ data: { trial_used: true }, error: null });
+
+    const handler = await loadHandler();
+    const res = mockRes();
+    await handler(
+      mockReq(
+        'POST',
+        { plan: 'monthly', couponCode: 'TRIAL14D', startTrial: false },
+        { authorization: 'Bearer token' },
+      ) as any,
+      res as any,
+    );
+
+    expect((res as any).getResult().statusCode).toBe(400);
+    expect(stripeSessionCreate).not.toHaveBeenCalled();
+  });
+
   it('combines a real discount code with the default trial', async () => {
     stripePromotionCodesList.mockResolvedValue({ data: [{ id: 'promo_1' }] });
 

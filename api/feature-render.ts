@@ -33,7 +33,6 @@ function getSupabase() {
 function renderFeature(featureId: FeatureId, locale: Locale, domain: DomainKey, relatedHtml = ''): string {
   const cfg = FEATURES[featureId];
   const pricingPath = buildPath('/pricing', locale, domain);
-  const demoPath = buildPath('/tutor/demo', locale, domain);
   const assetLocaleSuffix = locale === 'lt' ? '' : `-${locale}`;
   const mobileBusinessCardPreview = `/landing/digital-business-card-mobile${assetLocaleSuffix}.png`;
   const desktopBusinessCardPreview = `/landing/digital-business-card-desktop${assetLocaleSuffix}.png`;
@@ -70,7 +69,6 @@ ${featureId === 'digital-business-card' ? `<div class="section">
     <source media="(min-width:768px)" srcset="${desktopBusinessCardPreview}">
     <img src="${mobileBusinessCardPreview}" alt="${esc(t(locale, 'feature.digital-business-card.pageTitle'))}" width="941" height="1672" loading="lazy" style="display:block;width:100%;height:auto;margin:28px auto;border-radius:24px">
   </picture>
-  <a href="${demoPath}" class="btn">${esc(t(locale, 'feature.digital-business-card.demo.openExample'))}</a>
 </div>` : ''}
 <div class="section">
   <h2>${esc(t(locale, `feature.${featureId}.detailsTitle`))}</h2>
