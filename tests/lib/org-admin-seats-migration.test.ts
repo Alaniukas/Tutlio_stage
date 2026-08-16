@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 const migration = readFileSync(
   resolve(process.cwd(), 'supabase/migrations/20260814105327_org_admin_seats_permissions.sql'),
   'utf8',
-);
+).replace(/\r\n/g, '\n');
 
 describe('organization admin seats migration', () => {
   it('enforces one active owner and permission-gated RLS', () => {

@@ -210,6 +210,67 @@ function SpinnerColumn({
   );
 }
 
+/** Compact 24h hour:minute selects — no AM/PM, safe inside dialogs. */
+export function CompactTimeSelect({
+  value,
+  onChange,
+  minuteStep = 5,
+}: TimeSpinnerProps) {
+  const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'));
+  const minutes: string[] = [];
+  for (let m = 0; m < 60; m += minuteStep) {
+    minutes.push(m.toString().padStart(2, '0'));
+  }
+
+  const parts = (value || '08:00').split(':');
+  const hour = (parts[0] || '08').padStart(2, '0');
+  const rawMin = parseInt(parts[1] || '00', 10);
+  let minute = minutes[0] || '00';
+  let best = Infinity;
+  minutes.forEach((opt) => {
+    const diff = Math.abs(parseInt(opt, 10) - rawMin);
+    if (diff < best) {
+      best = diff;
+      minute = opt;
+    }
+  });
+
+  const selectClass =
+    'h-10 min-w-[4.25rem] appearance-none rounded-xl border border-gray-200 bg-white px-3 pr-7 text-sm font-semibold tabular-nums text-gray-900 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100';
+
+  return (
+    <div className="inline-flex items-center gap-1">
+      <div className="relative">
+        <select
+          value={hours.includes(hour) ? hour : '08'}
+          onChange={(e) => onChange(`${e.target.value}:${minute}`)}
+          className={selectClass}
+          aria-label="valandos"
+        >
+          {hours.map((h) => (
+            <option key={h} value={h}>{h}</option>
+          ))}
+        </select>
+        <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">▾</span>
+      </div>
+      <span className="text-gray-400 font-semibold px-0.5">:</span>
+      <div className="relative">
+        <select
+          value={minute}
+          onChange={(e) => onChange(`${hours.includes(hour) ? hour : '08'}:${e.target.value}`)}
+          className={selectClass}
+          aria-label="minutės"
+        >
+          {minutes.map((m) => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
+        <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">▾</span>
+      </div>
+    </div>
+  );
+}
+
 export default function TimeSpinner({ value, onChange, minuteStep = 1 }: TimeSpinnerProps) {
   const { t } = useTranslation();
   const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'));

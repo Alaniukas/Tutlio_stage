@@ -41,6 +41,16 @@ function missingColumns(error: { code?: string; message?: string } | null): bool
   ));
 }
 
+async function withAbort<T>(run: (signal: AbortSignal) => Promise<T>, ms: number): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await run(controller.signal);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function OrgAdminAccessProvider({ children }: { children: ReactNode }) {
   const { user, loading: userLoading } = useUser();
   const [loading, setLoading] = useState(true);
@@ -57,29 +67,70 @@ export function OrgAdminAccessProvider({ children }: { children: ReactNode }) {
     }
 
     setLoading(true);
-    const primary = await supabase
-      .from('organization_admins')
-      .select('id, user_id, organization_id, role, status, permissions, accepted_at, organizations(name, entity_type)')
-      .eq('user_id', user.id)
-      .maybeSingle();
+    try {
+      // Never embed organizations(*) here. That join re-enters RLS on
+      // organizations + organization_admins and has hung school/company login
+      // as a blank spinner (see hotfix_org_admin_login_hang).
+      const seat = await withAbort(async (signal) => {
+        const primary = await supabase
+          .from('organization_admins')
+          .select('id, user_id, organization_id, role, status, permissions, accepted_at')
+          .eq('user_id', user.id)
+          .abortSignal(signal)
+          .maybeSingle();
 
-    if (!primary.error && primary.data) {
-      const row = primary.data as any;
-      const org = row.organizations as { name?: string; entity_type?: string } | null;
+        if (!primary.error && primary.data) return { row: primary.data as Record<string, unknown>, legacy: false };
+        if (!missingColumns(primary.error)) return { row: null, legacy: false };
+
+        const legacy = await supabase
+          .from('organization_admins')
+          .select('id, user_id, organization_id')
+          .eq('user_id', user.id)
+          .abortSignal(signal)
+          .maybeSingle();
+        return { row: (legacy.data as Record<string, unknown> | null) ?? null, legacy: true };
+      }, 8000);
+
+      if (!seat.row) {
+        setMembership(null);
+        return;
+      }
+
+      const row = seat.row;
+      const organizationId = String(row.organization_id || '');
+      let organizationName = '';
+      let entityType: 'school' | 'company' = 'company';
+      if (organizationId) {
+        try {
+          const org = await withAbort(async (signal) => (
+            await supabase
+              .from('organizations')
+              .select('name, entity_type')
+              .eq('id', organizationId)
+              .abortSignal(signal)
+              .maybeSingle()
+          ), 4000);
+          if (!org.error && org.data) {
+            organizationName = String(org.data.name || '');
+            entityType = org.data.entity_type === 'school' ? 'school' : 'company';
+          }
+        } catch (err) {
+          console.warn('[OrgAdminAccess] organization lookup failed:', err);
+        }
+      }
+
       const next: OrgAdminMembership = {
         id: String(row.id),
         userId: String(row.user_id),
-        organizationId: String(row.organization_id),
-        role: row.role as OrgAdminRole,
-        status: row.status as OrgAdminStatus,
-        permissions: normalizeOrgAdminPermissions(row.permissions),
+        organizationId,
+        role: seat.legacy ? 'owner' : row.role as OrgAdminRole,
+        status: seat.legacy ? 'active' : row.status as OrgAdminStatus,
+        permissions: seat.legacy ? {} : normalizeOrgAdminPermissions(row.permissions),
         acceptedAt: typeof row.accepted_at === 'string' ? row.accepted_at : null,
-        organizationName: String(org?.name || ''),
-        entityType: org?.entity_type === 'school' ? 'school' : 'company',
+        organizationName,
+        entityType,
       };
       setMembership(next.status === 'active' ? next : null);
-      setResolvedUserId(user.id);
-      setLoading(false);
 
       if (next.status === 'active' && !next.acceptedAt) {
         void supabase.auth.getSession().then(async ({ data }) => {
@@ -95,38 +146,13 @@ export function OrgAdminAccessProvider({ children }: { children: ReactNode }) {
           }
         });
       }
-      return;
+    } catch (err) {
+      console.warn('[OrgAdminAccess] seat lookup failed:', err);
+      setMembership(null);
+    } finally {
+      setResolvedUserId(user.id);
+      setLoading(false);
     }
-
-    if (missingColumns(primary.error)) {
-      const legacy = await supabase
-        .from('organization_admins')
-        .select('id, user_id, organization_id, organizations(name, entity_type)')
-        .eq('user_id', user.id)
-        .maybeSingle();
-      if (legacy.data) {
-        const row = legacy.data as any;
-        const org = row.organizations as { name?: string; entity_type?: string } | null;
-        setMembership({
-          id: String(row.id),
-          userId: String(row.user_id),
-          organizationId: String(row.organization_id),
-          role: 'owner',
-          status: 'active',
-          permissions: {},
-          acceptedAt: null,
-          organizationName: String(org?.name || ''),
-          entityType: org?.entity_type === 'school' ? 'school' : 'company',
-        });
-        setResolvedUserId(user.id);
-        setLoading(false);
-        return;
-      }
-    }
-
-    setMembership(null);
-    setResolvedUserId(user.id);
-    setLoading(false);
   }, [user?.id, userLoading]);
 
   useEffect(() => {

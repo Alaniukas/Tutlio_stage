@@ -3,15 +3,26 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClientOptions.js';
+import { isProKlaseOrg } from './_lib/marketMoney.js';
+import { resolveOrgLoginDescription } from './_lib/orgLoginDescription.js';
+
+function setCors(res: VercelResponse) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  setCors(res);
+  if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'GET') {
-    res.setHeader('Allow', 'GET');
+    res.setHeader('Allow', 'GET, OPTIONS');
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   const slug = typeof req.query.slug === 'string' ? req.query.slug.trim() : '';
   const id = typeof req.query.id === 'string' ? req.query.id.trim() : '';
+  const locale = typeof req.query.locale === 'string' ? req.query.locale.trim() : '';
   if (!slug && !id) return res.status(400).json({ error: 'Missing slug or id param' });
 
   const supabase = createClient(
@@ -36,9 +47,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!org) return res.status(404).json({ error: 'Organization not found' });
 
   const features = (org.features && typeof org.features === 'object' ? org.features : {}) as Record<string, unknown>;
-  if (!features.custom_branding) {
+  const proKlase = isProKlaseOrg(org.id) || isProKlaseOrg(org.slug);
+  if (!features.custom_branding && !proKlase) {
     return res.status(404).json({ error: 'Branding not enabled' });
   }
+
+  const customDesc = typeof features.login_description === 'string' ? features.login_description : '';
 
   res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
   return res.status(200).json({
@@ -49,5 +63,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     brand_color: org.brand_color || '#6366f1',
     brand_color_secondary: org.brand_color_secondary || '#8b5cf6',
     entity_type: org.entity_type,
+    login_description: resolveOrgLoginDescription({
+      slug: org.slug,
+      orgId: org.id,
+      custom: customDesc,
+      locale,
+    }),
+    hide_powered_by: proKlase,
   });
 }

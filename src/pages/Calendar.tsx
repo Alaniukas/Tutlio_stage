@@ -78,7 +78,7 @@ import { DateInput } from '@/components/ui/date-input';
 import { cn, normalizeUrl } from '@/lib/utils';
 import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
 import { buildSameSlotPeerIdMap, hasOverlapWithExclusions } from '@/lib/calendarSessionOverlap';
-import TimeSpinner, { DateTimeSpinner } from '@/components/TimeSpinner';
+import TimeSpinner, { CompactTimeSelect, DateTimeSpinner } from '@/components/TimeSpinner';
 import AvailabilityManager from '@/components/AvailabilityManager';
 import RecurrenceFields from '@/components/RecurrenceFields';
 import SessionFiles from '@/components/SessionFiles';
@@ -111,6 +111,14 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { cancelSessionAndFillWaitlist, releaseSessionSlotViaApi } from '@/lib/lesson-actions';
 import { Checkbox } from '@/components/ui/checkbox';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
+import {
+  buildRecurringFreeTimeRows,
+  isValidTimeRange,
+  resolveFreeTimeEndDate,
+  timeRangesOverlap,
+  type DayTime,
+  type FreeTimeUntilMode,
+} from '@/lib/calendarFreeTimeFromSlot';
 import {
   advanceRecurringOccurrence,
   isRecurringEndDateOpen,
@@ -325,8 +333,16 @@ export default function CalendarPage() {
 
   // Slot choice popup (C2: Calendar day click → create free time or lesson)
   const [slotChoiceOpen, setSlotChoiceOpen] = useState(false);
+  const [slotChoiceStep, setSlotChoiceStep] = useState<'choice' | 'free-time'>('choice');
   const [pendingSlot, setPendingSlot] = useState<{ start: Date; end: Date } | null>(null);
   const [savingFreeTimeFromSlot, setSavingFreeTimeFromSlot] = useState(false);
+  const [freeTimeRepeat, setFreeTimeRepeat] = useState(false);
+  const [freeTimeDays, setFreeTimeDays] = useState<number[]>([]);
+  const [freeTimeSameTimes, setFreeTimeSameTimes] = useState(true);
+  const [freeTimeDayTimes, setFreeTimeDayTimes] = useState<Record<number, DayTime>>({});
+  const [freeTimeUntilMode, setFreeTimeUntilMode] = useState<FreeTimeUntilMode>('weeks');
+  const [freeTimeUntilDate, setFreeTimeUntilDate] = useState('');
+  const [freeTimeWeeks, setFreeTimeWeeks] = useState(8);
 
   // Modal states
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -1105,6 +1121,17 @@ export default function CalendarPage() {
     }
 
     setPendingSlot({ start, end });
+    setSlotChoiceStep('choice');
+    setFreeTimeRepeat(false);
+    setFreeTimeSameTimes(true);
+    setFreeTimeUntilMode('weeks');
+    setFreeTimeUntilDate('');
+    setFreeTimeWeeks(8);
+    const startHm = format(start, 'HH:mm');
+    const endHm = format(end, 'HH:mm');
+    const dow = getDay(start);
+    setFreeTimeDays([dow]);
+    setFreeTimeDayTimes({ [dow]: { start: startHm, end: endHm } });
     setSlotChoiceOpen(true);
   }, [isAvailabilityModalOpen, isEventModalOpen, isCreateModalOpen, isUpcomingListModalOpen, backgroundEvents, stripeConnected, subjects.length, isOrgTutor, licenseFrozen, t]);
 
@@ -1145,26 +1172,88 @@ export default function CalendarPage() {
     const specificEnd = format(pendingSlot.end, 'HH:mm');
     const blockStart = pendingSlot.start;
 
-    const timeToMinutes = (time: string) => {
-      const [hStr, mStr] = time.split(':');
-      const h = Number(hStr);
-      const m = Number(mStr);
-      if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
-      return h * 60 + m;
-    };
-    const rangesOverlap = (aStart: string, aEnd: string, bStart: string, bEnd: string) => {
-      const aS = timeToMinutes(aStart);
-      const aE = timeToMinutes(aEnd);
-      const bS = timeToMinutes(bStart.slice(0, 5));
-      const bE = timeToMinutes(bEnd.slice(0, 5));
-      if (aS === null || aE === null || bS === null || bE === null) return false;
-      return aS < bE && aE > bS;
-    };
-
-    const startMin = timeToMinutes(specificStart);
-    const endMin = timeToMinutes(specificEnd);
-    if (startMin === null || endMin === null || startMin >= endMin) {
+    if (!isValidTimeRange(specificStart, specificEnd)) {
       setToastMessage({ message: t('avail.invalidTimeRange'), type: 'error' });
+      return;
+    }
+
+    if (freeTimeRepeat) {
+      if (freeTimeDays.length === 0) {
+        setToastMessage({ message: t('cal.freeTimeNeedDay'), type: 'error' });
+        return;
+      }
+      for (const day of freeTimeDays) {
+        const times = freeTimeSameTimes
+          ? { start: specificStart, end: specificEnd }
+          : (freeTimeDayTimes[day] || { start: specificStart, end: specificEnd });
+        if (!isValidTimeRange(times.start, times.end)) {
+          setToastMessage({ message: t('avail.invalidTimeRange'), type: 'error' });
+          return;
+        }
+      }
+      const endDate = resolveFreeTimeEndDate({
+        mode: freeTimeUntilMode,
+        untilDate: freeTimeUntilDate,
+        weeks: freeTimeWeeks,
+        fromDate: specificDate,
+      });
+      if (!endDate) {
+        setToastMessage({ message: t('cal.freeTimeNeedUntil'), type: 'error' });
+        return;
+      }
+      if (endDate < specificDate) {
+        setToastMessage({ message: t('cal.freeTimeNeedUntil'), type: 'error' });
+        return;
+      }
+
+      setSavingFreeTimeFromSlot(true);
+      try {
+        const todayStr = format(new Date(), 'yyyy-MM-dd');
+        const { data: existingRecurring } = await supabase
+          .from('availability')
+          .select('id, start_time, end_time, end_date, day_of_week')
+          .eq('tutor_id', ctxUser.id)
+          .eq('is_recurring', true)
+          .in('day_of_week', freeTimeDays);
+
+        const stillValid = (existingRecurring || []).filter((s) => !s.end_date || s.end_date >= todayStr);
+        const hasOverlap = freeTimeDays.some((day) => {
+          const times = freeTimeSameTimes
+            ? { start: specificStart, end: specificEnd }
+            : (freeTimeDayTimes[day] || { start: specificStart, end: specificEnd });
+          return stillValid.some((s) =>
+            s.day_of_week === day && timeRangesOverlap(times.start, times.end, s.start_time, s.end_time),
+          );
+        });
+        if (hasOverlap) {
+          setToastMessage({ message: t('avail.overlapError'), type: 'error' });
+          return;
+        }
+
+        const rows = buildRecurringFreeTimeRows({
+          tutorId: ctxUser.id,
+          days: freeTimeDays,
+          sameTimes: freeTimeSameTimes,
+          defaultStart: specificStart,
+          defaultEnd: specificEnd,
+          dayTimes: freeTimeDayTimes,
+          endDate,
+        });
+        const { error } = await supabase.from('availability').insert(rows);
+        if (error) {
+          console.error('Error adding recurring free time:', error);
+          setToastMessage({ message: t('avail.addFailed'), type: 'error' });
+          return;
+        }
+
+        setSlotChoiceOpen(false);
+        setSlotChoiceStep('choice');
+        setPendingSlot(null);
+        setToastMessage({ message: t('cal.freeTimeCreatedRecurring'), type: 'success' });
+        fetchData();
+      } finally {
+        setSavingFreeTimeFromSlot(false);
+      }
       return;
     }
 
@@ -1178,7 +1267,7 @@ export default function CalendarPage() {
         .eq('specific_date', specificDate);
 
       if (existingSpecific?.some((s) =>
-        rangesOverlap(specificStart, specificEnd, s.start_time, s.end_time),
+        timeRangesOverlap(specificStart, specificEnd, s.start_time, s.end_time),
       )) {
         setToastMessage({ message: t('avail.overlapError'), type: 'error' });
         return;
@@ -1201,6 +1290,7 @@ export default function CalendarPage() {
       }
 
       setSlotChoiceOpen(false);
+      setSlotChoiceStep('choice');
       setPendingSlot(null);
 
       setEditingSlot({
@@ -5783,37 +5873,254 @@ export default function CalendarPage() {
       </Dialog>
 
       {/* === SLOT CHOICE POPUP (C2) === */}
-      <Dialog open={slotChoiceOpen} onOpenChange={setSlotChoiceOpen}>
-        <DialogContent className="max-w-xs">
+      <Dialog
+        open={slotChoiceOpen}
+        onOpenChange={(open) => {
+          setSlotChoiceOpen(open);
+          if (!open) setSlotChoiceStep('choice');
+        }}
+      >
+        <DialogContent className={slotChoiceStep === 'free-time' ? 'max-w-md overflow-x-hidden' : 'max-w-xs'}>
           <DialogHeader>
-            <DialogTitle>{t('cal.slotChoiceTitle')}</DialogTitle>
+            <DialogTitle>
+              {slotChoiceStep === 'free-time' ? t('cal.createFreeTime') : t('cal.slotChoiceTitle')}
+            </DialogTitle>
             {pendingSlot && (
               <DialogDescription>
                 {format(pendingSlot.start, 'yyyy-MM-dd HH:mm')} – {format(pendingSlot.end, 'HH:mm')}
               </DialogDescription>
             )}
           </DialogHeader>
-          <div className="flex flex-col gap-3 pt-2">
-            <Button
-              variant="outline"
-              className="justify-start gap-3 h-12"
-              onClick={openCreateFreeTimeFromSlot}
-              disabled={savingFreeTimeFromSlot}
-            >
-              <Clock className="w-5 h-5 text-green-600" />
-              {savingFreeTimeFromSlot ? t('avail.saving') : t('cal.createFreeTime')}
-            </Button>
-            <Button
-              variant="outline"
-              className="justify-start gap-3 h-12"
-              onClick={openCreateLessonFromSlot}
-              disabled={licenseFrozen}
-              title={licenseFrozen ? t('cal.licenseFrozenTitle') : undefined}
-            >
-              <Plus className="w-5 h-5 text-indigo-600" />
-              {t('cal.createLessonOption')}
-            </Button>
-          </div>
+          {slotChoiceStep === 'choice' ? (
+            <div className="flex flex-col gap-3 pt-2">
+              <Button
+                variant="outline"
+                className="justify-start gap-3 h-12"
+                onClick={() => setSlotChoiceStep('free-time')}
+                disabled={savingFreeTimeFromSlot}
+              >
+                <Clock className="w-5 h-5 text-green-600" />
+                {t('cal.createFreeTime')}
+              </Button>
+              <Button
+                variant="outline"
+                className="justify-start gap-3 h-12"
+                onClick={openCreateLessonFromSlot}
+                disabled={licenseFrozen}
+                title={licenseFrozen ? t('cal.licenseFrozenTitle') : undefined}
+              >
+                <Plus className="w-5 h-5 text-indigo-600" />
+                {t('cal.createLessonOption')}
+              </Button>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-4 pt-1 min-w-0">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <Checkbox
+                  checked={freeTimeRepeat}
+                  onChange={(e) => setFreeTimeRepeat(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="text-sm font-medium text-gray-900">{t('cal.freeTimeRepeat')}</span>
+                  <span className="block text-xs text-gray-500 mt-0.5">{t('cal.freeTimeRepeatHint')}</span>
+                </span>
+              </label>
+
+              {freeTimeRepeat && (
+                <>
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-gray-800">{t('cal.freeTimeDays')}</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        { value: 1, label: t('avail.monday') },
+                        { value: 2, label: t('avail.tuesday') },
+                        { value: 3, label: t('avail.wednesday') },
+                        { value: 4, label: t('avail.thursday') },
+                        { value: 5, label: t('avail.friday') },
+                        { value: 6, label: t('avail.saturday') },
+                        { value: 0, label: t('avail.sunday') },
+                      ].map((day) => {
+                        const active = freeTimeDays.includes(day.value);
+                        return (
+                          <button
+                            key={day.value}
+                            type="button"
+                            onClick={() => {
+                              setFreeTimeDays((prev) => {
+                                const next = prev.includes(day.value)
+                                  ? prev.filter((d) => d !== day.value)
+                                  : [...prev, day.value];
+                                return next;
+                              });
+                              setFreeTimeDayTimes((prev) => {
+                                if (prev[day.value] || !pendingSlot) return prev;
+                                return {
+                                  ...prev,
+                                  [day.value]: {
+                                    start: format(pendingSlot.start, 'HH:mm'),
+                                    end: format(pendingSlot.end, 'HH:mm'),
+                                  },
+                                };
+                              });
+                            }}
+                            className={cn(
+                              'px-2.5 py-1 rounded-full text-xs font-medium border transition-colors',
+                              active
+                                ? 'bg-indigo-600 text-white border-indigo-600'
+                                : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300',
+                            )}
+                          >
+                            {day.label.slice(0, 3)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-gray-800">{t('cal.freeTimeTimeMode')}</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setFreeTimeSameTimes(true)}
+                        className={cn(
+                          'px-3 py-2 rounded-xl text-xs font-medium border text-left',
+                          freeTimeSameTimes ? 'border-indigo-500 bg-indigo-50 text-indigo-800' : 'border-gray-200 text-gray-600',
+                        )}
+                      >
+                        {t('cal.freeTimeSameTimes')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFreeTimeSameTimes(false)}
+                        className={cn(
+                          'px-3 py-2 rounded-xl text-xs font-medium border text-left',
+                          !freeTimeSameTimes ? 'border-indigo-500 bg-indigo-50 text-indigo-800' : 'border-gray-200 text-gray-600',
+                        )}
+                      >
+                        {t('cal.freeTimeCustomTimes')}
+                      </button>
+                    </div>
+                    {!freeTimeSameTimes && pendingSlot && (
+                      <div className="space-y-2 pt-1 min-w-0">
+                        {freeTimeDays.map((day) => {
+                          const label = [
+                            t('avail.sunday'),
+                            t('avail.monday'),
+                            t('avail.tuesday'),
+                            t('avail.wednesday'),
+                            t('avail.thursday'),
+                            t('avail.friday'),
+                            t('avail.saturday'),
+                          ][day];
+                          const times = freeTimeDayTimes[day] || {
+                            start: format(pendingSlot.start, 'HH:mm'),
+                            end: format(pendingSlot.end, 'HH:mm'),
+                          };
+                          return (
+                            <div key={day} className="rounded-xl border border-gray-100 bg-gray-50/80 px-3 py-2.5 space-y-2 min-w-0">
+                              <p className="text-xs font-medium text-gray-700">{label}</p>
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                <label className="flex flex-col gap-1 min-w-0">
+                                  <span className="text-[11px] text-gray-400">{t('avail.startTime')}</span>
+                                  <CompactTimeSelect
+                                    value={times.start}
+                                    onChange={(v) => setFreeTimeDayTimes((prev) => ({
+                                      ...prev,
+                                      [day]: { ...times, start: v },
+                                    }))}
+                                    minuteStep={5}
+                                  />
+                                </label>
+                                <span className="hidden sm:block text-gray-300 pt-5">–</span>
+                                <label className="flex flex-col gap-1 min-w-0">
+                                  <span className="text-[11px] text-gray-400">{t('avail.endTime')}</span>
+                                  <CompactTimeSelect
+                                    value={times.end}
+                                    onChange={(v) => setFreeTimeDayTimes((prev) => ({
+                                      ...prev,
+                                      [day]: { ...times, end: v },
+                                    }))}
+                                    minuteStep={5}
+                                  />
+                                </label>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-gray-800">{t('cal.freeTimeUntil')}</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setFreeTimeUntilMode('weeks')}
+                        className={cn(
+                          'px-3 py-2 rounded-xl text-xs font-medium border',
+                          freeTimeUntilMode === 'weeks' ? 'border-indigo-500 bg-indigo-50 text-indigo-800' : 'border-gray-200 text-gray-600',
+                        )}
+                      >
+                        {t('cal.freeTimeUntilWeeks')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFreeTimeUntilMode('date')}
+                        className={cn(
+                          'px-3 py-2 rounded-xl text-xs font-medium border',
+                          freeTimeUntilMode === 'date' ? 'border-indigo-500 bg-indigo-50 text-indigo-800' : 'border-gray-200 text-gray-600',
+                        )}
+                      >
+                        {t('cal.freeTimeUntilDate')}
+                      </button>
+                    </div>
+                    {freeTimeUntilMode === 'weeks' ? (
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="number"
+                          min={1}
+                          max={52}
+                          value={freeTimeWeeks}
+                          onChange={(e) => setFreeTimeWeeks(Number(e.target.value) || 1)}
+                          className="w-20 rounded-xl"
+                        />
+                        <span className="text-sm text-gray-500">{t('cal.freeTimeWeeksUnit')}</span>
+                      </div>
+                    ) : (
+                      <DateInput
+                        value={freeTimeUntilDate}
+                        min={pendingSlot ? format(pendingSlot.start, 'yyyy-MM-dd') : undefined}
+                        onChange={(e) => setFreeTimeUntilDate(e.target.value)}
+                      />
+                    )}
+                  </div>
+                </>
+              )}
+
+              <div className="flex gap-2 pt-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => setSlotChoiceStep('choice')}
+                  disabled={savingFreeTimeFromSlot}
+                >
+                  {t('common.back')}
+                </Button>
+                <Button
+                  type="button"
+                  className="flex-1 bg-indigo-600 hover:bg-indigo-700"
+                  onClick={openCreateFreeTimeFromSlot}
+                  disabled={savingFreeTimeFromSlot}
+                >
+                  {savingFreeTimeFromSlot ? t('avail.saving') : t('cal.freeTimeCreate')}
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

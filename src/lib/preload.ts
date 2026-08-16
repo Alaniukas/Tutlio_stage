@@ -266,7 +266,7 @@ export function orgAdminRowByUserDeduped(userId: string) {
     try {
       const { data, error } = await supabase
         .from('organization_admins')
-        .select('organization_id, organizations(name, tutor_license_count, entity_type)')
+        .select('organization_id')
         .eq('user_id', userId)
         .abortSignal(controller.signal)
         .maybeSingle();
@@ -274,7 +274,17 @@ export function orgAdminRowByUserDeduped(userId: string) {
         console.warn('[preload] orgAdminRowByUserDeduped failed:', error.message);
         return null;
       }
-      return data;
+      if (!data?.organization_id) return data;
+      const org = await supabase
+        .from('organizations')
+        .select('name, tutor_license_count, entity_type')
+        .eq('id', data.organization_id)
+        .abortSignal(controller.signal)
+        .maybeSingle();
+      return {
+        ...data,
+        organizations: org.data || null,
+      };
     } catch (err) {
       if (controller.signal.aborted) {
         console.warn('[preload] orgAdminRowByUserDeduped aborted by timeout');

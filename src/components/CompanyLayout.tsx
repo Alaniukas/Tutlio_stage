@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { getCached } from '@/lib/dataCache';
-import { orgAdminRowByUserDeduped, preloadOrgAdminData } from '@/lib/preload';
+import { preloadOrgAdminData } from '@/lib/preload';
 import { buildPlatformPath } from '@/lib/platform';
 import {
   LayoutDashboard,
@@ -44,7 +44,14 @@ interface CompanyNavItem {
   icon: typeof LayoutDashboard;
   exact?: boolean;
   permission: OrgAdminPermission | null;
+  section: 'work' | 'manage' | 'help';
 }
+
+const NAV_SECTIONS = [
+  { id: 'work' as const, labelKey: 'companyNav.sectionWork' },
+  { id: 'manage' as const, labelKey: 'companyNav.sectionManage' },
+  { id: 'help' as const, labelKey: 'companyNav.sectionHelp' },
+];
 
 export function buildCompanyNavItems(
   isSchool: boolean,
@@ -56,31 +63,30 @@ export function buildCompanyNavItems(
   showTeam = false,
 ): CompanyNavItem[] {
   const base: CompanyNavItem[] = [
-    { href: `${orgBasePath}`, label: t('companyNav.overview'), icon: LayoutDashboard, exact: true, permission: 'dashboard.view' },
-    { href: `${orgBasePath}/tutors`, label: isSchool ? t('companyNav.teachers') : t('companyNav.tutors'), icon: Users, permission: 'tutors.view' },
-    { href: `${orgBasePath}/students`, label: t('companyNav.students'), icon: GraduationCap, permission: 'students.view' },
-    { href: `${orgBasePath}/sessions`, label: t('companyNav.sessions'), icon: BookOpen, permission: 'sessions.view' },
-    { href: `${orgBasePath}/schedule`, label: t('companyNav.schedule'), icon: CalendarDays, permission: 'sessions.view' },
-    { href: `${orgBasePath}/messages`, label: t('companyNav.messages'), icon: MessageSquare, permission: 'messages.view' },
-    { href: `${orgBasePath}/stats`, label: t('companyNav.stats'), icon: BarChart3, permission: 'stats.view' },
-    { href: `${orgBasePath}/settings`, label: t('companyNav.lessonSettings'), icon: Settings, permission: 'settings.view' },
+    { href: `${orgBasePath}`, label: t('companyNav.overview'), icon: LayoutDashboard, exact: true, permission: 'dashboard.view', section: 'work' },
+    { href: `${orgBasePath}/tutors`, label: isSchool ? t('companyNav.teachers') : t('companyNav.tutors'), icon: Users, permission: 'tutors.view', section: 'work' },
+    { href: `${orgBasePath}/students`, label: t('companyNav.students'), icon: GraduationCap, permission: 'students.view', section: 'work' },
+    { href: `${orgBasePath}/sessions`, label: t('companyNav.sessions'), icon: BookOpen, permission: 'sessions.view', section: 'work' },
+    { href: `${orgBasePath}/schedule`, label: t('companyNav.schedule'), icon: CalendarDays, permission: 'sessions.view', section: 'work' },
+    { href: `${orgBasePath}/messages`, label: t('companyNav.messages'), icon: MessageSquare, permission: 'messages.view', section: 'work' },
+    { href: `${orgBasePath}/stats`, label: t('companyNav.stats'), icon: BarChart3, permission: 'stats.view', section: 'manage' },
+    { href: `${orgBasePath}/settings`, label: t('companyNav.lessonSettings'), icon: Settings, permission: 'settings.view', section: 'manage' },
   ];
   if (showPublicPage) {
-    base.push({ href: `${orgBasePath}/public-page`, label: t('companyNav.publicPage'), icon: Globe, permission: 'settings.view' });
+    base.push({ href: `${orgBasePath}/public-page`, label: t('companyNav.publicPage'), icon: Globe, permission: 'settings.view', section: 'manage' });
   }
   if (isSchool) {
-    base.push({ href: `${orgBasePath}/contracts`, label: t('companyNav.contracts'), icon: FileText, permission: 'contracts.view' });
+    base.push({ href: `${orgBasePath}/contracts`, label: t('companyNav.contracts'), icon: FileText, permission: 'contracts.view', section: 'manage' });
   }
-  base.push({ href: `${orgBasePath}/finance`, label: t('companyNav.finance'), icon: CreditCard, permission: 'finance.view' });
+  base.push({ href: `${orgBasePath}/finance`, label: t('companyNav.finance'), icon: CreditCard, permission: 'finance.view', section: 'manage' });
   if (showDynamicPricing) {
-    base.push({ href: `${orgBasePath}/dynamic-pricing`, label: t('companyNav.dynamicPricing'), icon: BadgeEuro, permission: 'settings.view' });
+    base.push({ href: `${orgBasePath}/dynamic-pricing`, label: t('companyNav.dynamicPricing'), icon: BadgeEuro, permission: 'settings.view', section: 'manage' });
   }
   if (showTeam) {
-    base.push({ href: `${orgBasePath}/team`, label: t('companyNav.team'), icon: ShieldCheck, permission: null });
+    base.push({ href: `${orgBasePath}/team`, label: t('companyNav.team'), icon: ShieldCheck, permission: null, section: 'manage' });
   }
-  // Help stays last so the operational organization tools remain grouped.
   if (showInstructions) {
-    base.push({ href: `${orgBasePath}/instructions`, label: t('companyNav.instructions'), icon: HelpCircle, permission: null });
+    base.push({ href: `${orgBasePath}/instructions`, label: t('companyNav.instructions'), icon: HelpCircle, permission: null, section: 'help' });
   }
   return base;
 }
@@ -150,16 +156,6 @@ export default function CompanyLayout() {
       if (dc?.orgName && !orgName) setOrgName(dc.orgName);
       if (dc?.entityType) setEntityType(dc.entityType);
     });
-    (async () => {
-      if (!ctxUser || cancelled) return;
-      const data = await orgAdminRowByUserDeduped(ctxUser.id);
-      if (data && !cancelled) {
-        const name = (data.organizations as any)?.name || '';
-        const et = ((data.organizations as any)?.entity_type as OrgEntityType) || 'company';
-        if (name && !orgName) setOrgName(name);
-        setEntityType(et);
-      }
-    })();
     return () => { cancelled = true; };
   }, [ctxUser?.id, membership?.organizationId]);
 
@@ -192,7 +188,7 @@ export default function CompanyLayout() {
       <Link
         to={orgBasePath}
         onClick={() => setMobileOpen(false)}
-        className={cn('px-6 py-5 flex items-center gap-3 border-b flex-shrink-0', borderColor)}
+        className={cn('px-5 py-4 flex items-center gap-3 border-b flex-shrink-0', borderColor)}
       >
         <div className="w-9 h-9 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center flex-shrink-0">
           <BrandIcon className="w-5 h-5 text-white" />
@@ -203,31 +199,44 @@ export default function CompanyLayout() {
         </div>
       </Link>
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-1">
-        {NAV_ITEMS.map((item) => {
-          const showChatBadge = item.href === `${orgBasePath}/messages` && chatUnreadTotal > 0;
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide px-3 py-3 space-y-4">
+        {NAV_SECTIONS.map((section) => {
+          const items = NAV_ITEMS.filter((item) => item.section === section.id);
+          if (items.length === 0) return null;
           return (
-            <Link
-              key={item.href}
-              to={item.href}
-              onClick={() => setMobileOpen(false)}
-              className={cn(
-                'relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors',
-                isActive(item)
-                  ? 'bg-white/15 text-white'
-                  : cn(inactiveText, 'hover:text-white hover:bg-white/10'),
-              )}
-            >
-              <span className="relative flex-shrink-0">
-                <item.icon className="w-4 h-4 flex-shrink-0" />
-                {showChatBadge && (
-                  <span className="absolute -top-1 -right-1 min-w-[14px] h-3.5 px-0.5 rounded-full bg-rose-500 text-[9px] font-bold text-white flex items-center justify-center border border-slate-900">
-                    {chatUnreadTotal > 9 ? '9+' : chatUnreadTotal}
-                  </span>
-                )}
-              </span>
-              {item.label}
-            </Link>
+            <div key={section.id}>
+              <p className={cn('px-3 mb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em]', inactiveText)}>
+                {t(section.labelKey)}
+              </p>
+              <div className="space-y-0.5">
+                {items.map((item) => {
+                  const showChatBadge = item.href === `${orgBasePath}/messages` && chatUnreadTotal > 0;
+                  return (
+                    <Link
+                      key={item.href}
+                      to={item.href}
+                      onClick={() => setMobileOpen(false)}
+                      className={cn(
+                        'relative flex items-center gap-3 px-3 py-1.5 rounded-lg text-[13px] font-medium transition-colors',
+                        isActive(item)
+                          ? 'bg-white/15 text-white'
+                          : cn(inactiveText, 'hover:text-white hover:bg-white/10'),
+                      )}
+                    >
+                      <span className="relative flex-shrink-0">
+                        <item.icon className="w-4 h-4 flex-shrink-0" />
+                        {showChatBadge && (
+                          <span className="absolute -top-1 -right-1 min-w-[14px] h-3.5 px-0.5 rounded-full bg-rose-500 text-[9px] font-bold text-white flex items-center justify-center border border-slate-900">
+                            {chatUnreadTotal > 9 ? '9+' : chatUnreadTotal}
+                          </span>
+                        )}
+                      </span>
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
           );
         })}
       </div>

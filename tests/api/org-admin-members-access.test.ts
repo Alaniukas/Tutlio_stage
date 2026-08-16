@@ -15,8 +15,16 @@ function mockRes() {
   };
 }
 
-const requireOrgAdminAccess = vi.fn();
+const { requireOrgAdminAccess } = vi.hoisted(() => ({
+  requireOrgAdminAccess: vi.fn(),
+}));
 vi.mock('../../api/_lib/orgAdminAccess', () => ({
+  requireOrgAdminAccess,
+  isOrgOwner: (access: { role?: string; status?: string }) => (
+    access.role === 'owner' && access.status === 'active'
+  ),
+}));
+vi.mock('../../api/_lib/orgAdminAccess.js', () => ({
   requireOrgAdminAccess,
   isOrgOwner: (access: { role?: string; status?: string }) => (
     access.role === 'owner' && access.status === 'active'
@@ -77,13 +85,14 @@ const ownerAccess = {
   acceptedAt: '2026-08-01T00:00:00.000Z',
 };
 
-describe('POST /api/org-admin-members access', () => {
+describe.sequential('POST /api/org-admin-members access', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
     process.env.SUPABASE_URL = 'https://test.supabase.co';
     process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-role';
     requireOrgAdminAccess.mockResolvedValue({ ok: true, access: ownerAccess });
+    targetMaybeSingle.mockResolvedValue({ data: null, error: null });
     listOrder.mockResolvedValue({ data: [], error: null });
     auditInsert.mockResolvedValue({ error: null });
     rpc.mockResolvedValue({ error: null });

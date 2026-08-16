@@ -117,9 +117,9 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     name: 'Whitelabel / organizacijos stilius',
     nameEn: 'Whitelabel / Custom Branding',
     description:
-      'Mokiniai, tėvai ir korepetitoriai mato organizacijos logo ir spalvas vietoj Tutlio. Login puslapyje rodomas org logo su "powered by Tutlio".',
+      'Mokiniai, tėvai ir korepetitoriai mato organizacijos logo ir spalvas vietoj Tutlio. Galima įdėti prisijungimo nuorodas / widget į savo svetainę (be registracijos).',
     descriptionEn:
-      'Students, parents, and tutors see the organization\'s logo and colors instead of Tutlio. Login page shows org logo with "powered by Tutlio".',
+      'Students, parents, and tutors see the organization\'s logo and colors instead of Tutlio. Login-only links and an embeddable widget can be placed on the organization website.',
     category: 'appearance',
     defaultValue: false,
     requiresSetup: true,

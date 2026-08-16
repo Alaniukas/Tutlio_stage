@@ -56,7 +56,7 @@ export function publicPageCanonicalUrl(slug: string, locale: Locale): string {
 export const RESERVED_SLUGS = new Set([
   'api', 'admin', 'login', 'register', 'book', 'review', 'assets', 'new', 'edit',
   'settings', 'pricing', 'blog', 'features', 'schools', 'teachers', 'contacts',
-  'about', 'terms', 'privacy-policy', 'dpa', 'tutor', 'korepetitorius',
+  'about', 'terms', 'privacy-policy', 'dpa', 'tutor', 'korepetitorius', 'embed',
 ]);
 
 const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;

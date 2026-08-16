@@ -20,6 +20,8 @@ import { useTranslation } from '@/lib/i18n';
 import { useOrgBranding } from '@/hooks/useOrgBranding';
 import { setLastPortal } from '@/lib/pwaPortal';
 import { loadSavedLoginForm, persistLoginForm, readRememberMePreference } from '@/lib/loginCredentials';
+import { parseOrgLoginPortal } from '@/lib/orgLoginLinks';
+import { ORG_LOGIN_LOGO_IMG_CLASS, ORG_LOGIN_LOGO_WRAP_CLASS } from '@/lib/orgLoginLogo';
 
 // ─── SVG Illustrations ────────────────────────────────────────────────────────
 
@@ -125,7 +127,7 @@ function messageForAuthHashError(code: string, detailEnc: string | null): string
 
 export default function Login() {
   const { t, locale } = useTranslation();
-  const { branding: orgBranding } = useOrgBranding();
+  const { branding: orgBranding, loading: brandingLoading, slug: orgSlug } = useOrgBranding();
   const [role, setRole] = useState<Role>(null);
   const [studentMode, setStudentMode] = useState<StudentMode>(null);
   const [tutorMode, setTutorMode] = useState<TutorMode>(null);
@@ -176,6 +178,8 @@ export default function Login() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const nextPath = safeInternalNextPath(searchParams.get('next'));
+  const loginPortalParam = parseOrgLoginPortal(searchParams.get('portal'));
+  const loginOnly = Boolean(orgSlug);
   const redirectOnceRef = useRef(false);
   const hashHandledRef = useRef(false);
   const redirectInFlightRef = useRef(false);
@@ -332,8 +336,16 @@ export default function Login() {
     if (saved.email) setEmail(saved.email);
     if (saved.password) setPassword(saved.password);
     setRememberMeState(saved.rememberMe);
-    // Deep-link from reminder emails: open the matching portal login form.
-    if (nextPath?.startsWith('/student')) setRole('student');
+    // Deep-link from reminder emails / org website buttons: open the matching portal login form.
+    if (loginPortalParam === 'tutor') {
+      setRole('tutor');
+      setTutorMode('login');
+    } else if (loginPortalParam === 'student') {
+      setRole('student');
+      setStudentMode('login');
+    } else if (loginPortalParam === 'parent') {
+      setRole('parent');
+    } else if (nextPath?.startsWith('/student')) setRole('student');
     else if (nextPath?.startsWith('/parent')) setRole('parent');
     else if (
       nextPath?.startsWith('/calendar')
@@ -342,7 +354,7 @@ export default function Login() {
     ) {
       setRole('tutor');
     }
-  }, [nextPath]);
+  }, [nextPath, loginPortalParam]);
 
   useEffect(() => {
     const code = searchParams.get('auth_error');
@@ -661,20 +673,31 @@ export default function Login() {
         />
 
         <div className="relative z-20 flex flex-col justify-between p-12 h-full text-white">
+          {!loginOnly && (
           <Link to="/" className="flex items-center gap-2 hover:bg-white/20 transition-all w-fit text-sm font-medium bg-white/10 px-5 py-2.5 rounded-full backdrop-blur border border-white/10">
             <ArrowLeft className="w-4 h-4" />
             {t('auth.goBackToMain')}
           </Link>
+          )}
+          {loginOnly && <div />}
 
           <div className="max-w-xl space-y-6">
-            <h1 className="text-5xl font-bold leading-tight tracking-tight">{t('login.heroTitle')}</h1>
+            <h1 className="text-5xl font-bold leading-tight tracking-tight">
+              {orgBranding ? orgBranding.name : loginOnly ? '' : t('login.heroTitle')}
+            </h1>
             <p className="text-white/70 text-xl leading-relaxed font-light">
-              {t('login.heroDesc')}
+              {orgBranding
+                ? (orgBranding.login_description || t('login.orgHeroDesc', { name: orgBranding.name }))
+                : loginOnly
+                  ? ''
+                  : t('login.heroDesc')}
             </p>
           </div>
 
           <div className="text-sm text-white/50 font-medium">
-            {t('login.copyright', { year: String(new Date().getFullYear()) })}
+            {loginOnly
+              ? (orgBranding?.name || '')
+              : t('login.copyright', { year: String(new Date().getFullYear()) })}
           </div>
         </div>
       </div>
@@ -690,21 +713,32 @@ export default function Login() {
         <div className="absolute bottom-0 right-0 w-80 h-80 rounded-full blur-3xl pointer-events-none" style={brandColor ? { backgroundColor: `color-mix(in srgb, ${brandColor} 15%, transparent)` } : { backgroundColor: 'rgb(124 58 237 / 0.2)' }} />
 
         {/* Mobile back link – part of normal flow so it's always visible */}
+        {!loginOnly && (
         <div className="w-full max-w-md mb-4 lg:hidden relative z-10">
           <Link to="/" className="flex items-center gap-2 hover:bg-white/20 transition-all w-fit text-sm font-medium bg-white/10 px-4 py-2 rounded-full backdrop-blur border border-white/10 text-white">
             <ArrowLeft className="w-4 h-4" />
             {t('common.back')}
           </Link>
         </div>
+        )}
 
         <div className="relative w-full max-w-md z-10">
           {/* Logo */}
           <div className="text-center mb-8">
             {orgBranding?.logo_url ? (
               <div className="inline-flex flex-col items-center">
-                <img src={orgBranding.logo_url} alt={orgBranding.name} className="h-14 max-w-[180px] object-contain" />
-                <span className="text-[10px] text-white/40 mt-1">powered by Tutlio</span>
+                <div className={ORG_LOGIN_LOGO_WRAP_CLASS}>
+                  <img src={orgBranding.logo_url} alt={orgBranding.name} className={ORG_LOGIN_LOGO_IMG_CLASS} />
+                </div>
+                {!orgBranding.hide_powered_by && (
+                  <span className="text-[10px] text-white/40 mt-1">powered by Tutlio</span>
+                )}
                 <h1 className="text-2xl font-bold text-white tracking-tight mt-4">{orgBranding.name}</h1>
+              </div>
+            ) : loginOnly ? (
+              <div className="inline-flex flex-col items-center">
+                <div className={`${ORG_LOGIN_LOGO_WRAP_CLASS} h-16 w-16 ${brandingLoading ? 'animate-pulse' : ''}`} />
+                <h1 className="text-2xl font-bold text-white tracking-tight mt-4">{orgBranding?.name || ''}</h1>
               </div>
             ) : (
               <>
@@ -732,7 +766,8 @@ export default function Login() {
                 {t('login.chooseRole')}
               </p>
 
-              {/* Company admin — separate company login page */}
+              {/* Company admin — hidden on org-branded login-only pages */}
+              {!loginOnly && (
               <button
                 type="button"
                 onClick={() => {
@@ -757,11 +792,15 @@ export default function Login() {
                 </div>
                 <ChevronRight className="w-5 h-5 text-white/40 group-hover:text-white/80 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
               </button>
+              )}
 
               {/* Tutor card */}
               <button
                 type="button"
-                onClick={() => setRole('tutor')}
+                onClick={() => {
+                  setRole('tutor');
+                  if (loginOnly) setTutorMode('login');
+                }}
                 className="group w-full bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 hover:border-white/40 rounded-2xl p-5 text-left transition-all duration-200 flex items-center gap-5"
               >
                 <div className="w-24 h-18 flex-shrink-0 opacity-90">
@@ -777,7 +816,10 @@ export default function Login() {
               {/* Student card */}
               <button
                 type="button"
-                onClick={() => setRole('student')}
+                onClick={() => {
+                  setRole('student');
+                  if (loginOnly) setStudentMode('login');
+                }}
                 className="group w-full bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 hover:border-white/40 rounded-2xl p-5 text-left transition-all duration-200 flex items-center gap-5"
               >
                 <div className="w-24 h-18 flex-shrink-0 opacity-90">
@@ -785,14 +827,31 @@ export default function Login() {
                 </div>
                 <div className="flex-1">
                   <p className="text-white font-semibold text-base">
-                    {t('login.studentsParents')}
+                    {loginOnly ? t('common.student') : t('login.studentsParents')}
                   </p>
                   <p className="text-indigo-300 text-sm mt-0.5">
-                    {t('login.studentsParentsDesc')}
+                    {loginOnly ? t('login.studentLoginOnlyDesc') : t('login.studentsParentsDesc')}
                   </p>
                 </div>
                 <ChevronRight className="w-5 h-5 text-white/40 group-hover:text-white/80 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
               </button>
+
+              {loginOnly && (
+                <button
+                  type="button"
+                  onClick={() => setRole('parent')}
+                  className="group w-full bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 hover:border-white/40 rounded-2xl p-5 text-left transition-all duration-200 flex items-center gap-5"
+                >
+                  <div className="w-24 h-18 flex-shrink-0 flex items-center justify-center opacity-95">
+                    <Users className="w-12 h-12 text-fuchsia-200" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-white font-semibold text-base">{t('login.parentRole')}</p>
+                    <p className="text-indigo-300 text-sm mt-0.5">{t('login.parentLoginDesc2')}</p>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-white/40 group-hover:text-white/80 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
+                </button>
+              )}
             </div>
           )}
 
@@ -1019,6 +1078,7 @@ export default function Login() {
                   </form>
                 ) : !tutorOrgCodeMode ? (
                   <div className="flex items-center justify-between mt-5 pt-4 border-t border-gray-100">
+                    {!loginPortalParam && (
                     <button
                       type="button"
                       onClick={resetTutor}
@@ -1027,6 +1087,8 @@ export default function Login() {
                       <ArrowLeft className="w-3.5 h-3.5" />
                     {t('common.back')}
                     </button>
+                    )}
+                    {!loginOnly && (
                     <div className="text-right space-y-1">
                       <p className="text-sm text-gray-400">
                         {t('login.haveCompanyCode')}{' '}
@@ -1036,6 +1098,7 @@ export default function Login() {
                         </button>
                       </p>
                     </div>
+                    )}
                   </div>
                 ) : null}
               </div>
@@ -1055,12 +1118,14 @@ export default function Login() {
                 </div>
               </div>
               <div className="p-6 space-y-4">
+                {!loginOnly && (
                 <p className="text-sm text-gray-600">
                   {t('login.parentNoAccount')}{' '}
                   <Link to="/parent-register" className="text-violet-600 font-medium hover:underline">
                     {t('login.parentRegisterLink')}
                   </Link>
                 </p>
+                )}
                 {isForgotPassword ? (
                   <form onSubmit={handleForgotPassword} className="space-y-4">
                     <div className="space-y-2">
@@ -1159,11 +1224,14 @@ export default function Login() {
                     </button>
                   </form>
                 )}
+                {!loginPortalParam && (
                 <button type="button" onClick={reset}
                   className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-700 transition-colors mt-2">
                   <ArrowLeft className="w-3.5 h-3.5" /> {t('common.back')}
                 </button>
+                )}
 
+                {!loginOnly && (
                 <button
                   type="button"
                   onClick={backToStudentGroup}
@@ -1171,6 +1239,7 @@ export default function Login() {
                 >
                   {t('login.backToStudentsParents')}
                 </button>
+                )}
               </div>
             </div>
           )}
@@ -1209,6 +1278,7 @@ export default function Login() {
                         <p className="text-xs text-gray-400">{t('login.alreadyHaveAccount')}</p>
                       </div>
                     </button>
+                    {!loginOnly && (
                     <button
                       type="button"
                       onClick={() => setStudentMode('register')}
@@ -1222,7 +1292,9 @@ export default function Login() {
                         <p className="text-xs text-gray-400">{t('login.hasInviteCode')}</p>
                       </div>
                     </button>
+                    )}
 
+                    {!loginOnly && (
                     <button
                       type="button"
                       onClick={() => setRole('parent')}
@@ -1240,6 +1312,7 @@ export default function Login() {
                         </p>
                       </div>
                     </button>
+                    )}
                   </div>
                 )}
 
@@ -1354,7 +1427,7 @@ export default function Login() {
                 )}
 
                 {/* Student REGISTER with invite code */}
-                {studentMode === 'register' && (
+                {studentMode === 'register' && !loginOnly && (
                   <form onSubmit={handleStudentAccess} className="space-y-4">
                     <div className="space-y-2">
                       <Label className="text-sm font-medium text-gray-700">{t('login.inviteCode')}</Label>
@@ -1382,24 +1455,28 @@ export default function Login() {
                 )}
 
                 {/* Back + switch link */}
+                {(!loginPortalParam || studentMode === 'register') && (
                 <div className="mt-5 pt-4 border-t border-gray-100 flex items-center justify-between">
+                  {!loginPortalParam && (
                   <button type="button" onClick={studentMode ? resetStudent : reset}
                     className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-700 transition-colors">
                     <ArrowLeft className="w-3.5 h-3.5" /> {t('common.back')}
                   </button>
+                  )}
                   {studentMode === 'register' && (
                     <button type="button" onClick={() => setStudentMode('login')}
                       className="text-sm text-violet-600 hover:underline font-medium">
                       {t('login.alreadyHaveAccount')}
                     </button>
                   )}
-                  {studentMode === 'login' && (
+                  {studentMode === 'login' && !loginOnly && (
                     <button type="button" onClick={() => setStudentMode('register')}
                       className="text-sm text-violet-600 hover:underline font-medium">
                       {t('login.registerWithCode')}
                     </button>
                   )}
                 </div>
+                )}
               </div>
             </div>
           )}

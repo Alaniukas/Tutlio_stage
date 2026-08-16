@@ -60,17 +60,38 @@ describe('schoolFinanceExport', () => {
 
   it('filters unpaid and overdue rows', () => {
     const rows = buildSchoolFinanceRows(contracts, installments);
-    const unpaid = filterSchoolFinanceRows(rows, { paymentStatus: 'unpaid', search: '', dueFrom: '', dueTo: '' });
+    const unpaid = filterSchoolFinanceRows(rows, { paymentStatus: 'unpaid', search: '', paidFrom: '', paidTo: '' });
     expect(unpaid.every((r) => r.paymentStatus !== 'paid')).toBe(true);
-    const overdue = filterSchoolFinanceRows(rows, { paymentStatus: 'overdue', search: '', dueFrom: '', dueTo: '' });
+    const overdue = filterSchoolFinanceRows(rows, { paymentStatus: 'overdue', search: '', paidFrom: '', paidTo: '' });
     expect(overdue).toHaveLength(1);
     expect(overdue[0].paymentStatus).toBe('overdue');
   });
 
   it('searches by student name without diacritics', () => {
     const rows = buildSchoolFinanceRows(contracts, installments);
-    const found = filterSchoolFinanceRows(rows, { paymentStatus: 'all', search: 'ona', dueFrom: '', dueTo: '' });
+    const found = filterSchoolFinanceRows(rows, { paymentStatus: 'all', search: 'ona', paidFrom: '', paidTo: '' });
     expect(found.some((r) => r.studentName.includes('Ona'))).toBe(true);
+  });
+
+  it('filters by paid date period, not due date', () => {
+    const rows = buildSchoolFinanceRows(contracts, installments);
+    const july = filterSchoolFinanceRows(rows, {
+      paymentStatus: 'all',
+      search: '',
+      paidFrom: '2026-07-01',
+      paidTo: '2026-07-31',
+    });
+    expect(july).toHaveLength(0);
+
+    const august = filterSchoolFinanceRows(rows, {
+      paymentStatus: 'all',
+      search: '',
+      paidFrom: '2026-08-01',
+      paidTo: '2026-08-31',
+    });
+    expect(august).toHaveLength(1);
+    expect(august[0].installmentNumber).toBe(1);
+    expect(august[0].paymentStatus).toBe('paid');
   });
 
   it('summarizes totals', () => {

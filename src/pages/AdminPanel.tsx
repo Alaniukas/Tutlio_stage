@@ -145,6 +145,7 @@ export default function AdminPanel() {
   const [editLogoUrl, setEditLogoUrl] = useState('');
   const [editBrandColor, setEditBrandColor] = useState('#6366f1');
   const [editBrandColorSecondary, setEditBrandColorSecondary] = useState('#8b5cf6');
+  const [editLoginDescription, setEditLoginDescription] = useState('');
   const [detailStats, setDetailStats] = useState<OrgAdminStats | null>(null);
   const [soloTutors, setSoloTutors] = useState<SoloTutorAdminRow[]>([]);
   const [soloListLoading, setSoloListLoading] = useState(false);
@@ -362,6 +363,8 @@ export default function AdminPanel() {
       setEditLogoUrl(org.logo_url || '');
       setEditBrandColor(org.brand_color || '#6366f1');
       setEditBrandColorSecondary(org.brand_color_secondary || '#8b5cf6');
+      const loginDesc = (orgFeatures as Record<string, unknown>).login_description;
+      setEditLoginDescription(typeof loginDesc === 'string' ? loginDesc : '');
       setDetailTutors(data.tutors || []);
       setDetailArchivedTutors(data.archived_tutors || []);
       setDetailStudents(data.students || []);
@@ -383,6 +386,7 @@ export default function AdminPanel() {
       const merged: Record<string, unknown> = {
         ...detailFeaturesBase,
         ...editFeatures,
+        login_description: editLoginDescription.trim(),
       };
       const trimmedUrl = editManualPaymentUrl.trim();
       if (trimmedUrl) merged.manual_payment_url = trimmedUrl;
@@ -1157,7 +1161,9 @@ export default function AdminPanel() {
                             onChange={(e) => setEditSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
                             className="bg-white/10 border-white/20 text-white placeholder:text-slate-500 rounded-xl"
                           />
-                          <p className="text-[11px] text-slate-500">tutlio.lt/login?org={editSlug || 'slug'}</p>
+                          <p className="text-[11px] text-slate-500">
+                            tutlio.lt/login?org={editSlug || 'slug'}&portal=student|parent|tutor
+                          </p>
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-slate-400 text-xs">Logo</Label>
@@ -1261,6 +1267,16 @@ export default function AdminPanel() {
                           </div>
                           <div className="h-8 rounded-lg" style={{ background: `linear-gradient(135deg, ${editBrandColor} 0%, ${editBrandColorSecondary} 100%)` }} />
                           <p className="text-[11px] text-slate-500">Tutlio originalus: #6366f1 → #8b5cf6</p>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-slate-400 text-xs">Login kairės pusės aprašymas</Label>
+                          <textarea
+                            value={editLoginDescription}
+                            onChange={(e) => setEditLoginDescription(e.target.value)}
+                            rows={3}
+                            placeholder="Trumpas tekstas apie organizaciją (login puslapio kairėje)"
+                            className="w-full bg-white/10 border border-white/20 text-white placeholder:text-slate-500 rounded-xl px-3 py-2 text-sm"
+                          />
                         </div>
                       </div>
                     )}

@@ -5,6 +5,9 @@
  */
 export const sharedOrganizationWorkflowTranslations: Record<string, string> = {
   'companyNav.team': 'Team & access',
+  'companyNav.sectionWork': 'Daily work',
+  'companyNav.sectionManage': 'Management',
+  'companyNav.sectionHelp': 'Help',
   'orgTeam.title': 'Team & access',
   'orgTeam.subtitle': 'Invite additional administration users and control exactly what they can view and change.',
   'orgTeam.unlimitedSeats': 'Administration seats are currently unlimited and do not incur an additional charge.',

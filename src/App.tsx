@@ -35,6 +35,7 @@ const PublicTutorPage = lazy(() => import('@/pages/PublicTutorPage'));
 const PublicPageEditor = lazy(() => import('@/pages/PublicPageEditor'));
 
 const Login = lazy(() => import('@/pages/Login'));
+const EmbedOrgLogin = lazy(() => import('@/pages/EmbedOrgLogin'));
 const AuthCallback = lazy(() => import('@/pages/AuthCallback'));
 const Register = lazy(() => import('@/pages/Register'));
 const ResetPassword = lazy(() => import('@/pages/ResetPassword'));
@@ -283,6 +284,8 @@ export default function App({ basename }: { basename: string }) {
         {/* Public Auth & Onboarding - NO UserProvider wrapper */}
         <Route path="/login" element={<Login />} />
         <Route path="/:locale/login" element={<Login />} />
+        <Route path="/embed/org-login" element={<EmbedOrgLogin />} />
+        <Route path="/:locale/embed/org-login" element={<EmbedOrgLogin />} />
         <Route path="/auth/callback" element={<AuthCallback />} />
         <Route path="/register" element={<Register />} />
         <Route path="/:locale/register" element={<Register />} />

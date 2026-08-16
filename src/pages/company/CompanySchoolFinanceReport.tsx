@@ -18,6 +18,7 @@ import {
   paymentMethodLabel,
   paymentStatusLabel,
   signingStatusLabel,
+  schoolFinanceDateKey,
   summarizeSchoolFinanceRows,
   type SchoolFinanceFilters,
 } from '@/lib/schoolFinanceExport';
@@ -26,8 +27,8 @@ import { downloadSchoolFinanceXlsx } from '@/lib/schoolFinanceXlsxExport';
 const defaultFilters: SchoolFinanceFilters = {
   paymentStatus: 'all',
   search: '',
-  dueFrom: '',
-  dueTo: '',
+  paidFrom: '',
+  paidTo: '',
 };
 
 export default function CompanySchoolFinanceReport() {
@@ -53,10 +54,7 @@ export default function CompanySchoolFinanceReport() {
     }
   };
 
-  const formatDate = (value: string | null) => {
-    if (!value) return '—';
-    return new Date(value).toLocaleDateString('lt-LT');
-  };
+  const formatDate = (value: string | null) => schoolFinanceDateKey(value) || '—';
 
   if (loading) {
     return (
@@ -156,12 +154,12 @@ export default function CompanySchoolFinanceReport() {
               </div>
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">{t('school.financeDueFrom')}</Label>
-              <Input type="date" value={filters.dueFrom} onChange={(e) => setFilters((prev) => ({ ...prev, dueFrom: e.target.value }))} />
+              <Label className="text-xs">{t('school.financePaidFrom')}</Label>
+              <Input type="date" value={filters.paidFrom} onChange={(e) => setFilters((prev) => ({ ...prev, paidFrom: e.target.value }))} />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">{t('school.financeDueTo')}</Label>
-              <Input type="date" value={filters.dueTo} onChange={(e) => setFilters((prev) => ({ ...prev, dueTo: e.target.value }))} />
+              <Label className="text-xs">{t('school.financePaidTo')}</Label>
+              <Input type="date" value={filters.paidTo} onChange={(e) => setFilters((prev) => ({ ...prev, paidTo: e.target.value }))} />
             </div>
           </div>
 

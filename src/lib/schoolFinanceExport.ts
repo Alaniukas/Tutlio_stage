@@ -21,9 +21,24 @@ export type SchoolFinanceExportRow = {
 export type SchoolFinanceFilters = {
   paymentStatus: 'all' | 'unpaid' | 'paid' | 'overdue';
   search: string;
-  dueFrom: string;
-  dueTo: string;
+  paidFrom: string;
+  paidTo: string;
 };
+
+/** Calendar day (YYYY-MM-DD) in Europe/Vilnius — school orgs are LT-based. */
+export function schoolFinanceDateKey(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const d = new Date(trimmed);
+  if (Number.isNaN(d.getTime())) return null;
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Vilnius',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
+}
 
 export type SchoolFinanceSummary = {
   totalInstallmentCount: number;
@@ -212,8 +227,12 @@ export function filterSchoolFinanceRows(rows: SchoolFinanceExportRow[], filters:
     if (filters.paymentStatus === 'unpaid' && (row.paymentStatus === 'paid' || row.paymentStatus === 'no_schedule')) return false;
     if (filters.paymentStatus === 'overdue' && row.paymentStatus !== 'overdue') return false;
 
-    if (filters.dueFrom && row.dueDate && row.dueDate < filters.dueFrom) return false;
-    if (filters.dueTo && row.dueDate && row.dueDate > filters.dueTo) return false;
+    if (filters.paidFrom || filters.paidTo) {
+      const paidKey = schoolFinanceDateKey(row.paidAt);
+      if (!paidKey) return false;
+      if (filters.paidFrom && paidKey < filters.paidFrom) return false;
+      if (filters.paidTo && paidKey > filters.paidTo) return false;
+    }
 
     if (!q) return true;
     const haystack = normalizeSearch(
@@ -293,7 +312,7 @@ export function schoolFinanceTableData(
     row.installmentAmount == null ? '' : Number(row.installmentAmount.toFixed(2)),
     row.dueDate || '',
     paymentStatusLabel(row.paymentStatus, t),
-    row.paidAt ? row.paidAt.slice(0, 10) : '',
+    schoolFinanceDateKey(row.paidAt) || '',
     paymentMethodLabel(row.paymentMethod, t),
   ]);
 
