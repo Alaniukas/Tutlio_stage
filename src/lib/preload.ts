@@ -274,7 +274,7 @@ export function orgAdminRowByUserDeduped(userId: string) {
         console.warn('[preload] orgAdminRowByUserDeduped failed:', error.message);
         return null;
       }
-      if (!data?.organization_id) return data;
+      if (!data?.organization_id) return null;
       const org = await supabase
         .from('organizations')
         .select('name, tutor_license_count, entity_type')

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { allocateInvoiceNumber } from './invoiceNumber.js';
+import { proKlaseVatExemptionNote } from './proKlaseInvoice.js';
 
 export type PackageRowForSf = {
   id: string;
@@ -39,6 +40,7 @@ export async function tryIssueSalesInvoiceForStripePackage(
   if (!tutor) return;
 
   let invoiceProfile: Record<string, unknown> | null = null;
+  let usesOrganizationInvoiceProfile = false;
   if (tutor.organization_id) {
     const { data: orgProf } = await supabase
       .from('invoice_profiles')
@@ -46,6 +48,7 @@ export async function tryIssueSalesInvoiceForStripePackage(
       .eq('organization_id', tutor.organization_id)
       .maybeSingle();
     invoiceProfile = orgProf;
+    usesOrganizationInvoiceProfile = Boolean(orgProf);
   }
   if (!invoiceProfile) {
     const { data: userProf } = await supabase.from('invoice_profiles').select('*').eq('user_id', tutor.id).maybeSingle();
@@ -69,6 +72,10 @@ export async function tryIssueSalesInvoiceForStripePackage(
   const sellerName = isCompany
     ? (businessName || '').trim() || fullName || 'Įmonė'
     : fullName || (businessName || '').trim() || 'Korepetitorius';
+  const sellerTaxExemptionNote = proKlaseVatExemptionNote(
+    tutor.organization_id,
+    usesOrganizationInvoiceProfile,
+  );
 
   const sellerSnapshot = {
     name: sellerName || 'Korepetitorius',
@@ -80,6 +87,7 @@ export async function tryIssueSalesInvoiceForStripePackage(
     personalCode: (invoiceProfile.personal_code as string) || undefined,
     contactEmail: (invoiceProfile.contact_email as string) || undefined,
     contactPhone: (invoiceProfile.contact_phone as string) || undefined,
+    ...(sellerTaxExemptionNote ? { taxExemptionNote: sellerTaxExemptionNote } : {}),
   };
 
   // Look up per-subject items so we can emit one invoice line per subject.

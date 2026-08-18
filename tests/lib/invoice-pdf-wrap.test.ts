@@ -63,4 +63,20 @@ describe('generateInvoicePdf', () => {
     });
     expect(pdf.byteLength).toBeGreaterThan(1000);
   });
+
+  it('renders the seller tax exemption note below the total', async () => {
+    const pdf = await generateInvoicePdf({
+      invoiceNumber: 'SF-PROKLASE-001',
+      issueDate: '2026-08-19',
+      seller: {
+        name: 'Pro Klasė',
+        entityType: 'company',
+        taxExemptionNote: 'PVM neapmokestinama pagal LR PVMĮ 22 str.',
+      },
+      buyer: { name: 'Mokinys' },
+      lineItems: [{ description: 'Matematika – 14 pam.', quantity: 14, unitPrice: 27, totalPrice: 378 }],
+      totalAmount: 378,
+    });
+    expect(pdf.byteLength).toBeGreaterThan(1000);
+  });
 });

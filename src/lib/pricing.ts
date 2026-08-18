@@ -8,7 +8,11 @@
 export const TUTOR_PLANS = {
   monthly: { pricePerMonthEur: 19.99 },
   yearly: { pricePerMonthEur: 14.99, pricePerYearEur: 179.88 },
-  subscriptionOnly: { pricePerMonthEur: 35 },
+  subscriptionOnly: {
+    pricePerMonthEur: 35,
+    yearlyPricePerMonthEur: 26.25,
+    pricePerYearEur: 315,
+  },
 } as const;
 
 /** "€19.99" / "€35" — matches how prices have always been rendered in the UI. */

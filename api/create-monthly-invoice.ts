@@ -16,6 +16,7 @@ import {
 } from './_lib/soloManualStudentPayments.js';
 import { getOrgAdminSeatByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
+import { proKlaseVatExemptionNote } from './_lib/proKlaseInvoice.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' as any });
 const supabase = createClient(
@@ -509,11 +510,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     .maybeSingle();
                 if (!existingInv) {
                     const fbInvoiceNumber = `BB-${billingBatch.id.slice(0, 8).toUpperCase()}`;
+                    const fallbackSellerTaxExemptionNote = proKlaseVatExemptionNote(
+                        (tutor as any).organization_id,
+                        true,
+                    );
                     const { data: fbInvoice } = await supabase.from('invoices').insert({
                         invoice_number: fbInvoiceNumber,
                         issued_by_user_id: tutorId,
                         organization_id: (tutor as any).organization_id ?? null,
-                        seller_snapshot: { name: ownerName || 'Korepetitorius' },
+                        seller_snapshot: {
+                            name: ownerName || 'Korepetitorius',
+                            ...(fallbackSellerTaxExemptionNote
+                                ? { taxExemptionNote: fallbackSellerTaxExemptionNote }
+                                : {}),
+                        },
                         buyer_snapshot: { name: payerName || 'Mokinys', email: payerEmail || undefined },
                         issue_date: new Date().toISOString().slice(0, 10),
                         period_start: periodStartDate,

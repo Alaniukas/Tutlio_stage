@@ -9,7 +9,7 @@ const reference = [...new Set([
   ...Object.keys(en),
   ...Object.keys(lt),
   ...Object.keys(sharedOrganizationWorkflowTranslations),
-])];
+])].filter((key) => !key.startsWith('quiz.'));
 
 const legalKeys = new Set(['tos.bodyHtml', 'priv.bodyHtml', 'dpa.bodyHtml']);
 

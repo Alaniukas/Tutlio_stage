@@ -49,19 +49,24 @@ describe('plan pricing has a single source of truth', () => {
   });
 
   it('leaves no hardcoded euro plan prices in files that consume the constants', () => {
-    const files = [
-      'src/pages/Pricing.tsx',
+    const directConsumers = [
+      'src/lib/pricingDisplay.ts',
       'src/pages/TutorSubscribe.tsx',
       'src/pages/Settings.tsx',
       'api/page-render.ts',
       'api/llms-txt.ts',
       'api/_lib/ssr-shell.ts',
     ];
-    for (const file of files) {
+    for (const file of directConsumers) {
       const content = readFileSync(path.join(ROOT, file), 'utf8');
       expect(/€\d/.test(content), `${file} contains a hardcoded € price`).toBe(false);
-      expect(content.includes('lib/pricing'), `${file} should import from lib/pricing`).toBe(true);
+      const pricingImport = file === 'src/lib/pricingDisplay.ts' ? "from './pricing'" : 'lib/pricing';
+      expect(content.includes(pricingImport), `${file} should import from the pricing constants`).toBe(true);
     }
+
+    const pricingPage = readFileSync(path.join(ROOT, 'src/pages/Pricing.tsx'), 'utf8');
+    expect(/€\d/.test(pricingPage), 'src/pages/Pricing.tsx contains a hardcoded € price').toBe(false);
+    expect(pricingPage).toContain('TutorPlanCards');
   });
 
   it('llms.txt quotes the same prices humans see (the €9.99 staleness bug)', () => {

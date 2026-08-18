@@ -169,7 +169,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     }
                 }
                 const priceItem = subToUse.items.data[0];
-                const plan = isSubscriptionOnlyPriceId(priceItem?.price.id)
+                const plan = isSubscriptionOnlyPriceId(priceItem?.price)
                     ? 'subscription_only'
                     : priceItem?.price.recurring?.interval === 'year' ? 'yearly' : 'monthly';
                 const periodEnd = new Date((subToUse as Stripe.Subscription & { current_period_end: number }).current_period_end * 1000).toISOString();
@@ -212,8 +212,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 const all = await stripe.subscriptions.list({ customer: customerId, status: 'all', limit: 10 });
                 const otherActive = all.data.find(s => s.id !== subscription.id && (s.status === 'active' || s.status === 'trialing'));
                 if (otherActive) {
-                    const otherPriceId = otherActive.items.data[0]?.price?.id;
-                    const plan = isSubscriptionOnlyPriceId(otherPriceId)
+                    const otherPrice = otherActive.items.data[0]?.price;
+                    const plan = isSubscriptionOnlyPriceId(otherPrice)
                         ? 'subscription_only'
                         : otherActive.items.data[0]?.price.recurring?.interval === 'year'
                             ? 'yearly'
@@ -360,8 +360,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         .maybeSingle();
 
                     if (profile) {
-                        const currentPriceId = subscription.items.data[0]?.price?.id;
-                        const plan = isSubscriptionOnlyPriceId(currentPriceId)
+                        const currentPrice = subscription.items.data[0]?.price;
+                        const plan = isSubscriptionOnlyPriceId(currentPrice)
                             ? 'subscription_only'
                             : subscription.items.data[0]?.price.recurring?.interval === 'year'
                                 ? 'yearly'

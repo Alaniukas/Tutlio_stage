@@ -39,6 +39,8 @@ vi.mock('@/lib/pricingDisplay', () => ({
     monthly: () => '€19.99',
     yearlyPerMonth: () => '€14.99',
     subscriptionOnly: () => '€9.99',
+    subscriptionOnlyYearlyPerMonth: () => '€7.49',
+    subscriptionOnlyYearlyTotal: () => '€89.88',
   },
 }));
 

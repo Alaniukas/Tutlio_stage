@@ -65,6 +65,8 @@ export const DISALLOW_PATHS = [
   '/whiteboard/',
   '/preview/',
   '/dev/',
+  '/embed/',
+  '/quiz/',
   '/api/',
 ];
 

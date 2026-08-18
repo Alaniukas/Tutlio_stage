@@ -4167,6 +4167,11 @@ export const lv: Record<string, string> = {
   // --- pricing ---
   'pricing.subscriptionOnly': 'Tikai abonements',
   'pricing.subscriptionOnlyDesc': 'Pilna piekļuve platformai ar manuāliem maksājumiem. Bez komisijas par jūsu lietotājiem.',
+  'pricing.subscriptionOnlyYearlyDesc': 'Maksa {total} gadā. Jūs ietaupāt 25%.',
+  'pricing.switchToNoCommission': 'Izvēlēties bez komisijas maksas',
+  'pricing.switchToStandard': 'Izvēlēties maksu par lietošanu',
+  'pricing.saveTwentyFivePercent': 'Ietaupiet 25%, maksājot par gadu',
+  'pricing.billingPeriodLabel': 'Izvēlēties ikmēneša vai gada norēķinus',
   'pricing.manualPayments': 'Tikai manuālie maksājumi',
   'pricing.noCommission': 'Bez platformas komisijas',
   'pricing.studentFeeNote': 'Norādītā cena neietver maksājuma maksu. Jūsu skolēns maksā papildu maksu pie norēķina: 3,5% + €0,25.',

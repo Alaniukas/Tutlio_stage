@@ -144,9 +144,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       sub.status === 'canceled' || (sub as any).cancel_at_period_end ? 'canceled' : sub.status;
 
     if (active) {
-      const firstPriceId = active.items.data[0]?.price?.id;
+      const firstPrice = active.items.data[0]?.price;
       const plan =
-        isSubscriptionOnlyPriceId(firstPriceId)
+        isSubscriptionOnlyPriceId(firstPrice)
           ? 'subscription_only'
           : active.items.data[0]?.price.recurring?.interval === 'year'
             ? 'yearly'
@@ -178,9 +178,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Cancelled or other status – update profile so Settings shows 'Cancelled' and expiry date
     const latest = subscriptions.data[0];
     if (latest) {
-      const firstPriceId = latest.items.data[0]?.price?.id;
+      const firstPrice = latest.items.data[0]?.price;
       const plan =
-        isSubscriptionOnlyPriceId(firstPriceId)
+        isSubscriptionOnlyPriceId(firstPrice)
           ? 'subscription_only'
           : latest.items.data[0]?.price.recurring?.interval === 'year'
             ? 'yearly'
