@@ -1208,7 +1208,6 @@ export default function CalendarPage() {
 
       setSavingFreeTimeFromSlot(true);
       try {
-        const todayStr = format(new Date(), 'yyyy-MM-dd');
         const { data: existingRecurring } = await supabase
           .from('availability')
           .select('id, start_time, end_time, end_date, day_of_week')
@@ -1216,7 +1215,7 @@ export default function CalendarPage() {
           .eq('is_recurring', true)
           .in('day_of_week', freeTimeDays);
 
-        const stillValid = (existingRecurring || []).filter((s) => !s.end_date || s.end_date >= todayStr);
+        const stillValid = (existingRecurring || []).filter((s) => !s.end_date || s.end_date >= specificDate);
         const hasOverlap = freeTimeDays.some((day) => {
           const times = freeTimeSameTimes
             ? { start: specificStart, end: specificEnd }

@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "concurrently \"npm:dev:frontend\" \"npm:dev:api\" --names \"VITE,API\" --prefix-colors \"cyan,magenta\"",
     "dev:prod": "zsh -ac 'set -a; source .env.local; export SUPABASE_URL=\"$VITE_SUPABASE_URL\"; export VITE_SUPABASE_URL=\"$VITE_SUPABASE_URL\"; export VITE_SUPABASE_ANON_KEY=\"$VITE_SUPABASE_ANON_KEY\"; npm run dev'",
-    "dev:test": "zsh -ac 'set -a; source .env.local; export SUPABASE_URL=\"$TEST_SUPABASE_URL\"; export SUPABASE_SERVICE_ROLE_KEY=\"$TEST_SUPABASE_SERVICE_ROLE_KEY\"; export VITE_SUPABASE_URL=\"$TEST_SUPABASE_URL\"; export VITE_SUPABASE_ANON_KEY=\"$TEST_SUPABASE_ANON_KEY\"; export STRIPE_SECRET_KEY=\"${TEST_STRIPE_SECRET_KEY:-$STRIPE_SECRET_KEY}\"; export STRIPE_WEBHOOK_SECRET=\"${TEST_STRIPE_WEBHOOK_SECRET:-$STRIPE_WEBHOOK_SECRET}\"; export STRIPE_CONNECT_WEBHOOK_SECRET=\"${TEST_STRIPE_CONNECT_WEBHOOK_SECRET:-$STRIPE_CONNECT_WEBHOOK_SECRET}\"; npm run dev'",
+    "dev:test": "zsh -ac 'set -a; source .env.local; export SUPABASE_URL=\"$TEST_SUPABASE_URL\"; export SUPABASE_SERVICE_ROLE_KEY=\"$TEST_SUPABASE_SERVICE_ROLE_KEY\"; export VITE_SUPABASE_URL=\"$TEST_SUPABASE_URL\"; export VITE_SUPABASE_ANON_KEY=\"$TEST_SUPABASE_ANON_KEY\"; export STRIPE_SECRET_KEY=\"$TEST_STRIPE_SECRET_KEY\"; export STRIPE_PUBLISHABLE_KEY=\"${TEST_STRIPE_PUBLISHABLE_KEY:-$TEST_STRIPE_PUBLIC_KEY}\"; export STRIPE_WEBHOOK_SECRET=\"$TEST_STRIPE_WEBHOOK_SECRET\"; export STRIPE_CONNECT_WEBHOOK_SECRET=\"$TEST_STRIPE_CONNECT_WEBHOOK_SECRET\"; export STRIPE_MONTHLY_PRODUCT_ID=\"$TEST_STRIPE_MONTHLY_PRODUCT_ID\"; export STRIPE_MONTHLY_PRICE_ID=\"$TEST_STRIPE_MONTHLY_PRICE_ID\"; export STRIPE_YEARLY_PRODUCT_ID=\"$TEST_STRIPE_YEARLY_PRODUCT_ID\"; export STRIPE_YEARLY_PRICE_ID=\"$TEST_STRIPE_YEARLY_PRICE_ID\"; export STRIPE_SUBSCRIPTION_ONLY_PRODUCT_ID=\"$TEST_STRIPE_SUBSCRIPTION_ONLY_PRODUCT_ID\"; export STRIPE_SUBSCRIPTION_ONLY_PRICE_ID=\"$TEST_STRIPE_SUBSCRIPTION_ONLY_PRICE_ID\"; export STRIPE_SUBSCRIPTION_ONLY_YEARLY_PRICE_ID=\"$TEST_STRIPE_SUBSCRIPTION_ONLY_YEARLY_PRICE_ID\"; export STRIPE_MONTHLY_PRODUCT_ID_PLN=\"$TEST_STRIPE_MONTHLY_PRODUCT_ID_PLN\"; export STRIPE_MONTHLY_PRICE_ID_PLN=\"$TEST_STRIPE_MONTHLY_PRICE_ID_PLN\"; export STRIPE_YEARLY_PRODUCT_ID_PLN=\"$TEST_STRIPE_YEARLY_PRODUCT_ID_PLN\"; export STRIPE_YEARLY_PRICE_ID_PLN=\"$TEST_STRIPE_YEARLY_PRICE_ID_PLN\"; export STRIPE_SUBSCRIPTION_ONLY_PRODUCT_ID_PLN=\"$TEST_STRIPE_SUBSCRIPTION_ONLY_PRODUCT_ID_PLN\"; export STRIPE_SUBSCRIPTION_ONLY_PRICE_ID_PLN=\"$TEST_STRIPE_SUBSCRIPTION_ONLY_PRICE_ID_PLN\"; export STRIPE_SUBSCRIPTION_ONLY_YEARLY_PRICE_ID_PLN=\"$TEST_STRIPE_SUBSCRIPTION_ONLY_YEARLY_PRICE_ID_PLN\"; export STRIPE_ENTERPRISE_PRICE_ID=\"$TEST_STRIPE_ENTERPRISE_PRICE_ID\"; export STRIPE_ENTERPRISE_PRICE_ID_PLN=\"$TEST_STRIPE_ENTERPRISE_PRICE_ID_PLN\"; npm run dev'",
     "dev:frontend": "vite --port=3000 --host=0.0.0.0",
     "dev:api": "tsx scripts/dev-api-local.ts",
     "free:3002": "kill-port 3002",
@@ -26,6 +26,9 @@
     "stripe:setup-pln": "tsx scripts/setup-stripe-pln-products.ts",
     "stripe:setup-enterprise": "tsx scripts/setup-stripe-enterprise.ts",
     "stripe:setup-pln-enterprise": "tsx scripts/setup-stripe-pln-enterprise.ts",
+    "stripe:setup-test": "tsx scripts/setup-stripe-test-products.ts",
+    "stripe:verify-test": "tsx scripts/verify-stripe-test-checkouts.ts",
+    "stripe:setup-no-commission-yearly": "tsx scripts/setup-stripe-no-commission-yearly.ts",
     "supabase:login": "npx supabase login",
     "supabase:link": "npx supabase link",
     "supabase:push": "npx supabase db push",
@@ -47,6 +50,8 @@
     "@radix-ui/react-slot": "^1.2.4",
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-tooltip": "^1.2.8",
+    "@stripe/react-stripe-js": "^6.8.1",
+    "@stripe/stripe-js": "^9.13.0",
     "@supabase/supabase-js": "^2.98.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vercel/functions": "^3.6.0",
@@ -66,13 +71,12 @@
     "react-big-calendar": "^1.19.4",
     "react-day-picker": "^9.14.0",
     "react-dom": "^19.2.4",
-    "react-router-dom": "^7.13.1",
+    "react-router-dom": "^7.18.2",
     "recharts": "^3.7.0",
-    "resend": "^6.9.2",
+    "resend": "^6.20.0",
     "stripe": "^20.4.1",
     "tailwind-merge": "^3.5.0",
-    "undici": "^6.25.0",
-    "vite": "^6.2.0",
+    "undici": "^6.28.0",
     "web-push": "^3.6.7"
   },
   "devDependencies": {
@@ -93,8 +97,15 @@
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vercel": "^53.1.0",
-    "vite": "^6.2.0",
+    "vite": "^6.4.3",
     "vite-plugin-pwa": "^1.2.0",
     "vitest": "^4.1.0"
+  },
+  "overrides": {
+    "@mermaid-js/parser@0.6.3": "1.2.0",
+    "lodash-es@4.17.21": "4.18.1",
+    "nanoid@3.3.3": "3.3.18",
+    "nanoid@4.0.2": "5.1.16",
+    "uuid@8.3.2": "11.1.1"
   }
 }

@@ -36,9 +36,15 @@ export default defineConfig({
         // Never glob all HTML or JS — that would pin every lazy route / marketing
         // HTML and download ~20 MB of private chunks on a marketing visit.
         globPatterns: ['index.html', '**/*.{css,ico,png,svg,woff2}'],
-        // Locale-specific marketing screenshots are loaded responsively on the
-        // feature page; precaching every language pair would add ~40 MB.
-        globIgnores: ['landing/digital-business-card-*.png', 'preview-assign-student-modal.html'],
+        // Locale-specific marketing screenshots and quiz imagery are loaded on
+        // demand. The quiz warms only the next screen; global SW precaching
+        // would otherwise download every source PNG (~34 MB) on first visit.
+        globIgnores: [
+          'landing/digital-business-card-*.png',
+          'quiz/**',
+          'social/**',
+          'preview-assign-student-modal.html',
+        ],
         maximumFileSizeToCacheInBytes: 7 * 1024 * 1024,
         navigateFallback: 'index.html',
         // SEO/crawler files must never be answered with the SPA shell from the SW.

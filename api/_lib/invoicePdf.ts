@@ -27,6 +27,7 @@ export interface InvoicePdfData {
     personalCode?: string;
     contactEmail?: string;
     contactPhone?: string;
+    taxExemptionNote?: string;
   };
 
   buyer: {
@@ -333,14 +334,27 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
   drawLine(ctx, MARGIN, y, PAGE_WIDTH - MARGIN);
   y -= 18;
 
-  ensureSpace(80);
+  const taxExemptionNote = data.seller.taxExemptionNote?.trim();
+  ensureSpace(taxExemptionNote ? 98 : 80);
   drawText(ctx, 'IŠ VISO:', colUnit - 30, y, { size: 11, bold: true });
-  drawText(ctx, `${formatEur(data.totalAmount)} EUR`, colTotal, y, {
+  const totalAmountText = `${formatEur(data.totalAmount)} EUR`;
+  drawText(ctx, totalAmountText, colTotal, y, {
     size: 11,
     bold: true,
     color: primary,
   });
   y -= 18;
+
+  if (taxExemptionNote) {
+    const noteSize = 8;
+    const noteWidth = ctx.font.widthOfTextAtSize(taxExemptionNote, noteSize);
+    const totalAmountRight = colTotal + ctx.fontBold.widthOfTextAtSize(totalAmountText, 11);
+    drawText(ctx, taxExemptionNote, Math.max(MARGIN, totalAmountRight - noteWidth), y, {
+      size: noteSize,
+      color: ctx.black,
+    });
+    y -= 16;
+  }
 
   if (data.deductedAmount != null && data.deductedAmount > 0) {
     drawText(ctx, 'Jau apmokėta (išskaityta iš jūsų lėšų):', colDesc + 130, y, {

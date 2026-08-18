@@ -1,6 +1,6 @@
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { ArrowLeft, Download } from 'lucide-react';
-import { useTranslation } from '@/lib/i18n';
+import { stripLocalePrefix, useTranslation } from '@/lib/i18n';
 
 type LegalDoc = 'tos' | 'priv' | 'dpa';
 
@@ -23,6 +23,27 @@ function sanitizeLegalHtml(html: string): string {
     .replace(/\son\w+='[^']*'/gi, '');
 }
 
+function getQuizReturnTo(state: unknown): string | null {
+  if (!state || typeof state !== 'object' || !('returnTo' in state)) return null;
+
+  const returnTo = (state as { returnTo?: unknown }).returnTo;
+  if (typeof returnTo !== 'string' || !returnTo.startsWith('/') || returnTo.startsWith('//')) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(returnTo, 'https://tutlio.local');
+    if (parsed.origin !== 'https://tutlio.local') return null;
+
+    const pathname = stripLocalePrefix(parsed.pathname);
+    if (pathname !== '/quiz' && !pathname.startsWith('/quiz/')) return null;
+
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return null;
+  }
+}
+
 export default function LegalDocumentPage({
   doc,
   relatedLinks,
@@ -30,13 +51,17 @@ export default function LegalDocumentPage({
   showPrintButton = false,
 }: LegalDocumentPageProps) {
   const { t } = useTranslation();
+  const location = useLocation();
+  const quizReturnTo = getQuizReturnTo(location.state);
+  const preservedQuizState = quizReturnTo ? { returnTo: quizReturnTo } : undefined;
   const bodyHtml = sanitizeLegalHtml(t(`${doc}.bodyHtml`));
 
   return (
     <div className="min-h-screen bg-gray-50">
       <div className={`${maxWidthClassName} mx-auto px-4 py-8 sm:py-12`}>
         <Link
-          to="/"
+          to={quizReturnTo ?? '/'}
+          replace={Boolean(quizReturnTo)}
           className="mb-8 inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
         >
           <ArrowLeft className="h-4 w-4" /> {t('legal.goBack')}
@@ -65,7 +90,12 @@ export default function LegalDocumentPage({
           {relatedLinks.map((link, index) => (
             <span key={link.to}>
               {index > 0 && ' · '}
-              <Link to={link.to} className="text-indigo-600 hover:underline">
+              <Link
+                to={link.to}
+                replace={Boolean(quizReturnTo)}
+                state={preservedQuizState}
+                className="text-indigo-600 hover:underline"
+              >
                 {t(link.labelKey)}
               </Link>
             </span>

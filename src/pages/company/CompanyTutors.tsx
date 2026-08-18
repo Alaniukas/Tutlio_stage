@@ -1348,7 +1348,7 @@ export default function CompanyTutors() {
                   value={inviteMeetingLink}
                   onChange={(e) => setInviteMeetingLink(e.target.value)}
                   className="rounded-xl"
-                  placeholder="https://zoom.us/j/..."
+                  placeholder="https://meet.google.com/xxx-xxxx-xxx"
                 />
                 <p className="text-xs text-gray-500">
                   {t('compTut.personalMeetingLinkDesc')}
@@ -1587,7 +1587,7 @@ export default function CompanyTutors() {
                   <Input
                     value={editMeetingLink}
                     onChange={e => setEditMeetingLink(e.target.value)}
-                    placeholder="https://meet.google.com/..."
+                    placeholder="https://meet.google.com/xxx-xxxx-xxx"
                     className="rounded-xl"
                   />
                 </div>

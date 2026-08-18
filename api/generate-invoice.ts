@@ -5,6 +5,7 @@ import { resolveInvoiceBranding } from './_lib/invoiceBranding.js';
 import { generateInvoicePdf, type InvoicePdfData } from './_lib/invoicePdf.js';
 import { isProKlaseOrg } from './_lib/marketMoney.js';
 import { proKlaseSessionPayEur } from './_lib/proKlaseTutorPay.js';
+import { proKlaseVatExemptionNote } from './_lib/proKlaseInvoice.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
@@ -438,7 +439,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Build seller snapshot
-    const sellerSnapshot = buildSellerSnapshot(sellerProfile, profile);
+    const sellerTaxExemptionNote = proKlaseVatExemptionNote(
+      profile.organization_id,
+      !isOrgTutor,
+    );
+    const sellerSnapshot = {
+      ...buildSellerSnapshot(sellerProfile, profile),
+      ...(sellerTaxExemptionNote ? { taxExemptionNote: sellerTaxExemptionNote } : {}),
+    };
 
     sessions.sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
 

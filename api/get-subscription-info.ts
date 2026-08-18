@@ -37,9 +37,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const subscription = await stripe.subscriptions.retrieve(session.subscription as string);
-    const firstPriceId = subscription.items.data[0]?.price?.id;
+    const firstPrice = subscription.items.data[0]?.price;
     const plan =
-      isSubscriptionOnlyPriceId(firstPriceId)
+      isSubscriptionOnlyPriceId(firstPrice)
         ? 'subscription_only'
         : subscription.items.data[0]?.price.recurring?.interval === 'year'
           ? 'yearly'

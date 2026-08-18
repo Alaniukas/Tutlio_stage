@@ -10,6 +10,9 @@ interface Props {
   audience: 'tutor' | 'schools';
   /** Opens the existing enterprise contact / book-a-demo modal. */
   onBookDemo: () => void;
+  contactLabel?: string;
+  /** Keeps the card stacked when it is rendered inside a narrow parent on a wide viewport. */
+  compact?: boolean;
 }
 
 /**
@@ -19,7 +22,7 @@ interface Props {
  * canonical market tiers kept as a client fallback. Only quantities above the
  * self-serve cap fall back to contacting sales.
  */
-export default function EnterprisePlanCard({ audience, onBookDemo }: Props) {
+export default function EnterprisePlanCard({ audience, onBookDemo, contactLabel, compact = false }: Props) {
   const { t, locale } = useTranslation();
   const { pricing, failed: pricingFailed } = useEnterpriseLicensePricing();
   const [count, setCount] = useState(5);
@@ -102,16 +105,22 @@ export default function EnterprisePlanCard({ audience, onBookDemo }: Props) {
 
   return (
     <div className="bg-gray-900 rounded-2xl p-7 lg:p-9 shadow-lg shadow-gray-900/20">
-      <div className="grid lg:grid-cols-[1fr_380px] gap-8 lg:gap-12 items-start">
+      <div
+        className={
+          compact
+            ? 'grid min-w-0 gap-7 items-start'
+            : 'grid min-w-0 lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)] gap-8 lg:gap-12 items-start'
+        }
+      >
         {/* Plan identity + features */}
-        <div>
+        <div className="min-w-0">
           <div className="flex items-center gap-2 mb-2">
             <Building2 className="w-5 h-5 text-gray-400" />
             <h3 className="text-xl font-bold text-white">{t('pricing.enterprise')}</h3>
           </div>
           <p className="text-gray-400 text-[13px] leading-relaxed mb-6">{t('pricing.enterpriseDesc')}</p>
 
-          <ul className="grid sm:grid-cols-2 gap-x-6 gap-y-2.5 mb-6">
+          <ul className={compact ? 'grid gap-y-2.5 mb-6' : 'grid sm:grid-cols-2 gap-x-6 gap-y-2.5 mb-6'}>
             {features.map((feature, i) => (
               <li key={i} className="flex items-center gap-2 text-gray-300 text-[13px]">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -123,15 +132,15 @@ export default function EnterprisePlanCard({ audience, onBookDemo }: Props) {
           <button
             type="button"
             onClick={onBookDemo}
-            className="hidden lg:inline-flex items-center justify-center gap-2 h-11 px-7 rounded-full bg-[#4f46e5] text-white shadow-lg shadow-indigo-950/30 font-semibold text-[13px] transition-all duration-200 hover:scale-[1.03] hover:bg-[#4338ca] hover:shadow-xl active:scale-[0.98]"
+            className={`${compact ? 'hidden' : 'hidden lg:inline-flex'} items-center justify-center gap-2 h-11 px-7 rounded-full bg-[#4f46e5] text-white shadow-lg shadow-indigo-950/30 font-semibold text-[13px] transition-all duration-200 hover:scale-[1.03] hover:bg-[#4338ca] hover:shadow-xl active:scale-[0.98]`}
           >
-            {t('pricing.bookDemo')}
+            {contactLabel ?? t('pricing.bookDemo')}
             <ArrowRight className="h-4 w-4" />
           </button>
         </div>
 
         {/* License calculator */}
-        <div className="bg-gray-800/60 border border-gray-700/60 rounded-xl p-5 lg:p-6">
+        <div className="min-w-0 bg-gray-800/60 border border-gray-700/60 rounded-xl p-5 lg:p-6">
           {pricing ? (
             <>
               <div className="flex items-center justify-between mb-2">
@@ -227,9 +236,9 @@ export default function EnterprisePlanCard({ audience, onBookDemo }: Props) {
               <button
                 type="button"
                 onClick={onBookDemo}
-                className="lg:hidden flex items-center justify-center gap-2 w-full h-11 mt-2.5 rounded-full bg-[#4f46e5] text-white shadow-lg shadow-indigo-950/30 font-semibold text-[13px] transition-all duration-200 hover:scale-[1.02] hover:bg-[#4338ca] active:scale-[0.98]"
+                className={`${compact ? 'flex' : 'lg:hidden flex'} items-center justify-center gap-2 w-full h-11 mt-2.5 rounded-full bg-[#4f46e5] text-white shadow-lg shadow-indigo-950/30 font-semibold text-[13px] transition-all duration-200 hover:scale-[1.02] hover:bg-[#4338ca] active:scale-[0.98]`}
               >
-                {t('pricing.bookDemo')}
+                {contactLabel ?? t('pricing.bookDemo')}
                 <ArrowRight className="h-4 w-4" />
               </button>
             </>

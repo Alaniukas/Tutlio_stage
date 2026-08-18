@@ -15,15 +15,23 @@ export function stripeSubscriptionEnv(market: TutlioMarket) {
     yearlyPriceId: env(`STRIPE_YEARLY_PRICE_ID${suffix}`),
     subscriptionOnlyProductId: env(`STRIPE_SUBSCRIPTION_ONLY_PRODUCT_ID${suffix}`),
     subscriptionOnlyPriceId: env(`STRIPE_SUBSCRIPTION_ONLY_PRICE_ID${suffix}`),
+    subscriptionOnlyYearlyPriceId: env(`STRIPE_SUBSCRIPTION_ONLY_YEARLY_PRICE_ID${suffix}`),
   };
 }
 
 /** Recognize subscription_only across EUR and PLN Stripe prices. */
-export function isSubscriptionOnlyPriceId(priceId: string | undefined): boolean {
+export function isSubscriptionOnlyPriceId(
+  price: string | { id?: string; metadata?: Record<string, string> } | undefined,
+): boolean {
+  if (!price) return false;
+  if (typeof price !== 'string' && price.metadata?.plan === 'subscription_only') return true;
+  const priceId = typeof price === 'string' ? price : price.id;
   if (!priceId) return false;
   const ids = [
     env('STRIPE_SUBSCRIPTION_ONLY_PRICE_ID'),
+    env('STRIPE_SUBSCRIPTION_ONLY_YEARLY_PRICE_ID'),
     env('STRIPE_SUBSCRIPTION_ONLY_PRICE_ID_PLN'),
+    env('STRIPE_SUBSCRIPTION_ONLY_YEARLY_PRICE_ID_PLN'),
   ].filter(Boolean) as string[];
   return ids.includes(priceId);
 }

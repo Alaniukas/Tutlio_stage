@@ -16,6 +16,14 @@ export const tutorPlanPriceLabels = {
     isPlMarket()
       ? subscriptionPriceLabels.subscriptionOnly()
       : `${eur(TUTOR_PLANS.subscriptionOnly.pricePerMonthEur)}`,
+  subscriptionOnlyYearlyPerMonth: () =>
+    isPlMarket()
+      ? subscriptionPriceLabels.subscriptionOnlyYearlyPerMonth()
+      : `${eur(TUTOR_PLANS.subscriptionOnly.yearlyPricePerMonthEur)}`,
+  subscriptionOnlyYearlyTotal: () =>
+    isPlMarket()
+      ? subscriptionPriceLabels.subscriptionOnlyYearlyTotal()
+      : `${eur(TUTOR_PLANS.subscriptionOnly.pricePerYearEur)}`,
 };
 
 /** PLN labels include "/mies."; EUR uses separate common.perMonth. */

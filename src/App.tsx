@@ -25,6 +25,7 @@ const BlogPost = lazy(() => import('@/pages/BlogPost'));
 const PrivacyPolicy = lazy(() => import('@/pages/PrivacyPolicy'));
 const TermsOfService = lazy(() => import('@/pages/TermsOfService'));
 const DataProcessingAgreement = lazy(() => import('@/pages/DataProcessingAgreement'));
+const QuizFunnel = lazy(() => import('@/pages/QuizFunnel'));
 
 // Everything behind auth (and one-off payment/callback pages) loads on demand
 // so marketing visitors never download the app.
@@ -280,6 +281,10 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/:locale/terms" element={<TermsOfService />} />
         <Route path="/dpa" element={<DataProcessingAgreement />} />
         <Route path="/:locale/dpa" element={<DataProcessingAgreement />} />
+        <Route path="/quiz" element={<QuizFunnel />} />
+        <Route path="/quiz/:audience/:step" element={<QuizFunnel />} />
+        <Route path="/:locale/quiz" element={<QuizFunnel />} />
+        <Route path="/:locale/quiz/:audience/:step" element={<QuizFunnel />} />
 
         {/* Public Auth & Onboarding - NO UserProvider wrapper */}
         <Route path="/login" element={<Login />} />

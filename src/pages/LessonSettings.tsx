@@ -522,7 +522,7 @@ export default function LessonSettingsPage() {
               <Label>{t('lessonSet.personalLinkTitle')} ({t('common.optional')})</Label>
               <Input
                 type="url"
-                placeholder="https://zoom.us/j/..."
+                placeholder="https://meet.google.com/xxx-xxxx-xxx"
                 value={personalMeetingLink}
                 onChange={(e) => setPersonalMeetingLink(e.target.value)}
                 className="rounded-xl"

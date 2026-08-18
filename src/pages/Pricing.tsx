@@ -14,17 +14,15 @@ import {
   Banknote,
   FileText,
   UserCheck,
-  CircleHelp,
-  Loader2,
   ContactRound,
 } from 'lucide-react';
 import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
-import { tutorPlanPriceLabels, showPerMonthSuffix } from '@/lib/pricingDisplay';
 import { usePlatform } from '@/contexts/PlatformContext';
 import LandingNavbar from '@/components/LandingNavbar';
 import LandingFooter from '@/components/LandingFooter';
 import EnterpriseContactModal from '@/components/EnterpriseContactModal';
 import EnterprisePlanCard from '@/components/pricing/EnterprisePlanCard';
+import TutorPlanCards, { TutorBillingToggle } from '@/components/pricing/TutorPlanCards';
 import { applyPageDocumentMeta } from '@/lib/documentMeta';
 import { getSeoMeta } from '@/lib/seoMeta';
 import { resolveMarketingAudience, storeMarketingAudience } from '@/lib/marketingAudience';
@@ -51,8 +49,6 @@ export default function Pricing() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [isYearly, setIsYearly] = useState(false);
   const [enterpriseOpen, setEnterpriseOpen] = useState(false);
-  const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
-  const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const audienceParam = searchParams.get('audience');
   const promoCode = normalizeExtendedTrialPromoCode(searchParams.get('promo'));
   const trialDays = promoCode
@@ -84,32 +80,6 @@ export default function Pricing() {
     const meta = getSeoMeta(locale, 'pricing');
     applyPageDocumentMeta(meta.title, meta.description);
   }, [locale, platform]);
-
-  const startCheckout = async (plan: 'monthly' | 'yearly' | 'subscription_only') => {
-    setCheckoutLoading(plan);
-    setCheckoutError(null);
-    try {
-      const res = await fetch('/api/create-subscription-checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          plan,
-          locale,
-          audience: checkoutAudience,
-          ...(promoCode ? { couponCode: promoCode } : {}),
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.url) {
-        window.location.href = data.url;
-        return;
-      }
-      setCheckoutError(data.error || t('common.error'));
-    } catch {
-      setCheckoutError(t('common.error'));
-    }
-    setCheckoutLoading(null);
-  };
 
   const digitalBusinessCardPath = buildLocalizedPath('/features/digital-business-card', locale);
   const features: Array<{
@@ -165,117 +135,24 @@ export default function Pricing() {
               </p>
             )}
 
-            {checkoutError && (
-              <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 max-w-md mx-auto mb-6">
-                {checkoutError}
-              </p>
+            {!isAgencyPricing && (
+              <TutorBillingToggle isYearly={isYearly} onChange={setIsYearly} />
             )}
 
-            {!isAgencyPricing && (
-              <div className="flex items-center justify-center gap-3 mb-4">
-                <span className={`text-sm font-medium transition-colors ${!isYearly ? 'text-gray-900' : 'text-gray-400'}`}>
-                  {t('pricing.monthly')}
-                </span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={isYearly}
-                  onClick={() => setIsYearly((v) => !v)}
-                  className={`relative w-12 h-6 rounded-full transition-colors duration-200 ${isYearly ? 'bg-[#4f46e5]' : 'bg-gray-300'}`}
-                  aria-label="Toggle billing period"
-                >
-                  <span
-                    className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-transform duration-200 ${isYearly ? 'translate-x-6' : 'translate-x-0'}`}
-                  />
-                </button>
-                <span className="inline-flex items-start gap-2">
-                  <span className={`text-sm font-medium transition-colors ${isYearly ? 'text-gray-900' : 'text-gray-400'}`}>
-                    {t('pricing.yearly')}
-                  </span>
-                  <span className="-mt-2 rounded-full bg-emerald-500 px-3 py-0.5 text-[11px] font-bold text-white">
-                    {t('pricing.yearlyDiscountBadge')}
-                  </span>
-                </span>
-              </div>
-            )}
           </div>
         </section>
 
         {/* Cards */}
         <section id="pricing-plans" className="scroll-mt-24 max-w-[1200px] mx-auto px-6 pb-20">
           {!isAgencyPricing && (
-            <div className="grid md:grid-cols-2 gap-6 max-w-[760px] mx-auto items-stretch pt-5">
-            {/* Standard ??? monthly or yearly via toggle */}
-            <div className="relative bg-[#4f46e5] rounded-2xl p-7 shadow-lg shadow-indigo-200/40 ring-2 ring-[#4f46e5] flex flex-col">
-              <div className="mb-6">
-                <h3 className="text-xl font-bold text-white mb-2">
-                  {isYearly ? t('pricing.yearly') : t('pricing.monthly')}
-                </h3>
-                <div className="flex items-baseline gap-1.5 mb-3">
-                  <span className="text-4xl font-bold text-white">
-                    {isYearly ? tutorPlanPriceLabels.yearlyPerMonth() : tutorPlanPriceLabels.monthly()}
-                  </span>
-                  <span className="text-indigo-200 text-sm inline-flex items-center gap-1.5">
-                    {showPerMonthSuffix() ? t('common.perMonth') : null}
-                    <span className="relative inline-flex items-center group">
-                      <CircleHelp className="w-3.5 h-3.5 text-white/70 cursor-help" />
-                      <span className="hidden group-hover:block pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-64 -translate-x-1/2 rounded-lg border border-white/15 bg-white p-2.5 text-xs font-medium text-gray-700 opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
-                        {t('pricing.studentFeeNote')}
-                      </span>
-                    </span>
-                  </span>
-                </div>
-                <p className="text-indigo-200 text-[13px] leading-relaxed">
-                  {isYearly ? t('pricing.yearlyDesc') : t('pricing.monthlyDesc')}
-                </p>
-              </div>
-              <ul className="space-y-2.5 mb-7 flex-1">
-                <li className="flex items-center gap-2 text-white text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-300 shrink-0" />{t('pricing.allFeatures')}</li>
-                <li className="flex items-center gap-2 text-white text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-300 shrink-0" />{t('pricing.unlimitedStudents')}</li>
-                <li className="flex items-center gap-2 text-white text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-300 shrink-0" />{trialCopy('pricing.freeTrial')}</li>
-                <li className="flex items-center gap-2 text-white text-[13px]"><CheckCircle2 className="w-4 h-4 text-emerald-300 shrink-0" />{isYearly ? t('pricing.saveYearly') : t('pricing.cancelAnytime')}</li>
-              </ul>
-              <button
-                type="button"
-                disabled={!!checkoutLoading}
-                onClick={() => startCheckout(isYearly ? 'yearly' : 'monthly')}
-                className="flex items-center justify-center gap-2 w-full h-11 rounded-full bg-white text-[#4f46e5] font-semibold text-[13px] transition-all duration-200 hover:scale-[1.02] hover:shadow-md active:scale-[0.98] disabled:opacity-70"
-              >
-                {checkoutLoading === (isYearly ? 'yearly' : 'monthly') && <Loader2 className="w-4 h-4 animate-spin" />}
-                {t('pricing.startNow')}
-              </button>
-            </div>
-
-            {/* Subscription Only */}
-            <div className="relative bg-white rounded-2xl p-7 border border-gray-100 shadow-sm hover:shadow-md transition-shadow flex flex-col">
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#4f46e5] text-white text-[11px] font-bold px-4 py-1 rounded-full shadow-sm">
-                {t('pricing.noCommissionBadge')}
-              </div>
-              <div className="mb-6">
-                <h3 className="text-xl font-bold text-gray-900 mb-2">{t('pricing.subscriptionOnly')}</h3>
-                <div className="flex items-baseline gap-1.5 mb-3">
-                  <span className="text-4xl font-bold text-gray-900">{tutorPlanPriceLabels.subscriptionOnly()}</span>
-                  {showPerMonthSuffix() ? <span className="text-gray-400 text-sm">{t('common.perMonth')}</span> : null}
-                </div>
-                <p className="text-gray-500 text-[13px] leading-relaxed">{t('pricing.subscriptionOnlyDesc')}</p>
-              </div>
-              <ul className="space-y-2.5 mb-7 flex-1">
-                <li className="flex items-center gap-2 text-gray-700 text-[13px]"><CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />{t('pricing.allFeatures')}</li>
-                <li className="flex items-center gap-2 text-gray-700 text-[13px]"><CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />{t('pricing.manualPayments')}</li>
-                <li className="flex items-center gap-2 text-gray-700 text-[13px]"><CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />{t('pricing.noCommission')}</li>
-                <li className="flex items-center gap-2 text-gray-700 text-[13px]"><CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />{t('pricing.cancelAnytime')}</li>
-              </ul>
-              <button
-                type="button"
-                disabled={!!checkoutLoading}
-                onClick={() => startCheckout('subscription_only')}
-                className="flex items-center justify-center gap-2 w-full h-11 rounded-full bg-gray-900 hover:bg-gray-800 text-white font-semibold text-[13px] transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-70"
-              >
-                {checkoutLoading === 'subscription_only' && <Loader2 className="w-4 h-4 animate-spin" />}
-                {t('pricing.startNow')}
-              </button>
-            </div>
-
+            <div className="pt-5">
+              <TutorPlanCards
+                promoCode={promoCode}
+                checkoutAudience={checkoutAudience}
+                isYearly={isYearly}
+                onYearlyChange={setIsYearly}
+                showBillingToggle={false}
+              />
             </div>
           )}
 

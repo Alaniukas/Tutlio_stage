@@ -23,6 +23,29 @@ const DOTENV_FORCE_KEYS = new Set([
   'VITE_SUPABASE_ANON_KEY',
 ]);
 
+const STRIPE_PARENT_OVERRIDE_KEYS = new Set([
+  'STRIPE_SECRET_KEY',
+  'STRIPE_PUBLISHABLE_KEY',
+  'STRIPE_WEBHOOK_SECRET',
+  'STRIPE_CONNECT_WEBHOOK_SECRET',
+  'STRIPE_MONTHLY_PRODUCT_ID',
+  'STRIPE_MONTHLY_PRICE_ID',
+  'STRIPE_YEARLY_PRODUCT_ID',
+  'STRIPE_YEARLY_PRICE_ID',
+  'STRIPE_SUBSCRIPTION_ONLY_PRODUCT_ID',
+  'STRIPE_SUBSCRIPTION_ONLY_PRICE_ID',
+  'STRIPE_SUBSCRIPTION_ONLY_YEARLY_PRICE_ID',
+  'STRIPE_MONTHLY_PRODUCT_ID_PLN',
+  'STRIPE_MONTHLY_PRICE_ID_PLN',
+  'STRIPE_YEARLY_PRODUCT_ID_PLN',
+  'STRIPE_YEARLY_PRICE_ID_PLN',
+  'STRIPE_SUBSCRIPTION_ONLY_PRODUCT_ID_PLN',
+  'STRIPE_SUBSCRIPTION_ONLY_PRICE_ID_PLN',
+  'STRIPE_SUBSCRIPTION_ONLY_YEARLY_PRICE_ID_PLN',
+  'STRIPE_ENTERPRISE_PRICE_ID',
+  'STRIPE_ENTERPRISE_PRICE_ID_PLN',
+]);
+
 function loadEnvFile(name: string) {
   const p = join(projectRoot, name);
   if (!existsSync(p)) return;
@@ -47,9 +70,7 @@ function loadEnvFile(name: string) {
         key === 'SUPABASE_SERVICE_ROLE_KEY' ||
         key === 'VITE_SUPABASE_URL' ||
         key === 'VITE_SUPABASE_ANON_KEY' ||
-        key === 'STRIPE_SECRET_KEY' ||
-        key === 'STRIPE_WEBHOOK_SECRET' ||
-        key === 'STRIPE_CONNECT_WEBHOOK_SECRET');
+        STRIPE_PARENT_OVERRIDE_KEYS.has(key));
     if (preserveFromParent && process.env[key] !== undefined) continue;
     // Windows often has stale Supabase vars in user env — project .env must win.
     if (name === '.env' && DOTENV_FORCE_KEYS.has(key)) {
@@ -84,6 +105,28 @@ if (process.env.STRIPE_YEARLY_PRICE_ID) {
   console.log('[dev-api-local] STRIPE_YEARLY_PRICE_ID loaded');
 } else {
   console.warn('[dev-api-local] STRIPE_YEARLY_PRICE_ID missing — restart after editing .env.local');
+}
+
+const stripeSecretMode = process.env.STRIPE_SECRET_KEY?.startsWith('sk_test_')
+  ? 'test'
+  : process.env.STRIPE_SECRET_KEY?.startsWith('sk_live_')
+    ? 'live'
+    : 'missing';
+const stripePublishableMode = process.env.STRIPE_PUBLISHABLE_KEY?.startsWith('pk_test_')
+  ? 'test'
+  : process.env.STRIPE_PUBLISHABLE_KEY?.startsWith('pk_live_')
+    ? 'live'
+    : 'missing';
+if (stripePublishableMode === 'missing') {
+  console.warn(
+    '[dev-api-local] STRIPE_PUBLISHABLE_KEY missing — Embedded Checkout cannot load. For dev:test, add TEST_STRIPE_PUBLISHABLE_KEY to .env.local.',
+  );
+} else if (stripeSecretMode !== stripePublishableMode) {
+  console.warn(
+    `[dev-api-local] Stripe key mode mismatch: secret=${stripeSecretMode}, publishable=${stripePublishableMode}. Use keys from the same Stripe mode/account.`,
+  );
+} else {
+  console.log(`[dev-api-local] Stripe Checkout keys: ${stripeSecretMode} mode`);
 }
 
 const apiSupabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';

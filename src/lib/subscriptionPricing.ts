@@ -10,6 +10,8 @@ export const SUBSCRIPTION_PLN = {
   yearlyTotal: 773.88,
   yearlySave: 258,
   subscriptionOnly: 149.99,
+  subscriptionOnlyYearlyPerMonth: 112.49,
+  subscriptionOnlyYearlyTotal: 1349.91,
 } as const;
 
 export function formatSubscriptionPln(amount: number, opts?: { perMonth?: boolean }) {
@@ -22,4 +24,7 @@ export const subscriptionPriceLabels = {
   yearlyPerMonth: () => formatSubscriptionPln(SUBSCRIPTION_PLN.yearlyPerMonth, { perMonth: true }),
   yearlyTotal: () => formatPln(SUBSCRIPTION_PLN.yearlyTotal),
   subscriptionOnly: () => formatSubscriptionPln(SUBSCRIPTION_PLN.subscriptionOnly, { perMonth: true }),
+  subscriptionOnlyYearlyPerMonth: () =>
+    formatSubscriptionPln(SUBSCRIPTION_PLN.subscriptionOnlyYearlyPerMonth, { perMonth: true }),
+  subscriptionOnlyYearlyTotal: () => formatPln(SUBSCRIPTION_PLN.subscriptionOnlyYearlyTotal),
 } as const;

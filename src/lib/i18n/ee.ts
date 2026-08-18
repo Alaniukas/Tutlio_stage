@@ -3085,6 +3085,11 @@ export const ee: Record<string, string> = {
   // --- pricing ---
   'pricing.subscriptionOnly': 'Ainult tellimus',
   'pricing.subscriptionOnlyDesc': 'Täielik platvormi juurdepääs manuaalsete maksetega. Ilma komisjonita teie kasutajatele.',
+  'pricing.subscriptionOnlyYearlyDesc': 'Arveldatakse {total} aastas. Säästate 25%.',
+  'pricing.switchToNoCommission': 'Vali vahendustasuta',
+  'pricing.switchToStandard': 'Vali kasutuspõhine makse',
+  'pricing.saveTwentyFivePercent': 'Säästa aastase arveldusega 25%',
+  'pricing.billingPeriodLabel': 'Vali kuu- või aastaarveldus',
   'pricing.manualPayments': 'Ainult manuaalsed maksed',
   'pricing.noCommission': 'Ilma platvormi komisjonita',
   'pricing.studentFeeNote': 'Näidatud hind ei sisalda maksetasu. Teie õpilane maksab lisatasu kassas: 3,5% + €0,25.',

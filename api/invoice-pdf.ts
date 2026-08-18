@@ -5,6 +5,11 @@ import { resolveInvoiceBranding } from './_lib/invoiceBranding.js';
 import { generateInvoicePdf, type InvoicePdfData } from './_lib/invoicePdf.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
+import { isProKlaseOrg } from './_lib/marketMoney.js';
+import {
+  invoicePartyMatches,
+  proKlaseVatExemptionNote,
+} from './_lib/proKlaseInvoice.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -54,7 +59,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ? await resolveInvoiceBranding(supabase, invoice.organization_id)
       : null;
 
-    if (!brandingPreview && invoice.pdf_storage_path) {
+    const isProKlaseInvoice = isProKlaseOrg(invoice.organization_id);
+    if (!brandingPreview && !isProKlaseInvoice && invoice.pdf_storage_path) {
       const { data: fileData, error: dlErr } = await supabase.storage
         .from('invoices')
         .download(invoice.pdf_storage_path);
@@ -75,6 +81,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .order('created_at', { ascending: true });
 
     const branding = brandingPreview;
+    const sellerSnapshot = {
+      ...(invoice.seller_snapshot as InvoicePdfData['seller']),
+    };
+
+    // Older Pro Klasė invoices predate the stored tax note. Reconstruct it when
+    // the seller snapshot is the organization, while leaving tutor -> org
+    // invoices untouched because the tutor is the seller in that flow.
+    if (isProKlaseInvoice && !sellerSnapshot.taxExemptionNote) {
+      const [{ data: organization }, { data: organizationInvoiceProfile }] = await Promise.all([
+        supabase
+          .from('organizations')
+          .select('name')
+          .eq('id', invoice.organization_id)
+          .maybeSingle(),
+        supabase
+          .from('invoice_profiles')
+          .select('business_name, company_code')
+          .eq('organization_id', invoice.organization_id)
+          .maybeSingle(),
+      ]);
+      const organizationIdentity = {
+        name: organizationInvoiceProfile?.business_name || organization?.name || null,
+        companyCode: organizationInvoiceProfile?.company_code || null,
+      };
+      const hasOrganizationIdentity = Boolean(
+        organizationIdentity.name || organizationIdentity.companyCode,
+      );
+      const buyerIsOrganization = invoicePartyMatches(
+        invoice.buyer_snapshot as InvoicePdfData['buyer'],
+        organizationIdentity,
+      );
+      const sellerIsOrganization = invoicePartyMatches(sellerSnapshot, organizationIdentity)
+        || (hasOrganizationIdentity && !buyerIsOrganization);
+      const taxExemptionNote = proKlaseVatExemptionNote(
+        invoice.organization_id,
+        sellerIsOrganization,
+      );
+      if (taxExemptionNote) sellerSnapshot.taxExemptionNote = taxExemptionNote;
+    }
 
     const pdfData: InvoicePdfData = {
       invoiceNumber: invoice.invoice_number,
@@ -85,7 +130,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       periodEnd: invoice.period_end
         ? new Date(invoice.period_end).toLocaleDateString('lt-LT')
         : undefined,
-      seller: invoice.seller_snapshot as InvoicePdfData['seller'],
+      seller: sellerSnapshot,
       buyer: invoice.buyer_snapshot as InvoicePdfData['buyer'],
       lineItems: (lineItems || []).map((li: any) => ({
         description: li.description,
