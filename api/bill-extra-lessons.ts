@@ -100,7 +100,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Last month's unpackaged, unpaid, occurred lessons.
   const { data: candidates, error: sessErr } = await supabase
     .from('sessions')
-    .select('id, tutor_id, student_id, subject_id, start_time, price, status, paid, payment_status, lesson_package_id, payment_batch_id, subjects(name, is_trial, is_group)')
+    .select('id, tutor_id, student_id, subject_id, start_time, price, status, paid, payment_status, lesson_package_id, payment_batch_id, is_complimentary, subjects(name, is_trial, is_group)')
     .in('tutor_id', tutorIds)
     .gte('start_time', `${periodStart}T00:00:00`)
     .lt('start_time', `${currentMonthStart}T00:00:00`)
@@ -114,6 +114,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const billable = (candidates || []).filter((s: any) => {
     const subj = Array.isArray(s.subjects) ? s.subjects[0] : s.subjects;
     if (!s.subject_id || subj?.is_trial === true || subj?.is_group === true) return false;
+    if (s.is_complimentary === true) return false;
     const ps = String(s.payment_status || 'pending');
     if (ps !== 'pending') return false;
     // Only occurred lessons: active-but-future rows are not yet deliverable work.

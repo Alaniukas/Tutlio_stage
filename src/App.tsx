@@ -79,6 +79,7 @@ const CompanyDynamicPricing = lazy(() => import('@/pages/company/CompanyDynamicP
 const CompanyMessages = lazy(() => import('@/pages/company/CompanyMessages'));
 const CompanyTeam = lazy(() => import('@/pages/company/CompanyTeam'));
 const PreviewAssignStudentModal = lazy(() => import('@/pages/dev/PreviewAssignStudentModal'));
+const PreviewComplimentaryLesson = lazy(() => import('@/pages/dev/PreviewComplimentaryLesson'));
 const ParentDashboard = lazy(() => import('@/pages/ParentDashboard'));
 const ParentSessions = lazy(() => import('@/pages/ParentSessions'));
 const ParentInvoices = lazy(() => import('@/pages/ParentInvoices'));
@@ -238,6 +239,18 @@ export default function App({ basename }: { basename: string }) {
         <Route
           path="/dev/preview-assign-student-modal"
           element={<Navigate to="/preview/assign-student-modal" replace />}
+        />
+        <Route
+          path="/preview/complimentary-lesson"
+          element={
+            <StaticLocaleProvider locale="lt">
+              <PreviewComplimentaryLesson />
+            </StaticLocaleProvider>
+          }
+        />
+        <Route
+          path="/preview/nemokama-pamoka"
+          element={<Navigate to="/preview/complimentary-lesson" replace />}
         />
 
         {/* Public Landing Pages - NO UserProvider wrapper */}

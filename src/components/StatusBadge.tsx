@@ -13,6 +13,7 @@ interface StatusBadgeProps {
     paymentStatus?: string;
     paid?: boolean;
     isTrial?: boolean;
+    isComplimentary?: boolean;
     className?: string;
     noShowDetail?: string | null;
     orgTutorCopy?: boolean;
@@ -52,6 +53,7 @@ function StatusBadgeBase({
     paymentStatus,
     paid,
     isTrial,
+    isComplimentary,
     className,
     noShowDetail,
     orgTutorCopy,
@@ -92,6 +94,15 @@ function StatusBadgeBase({
                 {noShowDetail ? (
                     <span className="text-[10px] font-normal text-rose-700/90 pl-5 leading-tight">{noShowDetail}</span>
                 ) : null}
+            </span>
+        );
+    }
+
+    if (isComplimentary) {
+        return (
+            <span className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-sky-100 text-sky-800 text-xs font-medium", className)}>
+                <CheckCircle className="w-3.5 h-3.5" />
+                {t('status.complimentary')}
             </span>
         );
     }

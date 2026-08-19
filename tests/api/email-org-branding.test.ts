@@ -4,6 +4,7 @@ import {
   DEFAULT_TUTLIO_HEADER_MARKERS,
   resolveEmailOrgBranding,
 } from '../../api/_lib/emailOrgBranding';
+import { headerInlineStyle } from '../../api/_lib/outlookEmail';
 import { PRO_KLASE_ORG_ID } from '../../api/_lib/marketMoney';
 
 describe('resolveEmailOrgBranding', () => {
@@ -56,6 +57,31 @@ describe('resolveEmailOrgBranding', () => {
     expect(withFlag.branding?.name).toBe('Other Org');
     expect(withFlag.branding?.hidePoweredBy).toBe(false);
   });
+
+  it('applies full white-label from org features (signature, sender, hide powered-by)', () => {
+    const resolved = resolveEmailOrgBranding('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', {
+      name: 'Mano Korepetitorius',
+      logo_url: 'https://cdn.example/mano.png',
+      brand_color: '#4F33B2',
+      brand_color_secondary: '#68AE4A',
+      features: {
+        custom_branding: true,
+        hide_powered_by: true,
+        public_name: 'Mano Korepetitorius',
+        email_team_signature: 'Mano Korepetitoriaus komanda',
+        email_sender_name: 'Mano Korepetitorius',
+      },
+    });
+    expect(resolved.isProKlase).toBe(false);
+    expect(resolved.emailTeamSignature).toBe('Mano Korepetitoriaus komanda');
+    expect(resolved.emailSenderName).toBe('Mano Korepetitorius');
+    expect(resolved.branding).toMatchObject({
+      name: 'Mano Korepetitorius',
+      logo_url: 'https://cdn.example/mano.png',
+      brand_color: '#4F33B2',
+      hidePoweredBy: true,
+    });
+  });
 });
 
 describe('applyOrgBrandingToHtml', () => {
@@ -75,5 +101,24 @@ describe('applyOrgBrandingToHtml', () => {
     expect(out).toContain('Pro Klasės komanda');
     expect(out).not.toContain('Tutlio 🎓');
     expect(out).not.toContain('powered by Tutlio');
+  });
+
+  it('recolors Outlook reminder headers and buttons (amber / orange)', () => {
+    const html = `<div class="header" style="${headerInlineStyle('#f59e0b', '#f97316')}"></div>
+      <td bgcolor="#ea580c" style="background-color:#ea580c;"></td>`;
+    const out = applyOrgBrandingToHtml(html, {
+      branding: {
+        name: 'Mano Korepetitorius',
+        logo_url: null,
+        brand_color: '#4F33B2',
+        brand_color_secondary: '#68AE4A',
+        hidePoweredBy: true,
+      },
+    });
+    expect(out).toContain('#4F33B2');
+    expect(out).toContain('#68AE4A');
+    expect(out.toLowerCase()).not.toContain('#f59e0b');
+    expect(out.toLowerCase()).not.toContain('#f97316');
+    expect(out.toLowerCase()).not.toContain('#ea580c');
   });
 });

@@ -69,7 +69,13 @@ async function handleGet(req: VercelRequest, res: VercelResponse) {
   if (scope === 'tutor' && tutorIdParam) {
     const adminRow = await getOrgAdminAccessByUserId(supabase, userId);
 
-    if (!adminRow || !hasOrgAdminPermission(adminRow.role, adminRow.permissions, 'finance.view')) {
+    if (!adminRow) {
+      return res.status(403).json({ error: 'Insufficient organization permission' });
+    }
+    const canViewTutorInvoice =
+      hasOrgAdminPermission(adminRow.role, adminRow.permissions, 'finance.view') ||
+      hasOrgAdminPermission(adminRow.role, adminRow.permissions, 'tutors.view');
+    if (!canViewTutorInvoice) {
       return res.status(403).json({ error: 'Insufficient organization permission' });
     }
 
@@ -90,7 +96,7 @@ async function handleGet(req: VercelRequest, res: VercelResponse) {
       .maybeSingle();
 
     if (error) return res.status(500).json({ error: error.message });
-    return res.status(200).json({ data });
+    return res.status(200).json({ data, profile: data });
   }
 
   if (scope === 'organization') {

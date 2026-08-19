@@ -259,6 +259,7 @@ export default function CompanyFinance() {
         .lte('start_time', invoicePeriodEnd + 'T23:59:59')
         .lte('start_time', new Date().toISOString())
         .eq('paid', false)
+        .eq('is_complimentary', false)
         .is('payment_batch_id', null)
         .is('lesson_package_id', null)
         .order('start_time', { ascending: false });

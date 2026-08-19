@@ -159,7 +159,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const sessionSelect = `
-        id, price, start_time, subject_id, student_id, status,
+        id, price, start_time, subject_id, student_id, status, is_complimentary,
         students!inner(id, full_name, email, payer_email, payer_name, payer_phone),
         subjects(name, is_trial)
       `;
@@ -344,6 +344,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (sessErr) return res.status(500).json({ error: sessErr.message });
+    if (!isOrgTutor) {
+      sessions = sessions.filter((s: any) => s.__fromPackage || s.is_complimentary !== true);
+    }
     if (!sessions.length) {
       if (precheckOnly) {
         return res.status(200).json({ canGenerate: false, reason: 'no_sessions' });
