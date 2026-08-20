@@ -6279,7 +6279,7 @@ export default function CalendarPage() {
                 value={slotEditMeetingLink}
                 onChange={(e) => setSlotEditMeetingLink(e.target.value)}
                 className="rounded-xl"
-                placeholder="https://zoom.us/j/... arba https://meet.google.com/..."
+                placeholder="https://meet.google.com/..."
               />
               <p className="text-xs text-gray-400">{t('cal.linkUsedAsDefault')}</p>
             </div>
@@ -6592,7 +6592,7 @@ export default function CalendarPage() {
                     value={assignMeetingLink}
                     onChange={(e) => setAssignMeetingLink(e.target.value)}
                     className="rounded-xl"
-                    placeholder="https://zoom.us/j/... arba https://meet.google.com/..."
+                    placeholder="https://meet.google.com/..."
                   />
                   <p className="text-xs text-gray-400">
                     {editingSlot?.meetingLink

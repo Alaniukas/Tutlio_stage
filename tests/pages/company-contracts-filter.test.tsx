@@ -81,6 +81,7 @@ describe('CompanyContracts list filter', () => {
         student_id: 'student-2',
         signing_status: 'signed_by_school',
         contract_number: 'SUT-2',
+        signatures: [{ role: 'school', status: 'signed', signed_pdf_path: 'org/school.pdf' }],
         student: { full_name: 'Petraitis Jonas', email: 'j@example.test', payer_name: 'Rasa Petraitienė', payer_email: 'r@example.test' },
       },
     ];

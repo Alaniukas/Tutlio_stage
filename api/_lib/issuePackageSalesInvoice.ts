@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { allocateInvoiceNumber } from './invoiceNumber.js';
 
 export type PackageRowForSf = {
   id: string;
@@ -112,14 +113,7 @@ export async function tryIssueSalesInvoiceForStripePackage(
   const issueDate = new Date().toISOString().slice(0, 10);
   const paidDay = packageRow.paid_at ? packageRow.paid_at.slice(0, 10) : issueDate;
 
-  const series = (invoiceProfile.invoice_series as string) || 'SF';
-  const num = (invoiceProfile.next_invoice_number as number) || 1;
-  const invoiceNumber = `${series}-${String(num).padStart(3, '0')}`;
-
-  await supabase
-    .from('invoice_profiles')
-    .update({ next_invoice_number: num + 1, updated_at: new Date().toISOString() })
-    .eq('id', invoiceProfile.id as string);
+  const invoiceNumber = await allocateInvoiceNumber(supabase, invoiceProfile.id as string);
 
   const { data: invoice, error: invErr } = await supabase
     .from('invoices')
@@ -143,10 +137,6 @@ export async function tryIssueSalesInvoiceForStripePackage(
 
   if (invErr || !invoice) {
     console.error('[issuePackageSalesInvoice] Failed to insert invoice:', invErr);
-    await supabase
-      .from('invoice_profiles')
-      .update({ next_invoice_number: num, updated_at: new Date().toISOString() })
-      .eq('id', invoiceProfile.id as string);
     return;
   }
 

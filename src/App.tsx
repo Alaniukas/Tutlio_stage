@@ -78,8 +78,12 @@ const CompanyInstructions = lazy(() => import('@/pages/company/CompanyInstructio
 const CompanyDynamicPricing = lazy(() => import('@/pages/company/CompanyDynamicPricing'));
 const CompanyMessages = lazy(() => import('@/pages/company/CompanyMessages'));
 const CompanyTeam = lazy(() => import('@/pages/company/CompanyTeam'));
-const PreviewAssignStudentModal = lazy(() => import('@/pages/dev/PreviewAssignStudentModal'));
-const PreviewComplimentaryLesson = lazy(() => import('@/pages/dev/PreviewComplimentaryLesson'));
+const PreviewAssignStudentModal = import.meta.env.DEV
+  ? lazy(() => import('@/pages/dev/PreviewAssignStudentModal'))
+  : null;
+const PreviewComplimentaryLesson = import.meta.env.DEV
+  ? lazy(() => import('@/pages/dev/PreviewComplimentaryLesson'))
+  : null;
 const ParentDashboard = lazy(() => import('@/pages/ParentDashboard'));
 const ParentSessions = lazy(() => import('@/pages/ParentSessions'));
 const ParentInvoices = lazy(() => import('@/pages/ParentInvoices'));
@@ -228,30 +232,38 @@ export default function App({ basename }: { basename: string }) {
       <ThemeColorManager />
       <Suspense fallback={<RouteLoadingFallback />}>
       <Routes>
-        <Route
-          path="/preview/assign-student-modal"
-          element={
-            <StaticLocaleProvider locale="lt">
-              <PreviewAssignStudentModal />
-            </StaticLocaleProvider>
-          }
-        />
-        <Route
-          path="/dev/preview-assign-student-modal"
-          element={<Navigate to="/preview/assign-student-modal" replace />}
-        />
-        <Route
-          path="/preview/complimentary-lesson"
-          element={
-            <StaticLocaleProvider locale="lt">
-              <PreviewComplimentaryLesson />
-            </StaticLocaleProvider>
-          }
-        />
-        <Route
-          path="/preview/nemokama-pamoka"
-          element={<Navigate to="/preview/complimentary-lesson" replace />}
-        />
+        {import.meta.env.DEV && PreviewAssignStudentModal && (
+          <>
+            <Route
+              path="/preview/assign-student-modal"
+              element={
+                <StaticLocaleProvider locale="lt">
+                  <PreviewAssignStudentModal />
+                </StaticLocaleProvider>
+              }
+            />
+            <Route
+              path="/dev/preview-assign-student-modal"
+              element={<Navigate to="/preview/assign-student-modal" replace />}
+            />
+          </>
+        )}
+        {import.meta.env.DEV && PreviewComplimentaryLesson && (
+          <>
+            <Route
+              path="/preview/complimentary-lesson"
+              element={
+                <StaticLocaleProvider locale="lt">
+                  <PreviewComplimentaryLesson />
+                </StaticLocaleProvider>
+              }
+            />
+            <Route
+              path="/preview/nemokama-pamoka"
+              element={<Navigate to="/preview/complimentary-lesson" replace />}
+            />
+          </>
+        )}
 
         {/* Public Landing Pages - NO UserProvider wrapper */}
         <Route path="/" element={<Landing />} />

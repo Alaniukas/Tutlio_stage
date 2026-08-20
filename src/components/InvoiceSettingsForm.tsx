@@ -22,6 +22,9 @@ interface InvoiceProfile {
   contact_email: string;
   contact_phone: string;
   invoice_series: string;
+  bank_name: string;
+  iban: string;
+  next_invoice_number: number;
 }
 
 interface InvoiceSettingsFormProps {
@@ -41,6 +44,9 @@ const EMPTY_PROFILE: InvoiceProfile = {
   contact_email: '',
   contact_phone: '',
   invoice_series: 'SF',
+  bank_name: '',
+  iban: '',
+  next_invoice_number: 1,
 };
 
 const COMPANY_TYPES: EntityType[] = ['mb', 'uab', 'ii'];
@@ -90,6 +96,9 @@ export default function InvoiceSettingsForm({
           contact_email: json.data.contact_email || '',
           contact_phone: json.data.contact_phone || '',
           invoice_series: json.data.invoice_series || 'SF',
+          bank_name: json.data.bank_name || '',
+          iban: json.data.iban || '',
+          next_invoice_number: Number(json.data.next_invoice_number) || 1,
         });
       } else {
         setForm(prev => ({
@@ -131,8 +140,9 @@ export default function InvoiceSettingsForm({
     }
   };
 
-  const updateField = (field: keyof InvoiceProfile, value: string) => {
-    setForm(prev => ({ ...prev, [field]: value }));
+  const updateField = (field: keyof InvoiceProfile, value: string | number) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+    setSaved(false);
   };
 
   if (loading) {
@@ -290,6 +300,39 @@ export default function InvoiceSettingsForm({
           maxLength={10}
         />
         <p className="text-xs text-gray-500 mt-1">{t('invoiceSettings.invoiceSeriesHint')}</p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label className="text-sm font-medium text-gray-700">{t('invoiceSettings.bankName')}</Label>
+          <Input
+            value={form.bank_name}
+            onChange={(e) => updateField('bank_name', e.target.value)}
+            placeholder="Luminor bank AS"
+            className="mt-1 rounded-lg"
+          />
+        </div>
+        <div>
+          <Label className="text-sm font-medium text-gray-700">{t('invoiceSettings.iban')}</Label>
+          <Input
+            value={form.iban}
+            onChange={(e) => updateField('iban', e.target.value.toUpperCase())}
+            placeholder="LT00 0000 0000 0000 000"
+            className="mt-1 rounded-lg"
+          />
+        </div>
+      </div>
+
+      <div>
+        <Label className="text-sm font-medium text-gray-700">{t('invoiceSettings.nextInvoiceNumber')}</Label>
+        <Input
+          type="number"
+          min={1}
+          value={form.next_invoice_number}
+          onChange={(e) => updateField('next_invoice_number', parseInt(e.target.value, 10) || 1)}
+          className="mt-1 rounded-lg w-32"
+        />
+        <p className="text-xs text-gray-500 mt-1">{t('invoiceSettings.nextInvoiceNumberHint')}</p>
       </div>
 
       {error && (

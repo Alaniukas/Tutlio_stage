@@ -105,6 +105,8 @@ Maršrutai apibrėžti `src/App.tsx`.
 - `/school-sign` — tėvų pasirašymas
 - `/school-contract-complete` — sutarties užbaigimas po pasirašymo
 
+**Lokalūs UI preview (ne produkcija):** `/preview/assign-student-modal`, `/preview/complimentary-lesson` — registruojami tik kai `import.meta.env.DEV`. Fake duomenys, be auth.
+
 ---
 
 ## 5. Architektūros schema
@@ -175,7 +177,7 @@ Pilnas sąrašas: `.env.example`
 | App | `APP_URL`, `VITE_APP_URL` | Redirect'ams |
 | Email | `RESEND_API_KEY`, `FROM_EMAIL` | |
 | Cron | `CRON_SECRET` | **Privaloma** Vercel prod |
-| Admin | `ADMIN_SECRET` | Platformos admin API |
+| Admin | `ADMIN_SECRET` | Platformos admin API. **Ne** `VITE_ADMIN_SECRET` fronte — Vite išleistų į browserį. API paliktas tik senas fallback. |
 | GoSign | `GOSIGN_CLIENT_ID`, `GOSIGN_PRIVATE_KEY`, `GOSIGN_ONESIGN_ENDPOINT`… | E-parašas |
 | DOCX | `DOCX_CONVERTER_URL`, `DOCX_CONVERTER_API_KEY` | Sutarčių PDF |
 | Google | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Kalendoriaus sync |
@@ -212,7 +214,7 @@ npm run vercel:deploy-prod
 
 ## 9. Duomenų bazė (Supabase)
 
-Migracijos: `supabase/migrations/` (datuotos `202603*`–`202607*`).
+Migracijos: `supabase/migrations/` (datuotos `202603*`–`202608*`).
 
 ### Pagrindinės lentelės
 
@@ -340,21 +342,26 @@ if (hasFeature('school_contract_esign')) { /* GoSign flow */ }
 - Šablonų valdymas (DOCX + placeholders: `{{student_name}}`, `{{annual_fee}}`…)
 - Sutarties kūrimas su metiniu mokesčiu, papildomu mokesčiu
 - **Pasirašymo statusai (5):** `draft` → `sent` → `awaiting_school_signature` → `signed_by_school` → `signed`
-- Rankinis pasirašytos sutarties įkėlimas (foto/PDF) — veikia ir su eSign org
+**Pasirašymo statusai (5):** `draft` → `sent` → `awaiting_school_signature` → `signed_by_school` → `signed`
+- Rankinis pasirašytos sutarties įkėlimas (foto/PDF) — **ne-eSign** org vis dar užbaigia kaip `signed`
+- **eSign org:** „Įkelti pasirašytą kopiją“ **ne** pažymi sutarties kaip pasirašytos mokyklos. Failas tampa `pdf_url`, statusas `awaiting_school_signature` (jei tėvai jau patvirtino duomenis), mokyklos GoSign eilutė resetinama — direktorė gali pasirašyti tą kopiją
+- Sąrašo PDF nuoroda: `currentContractPdfPath()` — naujausias parašo PDF (`school.pdf` / tėvų GoSign), ne senas tėvų skanas
 - GoSign integracija kai `school_contract_esign` įjungta
 
 **School view filtrai** (dropdown, ne pill mygtukai):
 | Filtras | Sąlyga |
 |---------|--------|
 | Visos | visos nearchyvuotos |
-| Nepasirašyta mokyklos | `signing_status === 'awaiting_school_signature'` |
-| Nepasirašyta tėvų | `signing_status === 'signed_by_school'` |
-| Neužpildyti sutarties duomenys | trūksta privalomų laukų, ne `signed` |
+| Nepasirašyta mokyklos | `awaiting_school_signature` **arba** `signed_by_school` be tikro mokyklos parašo eilutėje |
+| Nepasirašyta tėvų | `signed_by_school` **ir** mokyklos parašas `status === 'signed'` |
+| Neužpildyti sutarties duomenys | ne `signed` ir (trūksta privalomų laukų **arba** e-sign `sent` be `completion_submitted_at`) |
 | Pasirašytos | `signing_status === 'signed'` |
 
-**Filtrų logika:** `src/lib/schoolContractFilters.ts` — `getContractMissingFieldLabels()`, `matchesContractFilter()`, `countContractsByFilter()`.
+**Filtrų logika:** `src/lib/schoolContractFilters.ts` — `getContractMissingFieldLabels()`, `matchesContractFilter()`, `countContractsByFilter()`, `schoolCanInitiateSignature()`, `currentContractPdfPath()`.
 
-**Trūkstami laukai** (school): adresas, gimimo data, tėvų asm. kodas, tėvų tel., atvaizdo sutikimas (`media_publicity_consent`).
+**Trūkstami laukai** (school): adresas, gimimo data, tėvų asm. kodas, tėvų tel., atvaizdo sutikimas. Sutikimas imamas iš **`school_contracts.media_publicity_consent`**, ne iš mokinio įrašo (sibling / senesnės sutarties `students.media_publicity_consent` nereiškia, kad ši sutartis užpildyta).
+
+**Geltona juosta** „laukia, kol tėvai patvirtins duomenis“ = `sent` + eSign. Tai turi patekti į filtrą „Neužpildyti sutarties duomenys“.
 
 **Excel eksportas (sutartys):** `schoolContractsExport.ts` + `schoolContractsXlsxExport.ts` — mygtukas school view, eksportuoja **dabartinį filtruotą** sąrašą (+ paieška).
 
@@ -430,6 +437,8 @@ if (hasFeature('school_contract_esign')) { /* GoSign flow */ }
 
 **Testai:** `tests/lib/proKlaseTutorPay.test.ts`
 
+**RLS:** tutor SELECT `students` / `sessions` = `auth.uid() = tutor_id`. `org_admin_permission_*` politikos yra **RESTRICTIVE**; `private.org_admin_permission_gate()` neadminams grąžina `true` tyčia (kad neužblokuotų korep/mokinio/tėvų policy). Tai nėra skylių tarp paskyrų.
+
 ---
 
 ## 15. Stripe integracija
@@ -478,7 +487,7 @@ npm run security:pencheck
 
 **School testai:**
 - `tests/lib/school-finance-export.test.ts`
-- `tests/lib/school-contract-filters.test.ts` — missing fields, 5 filtrų matching
+- `tests/lib/school-contract-filters.test.ts` — missing fields, 5 filtrų matching, e-sign incomplete (be `completion_submitted_at`), tėvų kopija be mokyklos parašo → `awaiting_school`
 - `tests/lib/school-students-export.test.ts` — export rows, consent labels
 - `tests/pages/company-students-filter.test.tsx` — school list filtrai
 - `tests/integration/school-contract-signing-flow.test.ts`
@@ -532,8 +541,11 @@ npm run security:pencheck
 6. **`.env` Supabase URL** — gali būti pasenęs (`xklzjhfztjxltrdkplog`); stage/prod `cuhciqwmqfuajeeqjjbm`. Demo login reikalauja `.env.local` su teisingais raktais.
 7. **Per platus diff** — vartotojas nori minimalaus, fokusuoto pakeitimo.
 8. **xlsx paketas** — nenaudojamas; Excel eksportui naudok `exceljs` (`schoolFinanceXlsxExport.ts`).
-9. **Temp failai** — necommitink `scripts/_*.mjs`, `scripts/_last-*.pdf` ir pan.
+9. **Temp failai** — necommitink `scripts/_*.mjs`, `scripts/_last-*.pdf`, `tmp/`, `preview-*.html`.
 10. **i18n** — nauji string'ai reikalauja `lt.ts` + `en.ts` atnaujinimo.
+11. **Lokalūs UI preview** (`/preview/assign-student-modal`, `/preview/complimentary-lesson`) — tik `import.meta.env.DEV`. Produkcijoje maršrutų nėra.
+12. **Vercel `level:error`** dažnai yra Node `[DEP0169] url.parse()` (200 OK). Tikri incidentai: `5xx` arba `[school-contract-sign-reconcile] GoSign ... timed out`.
+13. **eSign tėvų skanas ≠ mokyklos parašas** — `signed_contract_url` gali būti tėvų kopija, o GoSign guli `signatures.signed_pdf_path` (`school.pdf`). Filtras „Pasirašyta mokyklos“ (`signed_by_school`) be `school` parašo eilutės yra klaida — žr. `schoolHasSigned()`.
 
 ---
 
@@ -586,4 +598,4 @@ npm run security:pencheck
 
 ---
 
-*Paskutinis atnaujinimas: 2026-08-04 (Pro Klasė org_tutor atlygis/baudos, kalendoriaus laisvo laiko srautas, vizualūs session stiliai, school filtrai/eksportas, Windows API auth fix). Jei radai neatitikimų su kodu — prioritetas kodui, atnaujink šį failą.*
+*Paskutinis atnaujinimas: 2026-08-20 (school sutarčių filtrai / e-sign tėvų kopija, DEV-only `/preview/*`, Pro Klasė RLS pastaba: `org_admin_permission_gate` yra RESTRICTIVE ir neadminams grąžina true tyčia). Jei radai neatitikimų su kodu — prioritetas kodui, atnaujink šį failą.*

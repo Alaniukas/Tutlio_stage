@@ -27,6 +27,8 @@ export interface InvoicePdfData {
     personalCode?: string;
     contactEmail?: string;
     contactPhone?: string;
+    bankName?: string;
+    iban?: string;
   };
 
   buyer: {
@@ -52,6 +54,13 @@ export interface InvoicePdfData {
   paidNote?: string[];
 
   branding?: InvoicePdfBranding;
+
+  isVatInvoice?: boolean;
+  invoiceNumberLabel?: string;
+  layout?: 'default' | 'pvm_education';
+  notes?: string[];
+  lessonDetails?: { subject: string; price: number; datetime: string }[];
+  hidePlatformFooter?: boolean;
 }
 
 const PAGE_WIDTH = 595.28;
@@ -73,7 +82,6 @@ export function invoiceFontCandidateDirs(): string[] {
   const dirs: string[] = [];
   const cwd = process.cwd();
   dirs.push(join(cwd, 'api', '_lib', 'fonts'));
-  // Bundled / nested cwd variants seen on some Vercel builds
   dirs.push(join(cwd, 'fonts'));
   try {
     dirs.push(join(dirname(fileURLToPath(import.meta.url)), 'fonts'));
@@ -117,15 +125,10 @@ const LT_MAP: Record<string, string> = {
 };
 const LT_RE = new RegExp(`[${Object.keys(LT_MAP).join('')}]`, 'g');
 
-/**
- * Strip Lithuanian diacritics (legacy helper for WinAnsi / Helvetica).
- * Invoice PDFs now use Noto Sans and render Unicode directly.
- */
 export function asciify(text: string): string {
   return text.replace(LT_RE, (ch) => LT_MAP[ch] || ch);
 }
 
-/** Word-wrap for invoice line descriptions (supports explicit `\n` for date lines). */
 export function wrapInvoiceDescription(
   text: string,
   font: PDFFont,
@@ -180,6 +183,10 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
   const branding = data.branding;
   const primary = branding?.primaryColor ?? defaultPrimary;
   const secondary = branding?.secondaryColor ?? defaultSecondary;
+  const isPvmLayout = data.layout === 'pvm_education';
+  const isVatInvoice = data.isVatInvoice === true || isPvmLayout || !!data.seller.vatCode;
+  const title = isVatInvoice ? 'PVM SĄSKAITA FAKTŪRA' : 'SĄSKAITA FAKTŪRA';
+  const numberLabel = data.invoiceNumberLabel || `Nr. ${data.invoiceNumber}`;
 
   const ctx: DrawCtx = {
     page,
@@ -214,9 +221,9 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
   }
 
   let y = headerTop - 16;
-  drawText(ctx, 'SĄSKAITA FAKTŪRA', MARGIN, y, { size: 16, bold: true, color: primary });
+  drawText(ctx, title, MARGIN, y, { size: 16, bold: true, color: primary });
   y -= 22;
-  drawText(ctx, `Nr. ${data.invoiceNumber}`, MARGIN, y, { size: 11, bold: true });
+  drawText(ctx, numberLabel, MARGIN, y, { size: 11, bold: true });
   drawText(ctx, `Data: ${data.issueDate}`, MARGIN + 250, y, { size: 9, color: ctx.gray });
   y -= 14;
 
@@ -243,7 +250,6 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
   });
   y = headerBottom - 16;
 
-  // Seller / Buyer
   const halfWidth = COL_WIDTH / 2 - 10;
   const sellerX = MARGIN;
   const buyerX = MARGIN + halfWidth + 20;
@@ -270,33 +276,11 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
   const colQty = MARGIN + 280;
   const colUnit = MARGIN + 340;
   const colTotal = MARGIN + 420;
-
-  const tableHeaderHeight = 20;
-  const tableHeaderBottom = y - tableHeaderHeight;
-  page.drawRectangle({
-    x: MARGIN,
-    y: tableHeaderBottom,
-    width: COL_WIDTH,
-    height: tableHeaderHeight,
-    color: rgb(
-      primary.red * 0.12 + 0.88,
-      primary.green * 0.12 + 0.88,
-      primary.blue * 0.12 + 0.88,
-    ),
-  });
-
-  const tableHeaderTextY = tableHeaderBottom + 6;
-  drawText(ctx, 'Paslaugos aprašymas', colDesc, tableHeaderTextY, {
-    size: 8,
-    bold: true,
-    color: primary,
-  });
-  drawText(ctx, 'Kiekis', colQty, tableHeaderTextY, { size: 8, bold: true, color: primary });
-  drawText(ctx, 'Vnt. kaina', colUnit, tableHeaderTextY, { size: 8, bold: true, color: primary });
-  drawText(ctx, 'Suma, EUR', colTotal, tableHeaderTextY, { size: 8, bold: true, color: primary });
-  y = tableHeaderBottom - 6;
-  drawLine(ctx, MARGIN, y, PAGE_WIDTH - MARGIN);
-  y -= 12;
+  const headerFill = rgb(
+    primary.red * 0.12 + 0.88,
+    primary.green * 0.12 + 0.88,
+    primary.blue * 0.12 + 0.88,
+  );
 
   const ensureSpace = (needed: number) => {
     if (y >= MARGIN + needed) return;
@@ -305,28 +289,67 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
     y = PAGE_HEIGHT - MARGIN - 20;
   };
 
-  for (const item of data.lineItems) {
-    const descLines = wrapInvoiceDescription(
-      item.description,
-      font,
-      LINE_ITEM_FONT_SIZE,
-      DESC_COL_MAX_WIDTH,
-    );
-    const rowHeight = Math.max(MIN_ROW_HEIGHT, descLines.length * LINE_ITEM_LINE_HEIGHT);
-    ensureSpace(rowHeight + 40);
-
-    for (let i = 0; i < descLines.length; i++) {
-      drawText(ctx, descLines[i], colDesc, y - i * LINE_ITEM_LINE_HEIGHT, {
-        size: LINE_ITEM_FONT_SIZE,
-      });
-    }
-    drawText(ctx, String(item.quantity), colQty + 10, y, { size: LINE_ITEM_FONT_SIZE });
-    drawText(ctx, formatEur(item.unitPrice), colUnit, y, { size: LINE_ITEM_FONT_SIZE });
-    drawText(ctx, formatEur(item.totalPrice), colTotal, y, {
-      size: LINE_ITEM_FONT_SIZE,
-      bold: true,
+  const drawTableHeaderBar = (labels: { text: string; x: number }[]) => {
+    const tableHeaderHeight = 20;
+    const tableHeaderBottom = y - tableHeaderHeight;
+    page.drawRectangle({
+      x: MARGIN,
+      y: tableHeaderBottom,
+      width: COL_WIDTH,
+      height: tableHeaderHeight,
+      color: headerFill,
     });
-    y -= rowHeight;
+    const tableHeaderTextY = tableHeaderBottom + 6;
+    for (const label of labels) {
+      drawText(ctx, label.text, label.x, tableHeaderTextY, { size: 8, bold: true, color: primary });
+    }
+    y = tableHeaderBottom - 6;
+    drawLine(ctx, MARGIN, y, PAGE_WIDTH - MARGIN);
+    y -= 12;
+  };
+
+  if (isPvmLayout) {
+    drawTableHeaderBar([
+      { text: 'Eil. Nr.', x: colDesc },
+      { text: 'Prekės ar paslaugos pavadinimas', x: colDesc + 50 },
+      { text: 'Suma, EUR', x: colTotal },
+    ]);
+    ensureSpace(40);
+    drawText(ctx, '1', colDesc, y, { size: LINE_ITEM_FONT_SIZE });
+    drawText(ctx, 'Mokymo paslaugos', colDesc + 50, y, { size: LINE_ITEM_FONT_SIZE });
+    drawText(ctx, formatEur(data.totalAmount), colTotal, y, { size: LINE_ITEM_FONT_SIZE, bold: true });
+    y -= MIN_ROW_HEIGHT;
+  } else {
+    drawTableHeaderBar([
+      { text: 'Paslaugos aprašymas', x: colDesc },
+      { text: 'Kiekis', x: colQty },
+      { text: 'Vnt. kaina', x: colUnit },
+      { text: 'Suma, EUR', x: colTotal },
+    ]);
+
+    for (const item of data.lineItems) {
+      const descLines = wrapInvoiceDescription(
+        item.description,
+        font,
+        LINE_ITEM_FONT_SIZE,
+        DESC_COL_MAX_WIDTH,
+      );
+      const rowHeight = Math.max(MIN_ROW_HEIGHT, descLines.length * LINE_ITEM_LINE_HEIGHT);
+      ensureSpace(rowHeight + 40);
+
+      for (let i = 0; i < descLines.length; i++) {
+        drawText(ctx, descLines[i], colDesc, y - i * LINE_ITEM_LINE_HEIGHT, {
+          size: LINE_ITEM_FONT_SIZE,
+        });
+      }
+      drawText(ctx, String(item.quantity), colQty + 10, y, { size: LINE_ITEM_FONT_SIZE });
+      drawText(ctx, formatEur(item.unitPrice), colUnit, y, { size: LINE_ITEM_FONT_SIZE });
+      drawText(ctx, formatEur(item.totalPrice), colTotal, y, {
+        size: LINE_ITEM_FONT_SIZE,
+        bold: true,
+      });
+      y -= rowHeight;
+    }
   }
 
   y -= 4;
@@ -335,7 +358,7 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
 
   ensureSpace(80);
   drawText(ctx, 'IŠ VISO:', colUnit - 30, y, { size: 11, bold: true });
-  drawText(ctx, `${formatEur(data.totalAmount)} EUR`, colTotal, y, {
+  drawText(ctx, `${formatEur(data.totalAmount)} Eur`, colTotal, y, {
     size: 11,
     bold: true,
     color: primary,
@@ -373,12 +396,45 @@ export async function generateInvoicePdf(data: InvoicePdfData): Promise<Uint8Arr
   }
   y -= 12;
 
-  drawLine(ctx, MARGIN, y, PAGE_WIDTH - MARGIN);
-  y -= 14;
-  drawText(ctx, 'Sąskaita suformuota Tutlio platformoje | www.tutlio.lt', MARGIN, y, {
-    size: 7,
-    color: ctx.gray,
-  });
+  if (isPvmLayout && data.lessonDetails && data.lessonDetails.length > 0) {
+    ensureSpace(50);
+    drawText(ctx, 'Pamokų detalizacija', MARGIN, y, { size: 10, bold: true });
+    y -= 16;
+    drawTableHeaderBar([
+      { text: 'Pamoka', x: colDesc },
+      { text: 'Kaina', x: colUnit },
+      { text: 'Data', x: colTotal - 10 },
+    ]);
+    for (const lesson of data.lessonDetails) {
+      ensureSpace(24);
+      drawText(ctx, lesson.subject, colDesc, y, { size: LINE_ITEM_FONT_SIZE });
+      drawText(ctx, `${formatEur(lesson.price)} Eur`, colUnit, y, { size: LINE_ITEM_FONT_SIZE });
+      drawText(ctx, lesson.datetime, colTotal - 10, y, { size: LINE_ITEM_FONT_SIZE });
+      y -= MIN_ROW_HEIGHT;
+    }
+    y -= 8;
+  }
+
+  if (data.notes && data.notes.length > 0) {
+    for (const note of data.notes) {
+      const noteLines = wrapInvoiceDescription(note, font, 8, COL_WIDTH);
+      ensureSpace(noteLines.length * 12 + 8);
+      for (const line of noteLines) {
+        drawText(ctx, line, MARGIN, y, { size: 8, color: ctx.gray });
+        y -= 12;
+      }
+      y -= 4;
+    }
+  }
+
+  if (!data.hidePlatformFooter && !isPvmLayout) {
+    drawLine(ctx, MARGIN, y, PAGE_WIDTH - MARGIN);
+    y -= 14;
+    drawText(ctx, 'Sąskaita suformuota Tutlio platformoje | www.tutlio.lt', MARGIN, y, {
+      size: 7,
+      color: ctx.gray,
+    });
+  }
 
   return doc.save();
 }
@@ -438,6 +494,8 @@ function buildEntityLines(seller: InvoicePdfData['seller']): string[] {
   if (seller.personalCode) lines.push(`Asmens kodas: ${seller.personalCode}`);
   if (seller.contactEmail) lines.push(seller.contactEmail);
   if (seller.contactPhone) lines.push(seller.contactPhone);
+  if (seller.bankName) lines.push(`Bankas: ${seller.bankName}`);
+  if (seller.iban) lines.push(`Sąskaita: ${seller.iban}`);
   return lines;
 }
 

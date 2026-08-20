@@ -25,6 +25,9 @@ interface InvoiceSettingsBody {
   contact_email?: string;
   contact_phone?: string;
   invoice_series?: string;
+  bank_name?: string;
+  iban?: string;
+  next_invoice_number?: number;
   scope?: 'user' | 'organization';
 }
 
@@ -151,8 +154,15 @@ async function handleSave(req: VercelRequest, res: VercelResponse) {
     contact_email: body.contact_email?.trim() || null,
     contact_phone: body.contact_phone?.trim() || null,
     invoice_series: body.invoice_series?.trim() || 'SF',
+    bank_name: body.bank_name?.trim() || null,
+    iban: body.iban?.trim() || null,
     updated_at: new Date().toISOString(),
   };
+
+  if (typeof body.next_invoice_number === 'number' && Number.isFinite(body.next_invoice_number)) {
+    const n = Math.floor(body.next_invoice_number);
+    if (n >= 1 && n <= 9999999) payload.next_invoice_number = n;
+  }
 
   if (isOrgScope) {
     const adminRow = await getOrgAdminAccessByUserId(supabase, userId);

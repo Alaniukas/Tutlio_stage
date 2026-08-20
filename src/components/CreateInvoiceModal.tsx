@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import { fetchPaidSalesInvoiceCandidates } from '@/lib/manualSalesInvoicePreview';
 import { fetchOrgTutorInvoicesDeduped } from '@/lib/fetchOrgTutorInvoicesDeduped';
 import { orgTutorLessonPayEur } from '@/lib/orgTutorLessonPay';
+import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 
 type GroupingType = 'per_payment' | 'per_week' | 'single';
 
@@ -55,6 +56,8 @@ export default function CreateInvoiceModal({
   orgTutors,
 }: CreateInvoiceModalProps) {
   const { t } = useTranslation();
+  const { hasFeature } = useOrgFeatures();
+  const pvmEducationInvoice = hasFeature('pvm_education_invoice');
   const [periodStart, setPeriodStart] = useState('');
   const [periodEnd, setPeriodEnd] = useState('');
   const [groupingType, setGroupingType] = useState<GroupingType>('single');
@@ -253,6 +256,53 @@ export default function CreateInvoiceModal({
           setSessions(rows as any[]);
           setPreviewMode(true);
         }
+      } else if (pvmEducationInvoice) {
+        const { data: sessRows, error: sessErr } = await supabase
+          .from('sessions')
+          .select('id, tutor_id, student_id, start_time, end_time, status, price, is_complimentary, students(full_name, email, payer_name, payer_email, grade), subjects(name)')
+          .in('tutor_id', tutorIdsForQuery)
+          .neq('status', 'cancelled')
+          .gte('start_time', periodStart + 'T00:00:00')
+          .lte('start_time', periodEnd + 'T23:59:59')
+          .lte('end_time', new Date().toISOString());
+        if (sessErr) throw sessErr;
+        const delivered = (sessRows || []).filter((s: any) => s.is_complimentary !== true);
+        const sessionIds = delivered.map((s: any) => s.id).filter(Boolean);
+        let already = new Set<string>();
+        if (sessionIds.length > 0) {
+          const { data: adminRow } = await supabase
+            .from('organization_admins')
+            .select('organization_id')
+            .eq('user_id', user.id)
+            .maybeSingle();
+          if (adminRow?.organization_id) {
+            const { data: existingInv } = await supabase
+              .from('invoices')
+              .select('id')
+              .eq('organization_id', adminRow.organization_id)
+              .neq('status', 'cancelled');
+            const invIds = (existingInv || []).map((r: { id: string }) => r.id);
+            if (invIds.length > 0) {
+              const { data: lis } = await supabase
+                .from('invoice_line_items')
+                .select('session_ids')
+                .in('invoice_id', invIds);
+              for (const li of lis || []) {
+                const ids = Array.isArray((li as any).session_ids) ? (li as any).session_ids : [];
+                for (const sid of ids) already.add(String(sid));
+              }
+            }
+          }
+        }
+        const rows = delivered.filter((s: any) => !already.has(s.id));
+        if (!rows.length) {
+          setError(t('invoiceCreate.noSessions'));
+          setSessions([]);
+          setPreviewMode(false);
+        } else {
+          setSessions(rows as any[]);
+          setPreviewMode(true);
+        }
       } else {
         const { rows, error: prevErr } = await fetchPaidSalesInvoiceCandidates(supabase, {
           tutorIds: tutorIdsForQuery,
@@ -307,6 +357,35 @@ export default function CreateInvoiceModal({
 
       const groupingForApi = effectiveGrouping;
 
+      if (pvmEducationInvoice && !isOrgTutor) {
+        const sessionIds = sessions
+          .filter((row: any) => row.invoice_row_kind !== 'package')
+          .map((row: any) => row.id)
+          .filter(Boolean);
+        const packageIds = sessions
+          .filter((row: any) => row.invoice_row_kind === 'package')
+          .map((row: any) => row.package_id || row.id)
+          .filter(Boolean);
+        const tutorId = sessions[0]?.tutor_id || user.id;
+        const res = await fetch('/api/generate-invoice', {
+          method: 'POST',
+          headers: await authHeaders(),
+          body: JSON.stringify({
+            periodStart,
+            periodEnd,
+            groupingType: 'single',
+            studentId: studentId || undefined,
+            tutorId,
+            isOrgTutor: false,
+            onlyPaid: false,
+            sessionIds: sessionIds.length > 0 ? sessionIds : undefined,
+            packageIds: packageIds.length > 0 ? packageIds : undefined,
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || t('common.error'));
+        totalCount += json.count || 0;
+      } else {
       for (const tid of tutorKeys) {
         const { sessionIds, packageIds } = groupedByTutor[tid];
         if (sessionIds.length === 0 && packageIds.length === 0) continue;
@@ -329,6 +408,7 @@ export default function CreateInvoiceModal({
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || t('common.error'));
         totalCount += json.count || 0;
+      }
       }
       if (totalCount === 0) throw new Error(t('invoiceCreate.noSessions'));
 

@@ -26,10 +26,25 @@ export type SchoolContractStudentFields = {
   media_publicity_consent?: string | null;
 };
 
+export type SchoolContractSignatureFields = {
+  role: string;
+  status: string;
+  signed_pdf_path?: string | null;
+};
+
 export type SchoolContractFilterInput = {
   signing_status: SchoolContractSigningStatus;
   media_publicity_consent?: string | null;
+  completion_submitted_at?: string | null;
   student?: SchoolContractStudentFields | null;
+  signatures?: SchoolContractSignatureFields[] | null;
+  pdf_url?: string | null;
+  signed_contract_url?: string | null;
+};
+
+export type SchoolContractFilterOptions = {
+  /** Parent confirmation form exists only in the e-sign school flow. */
+  eSignEnabled?: boolean;
 };
 
 export const CONTRACT_MISSING_FIELD_LABELS = {
@@ -39,6 +54,36 @@ export const CONTRACT_MISSING_FIELD_LABELS = {
   parentPhone: 'Tėvų tel. nr.',
   mediaConsent: 'Vaiko atvaizdo naudojimo sutikimas',
 } as const;
+
+export function schoolHasSigned(
+  contract: Pick<SchoolContractFilterInput, 'signatures'>,
+): boolean {
+  return (contract.signatures || []).some((row) => row.role === 'school' && row.status === 'signed');
+}
+
+/** Latest PDF to open in the school list: newest signature, then stored copies. */
+export function currentContractPdfPath(
+  contract: Pick<SchoolContractFilterInput, 'signatures' | 'pdf_url' | 'signed_contract_url'>,
+): string | null {
+  const signedByRole = (role: string) =>
+    (contract.signatures || []).find((row) => row.role === role && row.status === 'signed' && row.signed_pdf_path)
+      ?.signed_pdf_path || null;
+  return signedByRole('parent_secondary')
+    || signedByRole('parent_primary')
+    || signedByRole('school')
+    || contract.signed_contract_url
+    || contract.pdf_url
+    || null;
+}
+
+export function schoolCanInitiateSignature(
+  contract: Pick<SchoolContractFilterInput, 'signing_status' | 'completion_submitted_at' | 'signatures'>,
+): boolean {
+  if (schoolHasSigned(contract)) return false;
+  if (!String(contract.completion_submitted_at || '').trim()) return false;
+  return contract.signing_status === 'awaiting_school_signature'
+    || contract.signing_status === 'signed_by_school';
+}
 
 export function getContractMissingFieldLabels(
   contract: SchoolContractFilterInput,
@@ -60,7 +105,9 @@ export function getContractMissingFieldLabels(
     missing.push(CONTRACT_MISSING_FIELD_LABELS.parentPhone);
   }
   if (isSchoolView) {
-    const consent = String(contract.media_publicity_consent || student?.media_publicity_consent || '').trim();
+    // This contract's consent is filled on the parent confirmation form.
+    // Do not treat leftover student-record consent (sibling / previous year) as complete.
+    const consent = String(contract.media_publicity_consent || '').trim();
     if (!consent) {
       missing.push(CONTRACT_MISSING_FIELD_LABELS.mediaConsent);
     }
@@ -73,16 +120,29 @@ export function matchesContractFilter(
   filter: SchoolContractFilter,
   contract: SchoolContractFilterInput,
   isSchoolView: boolean,
+  options?: SchoolContractFilterOptions,
 ): boolean {
   if (filter === 'all') return true;
   if (filter === 'draft') return contract.signing_status === 'draft';
   if (filter === 'sent') return contract.signing_status === 'sent';
   if (filter === 'signed') return contract.signing_status === 'signed';
-  if (filter === 'awaiting_school') return contract.signing_status === 'awaiting_school_signature';
-  if (filter === 'awaiting_parents') return contract.signing_status === 'signed_by_school';
+  if (filter === 'awaiting_school') {
+    if (contract.signing_status === 'awaiting_school_signature') return true;
+    // Parent-signed copy (or a bad status jump) must not sit in "signed by school"
+    // until the school signature actually exists.
+    return contract.signing_status === 'signed_by_school' && !schoolHasSigned(contract);
+  }
+  if (filter === 'awaiting_parents') {
+    return contract.signing_status === 'signed_by_school' && schoolHasSigned(contract);
+  }
   if (filter === 'incomplete_data') {
-    return contract.signing_status !== 'signed'
-      && getContractMissingFieldLabels(contract, isSchoolView).length > 0;
+    if (contract.signing_status === 'signed') return false;
+    if (getContractMissingFieldLabels(contract, isSchoolView).length > 0) return true;
+    // Yellow banner: sent, waiting for parents to confirm data on Tutlio.
+    if (options?.eSignEnabled && contract.signing_status === 'sent' && !contract.completion_submitted_at) {
+      return true;
+    }
+    return false;
   }
   return true;
 }
@@ -90,6 +150,7 @@ export function matchesContractFilter(
 export function countContractsByFilter(
   contracts: SchoolContractFilterInput[],
   isSchoolView: boolean,
+  options?: SchoolContractFilterOptions,
 ): Record<SchoolContractFilter, number> {
   const filters: SchoolContractFilter[] = [
     'all',
@@ -102,7 +163,7 @@ export function countContractsByFilter(
   ];
   const counts = {} as Record<SchoolContractFilter, number>;
   for (const filter of filters) {
-    counts[filter] = contracts.filter((c) => matchesContractFilter(filter, c, isSchoolView)).length;
+    counts[filter] = contracts.filter((c) => matchesContractFilter(filter, c, isSchoolView, options)).length;
   }
   return counts;
 }

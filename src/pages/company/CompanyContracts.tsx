@@ -42,7 +42,9 @@ import {
 } from '@/lib/schoolContractSigningSettings';
 import {
   countContractsByFilter,
+  currentContractPdfPath,
   matchesContractFilter,
+  schoolCanInitiateSignature,
   type SchoolContractFilter,
 } from '@/lib/schoolContractFilters';
 import { buildSchoolContractExportRows, schoolContractsExportFilename } from '@/lib/schoolContractsExport';
@@ -95,7 +97,7 @@ interface Contract {
   media_publicity_consent?: string | null;
   additional_fee_amount?: number | null;
   additional_fee_purpose?: string | null;
-  signatures?: { role: string; status: string; signed_at?: string | null; gosign_transaction_id?: string | null; manually_marked_at?: string | null }[];
+  signatures?: { role: string; status: string; signed_at?: string | null; gosign_transaction_id?: string | null; manually_marked_at?: string | null; signed_pdf_path?: string | null }[];
   installments?: { installment_number: number; amount: number; due_date: string | null; payment_status: string | null }[];
   student?: { full_name: string; email: string; phone?: string | null; payer_name: string | null; payer_email: string | null; payer_phone?: string | null; payer_personal_code?: string | null; parent_secondary_name?: string | null; parent_secondary_email?: string | null; parent_secondary_phone?: string | null; parent_secondary_personal_code?: string | null; parent_secondary_address?: string | null; student_address?: string | null; student_city?: string | null; child_birth_date?: string | null; media_publicity_consent?: string | null };
 }
@@ -203,7 +205,7 @@ function contractInstallmentEmailExtras(contract: {
 }
 
 const CONTRACTS_CACHE_KEY = 'company_contracts';
-const CONTRACTS_SELECT = '*, media_publicity_consent, student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent), signatures:school_contract_signatures(role, status, signed_at, gosign_transaction_id, manually_marked_at), installments:school_payment_installments(installment_number, amount, due_date, payment_status)';
+const CONTRACTS_SELECT = '*, media_publicity_consent, student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent), signatures:school_contract_signatures(role, status, signed_at, gosign_transaction_id, manually_marked_at, signed_pdf_path), installments:school_payment_installments(installment_number, amount, due_date, payment_status)';
 
 export default function CompanyContracts() {
   const { t: tr } = useTranslation();
@@ -1655,20 +1657,55 @@ export default function CompanyContracts() {
       setToast({ message: uploadErr || tr('school.toastTemplateUploadPrepareFail'), type: 'error' });
       return;
     }
+    const attachForSchoolSignature = eSignEnabled && contract.signing_status !== 'signed';
+    const nextStatus = attachForSchoolSignature
+      ? (contract.completion_submitted_at
+          || contract.signing_status === 'awaiting_school_signature'
+          || contract.signing_status === 'signed_by_school'
+          ? 'awaiting_school_signature'
+          : contract.signing_status)
+      : 'signed';
     const { error: updateErr } = await supabase
       .from('school_contracts')
-      .update({
-        signed_contract_url: storedPath,
-        signed_uploaded_at: new Date().toISOString(),
-        signing_status: 'signed',
-        signed_at: contract.signed_at || new Date().toISOString(),
-      })
+      .update(attachForSchoolSignature
+        ? {
+            pdf_url: storedPath,
+            signed_uploaded_at: new Date().toISOString(),
+            signing_status: nextStatus,
+            signed_contract_url: null,
+          }
+        : {
+            signed_contract_url: storedPath,
+            signed_uploaded_at: new Date().toISOString(),
+            signing_status: 'signed',
+            signed_at: contract.signed_at || new Date().toISOString(),
+          })
       .eq('id', contract.id);
-    setSaving(false);
     if (updateErr) {
+      setSaving(false);
       setToast({ message: updateErr.message, type: 'error' });
       return;
     }
+    if (attachForSchoolSignature) {
+      await supabase
+        .from('school_contract_signatures')
+        .update({
+          status: 'pending',
+          signed_at: null,
+          signed_pdf_path: null,
+          gosign_transaction_id: null,
+          signing_url: null,
+          error_message: null,
+        })
+        .eq('contract_id', contract.id)
+        .eq('role', 'school')
+        .neq('status', 'pending');
+      setSaving(false);
+      setToast({ message: tr('school.toastParentCopyUploadedForSchoolSign'), type: 'success' });
+      reload();
+      return;
+    }
+    setSaving(false);
     setToast({ message: tr('school.toastSignedContractUploaded'), type: 'success' });
     let hasUnpaidInstallment: boolean | undefined;
     try {
@@ -1746,10 +1783,10 @@ export default function CompanyContracts() {
 
   // Diacritics-insensitive match (Vėgėlė findable as "vegele" and vice versa).
   const searchable = (value: string) => normalizePdfText(value).toLowerCase();
-  const contractFilterCounts = countContractsByFilter(contracts, isSchoolView);
+  const contractFilterCounts = countContractsByFilter(contracts, isSchoolView, { eSignEnabled });
   const visibleContracts = contracts.filter((c) => {
     if (isSchoolView) {
-      if (!matchesContractFilter(contractFilter as SchoolContractFilter, c, isSchoolView)) return false;
+      if (!matchesContractFilter(contractFilter as SchoolContractFilter, c, isSchoolView, { eSignEnabled })) return false;
     } else {
       if (contractFilter === 'signed' && c.signing_status !== 'signed') return false;
       if (contractFilter === 'unsigned' && c.signing_status === 'signed') return false;
@@ -2007,22 +2044,32 @@ export default function CompanyContracts() {
                             ))}
                         </p>
                       )}
-                      {c.signed_contract_url && (
-                        <p className="text-xs text-emerald-700 mt-1">
-                          Pasirašyta sutartis ({c.student?.full_name || 'mokinys'}):{' '}
-                          <button type="button" className="underline" onClick={() => openContractFile(c.signed_contract_url)}>
-                            Atidaryti failą
-                          </button>
-                        </p>
-                      )}
-                      {!c.signed_contract_url && c.pdf_url && (
-                        <p className="text-xs text-indigo-700 mt-1">
-                          Naujausia sutarties versija:{' '}
-                          <button type="button" className="underline" onClick={() => openContractFile(c.pdf_url)}>
-                            Atidaryti PDF
-                          </button>
-                        </p>
-                      )}
+                      {(() => {
+                        const currentPdf = currentContractPdfPath(c);
+                        const schoolSignedPdf = (c.signatures || []).find((s) => s.role === 'school' && s.status === 'signed' && s.signed_pdf_path)?.signed_pdf_path;
+                        const parentScan = c.signed_contract_url && c.signed_contract_url !== currentPdf ? c.signed_contract_url : null;
+                        return (
+                          <>
+                            {currentPdf && (
+                              <p className={`text-xs mt-1 ${schoolSignedPdf ? 'text-emerald-700' : 'text-indigo-700'}`}>
+                                {schoolSignedPdf ? 'Naujausia pasirašyta versija' : 'Naujausia sutarties versija'}
+                                {' '}({c.student?.full_name || 'mokinys'}):{' '}
+                                <button type="button" className="underline" onClick={() => openContractFile(currentPdf)}>
+                                  Atidaryti failą
+                                </button>
+                              </p>
+                            )}
+                            {parentScan && (
+                              <p className="text-xs text-gray-500 mt-1">
+                                Įkelta tėvų kopija (be naujausio mokyklos parašo):{' '}
+                                <button type="button" className="underline" onClick={() => openContractFile(parentScan)}>
+                                  Atidaryti originalą
+                                </button>
+                              </p>
+                            )}
+                          </>
+                        );
+                      })()}
                       {(c.signatures || []).some((s) => s.role.startsWith('parent') && s.status === 'signed' && !s.gosign_transaction_id && !s.manually_marked_at) && (
                         <p className="text-xs text-emerald-700 mt-1">
                           Tėvų parašas gautas per Smart-ID (Dokobit) — PDF vientisumas ir naujas parašas patikrinti automatiškai.
@@ -2041,12 +2088,12 @@ export default function CompanyContracts() {
                           <Send className="w-3.5 h-3.5 mr-1.5" /> {tr('school.send')}
                         </Button>
                       )}
-                      {c.signing_status === 'awaiting_school_signature' && (
+                      {eSignEnabled && schoolCanInitiateSignature(c) && (
                         <Button size="sm" onClick={() => signAsSchool(c)} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
                           <PenLine className="w-3.5 h-3.5 mr-1.5" /> {saving ? 'Ruošiama…' : tr('school.signAsDirector')}
                         </Button>
                       )}
-                      {c.signing_status === 'signed_by_school' && (
+                      {c.signing_status === 'signed_by_school' && !schoolCanInitiateSignature(c) && (
                         <span className="text-xs text-blue-700 font-medium">{tr('school.waitingParentSignature')}</span>
                       )}
 
@@ -2070,7 +2117,7 @@ export default function CompanyContracts() {
                         </PopoverTrigger>
                         <PopoverContent align="end" className="w-64 p-1">
                           <div className="flex flex-col">
-                            {eSignEnabled && c.signing_status === 'signed_by_school' && (
+                            {eSignEnabled && c.signing_status === 'signed_by_school' && !schoolCanInitiateSignature(c) && (
                               <button
                                 type="button"
                                 className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-left hover:bg-gray-50 text-green-700"

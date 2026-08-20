@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   countContractsByFilter,
+  currentContractPdfPath,
   getContractMissingFieldLabels,
   matchesContractFilter,
+  schoolCanInitiateSignature,
 } from '@/lib/schoolContractFilters';
 
 const baseStudent = {
@@ -17,9 +19,12 @@ const baseStudent = {
   media_publicity_consent: 'agree',
 };
 
+const schoolSigned = [{ role: 'school', status: 'signed', signed_pdf_path: 'org/signed/school.pdf' }];
+
 const baseContract = {
   signing_status: 'sent' as const,
   media_publicity_consent: 'agree',
+  completion_submitted_at: '2026-08-01T10:00:00.000Z',
   student: baseStudent,
 };
 
@@ -61,12 +66,28 @@ describe('schoolContractFilters', () => {
     expect(missing).toEqual([]);
   });
 
+  it('does not treat leftover student consent as this contract being filled', () => {
+    const missing = getContractMissingFieldLabels(
+      {
+        signing_status: 'sent',
+        media_publicity_consent: null,
+        student: { ...baseStudent, media_publicity_consent: 'disagree' },
+      },
+      true,
+    );
+    expect(missing).toContain('Vaiko atvaizdo naudojimo sutikimas');
+  });
+
   it('matches granular filters', () => {
     expect(matchesContractFilter('signed', { ...baseContract, signing_status: 'signed' }, true)).toBe(true);
     expect(matchesContractFilter('draft', { ...baseContract, signing_status: 'draft' }, true)).toBe(true);
     expect(matchesContractFilter('sent', { ...baseContract, signing_status: 'sent' }, true)).toBe(true);
     expect(matchesContractFilter('awaiting_school', { ...baseContract, signing_status: 'awaiting_school_signature' }, true)).toBe(true);
-    expect(matchesContractFilter('awaiting_parents', { ...baseContract, signing_status: 'signed_by_school' }, true)).toBe(true);
+    expect(matchesContractFilter('awaiting_parents', {
+      ...baseContract,
+      signing_status: 'signed_by_school',
+      signatures: schoolSigned,
+    }, true)).toBe(true);
     expect(matchesContractFilter('incomplete_data', {
       signing_status: 'sent',
       media_publicity_consent: null,
@@ -75,11 +96,22 @@ describe('schoolContractFilters', () => {
     expect(matchesContractFilter('incomplete_data', { ...baseContract, signing_status: 'signed' }, true)).toBe(false);
   });
 
+  it('puts parent-uploaded copies without a school signature into awaiting_school', () => {
+    const parentCopy = {
+      ...baseContract,
+      signing_status: 'signed_by_school' as const,
+      signatures: [{ role: 'parent_primary', status: 'signed' }, { role: 'school', status: 'pending' }],
+    };
+    expect(matchesContractFilter('awaiting_school', parentCopy, true)).toBe(true);
+    expect(matchesContractFilter('awaiting_parents', parentCopy, true)).toBe(false);
+    expect(schoolCanInitiateSignature(parentCopy)).toBe(true);
+  });
+
   it('counts contracts per filter', () => {
     const contracts = [
       { ...baseContract, signing_status: 'signed' as const },
       { ...baseContract, signing_status: 'awaiting_school_signature' as const },
-      { ...baseContract, signing_status: 'signed_by_school' as const },
+      { ...baseContract, signing_status: 'signed_by_school' as const, signatures: schoolSigned },
       {
         ...baseContract,
         signing_status: 'sent' as const,
@@ -101,7 +133,7 @@ describe('schoolContractFilters', () => {
       { ...baseContract, signing_status: 'draft' as const },
       { ...baseContract, signing_status: 'sent' as const },
       { ...baseContract, signing_status: 'awaiting_school_signature' as const },
-      { ...baseContract, signing_status: 'signed_by_school' as const },
+      { ...baseContract, signing_status: 'signed_by_school' as const, signatures: schoolSigned },
       { ...baseContract, signing_status: 'signed' as const },
     ];
     const counts = countContractsByFilter(contracts, true);
@@ -132,5 +164,28 @@ describe('schoolContractFilters', () => {
     expect(counts.incomplete_data).toBe(1);
     expect(counts.sent).toBe(1);
     expect(counts.all).toBe(2);
+  });
+
+  it('treats e-sign contracts waiting for parent confirmation as incomplete data', () => {
+    const waiting = {
+      signing_status: 'sent' as const,
+      media_publicity_consent: 'agree' as const,
+      completion_submitted_at: null,
+      student: baseStudent,
+    };
+    expect(matchesContractFilter('incomplete_data', waiting, true)).toBe(false);
+    expect(matchesContractFilter('incomplete_data', waiting, true, { eSignEnabled: true })).toBe(true);
+    expect(matchesContractFilter('incomplete_data', {
+      ...waiting,
+      media_publicity_consent: null,
+    }, true)).toBe(true);
+  });
+
+  it('prefers the newest signed PDF over a parent scan stored as signed_contract_url', () => {
+    expect(currentContractPdfPath({
+      pdf_url: 'org/scan.pdf',
+      signed_contract_url: 'org/scan.pdf',
+      signatures: schoolSigned,
+    })).toBe('org/signed/school.pdf');
   });
 });
