@@ -5,6 +5,7 @@ import {
   getContractMissingFieldLabels,
   matchesContractFilter,
   schoolCanInitiateSignature,
+  shouldPromptSchoolSignedOnScan,
 } from '@/lib/schoolContractFilters';
 
 const baseStudent = {
@@ -100,11 +101,44 @@ describe('schoolContractFilters', () => {
     const parentCopy = {
       ...baseContract,
       signing_status: 'signed_by_school' as const,
+      completion_submitted_at: '2026-08-01T00:00:00Z',
       signatures: [{ role: 'parent_primary', status: 'signed' }, { role: 'school', status: 'pending' }],
     };
     expect(matchesContractFilter('awaiting_school', parentCopy, true)).toBe(true);
     expect(matchesContractFilter('awaiting_parents', parentCopy, true)).toBe(false);
     expect(schoolCanInitiateSignature(parentCopy)).toBe(true);
+  });
+
+  it('keeps a fully signed manual upload out of awaiting_school even without GoSign rows', () => {
+    const bothPartiesScan = {
+      ...baseContract,
+      signing_status: 'signed' as const,
+      signed_contract_url: 'org/signed/butkus.pdf',
+      signatures: [{ role: 'parent_primary', status: 'pending' }, { role: 'school', status: 'pending' }],
+    };
+    expect(matchesContractFilter('signed', bothPartiesScan, true)).toBe(true);
+    expect(matchesContractFilter('awaiting_school', bothPartiesScan, true)).toBe(false);
+    expect(matchesContractFilter('awaiting_parents', bothPartiesScan, true)).toBe(false);
+    expect(schoolCanInitiateSignature(bothPartiesScan)).toBe(false);
+  });
+
+  it('asks where to file a parent scan only when e-sign is on and school has not signed', () => {
+    const waiting = {
+      ...baseContract,
+      signing_status: 'awaiting_school_signature' as const,
+      signatures: [{ role: 'school', status: 'pending' }],
+    };
+    expect(shouldPromptSchoolSignedOnScan(waiting, true)).toBe(true);
+    expect(shouldPromptSchoolSignedOnScan(waiting, false)).toBe(false);
+    expect(shouldPromptSchoolSignedOnScan({ ...waiting, signing_status: 'signed' }, true)).toBe(false);
+    expect(shouldPromptSchoolSignedOnScan({
+      ...waiting,
+      signatures: [{ role: 'school', status: 'signed' }],
+    }, true)).toBe(false);
+    expect(schoolCanInitiateSignature({
+      signing_status: 'awaiting_school_signature',
+      signatures: [{ role: 'school', status: 'pending' }],
+    })).toBe(true);
   });
 
   it('counts contracts per filter', () => {

@@ -80,9 +80,22 @@ export function schoolCanInitiateSignature(
   contract: Pick<SchoolContractFilterInput, 'signing_status' | 'completion_submitted_at' | 'signatures'>,
 ): boolean {
   if (schoolHasSigned(contract)) return false;
-  if (!String(contract.completion_submitted_at || '').trim()) return false;
-  return contract.signing_status === 'awaiting_school_signature'
-    || contract.signing_status === 'signed_by_school';
+  // Folder "Nepasirašyta mokyklos" must always offer the director button,
+  // including paper scans uploaded before the Tutlio confirmation form.
+  if (contract.signing_status === 'awaiting_school_signature') return true;
+  if (contract.signing_status !== 'signed_by_school') return false;
+  return Boolean(String(contract.completion_submitted_at || '').trim());
+}
+
+/** Ask the admin where to file a photo/PDF scan — Tutlio does not inspect signatures. */
+export function shouldPromptSchoolSignedOnScan(
+  contract: Pick<SchoolContractFilterInput, 'signing_status' | 'signatures'>,
+  eSignEnabled: boolean,
+): boolean {
+  if (!eSignEnabled) return false;
+  if (contract.signing_status === 'signed') return false;
+  if (schoolHasSigned(contract)) return false;
+  return true;
 }
 
 export function getContractMissingFieldLabels(

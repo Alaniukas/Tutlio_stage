@@ -45,6 +45,7 @@ import {
   currentContractPdfPath,
   matchesContractFilter,
   schoolCanInitiateSignature,
+  shouldPromptSchoolSignedOnScan,
   type SchoolContractFilter,
 } from '@/lib/schoolContractFilters';
 import { buildSchoolContractExportRows, schoolContractsExportFilename } from '@/lib/schoolContractsExport';
@@ -1486,6 +1487,7 @@ export default function CompanyContracts() {
   const [manualMarkBusy, setManualMarkBusy] = useState(false);
   const [manualMarkErr, setManualMarkErr] = useState('');
   const [manualMarkNoFileConfirm, setManualMarkNoFileConfirm] = useState(false);
+  const [pendingScanUpload, setPendingScanUpload] = useState<{ contract: Contract; file: File } | null>(null);
 
   const openManualMark = (contract: Contract) => {
     setManualMarkErr('');
@@ -1632,7 +1634,7 @@ export default function CompanyContracts() {
     if (!ok) setToast({ message: tr('school.toastFileOpenFail'), type: 'error' });
   };
 
-  const uploadSignedContract = async (contract: Contract, file: File) => {
+  const uploadSignedContract = async (contract: Contract, file: File, schoolAlreadySigned: boolean) => {
     if (!orgId) return;
     if (!isManualSignedFile(file)) {
       setToast({ message: tr('school.toastSignedUploadInvalidType'), type: 'error' });
@@ -1657,36 +1659,22 @@ export default function CompanyContracts() {
       setToast({ message: uploadErr || tr('school.toastTemplateUploadPrepareFail'), type: 'error' });
       return;
     }
-    const attachForSchoolSignature = eSignEnabled && contract.signing_status !== 'signed';
-    const nextStatus = attachForSchoolSignature
-      ? (contract.completion_submitted_at
-          || contract.signing_status === 'awaiting_school_signature'
-          || contract.signing_status === 'signed_by_school'
-          ? 'awaiting_school_signature'
-          : contract.signing_status)
-      : 'signed';
-    const { error: updateErr } = await supabase
-      .from('school_contracts')
-      .update(attachForSchoolSignature
-        ? {
-            pdf_url: storedPath,
-            signed_uploaded_at: new Date().toISOString(),
-            signing_status: nextStatus,
-            signed_contract_url: null,
-          }
-        : {
-            signed_contract_url: storedPath,
-            signed_uploaded_at: new Date().toISOString(),
-            signing_status: 'signed',
-            signed_at: contract.signed_at || new Date().toISOString(),
-          })
-      .eq('id', contract.id);
-    if (updateErr) {
-      setSaving(false);
-      setToast({ message: updateErr.message, type: 'error' });
-      return;
-    }
-    if (attachForSchoolSignature) {
+
+    if (!schoolAlreadySigned) {
+      const { error: updateErr } = await supabase
+        .from('school_contracts')
+        .update({
+          pdf_url: storedPath,
+          signed_uploaded_at: new Date().toISOString(),
+          signing_status: 'awaiting_school_signature',
+          signed_contract_url: null,
+        })
+        .eq('id', contract.id);
+      if (updateErr) {
+        setSaving(false);
+        setToast({ message: updateErr.message, type: 'error' });
+        return;
+      }
       await supabase
         .from('school_contract_signatures')
         .update({
@@ -1701,11 +1689,27 @@ export default function CompanyContracts() {
         .eq('role', 'school')
         .neq('status', 'pending');
       setSaving(false);
+      setPendingScanUpload(null);
       setToast({ message: tr('school.toastParentCopyUploadedForSchoolSign'), type: 'success' });
       reload();
       return;
     }
+
+    const { error: updateErr } = await supabase
+      .from('school_contracts')
+      .update({
+        signed_contract_url: storedPath,
+        signed_uploaded_at: new Date().toISOString(),
+        signing_status: 'signed',
+        signed_at: contract.signed_at || new Date().toISOString(),
+      })
+      .eq('id', contract.id);
     setSaving(false);
+    setPendingScanUpload(null);
+    if (updateErr) {
+      setToast({ message: updateErr.message, type: 'error' });
+      return;
+    }
     setToast({ message: tr('school.toastSignedContractUploaded'), type: 'success' });
     let hasUnpaidInstallment: boolean | undefined;
     try {
@@ -1735,7 +1739,15 @@ export default function CompanyContracts() {
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
-      await uploadSignedContract(contract, file);
+      if (!isManualSignedFile(file)) {
+        setToast({ message: tr('school.toastSignedUploadInvalidType'), type: 'error' });
+        return;
+      }
+      if (shouldPromptSchoolSignedOnScan(contract, eSignEnabled)) {
+        setPendingScanUpload({ contract, file });
+        return;
+      }
+      await uploadSignedContract(contract, file, true);
     };
     input.click();
   };
@@ -2226,6 +2238,57 @@ export default function CompanyContracts() {
           )
         )}
       </div>
+
+      <Dialog
+        open={Boolean(pendingScanUpload)}
+        onOpenChange={(open) => { if (!open && !saving) setPendingScanUpload(null); }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{tr('school.scanAskSchoolSignedTitle')}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-600">{tr('school.scanAskSchoolSignedBody')}</p>
+          {pendingScanUpload && (
+            <p className="text-sm text-gray-900 font-medium">
+              {pendingScanUpload.contract.student?.full_name || pendingScanUpload.file.name}
+            </p>
+          )}
+          <div className="grid gap-2">
+            <Button
+              disabled={saving || !pendingScanUpload}
+              className="h-auto whitespace-normal py-3"
+              onClick={() => {
+                if (!pendingScanUpload) return;
+                void uploadSignedContract(pendingScanUpload.contract, pendingScanUpload.file, true);
+              }}
+            >
+              <span className="block text-left">
+                <span className="block font-semibold">{tr('school.scanAskSchoolSignedYes')}</span>
+                <span className="block text-xs font-normal opacity-90 mt-0.5">{tr('school.scanAskSchoolSignedYesHint')}</span>
+              </span>
+            </Button>
+            <Button
+              variant="outline"
+              disabled={saving || !pendingScanUpload}
+              className="h-auto whitespace-normal py-3"
+              onClick={() => {
+                if (!pendingScanUpload) return;
+                void uploadSignedContract(pendingScanUpload.contract, pendingScanUpload.file, false);
+              }}
+            >
+              <span className="block text-left">
+                <span className="block font-semibold">{tr('school.scanAskSchoolSignedNo')}</span>
+                <span className="block text-xs font-normal text-gray-600 mt-0.5">{tr('school.scanAskSchoolSignedNoHint')}</span>
+              </span>
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" disabled={saving} onClick={() => setPendingScanUpload(null)}>
+              {tr('common.cancel')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={Boolean(manualMarkContract)} onOpenChange={(open) => { if (!open && !manualMarkBusy) setManualMarkContract(null); }}>
         <DialogContent className="max-w-lg">
