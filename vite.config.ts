@@ -110,8 +110,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: path.resolve(__dirname, 'index.html'),
-        previewAssignStudentModal: path.resolve(__dirname, 'preview-assign-student-modal.html'),
-        previewComplimentaryLesson: path.resolve(__dirname, 'preview-complimentary-lesson.html'),
       },
     },
   },
