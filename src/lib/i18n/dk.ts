@@ -1083,6 +1083,7 @@ export const dk: Record<string, string> = {
   'dateFilter.toDate': 'Til dato',
   'features': 'Funktioner',
   'files.downloadFailed': 'Kunne ikke downloade filen',
+  'files.tooLarge': 'Filen er for stor (maks. 10 MB).',
   'files.noFiles': 'Ingen filer.',
   'files.noFilesTutor': 'Tutoren har ikke uploadet filer endnu.',
   'finance.connectStripe': 'Tilslut Stripe',

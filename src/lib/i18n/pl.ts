@@ -1706,6 +1706,7 @@ export const pl: Record<string, string> = {
   'legal.privacyPolicy': 'Polityka prywatności',
   'legal.termsOfService': 'Regulamin',
   'files.downloadFailed': 'Nie udało się pobrać pliku',
+  'files.tooLarge': 'Plik jest za duży (maks. 10 MB).',
   'files.noFiles': 'Brak plików.',
   'files.noFilesTutor': 'Korepetytor nie przesłał jeszcze żadnych plików.',
   'features': 'Funkcje',

@@ -2391,6 +2391,7 @@ export const nl: Record<string, string> = {
   "email": "Reactie opgeslagen. E-mail niet verzonden: leerling heeft geen e-mailadres.",
   "features": "Functies",
   "files.downloadFailed": "Kan bestand niet downloaden",
+  "files.tooLarge": "Bestand is te groot (max. 10 MB).",
   "files.noFiles": "Geen bestanden.",
   "files.noFilesTutor": "Docent heeft nog geen bestanden geüpload.",
   "finance.afterLesson": "Na de les",

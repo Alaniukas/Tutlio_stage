@@ -3038,6 +3038,7 @@ export const ee: Record<string, string> = {
   // --- features, files, layout, legal, login, misc, nav, org, sessions, time, blog, status, studentWait ---
   'features': 'Funktsioonid',
   'files.downloadFailed': 'Faili allalaadimine ebaõnnestus',
+  'files.tooLarge': 'Fail on liiga suur (max 10 MB).',
   'files.noFilesTutor': 'Õpetaja pole veel ühtegi faili üles laadinud.',
   'layout.tutlioCompany': 'Tutlio Ettevõte',
   'layout.tutlioSchool': 'Tutlio Kool',

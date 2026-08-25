@@ -1672,6 +1672,7 @@ export const es: Record<string, string> = {
   'hidden_from_calendar': 'Oculto del calendario',
   'files.noFiles': 'Sin archivos.',
   'files.downloadFailed': 'Error al descargar el archivo',
+  'files.tooLarge': 'El archivo es demasiado grande (máx. 10 MB).',
   'contact.title': 'Contáctenos',
   'contact.subtitle': '¿Tiene preguntas? ¿Quiere colaborar? Puede contactarnos por teléfono. Estaremos encantados de atenderle.',
   'contact.ourContacts': 'Nuestros contactos',
