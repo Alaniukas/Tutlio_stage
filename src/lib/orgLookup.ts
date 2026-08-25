@@ -15,5 +15,5 @@ export async function fetchOrganizationRow<T extends Record<string, unknown>>(
     console.warn('[fetchOrganizationRow]', error.message);
     return null;
   }
-  return (data as T | null) ?? null;
+  return (data as unknown as T | null) ?? null;
 }

@@ -3914,6 +3914,7 @@ export const lv: Record<string, string> = {
 
   // --- files ---
   'files.downloadFailed': 'Neizdevās lejupielādēt failu',
+  'files.tooLarge': 'Fails ir pārāk liels (maks. 10 MB).',
   'files.noFilesTutor': 'Pasniedzējs vēl nav augšupielādējis nevienu failu.',
 
   // --- findLesson ---

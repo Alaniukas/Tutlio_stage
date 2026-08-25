@@ -1363,6 +1363,7 @@ export const fr: Record<string, string> = {
   'misc.refundNote': 'Ce cours a été payé ({price} €). Pour un remboursement, veuillez contacter info@tutlio.lt.',
   'misc.studentFallback': 'Élève',
   'files.downloadFailed': 'Échec du téléchargement du fichier',
+  'files.tooLarge': 'Le fichier est trop volumineux (10 Mo max.).',
   'files.noFiles': 'Aucun fichier.',
   'files.noFilesTutor': 'Le tuteur n\'a pas encore téléversé de fichiers.',
   'time.date': 'Date',

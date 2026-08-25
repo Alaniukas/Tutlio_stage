@@ -7,9 +7,11 @@ export function loadPublicLandingLessonCount(onCount: (n: number) => void): () =
   let cancelled = false;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), LANDING_STATS_TIMEOUT_MS);
-  void supabase
-    .rpc('get_public_landing_stats')
-    .abortSignal(controller.signal)
+  void Promise.resolve(
+    supabase
+      .rpc('get_public_landing_stats')
+      .abortSignal(controller.signal),
+  )
     .then(({ data }) => {
       if (cancelled || !data) return;
       const d = data as { completed_lessons?: number; upcoming_lessons?: number };

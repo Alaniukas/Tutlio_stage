@@ -324,7 +324,7 @@ export default function CompanySessions() {
     const next = !selectedSession.is_complimentary;
     const result = await setSessionComplimentary(selectedSession.id, next);
     setTogglingComplimentary(false);
-    if (!result.ok) {
+    if (result.ok === false) {
       alert(result.error);
       return;
     }

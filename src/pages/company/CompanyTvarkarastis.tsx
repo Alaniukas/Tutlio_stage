@@ -1760,7 +1760,7 @@ export default function CompanyTvarkarastis() {
     try {
       const next = !selectedEvent.is_complimentary;
       const result = await setSessionComplimentary(selectedEvent.id, next);
-      if (!result.ok) {
+      if (result.ok === false) {
         alert(t('compSch.errorPayment', { msg: result.error }));
       } else {
         setSelectedEvent((prev) =>

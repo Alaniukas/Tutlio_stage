@@ -1617,6 +1617,7 @@ export const de: Record<string, string> = {
   'hidden_from_calendar': 'Aus Kalender ausgeblendet',
   'files.noFiles': 'Keine Dateien.',
   'files.downloadFailed': 'Datei konnte nicht heruntergeladen werden',
+  'files.tooLarge': 'Die Datei ist zu groß (max. 10 MB).',
   'contact.title': 'Kontaktieren Sie uns',
   'contact.subtitle': 'Haben Sie Fragen? Wir sind telefonisch erreichbar. Wir freuen uns von Ihnen zu hören!',
   'contact.ourContacts': 'Unsere Kontaktdaten',

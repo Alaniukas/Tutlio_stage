@@ -1083,6 +1083,7 @@ export const se: Record<string, string> = {
   'dateFilter.toDate': 'Till datum',
   'features': 'Funktioner',
   'files.downloadFailed': 'Kunde inte ladda ner filen',
+  'files.tooLarge': 'Filen är för stor (max 10 MB).',
   'files.noFiles': 'Inga filer.',
   'files.noFilesTutor': 'Läraren har inte laddat upp några filer ännu.',
   'finance.connectStripe': 'Anslut Stripe',

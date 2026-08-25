@@ -85,7 +85,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .order('created_at', { ascending: true });
 
     const branding = brandingPreview;
-    const branding = brandingPreview;
     const pvmMeta = pvmMetaEarly;
     const sellerSnapshot = {
       ...(invoice.seller_snapshot as InvoicePdfData['seller']),

@@ -1094,6 +1094,7 @@ export const fi: Record<string, string> = {
   'dateFilter.toDate': 'Päivämäärään',
   'features': 'Ominaisuudet',
   'files.downloadFailed': 'Tiedoston lataaminen epäonnistui',
+  'files.tooLarge': 'Tiedosto on liian suuri (enintään 10 Mt).',
   'files.noFiles': 'Ei tiedostoja.',
   'files.noFilesTutor': 'Tutor ei ole ladannut tiedostoja vielä.',
   'finance.connectStripe': 'Yhdistä Stripe',

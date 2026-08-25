@@ -928,6 +928,7 @@ export const no: Record<string, string> = {
   'dateFilter.toDate': 'Til dato',
   'features': 'Funksjoner',
   'files.downloadFailed': 'Kunne ikke laste ned filen',
+  'files.tooLarge': 'Filen er for stor (maks. 10 MB).',
   'files.noFiles': 'Ingen filer.',
   'files.noFilesTutor': 'Privatlæreren har ikke lastet opp filer ennå.',
   'finance.connectStripe': 'Koble til Stripe',
