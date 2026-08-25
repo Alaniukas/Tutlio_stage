@@ -2578,6 +2578,7 @@ export const pl: Record<string, string> = {
   'chat.lessonProposalDecline': 'Odrzuć',
   'chat.lessonProposalDeclined': 'Propozycja odrzucona',
   'chat.lessonProposalPending': 'Oczekuje na odpowiedź',
+  'chat.loadOlder': 'Wczytaj wcześniejsze wiadomości',
   'chat.messages': 'Wiadomości',
   'chat.newMessage': 'Nowa wiadomość',
   'chat.noConversationSelected': 'Wybierz rozmowę',

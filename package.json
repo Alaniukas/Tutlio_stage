@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "engines": {
-    "node": ">=20 <25"
+    "node": ">=22 <25"
   },
   "scripts": {
     "dev": "concurrently \"npm:dev:frontend\" \"npm:dev:api\" --names \"VITE,API\" --prefix-colors \"cyan,magenta\"",
@@ -22,6 +22,7 @@
     "lint:api": "tsc -p tsconfig.api.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "load:test:capacity": "k6 run scripts/load/k6-capacity.js",
     "seo:smoke": "node scripts/seo-smoke.mjs",
     "stripe:setup-pln": "tsx scripts/setup-stripe-pln-products.ts",
     "stripe:setup-enterprise": "tsx scripts/setup-stripe-enterprise.ts",

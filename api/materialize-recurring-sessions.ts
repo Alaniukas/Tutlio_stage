@@ -11,6 +11,7 @@ import { findActivePackageForBooking } from '../src/lib/lessonPackageBooking.js'
 import { defaultSessionPaymentStatusForStudent } from '../src/lib/studentPaymentModel.js';
 
 const HORIZON_DAYS = 60;
+export const MATERIALIZER_BATCH_SIZE = 100;
 
 type RecurringTemplate = {
   id: string;
@@ -25,6 +26,7 @@ type RecurringTemplate = {
   meeting_link: string | null;
   topic: string | null;
   price: number | null;
+  last_materialized_at: string | null;
 };
 
 function ymdInVilnius(value: Date): string {
@@ -56,11 +58,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data, error } = await supabase
     .from('recurring_individual_sessions')
-    .select('id, tutor_id, student_id, subject_id, start_date, end_date, start_time, end_time, frequency, meeting_link, topic, price')
+    .select('id, tutor_id, student_id, subject_id, start_date, end_date, start_time, end_time, frequency, meeting_link, topic, price, last_materialized_at')
     .eq('active', true)
     .is('end_date', null)
     .lte('start_date', windowEndYmd)
-    .limit(1000);
+    .order('last_materialized_at', { ascending: true, nullsFirst: true })
+    .order('id', { ascending: true })
+    .limit(MATERIALIZER_BATCH_SIZE);
 
   if (error) return res.status(500).json({ error: error.message });
   const templates = (data || []) as RecurringTemplate[];
@@ -219,5 +223,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  return res.status(200).json({ success: true, created, skipped, templates: templates.length });
+  const { error: cursorError } = await supabase
+    .from('recurring_individual_sessions')
+    .update({ last_materialized_at: new Date().toISOString() })
+    .in('id', templates.map((template) => template.id));
+  if (cursorError) {
+    console.error('[materialize-recurring-sessions] cursor update failed', cursorError.message);
+  }
+
+  return res.status(200).json({
+    success: true,
+    created,
+    skipped,
+    templates: templates.length,
+    batchSize: MATERIALIZER_BATCH_SIZE,
+    cursorUpdated: !cursorError,
+  });
 }

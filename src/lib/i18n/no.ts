@@ -3009,6 +3009,7 @@ export const no: Record<string, string> = {
   'chat.lessonProposalDecline': 'Avslå',
   'chat.lessonProposalDeclined': 'Forslag avslått',
   'chat.lessonProposalPending': 'Venter på svar',
+  'chat.loadOlder': 'Last inn tidligere meldinger',
   'chat.noConversationSelectedDesc': 'Velg en samtale fra listen til venstre.',
   'chat.notifications': 'Varsler',
   'chat.notificationsDelayLabel': 'Send e-postvarsling etter',

@@ -11,3 +11,5 @@ coverage/
 Tutlio-main-compare/
 .env*.local
 .gosign-keys/
+scripts/load/users.staging.json
+load-results/

@@ -2854,6 +2854,7 @@ export const nl: Record<string, string> = {
   "chat.lessonProposalDecline": "Weigeren",
   "chat.lessonProposalDeclined": "Voorstel afgewezen",
   "chat.lessonProposalPending": "In afwachting van reactie",
+  "chat.loadOlder": "Eerdere berichten laden",
   "chat.messages": "Berichten",
   "chat.newMessage": "Nieuw bericht",
   "chat.noConversationSelected": "Selecteer een gesprek",

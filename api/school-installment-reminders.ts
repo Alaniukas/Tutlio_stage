@@ -2,9 +2,10 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { requireCronAuth } from './_lib/cronAuth.js';
 import { schoolContractAllowsInstallmentPayment } from './_lib/schoolContractPaymentGate.js';
-import { isReminderOptedOut } from './_lib/reminderOptOut.js';
+import { loadReminderOptOuts, normalizeReminderEmail } from './_lib/reminderOptOut.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
+export const SCHOOL_REMINDER_BATCH_SIZE = 25;
 
 function ymdInVilnius(date: Date): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -47,32 +48,68 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const installmentSelect =
     'id, contract_id, installment_number, amount, due_date, payment_status, reminder_3d_sent_at, reminder_1d_sent_at, contract:school_contracts(id, student_id, organization_id, signing_status, archived_at, annual_fee, additional_fee_amount, additional_fee_purpose, student:students(full_name, email, payer_email, payer_name), org:organizations(name, email, features, stripe_account_id, stripe_onboarding_complete))';
 
-  const [upcomingRes, overdueRes] = await Promise.all([
-    supabase
-      .from('school_payment_installments')
-      .select(installmentSelect)
-      .eq('payment_status', 'pending')
-      .in('due_date', [dueIn3, dueIn1]),
-    supabase
-      .from('school_payment_installments')
-      .select(installmentSelect)
-      .eq('payment_status', 'pending')
-      .lt('due_date', todayYmd)
-      .is('reminder_3d_sent_at', null)
-      .is('reminder_1d_sent_at', null),
+  const [due3IdsRes, due1IdsRes, overdueIdsRes] = await Promise.all([
+    supabase.rpc('get_due_school_installment_reminder_ids', {
+      p_bucket: 'due_3d',
+      p_reference_date: dueIn3,
+      p_limit: SCHOOL_REMINDER_BATCH_SIZE,
+    }),
+    supabase.rpc('get_due_school_installment_reminder_ids', {
+      p_bucket: 'due_1d',
+      p_reference_date: dueIn1,
+      p_limit: SCHOOL_REMINDER_BATCH_SIZE,
+    }),
+    supabase.rpc('get_due_school_installment_reminder_ids', {
+      p_bucket: 'overdue',
+      p_reference_date: todayYmd,
+      p_limit: SCHOOL_REMINDER_BATCH_SIZE,
+    }),
   ]);
 
-  if (upcomingRes.error) return res.status(500).json({ error: upcomingRes.error.message });
-  if (overdueRes.error) return res.status(500).json({ error: overdueRes.error.message });
+  if (due3IdsRes.error) return res.status(500).json({ error: due3IdsRes.error.message });
+  if (due1IdsRes.error) return res.status(500).json({ error: due1IdsRes.error.message });
+  if (overdueIdsRes.error) return res.status(500).json({ error: overdueIdsRes.error.message });
 
-  const seen = new Set<string>();
-  const installments = [...(upcomingRes.data || []), ...(overdueRes.data || [])].filter((inst) => {
-    if (seen.has(inst.id)) return false;
-    seen.add(inst.id);
-    return true;
-  });
+  const installmentIds = [...new Set(
+    [...(due3IdsRes.data || []), ...(due1IdsRes.data || []), ...(overdueIdsRes.data || [])]
+      .map((row: { id?: string }) => row.id)
+      .filter((id: string | undefined): id is string => Boolean(id)),
+  )];
+  if (!installmentIds.length) return res.status(200).json({ sent: 0 });
 
-  if (!installments.length) return res.status(200).json({ sent: 0 });
+  const { data: installments, error: installmentError } = await supabase
+    .from('school_payment_installments')
+    .select(installmentSelect)
+    .in('id', installmentIds)
+    .order('due_date', { ascending: true })
+    .order('id', { ascending: true });
+  if (installmentError) return res.status(500).json({ error: installmentError.message });
+  if (!installments?.length) return res.status(200).json({ sent: 0 });
+
+  const recipientByInstallment = new Map<string, string>();
+  for (const inst of installments as any[]) {
+    const recipient = inst.contract?.student?.payer_email || inst.contract?.student?.email;
+    if (recipient) recipientByInstallment.set(inst.id, recipient);
+  }
+  const optedOutEmails = await loadReminderOptOuts(supabase, recipientByInstallment.values());
+
+  const contractIds = [...new Set((installments as any[]).map((inst) => inst.contract_id).filter(Boolean))];
+  const installmentCountByContract = new Map<string, number>();
+  if (contractIds.length > 0) {
+    const { data: countRows, error: countError } = await supabase
+      .from('school_payment_installments')
+      .select('contract_id')
+      .in('contract_id', contractIds);
+    if (countError) {
+      console.error('[school-installment-reminders] installment count preload failed', countError.message);
+    }
+    for (const row of countRows || []) {
+      installmentCountByContract.set(
+        row.contract_id,
+        (installmentCountByContract.get(row.contract_id) || 0) + 1,
+      );
+    }
+  }
 
   let sent = 0;
   for (const inst of installments as any[]) {
@@ -105,7 +142,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const org = inst.contract?.org;
     const recipient = student?.payer_email || student?.email;
     if (!recipient) continue;
-    if (await isReminderOptedOut(supabase, recipient)) {
+    if (optedOutEmails.has(normalizeReminderEmail(recipient))) {
       console.warn('[school-installment-reminders] skip: opted out', recipient, inst.id);
       continue;
     }
@@ -116,10 +153,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.warn('[school-installment-reminders] skip: org Stripe not connected', inst.contract?.organization_id, inst.id);
       continue;
     }
-    const { count: totalInstallments } = await supabase
-      .from('school_payment_installments')
-      .select('id', { count: 'exact', head: true })
-      .eq('contract_id', inst.contract_id);
+    const totalInstallments = installmentCountByContract.get(inst.contract_id) || 0;
 
     // The email's "Pay now" button links to /api/pay-school-installment, which
     // creates the Stripe Checkout on demand when the payer clicks it.
@@ -132,35 +166,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       org?.email ||
       '';
 
-    await fetch(`${APP_URL}/api/send-email`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-internal-key': serviceRoleKey },
-      body: JSON.stringify({
-        type: 'school_installment_request',
-        to: recipient,
-        data: {
-          schoolName: org?.name || '',
-          schoolEmail: org?.email || '',
-          contactEmail: orgContactEmail,
-          studentName: student?.full_name || '',
-          parentName: student?.payer_name || student?.full_name || '',
-          recipientName: student?.payer_name || student?.full_name || '',
-          installmentNumber: inst.installment_number,
-          totalInstallments: totalInstallments || undefined,
-          amount: Number(inst.amount).toFixed(2),
-          dueDate: new Date(inst.due_date).toLocaleDateString('lt-LT'),
-          installmentId: inst.id,
-          additionalFeeAmount: Number(inst.contract?.additional_fee_amount || 0) > 0
-            ? Number(inst.contract.additional_fee_amount).toFixed(2)
-            : undefined,
-          additionalFeePurpose: inst.contract?.additional_fee_purpose || undefined,
-          contractAnnualFee: Number(inst.contract?.annual_fee || 0).toFixed(2),
-          ...(inst.contract?.organization_id ? { organizationId: inst.contract.organization_id } : {}),
-        },
-      }),
-    });
+    let emailResponse: Response;
+    try {
+      emailResponse = await fetch(`${APP_URL}/api/send-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-internal-key': serviceRoleKey },
+        body: JSON.stringify({
+          type: 'school_installment_request',
+          to: recipient,
+          data: {
+            schoolName: org?.name || '',
+            schoolEmail: org?.email || '',
+            contactEmail: orgContactEmail,
+            studentName: student?.full_name || '',
+            parentName: student?.payer_name || student?.full_name || '',
+            recipientName: student?.payer_name || student?.full_name || '',
+            installmentNumber: inst.installment_number,
+            totalInstallments: totalInstallments || undefined,
+            amount: Number(inst.amount).toFixed(2),
+            dueDate: new Date(inst.due_date).toLocaleDateString('lt-LT'),
+            installmentId: inst.id,
+            additionalFeeAmount: Number(inst.contract?.additional_fee_amount || 0) > 0
+              ? Number(inst.contract.additional_fee_amount).toFixed(2)
+              : undefined,
+            additionalFeePurpose: inst.contract?.additional_fee_purpose || undefined,
+            contractAnnualFee: Number(inst.contract?.annual_fee || 0).toFixed(2),
+            ...(inst.contract?.organization_id ? { organizationId: inst.contract.organization_id } : {}),
+          },
+        }),
+      });
+    } catch (error) {
+      console.error('[school-installment-reminders] email request failed', inst.id, error);
+      continue;
+    }
+    if (!emailResponse.ok) {
+      console.error(
+        '[school-installment-reminders] email failed',
+        inst.id,
+        emailResponse.status,
+      );
+      continue;
+    }
 
-    await supabase
+    const { error: updateError } = await supabase
       .from('school_payment_installments')
       .update(
         isOverdue || is3d
@@ -168,8 +216,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           : { reminder_1d_sent_at: new Date().toISOString() },
       )
       .eq('id', inst.id);
+    if (updateError) {
+      console.error('[school-installment-reminders] flag update failed', inst.id, updateError.message);
+      continue;
+    }
     sent += 1;
   }
 
-  return res.status(200).json({ sent });
+  return res.status(200).json({
+    sent,
+    candidates: installments.length,
+    batchSizePerBucket: SCHOOL_REMINDER_BATCH_SIZE,
+  });
 }

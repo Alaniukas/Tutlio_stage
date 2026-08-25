@@ -3311,6 +3311,7 @@ export const fi: Record<string, string> = {
   'chat.lessonProposalDecline': 'Hylkää',
   'chat.lessonProposalDeclined': 'Ehdotus hylätty',
   'chat.lessonProposalPending': 'Odottaa vastausta',
+  'chat.loadOlder': 'Lataa aiemmat viestit',
   'chat.noConversationSelectedDesc': 'Valitse keskustelu vasemmanpuoleisesta luettelosta.',
   'chat.notifications': 'Ilmoitukset',
   'chat.notificationsDelayLabel': 'Lähetä sähköposti-ilmoitus',
