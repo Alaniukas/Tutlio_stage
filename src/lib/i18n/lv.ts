@@ -1242,6 +1242,7 @@ export const lv: Record<string, string> = {
   'chat.lessonProposalDecline': 'Noraidīt',
   'chat.lessonProposalDeclined': 'Piedāvājums noraidīts',
   'chat.lessonProposalPending': 'Gaida atbildi',
+  'chat.loadOlder': 'Ielādēt iepriekšējās ziņas',
   'chat.messages': 'Ziņas',
   'chat.newMessage': 'Jauna ziņa',
   'chat.noConversationSelected': 'Izvēlieties sarunu',

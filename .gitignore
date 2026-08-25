@@ -14,3 +14,5 @@ Tutlio-main-compare/
 tmp/
 scripts/_*.mjs
 preview-*.html
+scripts/load/users.staging.json
+load-results/

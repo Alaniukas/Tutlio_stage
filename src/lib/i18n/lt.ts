@@ -2892,6 +2892,7 @@ export const lt: Record<string, string> = {
   'chat.lessonProposalDecline': 'Atmesti',
   'chat.lessonProposalDeclined': 'Pasiūlymas atmestas',
   'chat.lessonProposalPending': 'Laukiama atsakymo',
+  'chat.loadOlder': 'Įkelti ankstesnes žinutes',
   'chat.messages': 'Žinutės',
   'chat.newMessage': 'Nauja žinutė',
   'chat.noConversationSelected': 'Pasirinkite pokalbį',

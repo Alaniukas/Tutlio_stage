@@ -3194,6 +3194,7 @@ export const dk: Record<string, string> = {
   'chat.lessonProposalDecline': 'Afvis',
   'chat.lessonProposalDeclined': 'Forslag afvist',
   'chat.lessonProposalPending': 'Afventer svar',
+  'chat.loadOlder': 'Indlæs tidligere beskeder',
   'chat.noConversationSelectedDesc': 'Vælg en samtale fra listen til venstre.',
   'chat.notifications': 'Notifikationer',
   'chat.notificationsDelayLabel': 'Send e-mailnotifikation efter',

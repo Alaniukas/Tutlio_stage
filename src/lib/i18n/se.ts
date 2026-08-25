@@ -3174,6 +3174,7 @@ export const se: Record<string, string> = {
   'chat.lessonProposalDecline': 'Avböj',
   'chat.lessonProposalDeclined': 'Förslaget avböjt',
   'chat.lessonProposalPending': 'Väntar på svar',
+  'chat.loadOlder': 'Läs in tidigare meddelanden',
   'chat.noConversationSelectedDesc': 'Välj en konversation från listan till vänster.',
   'chat.notifications': 'Aviseringar',
   'chat.notificationsDelayLabel': 'Skicka e-postavisering efter',

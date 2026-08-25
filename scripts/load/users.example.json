@@ -1,0 +1,25 @@
+[
+  {
+    "email": "synthetic-tutor-0001@example.invalid",
+    "password": "replace-with-staging-only-password",
+    "role": "tutor"
+  },
+  {
+    "email": "synthetic-student-0001@example.invalid",
+    "password": "replace-with-staging-only-password",
+    "role": "student",
+    "studentId": "00000000-0000-4000-8000-000000000001"
+  },
+  {
+    "email": "synthetic-admin-0001@example.invalid",
+    "password": "replace-with-staging-only-password",
+    "role": "org_admin",
+    "organizationId": "00000000-0000-4000-8000-000000000002"
+  },
+  {
+    "email": "synthetic-parent-0001@example.invalid",
+    "password": "replace-with-staging-only-password",
+    "role": "parent",
+    "studentId": "00000000-0000-4000-8000-000000000001"
+  }
+]

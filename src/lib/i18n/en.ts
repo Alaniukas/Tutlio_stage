@@ -2893,6 +2893,7 @@ export const en: Record<string, string> = {
   'chat.lessonProposalDecline': 'Decline',
   'chat.lessonProposalDeclined': 'Proposal declined',
   'chat.lessonProposalPending': 'Awaiting response',
+  'chat.loadOlder': 'Load earlier messages',
   'chat.messages': 'Messages',
   'chat.newMessage': 'New message',
   'chat.noConversationSelected': 'Select a conversation',

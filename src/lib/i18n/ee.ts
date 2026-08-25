@@ -3751,6 +3751,7 @@ export const ee: Record<string, string> = {
   'chat.lessonProposalDecline': 'Keeldu',
   'chat.lessonProposalDeclined': 'Ettepanek tagasi lükatud',
   'chat.lessonProposalPending': 'Ootab vastust',
+  'chat.loadOlder': 'Laadi varasemad sõnumid',
   'chat.messages': 'Sõnumid',
   'chat.newMessage': 'Uus sõnum',
   'chat.noConversationSelected': 'Valige vestlus',

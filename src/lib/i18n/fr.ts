@@ -1286,6 +1286,7 @@ export const fr: Record<string, string> = {
   'chat.lessonProposalDecline': 'Refuser',
   'chat.lessonProposalDeclined': 'Proposition refusée',
   'chat.lessonProposalPending': 'En attente de réponse',
+  'chat.loadOlder': 'Charger les messages précédents',
   'chat.notificationsDelayLabel': 'Envoyer la notification par e-mail après',
   'chat.notificationsEnabled': 'Notifications par e-mail activées',
   'chat.notificationsHours': 'h',

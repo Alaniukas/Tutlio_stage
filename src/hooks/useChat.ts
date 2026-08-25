@@ -2,10 +2,18 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { authHeaders } from '@/lib/apiHelpers';
 import { orgAdminRowByUserDeduped } from '@/lib/preload';
+import { useUser } from '@/contexts/UserContext';
+import {
+  CHAT_MESSAGE_PAGE_SIZE,
+  chatMessageRefFromBroadcast,
+  mergeChatMessages,
+  type ChatMessage,
+} from '@/lib/chatMessages';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
 const CONV_CACHE_TTL = 300_000;
-let convCache: { data: Conversation[]; ts: number } | null = null;
+const CHAT_RECONCILE_INTERVAL_MS = 60_000;
+let convCache: { userId: string; data: Conversation[]; ts: number } | null = null;
 
 type ConversationListener = (list: Conversation[]) => void;
 const convListeners = new Set<ConversationListener>();
@@ -36,60 +44,78 @@ function mapRpcRowsToConversations(data: unknown): Conversation[] {
   });
 }
 
-let inboxConversationsInflight: Promise<void> | null = null;
+let inboxConversationsInflight: { userId: string; promise: Promise<void> } | null = null;
 
-async function fetchAndBroadcastConversations(): Promise<void> {
-  if (inboxConversationsInflight) return inboxConversationsInflight;
-  inboxConversationsInflight = (async () => {
+async function fetchAndBroadcastConversations(userId: string): Promise<void> {
+  if (inboxConversationsInflight?.userId === userId) {
+    return inboxConversationsInflight.promise;
+  }
+  const promise = (async () => {
     const { data, error: err } = await supabase.rpc('get_my_conversations');
     if (err) {
       console.error('[useChat] get_my_conversations:', err.message);
       return;
     }
+    if (inboxChannelUserId !== userId) return;
     const list = mapRpcRowsToConversations(data);
-    convCache = { data: list, ts: Date.now() };
+    convCache = { userId, data: list, ts: Date.now() };
     convListeners.forEach((l) => l(list));
   })().finally(() => {
-    inboxConversationsInflight = null;
+    if (inboxConversationsInflight?.promise === promise) {
+      inboxConversationsInflight = null;
+    }
   });
-  return inboxConversationsInflight;
+  inboxConversationsInflight = { userId, promise };
+  return promise;
 }
 
 let inboxBroadcastDebounce: ReturnType<typeof setTimeout> | null = null;
-function scheduleBroadcastConversations(): void {
+function scheduleBroadcastConversations(userId: string): void {
   if (inboxBroadcastDebounce) clearTimeout(inboxBroadcastDebounce);
   inboxBroadcastDebounce = setTimeout(() => {
     inboxBroadcastDebounce = null;
-    void fetchAndBroadcastConversations();
+    if (inboxChannelUserId === userId) {
+      void fetchAndBroadcastConversations(userId);
+    }
   }, 350);
 }
 
 let inboxChannel: RealtimeChannel | null = null;
+let inboxChannelUserId: string | null = null;
 let inboxChannelRefCount = 0;
 
-function attachInboxRealtime(): void {
+function attachInboxRealtime(userId: string): void {
+  if (inboxChannelUserId && inboxChannelUserId !== userId) {
+    if (inboxChannel) void supabase.removeChannel(inboxChannel);
+    inboxChannel = null;
+    inboxChannelRefCount = 0;
+    convCache = null;
+  }
+
   inboxChannelRefCount += 1;
   if (inboxChannelRefCount !== 1) return;
+  inboxChannelUserId = userId;
   inboxChannel = supabase
-    .channel('inbox-conversations')
-    .on(
-      'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'chat_messages' },
-      () => scheduleBroadcastConversations(),
-    )
-    .on(
-      'postgres_changes',
-      { event: 'UPDATE', schema: 'public', table: 'chat_participants' },
-      () => scheduleBroadcastConversations(),
-    )
-    .subscribe();
+    .channel(`user:${userId}:inbox`, { config: { private: true } })
+    .on('broadcast', { event: 'inbox_changed' }, () => scheduleBroadcastConversations(userId))
+    .subscribe((status, err) => {
+      if (status === 'SUBSCRIBED') {
+        void fetchAndBroadcastConversations(userId);
+      }
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        console.warn('[useChat] inbox realtime channel', status, err?.message);
+        void fetchAndBroadcastConversations(userId);
+      }
+    });
 }
 
-function detachInboxRealtime(): void {
-  inboxChannelRefCount -= 1;
+function detachInboxRealtime(userId: string): void {
+  if (inboxChannelUserId !== userId) return;
+  inboxChannelRefCount = Math.max(0, inboxChannelRefCount - 1);
   if (inboxChannelRefCount === 0 && inboxChannel) {
     void supabase.removeChannel(inboxChannel);
     inboxChannel = null;
+    inboxChannelUserId = null;
   }
 }
 
@@ -115,20 +141,16 @@ export interface Conversation {
   other_party_kind?: 'student' | 'tutor' | 'org_admin' | 'parent';
 }
 
-export interface ChatMessage {
-  id: string;
-  conversation_id: string;
-  sender_id: string;
-  content: string | null;
-  message_type: 'text' | 'file' | 'lesson_proposal';
-  metadata: Record<string, unknown> | null;
-  created_at: string;
-}
+export type { ChatMessage } from '@/lib/chatMessages';
 
 export function useConversations() {
-  const [conversations, setConversations] = useState<Conversation[]>(() => convCache?.data ?? []);
+  const { user } = useUser();
+  const userId = user?.id ?? null;
+  const [conversations, setConversations] = useState<Conversation[]>(
+    () => (userId && convCache?.userId === userId ? convCache.data : []),
+  );
   const [loading, setLoading] = useState(
-    () => !(convCache && Date.now() - convCache.ts < CONV_CACHE_TTL),
+    () => !!userId && !(convCache?.userId === userId && Date.now() - convCache.ts < CONV_CACHE_TTL),
   );
   const [error, setError] = useState<string | null>(null);
 
@@ -141,11 +163,17 @@ export function useConversations() {
   }, []);
 
   useEffect(() => {
-    attachInboxRealtime();
-    return () => detachInboxRealtime();
-  }, []);
+    if (!userId) return;
+    attachInboxRealtime(userId);
+    return () => detachInboxRealtime(userId);
+  }, [userId]);
 
   const fetchConversations = useCallback(async () => {
+    if (!userId) {
+      setConversations([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     const { data, error: err } = await supabase.rpc('get_my_conversations');
@@ -155,63 +183,61 @@ export function useConversations() {
       return;
     }
     const list = mapRpcRowsToConversations(data);
-    convCache = { data: list, ts: Date.now() };
+    if (inboxChannelUserId !== userId) return;
+    convCache = { userId, data: list, ts: Date.now() };
     setLoading(false);
     convListeners.forEach((l) => l(list));
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
-    if (convCache && Date.now() - convCache.ts < CONV_CACHE_TTL) {
+    if (!userId) {
+      setConversations([]);
+      setLoading(false);
+      return;
+    }
+    if (convCache?.userId === userId && Date.now() - convCache.ts < CONV_CACHE_TTL) {
       setConversations(convCache.data);
       setLoading(false);
       return;
     }
     void fetchConversations();
-  }, [fetchConversations]);
+  }, [fetchConversations, userId]);
 
   return { conversations, loading, error, refetch: fetchConversations };
 }
 
 /** Sum of unread_count across inbox; shares realtime + RPC with useConversations via convListeners. */
 export function useTotalChatUnread() {
+  const { user } = useUser();
+  const userId = user?.id ?? null;
   const [total, setTotal] = useState(0);
 
   useEffect(() => {
+    if (!userId) {
+      setTotal(0);
+      return;
+    }
     const listener: ConversationListener = (list) => {
       setTotal(list.reduce((s, c) => s + c.unread_count, 0));
     };
     convListeners.add(listener);
-    attachInboxRealtime();
-    if (convCache?.data) listener(convCache.data);
-    else void fetchAndBroadcastConversations();
+    attachInboxRealtime(userId);
+    if (convCache?.userId === userId) listener(convCache.data);
+    else void fetchAndBroadcastConversations(userId);
     return () => {
       convListeners.delete(listener);
-      detachInboxRealtime();
+      detachInboxRealtime(userId);
     };
-  }, []);
+  }, [userId]);
 
   return total;
-}
-
-function mergeChatMessages(prev: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
-  if (incoming.length === 0) return prev;
-  if (
-    prev.length === incoming.length &&
-    prev[prev.length - 1]?.id === incoming[incoming.length - 1]?.id
-  ) {
-    return prev;
-  }
-  const byId = new Map<string, ChatMessage>();
-  for (const m of prev) byId.set(m.id, m);
-  for (const m of incoming) byId.set(m.id, m);
-  return [...byId.values()].sort(
-    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-  );
 }
 
 export function useChatMessages(conversationId: string | null) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const conversationIdRef = useRef(conversationId);
   conversationIdRef.current = conversationId;
@@ -224,6 +250,23 @@ export function useChatMessages(conversationId: string | null) {
     });
   }, []);
 
+  const fetchMessageById = useCallback(async (messageId: string) => {
+    const cid = conversationIdRef.current;
+    if (!cid) return;
+    const { data, error } = await supabase
+      .from('chat_messages')
+      .select('*')
+      .eq('conversation_id', cid)
+      .eq('id', messageId)
+      .maybeSingle();
+    if (conversationIdRef.current !== cid) return;
+    if (error) {
+      console.error('[useChat] fetchMessageById:', error.message);
+      return;
+    }
+    if (data) appendMessage(data as ChatMessage);
+  }, [appendMessage]);
+
   const fetchMessages = useCallback(async (opts?: { silent?: boolean }) => {
     const cid = conversationIdRef.current;
     if (!cid) return;
@@ -232,47 +275,79 @@ export function useChatMessages(conversationId: string | null) {
       .from('chat_messages')
       .select('*')
       .eq('conversation_id', cid)
-      .order('created_at', { ascending: true });
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(CHAT_MESSAGE_PAGE_SIZE);
     if (conversationIdRef.current !== cid) return;
     if (error) {
       console.error('[useChat] fetchMessages:', error.message);
     } else {
-      const rows = (data ?? []) as ChatMessage[];
-      setMessages(rows);
+      const rows = [...((data ?? []) as ChatMessage[])].reverse();
+      if (opts?.silent) setMessages((prev) => mergeChatMessages(prev, rows));
+      else {
+        setMessages(rows);
+        setHasMore(rows.length === CHAT_MESSAGE_PAGE_SIZE);
+      }
     }
     if (!opts?.silent && conversationIdRef.current === cid) setLoading(false);
   }, []);
 
+  const loadOlder = useCallback(async () => {
+    const cid = conversationIdRef.current;
+    const oldest = messages[0];
+    if (!cid || !oldest || loadingOlder || !hasMore) return;
+
+    setLoadingOlder(true);
+    const { data, error } = await supabase
+      .from('chat_messages')
+      .select('*')
+      .eq('conversation_id', cid)
+      .or(
+        `created_at.lt.${oldest.created_at},and(created_at.eq.${oldest.created_at},id.lt.${oldest.id})`,
+      )
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(CHAT_MESSAGE_PAGE_SIZE);
+
+    if (conversationIdRef.current === cid) {
+      if (error) {
+        console.error('[useChat] loadOlder:', error.message);
+      } else {
+        const rows = [...((data ?? []) as ChatMessage[])].reverse();
+        setMessages((prev) => mergeChatMessages(rows, prev));
+        setHasMore(rows.length === CHAT_MESSAGE_PAGE_SIZE);
+      }
+      setLoadingOlder(false);
+    }
+  }, [hasMore, loadingOlder, messages]);
+
   useEffect(() => {
+    setLoadingOlder(false);
     if (!conversationId) {
       setMessages([]);
+      setHasMore(false);
       return;
     }
 
     setMessages([]);
+    setHasMore(false);
     void fetchMessages();
 
     const channel = supabase
-      .channel(`chat:${conversationId}`, {
-        config: { broadcast: { self: true } },
+      .channel(`conversation:${conversationId}:messages`, {
+        config: { private: true, broadcast: { self: false } },
       })
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'chat_messages',
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        (payload) => {
-          const newMsg = payload.new as ChatMessage;
-          if (newMsg.conversation_id !== conversationIdRef.current) return;
-          appendMessage(newMsg);
-        },
-      )
+      .on('broadcast', { event: 'message_inserted' }, ({ payload }) => {
+        const messageRef = chatMessageRefFromBroadcast(payload);
+        if (!messageRef || messageRef.conversationId !== conversationIdRef.current) return;
+        void fetchMessageById(messageRef.messageId);
+      })
       .subscribe((status, err) => {
-        if (import.meta.env?.DEV && status === 'SUBSCRIBED') {
-          console.log('[useChat] realtime subscribed', conversationId);
+        if (status === 'SUBSCRIBED') {
+          void fetchMessages({ silent: true });
+          if (import.meta.env?.DEV) {
+            console.log('[useChat] realtime subscribed', conversationId);
+          }
         }
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           console.warn('[useChat] realtime channel', status, err?.message);
@@ -282,22 +357,31 @@ export function useChatMessages(conversationId: string | null) {
 
     channelRef.current = channel;
 
-    // Fallback when Realtime is slow/unavailable (common with RLS until setAuth + replica are correct).
+    // Slow reconciliation protects against a missed socket event without the
+    // previous high-frequency per-open-chat polling load.
     const poll = setInterval(() => {
       if (document.visibilityState === 'hidden') return;
       void fetchMessages({ silent: true });
-    }, 15000);
+    }, CHAT_RECONCILE_INTERVAL_MS);
 
     return () => {
       clearInterval(poll);
       if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
+        void supabase.removeChannel(channelRef.current);
         channelRef.current = null;
       }
     };
-  }, [conversationId, fetchMessages, appendMessage]);
+  }, [conversationId, fetchMessages, fetchMessageById]);
 
-  return { messages, loading, refetch: fetchMessages, appendMessage };
+  return {
+    messages,
+    loading,
+    loadingOlder,
+    hasMore,
+    loadOlder,
+    refetch: fetchMessages,
+    appendMessage,
+  };
 }
 
 export async function sendMessage(
@@ -357,11 +441,6 @@ export async function sendMessage(
     return null;
   }
 
-  await supabase
-    .from('chat_conversations')
-    .update({ last_message_at: new Date().toISOString() })
-    .eq('id', conversationId);
-
   const inserted = data as ChatMessage;
   void (async () => {
     try {
@@ -400,7 +479,7 @@ export async function updateChatEmailNotifyPrefs(
     console.error('[useChat] updateChatEmailNotifyPrefs:', error.message);
     return false;
   }
-  void fetchAndBroadcastConversations();
+  void fetchAndBroadcastConversations(user.id);
   return true;
 }
 
@@ -425,7 +504,7 @@ export async function markConversationRead(conversationId: string): Promise<void
     .eq('conversation_id', conversationId)
     .eq('user_id', user.id);
 
-  void fetchAndBroadcastConversations();
+  void fetchAndBroadcastConversations(user.id);
 }
 
 export async function uploadChatFile(

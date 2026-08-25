@@ -20,6 +20,9 @@ const API_URL = process.env.VERCEL_URL
   ? `https://${process.env.VERCEL_URL}`
   : (process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt');
 
+export const SESSION_REMINDER_BATCH_SIZE = 250;
+export const SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT = 100;
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -29,6 +32,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const results: { session?: number; deadline?: any; afterLesson?: any; schoolInstallments?: any; lessonStatusConfirmations?: any } = {};
   let totalSent = 0;
+  let emailAttempts = 0;
 
   // Cache org features across the session loop (req 7: flexible_invitations gates
   // expanded parent reminder recipients, so other orgs' email volume is unchanged).
@@ -44,25 +48,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const now = new Date();
-    const maxFuture = new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString();
-
-    const { data: sessions, error } = await supabase
-      .from('sessions')
-      .select(`
-        id, start_time, end_time, topic, price, meeting_link,
-        reminder_student_sent, reminder_tutor_sent, reminder_payer_sent,
-        student:students(id, full_name, email, payment_payer, payer_email, payer_name, parent_secondary_email, parent_secondary_name),
-        tutor:profiles(id, full_name, email, phone, reminder_student_hours, reminder_tutor_hours, organization_id)
-      `)
-      .eq('status', 'active')
-      .gte('start_time', now.toISOString())
-      .lt('start_time', maxFuture)
-      .limit(500);
+    const { data: dueSessionRows, error: dueSessionError } = await supabase.rpc(
+      'get_due_session_reminder_ids',
+      { p_limit: SESSION_REMINDER_BATCH_SIZE },
+    );
+    const dueSessionIds = (dueSessionRows || [])
+      .map((row: { id?: string }) => row.id)
+      .filter((id: string | undefined): id is string => Boolean(id));
+    const sessionResult = dueSessionError || dueSessionIds.length === 0
+      ? { data: [], error: dueSessionError }
+      : await supabase
+        .from('sessions')
+        .select(`
+          id, start_time, end_time, topic, price, meeting_link,
+          reminder_student_sent, reminder_tutor_sent, reminder_payer_sent,
+          student:students(id, full_name, email, payment_payer, payer_email, payer_name, parent_secondary_email, parent_secondary_name),
+          tutor:profiles(id, full_name, email, phone, reminder_student_hours, reminder_tutor_hours, organization_id)
+        `)
+        .in('id', dueSessionIds)
+        .order('start_time', { ascending: true })
+        .order('id', { ascending: true });
+    const { data: sessions, error } = sessionResult;
 
     if (error) {
       console.error('[send-reminders] Session query error:', error);
     } else if (sessions?.length) {
       for (const session of sessions) {
+        if (emailAttempts >= SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT) break;
         const startTime = new Date(session.start_time);
         if (startTime <= now) continue; // Only future sessions – never remind for past
         const diffHours = (startTime.getTime() - now.getTime()) / (1000 * 60 * 60);
@@ -94,6 +106,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         if (reminderStudentHours > 0 && !session.reminder_student_sent && diffHours <= reminderStudentHours && diffHours >= 0 && student?.email) {
           try {
+            emailAttempts += 1;
             const resp = await fetch(`${API_URL}/api/send-email`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
@@ -174,7 +187,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
           let anyParentSent = false;
           for (const r of recipients) {
+            if (emailAttempts >= SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT) break;
             try {
+              emailAttempts += 1;
               const resp = await fetch(`${API_URL}/api/send-email`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '' },
@@ -204,8 +219,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         }
 
-        if (reminderTutorHours > 0 && !session.reminder_tutor_sent && diffHours <= reminderTutorHours && diffHours >= 0 && tutor?.email) {
+        if (reminderTutorHours > 0 && !session.reminder_tutor_sent && diffHours <= reminderTutorHours && diffHours >= 0 && tutor?.email && emailAttempts < SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT) {
           try {
+            emailAttempts += 1;
             const tutorReminderCore = {
               sessionId: session.id,
               studentId: student?.id || undefined,
@@ -276,6 +292,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({
       message: 'Reminders run complete',
       sent: totalSent,
+      emailAttempts,
+      emailAttemptLimit: SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT,
+      sessionBatchSize: SESSION_REMINDER_BATCH_SIZE,
       sessionReminders: results.session,
       paymentDeadlineWarnings: results.deadline,
       paymentAfterLessonReminders: results.afterLesson,
