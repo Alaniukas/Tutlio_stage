@@ -612,11 +612,15 @@ export default function CompanyTvarkarastis() {
       }
 
       // Fetch sessions for org tutors
+      const schedulePast = addDays(new Date(), -90).toISOString();
+      const scheduleFuture = addDays(new Date(), 180).toISOString();
       const { data: sessionsData } = await supabase
         .from('sessions')
         .select(TVARKARASTIS_SESSION_SELECT)
         .in('tutor_id', tutorIds)
         .not('hidden_from_calendar', 'eq', true)
+        .gte('start_time', schedulePast)
+        .lte('start_time', scheduleFuture)
         .limit(1000);
 
       const parsedSessions = (sessionsData || []).map((session: any) => ({
@@ -627,15 +631,17 @@ export default function CompanyTvarkarastis() {
       setSessions(parsedSessions);
 
       // Fetch availability for org tutors
+      const tutorNameById = new Map(filteredTutors.map((t: any) => [t.id, t.full_name || '']));
       const { data: availabilityData } = await supabase
         .from('availability')
-        .select(`
-          *,
-          tutor:profiles!availability_tutor_id_fkey(full_name)
-        `)
+        .select('*')
         .in('tutor_id', tutorIds);
 
-      setAvailability(availabilityData || []);
+      const mappedAvailability = (availabilityData || []).map((row: any) => ({
+        ...row,
+        tutor: { full_name: tutorNameById.get(row.tutor_id) || '' },
+      }));
+      setAvailability(mappedAvailability);
 
       // Fetch subjects for org tutors
       const { data: subjectsData } = await supabase
@@ -706,7 +712,7 @@ export default function CompanyTvarkarastis() {
       setCache('company_tvarkarastis', {
         orgTutors: filteredTutors,
         sessions: parsedSessions,
-        availability: availabilityData || [],
+        availability: mappedAvailability,
         subjects: subjectsData || [],
         students: studentsData || [],
         individualPricing: pricingData || [],

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import Layout from '@/components/Layout';
 import { supabase } from '@/lib/supabase';
+import { fetchOrganizationRow } from '@/lib/orgLookup';
 import { useUser } from '@/contexts/UserContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -86,21 +87,20 @@ export default function SettingsPage() {
     if (!ctxUser) return;
     setLoading(true);
     setSubscriptionError(null);
+    try {
     const user = ctxUser;
-    if (!user) {
-      setLoading(false);
-      return;
-    }
+    if (!user) return;
 
     const { data: tutorData } = await supabase
       .from('profiles')
-      .select('full_name, phone, organization_id, organizations(name), stripe_customer_id, subscription_status, subscription_plan, subscription_current_period_end')
+      .select('full_name, phone, organization_id, stripe_customer_id, subscription_status, subscription_plan, subscription_current_period_end')
       .eq('id', user.id)
       .single();
 
     const base = tutorData;
     if (base?.organization_id) {
-      setOrgName((base.organizations as any)?.name || null);
+      const org = await fetchOrganizationRow<{ name?: string }>(supabase as any, base.organization_id, 'name');
+      setOrgName(org?.name || null);
     }
     setProfile({
       full_name: base?.full_name || '',
@@ -115,7 +115,6 @@ export default function SettingsPage() {
       subscription_price_currency: null,
       subscription_price_interval: null,
     });
-    setLoading(false);
 
     if (base?.organization_id || skipRefresh) return;
     try {
@@ -143,6 +142,9 @@ export default function SettingsPage() {
     } catch (_) {}
     finally {
       setRefreshingSubscription(false);
+    }
+    } finally {
+      setLoading(false);
     }
   };
 

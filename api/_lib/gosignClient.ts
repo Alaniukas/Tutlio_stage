@@ -132,11 +132,19 @@ export async function initOneSign(input: InitOneSignInput): Promise<InitOneSignR
 }
 
 /** Fetch the current status (and, when Signed, the signed PDF) of a transaction. */
-export async function getSigningResult(transactionId: string | number): Promise<SigningResultResponse> {
+export async function getSigningResult(
+  transactionId: string | number,
+  { timeoutMs = 30_000 }: { timeoutMs?: number } = {},
+): Promise<SigningResultResponse> {
   const cfg = getGoSignConfig();
   if (!cfg) throw new GoSignError(goSignNotConfiguredMessage());
   const xml = buildTransactionEnvelope('SigningResult', { clientId: cfg.clientId, transactionId }, cfg.privateKeyPem);
-  const respXml = await postSoap(cfg.onesignEndpoint, soapActionFor('SigningResult', cfg.soapAction), xml);
+  const respXml = await postSoap(
+    cfg.onesignEndpoint,
+    soapActionFor('SigningResult', cfg.soapAction),
+    xml,
+    { timeoutMs },
+  );
   return parseSigningResultResponse(respXml, cfg.responsePublicKeyPem);
 }
 
@@ -147,11 +155,11 @@ export async function getSigningResult(transactionId: string | number): Promise<
  */
 export async function pollSigningResult(
   transactionId: string | number,
-  { attempts = 6, delayMs = 1500 }: { attempts?: number; delayMs?: number } = {},
+  { attempts = 6, delayMs = 1500, timeoutMs }: { attempts?: number; delayMs?: number; timeoutMs?: number } = {},
 ): Promise<SigningResultResponse> {
   let last: SigningResultResponse | undefined;
   for (let i = 0; i < attempts; i++) {
-    last = await getSigningResult(transactionId);
+    last = await getSigningResult(transactionId, timeoutMs != null ? { timeoutMs } : {});
     if (last.status !== 'InProgress') return last;
     if (i < attempts - 1) await new Promise((r) => setTimeout(r, delayMs));
   }

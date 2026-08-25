@@ -50,6 +50,7 @@ import {
 } from '@/lib/schoolContractFilters';
 import { buildSchoolContractExportRows, schoolContractsExportFilename } from '@/lib/schoolContractsExport';
 import { downloadSchoolContractsXlsx } from '@/lib/schoolContractsXlsxExport';
+import { fetchOrganizationRow } from '@/lib/orgLookup';
 
 interface Student {
   id: string;
@@ -271,21 +272,27 @@ export default function CompanyContracts() {
 
   const load = async () => {
     if (!getCached(CONTRACTS_CACHE_KEY)) setLoading(true);
+    try {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setLoading(false); return; }
+    if (!user) return;
 
     const { data: admin } = await supabase
       .from('organization_admins')
-      .select('organization_id, organizations(name, email, features)')
+      .select('organization_id')
       .eq('user_id', user.id)
       .maybeSingle();
 
-    if (!admin?.organization_id) { setLoading(false); return; }
+    if (!admin?.organization_id) return;
     setOrgId(admin.organization_id);
-    const name = (admin.organizations as any)?.name || '';
-    const email = (admin.organizations as any)?.email || '';
-    const features = (admin.organizations as any)?.features && typeof (admin.organizations as any).features === 'object'
-      ? (admin.organizations as any).features as Record<string, unknown>
+    const org = await fetchOrganizationRow<{
+      name?: string;
+      email?: string;
+      features?: Record<string, unknown>;
+    }>(supabase as any, admin.organization_id, 'name, email, features');
+    const name = org?.name || '';
+    const email = org?.email || '';
+    const features = org?.features && typeof org.features === 'object'
+      ? org.features as Record<string, unknown>
       : {};
     const nextSigningSettings = parseSchoolContractSigningSettings(features, email);
     setOrgName(name);
@@ -296,7 +303,7 @@ export default function CompanyContracts() {
 
     const [tRes, cRes, sRes] = await Promise.all([
       supabase.from('school_contract_templates').select('*').eq('organization_id', admin.organization_id).order('created_at', { ascending: false }),
-      supabase.from('school_contracts').select(CONTRACTS_SELECT).eq('organization_id', admin.organization_id).is('archived_at', null).order('created_at', { ascending: false }),
+      supabase.from('school_contracts').select(CONTRACTS_SELECT).eq('organization_id', admin.organization_id).is('archived_at', null).order('created_at', { ascending: false }).limit(2000),
       supabase.from('students').select('id, full_name, email, phone, grade, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent').eq('organization_id', admin.organization_id).order('full_name'),
     ]);
 
@@ -317,7 +324,11 @@ export default function CompanyContracts() {
       contracts: cData,
       students: sData,
     });
-    setLoading(false);
+    } catch (err) {
+      console.error('[CompanyContracts] load failed:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const reload = () => { invalidateCache(CONTRACTS_CACHE_KEY); load(); };

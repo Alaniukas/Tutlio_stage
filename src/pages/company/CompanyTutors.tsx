@@ -528,7 +528,7 @@ export default function CompanyTutors() {
 
     const { data: adminRow } = await supabase
       .from('organization_admins')
-      .select('organization_id, organizations(tutor_license_count)')
+      .select('organization_id')
       .eq('user_id', user.id)
       .maybeSingle();
     if (!adminRow) {
@@ -536,10 +536,7 @@ export default function CompanyTutors() {
     }
 
     setOrgId(adminRow.organization_id);
-    const orgJoinedRaw = (adminRow as any).organizations as any;
-    const orgJoined = Array.isArray(orgJoinedRaw) ? orgJoinedRaw[0] : orgJoinedRaw;
-    const joinedLicenseCount = Number(orgJoined?.tutor_license_count) || 0;
-    let effectiveLicenseCount = joinedLicenseCount;
+    let effectiveLicenseCount = 0;
     setLicenseInfoError(null);
 
     // Separate query: column may not exist until the enterprise billing migration runs.

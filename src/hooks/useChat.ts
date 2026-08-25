@@ -286,7 +286,7 @@ export function useChatMessages(conversationId: string | null) {
     const poll = setInterval(() => {
       if (document.visibilityState === 'hidden') return;
       void fetchMessages({ silent: true });
-    }, 4000);
+    }, 15000);
 
     return () => {
       clearInterval(poll);

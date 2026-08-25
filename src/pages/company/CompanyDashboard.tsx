@@ -21,6 +21,7 @@ import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
 import { useTranslation } from '@/lib/i18n';
 import { useDismissibleDashboardItemIds } from '@/hooks/useDismissibleDashboardItemIds';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
+import { fetchOrganizationRow } from '@/lib/orgLookup';
 import { authHeaders } from '@/lib/apiHelpers';
 import { deriveAttendance, isAttendanceFlagged } from '@/lib/attendance';
 import { buildNoShowSessionPatch, defaultNoShowWhenForNow } from '@/lib/noShowWhen';
@@ -157,7 +158,7 @@ export default function CompanyDashboard() {
 
       const { data: adminRow } = await supabase
         .from('organization_admins')
-        .select('organization_id, organizations(name, tutor_license_count, features)')
+        .select('organization_id')
         .eq('user_id', user.id)
         .maybeSingle();
 
@@ -165,8 +166,11 @@ export default function CompanyDashboard() {
         setLoading(false);
         return;
       }
-      const orgRaw = adminRow.organizations as any;
-      const org = Array.isArray(orgRaw) ? orgRaw[0] : orgRaw;
+      const org = await fetchOrganizationRow<{
+        name?: string;
+        tutor_license_count?: number;
+        features?: Record<string, unknown>;
+      }>(supabase as any, adminRow.organization_id, 'name, tutor_license_count, features');
       const organizationId = adminRow.organization_id;
       const orgFeatures = org?.features && typeof org.features === 'object' && !Array.isArray(org.features)
         ? (org.features as Record<string, unknown>)
@@ -260,10 +264,12 @@ export default function CompanyDashboard() {
       setUpcomingSessions(upcoming.length);
       setEarningsThisMonth(completed.reduce((sum, s) => sum + billablePrice(s), 0));
 
+      const twoYearsAgo = subDays(now, 730).toISOString();
       const { data: allSessions } = await supabase
       .from('sessions')
       .select('price, status, payment_status, is_complimentary')
       .in('tutor_id', tutorIds)
+      .gte('start_time', twoYearsAgo)
       .neq('status', 'cancelled')
       .limit(5000);
       const totalPaid = (allSessions || []).filter(

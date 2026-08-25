@@ -441,6 +441,8 @@ export interface PollAndAdvanceOptions {
   /** Browser return pages retry briefly; server reconciliation needs one cheap check per scheduled run. */
   attempts?: number;
   delayMs?: number;
+  /** SOAP timeout for SigningResult. Cron must stay well below Vercel maxDuration. */
+  timeoutMs?: number;
 }
 
 /**
@@ -520,6 +522,7 @@ export async function pollAndAdvance(
     result = await pollSigningResult(row.gosign_transaction_id, {
       attempts: options.attempts ?? 6,
       delayMs: options.delayMs ?? 1500,
+      timeoutMs: options.timeoutMs,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

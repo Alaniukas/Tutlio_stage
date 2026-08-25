@@ -2420,6 +2420,7 @@ export const lt: Record<string, string> = {
   'email': 'Komentaras išsaugotas. Mokiniui nesiųsta – mokinys neturi el. pašto.',
   'features': 'Funkcijos',
   'files.downloadFailed': 'Nepavyko atsisiųsti failo',
+  'files.tooLarge': 'Failas per didelis (maks. 10 MB).',
   'files.noFiles': 'Failų nėra.',
   'files.noFilesTutor': 'Korepetitorius dar neįkėlė failų.',
   'finance.afterLesson': 'Po pamokos',

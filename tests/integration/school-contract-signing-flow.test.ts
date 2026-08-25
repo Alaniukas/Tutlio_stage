@@ -161,8 +161,8 @@ describe('school contract signing lifecycle', () => {
     const payment = emailCalls.find((call) => call.type === 'school_installment_request');
     expect(payment.to).toEqual(['parent@example.com']);
     expect(payment.data).toMatchObject({ installmentId: 'installment-1', amount: '325.00' });
-    expect(pollMock).toHaveBeenCalledWith('txn-school', { attempts: 1, delayMs: 0 });
-    expect(pollMock).toHaveBeenCalledWith('txn-parent', { attempts: 1, delayMs: 0 });
+    expect(pollMock).toHaveBeenCalledWith('txn-school', { attempts: 1, delayMs: 0, timeoutMs: 8000 });
+    expect(pollMock).toHaveBeenCalledWith('txn-parent', { attempts: 1, delayMs: 0, timeoutMs: 8000 });
   });
 
   it('does not send payment email when all installments are already paid', async () => {
@@ -282,6 +282,43 @@ describe('school contract signing lifecycle', () => {
     expect(result).toMatchObject({ scanned: 1, signed: 0, failed: 1 });
     expect(advance).toHaveBeenCalledTimes(1);
     expect(fake.db.school_contract_signatures[0].status).toBe('in_progress');
+  });
+
+  it('stops after the time budget so a hung GoSign poll cannot occupy the cron for 60s', async () => {
+    const fake = new FakeSupabase();
+    fake.db.school_contract_signatures = [
+      {
+        id: 'sig-a',
+        token: 'token-a',
+        role: 'school',
+        status: 'in_progress',
+        gosign_transaction_id: 'txn-a',
+        updated_at: '2026-07-10T10:00:00.000Z',
+      },
+      {
+        id: 'sig-b',
+        token: 'token-b',
+        role: 'parent_primary',
+        status: 'in_progress',
+        gosign_transaction_id: 'txn-b',
+        updated_at: '2026-07-10T10:01:00.000Z',
+      },
+    ];
+    const advance = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return { status: 'in_progress' as const };
+    });
+
+    const result = await reconcileInProgressContractSignatures(fake as any, 'https://www.tutlio.lt', {
+      advance,
+      concurrency: 1,
+      budgetMs: 10,
+    });
+
+    expect(result.scanned).toBe(2);
+    expect(result.skipped).toBe(1);
+    expect(result.inProgress).toBe(1);
+    expect(advance).toHaveBeenCalledTimes(1);
   });
 
   it('runs the protected server reconciliation every minute', () => {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { supabase } from '@/lib/supabase';
+import { loadPublicLandingLessonCount } from '@/lib/landingStats';
 import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
 import { marketingAudienceFromLanding } from '@/lib/marketingAudience';
 import type { LandingAudience } from './audience';
@@ -51,12 +51,13 @@ export default function HeroSection({
   const [lessonCount, setLessonCount] = useState<number | null>(null);
   useEffect(() => {
     let cancelled = false;
-    supabase.rpc('get_public_landing_stats').then(({ data }) => {
-      if (cancelled || !data) return;
-      const d = data as { completed_lessons: number; upcoming_lessons: number };
-      setLessonCount(d.completed_lessons + d.upcoming_lessons);
+    const stop = loadPublicLandingLessonCount((n) => {
+      if (!cancelled) setLessonCount(n);
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      stop();
+    };
   }, []);
 
   const ctaHref = `${buildLocalizedPath('/pricing', locale)}?audience=${marketingAudienceFromLanding(audience)}`;

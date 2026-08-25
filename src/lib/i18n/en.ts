@@ -2422,6 +2422,7 @@ export const en: Record<string, string> = {
   'email': 'Comment saved. Email not sent — student has no email address.',
   'features': 'Features',
   'files.downloadFailed': 'Failed to download file',
+  'files.tooLarge': 'File is too large (max 10 MB).',
   'files.noFiles': 'No files.',
   'files.noFilesTutor': 'Tutor hasn\'t uploaded any files yet.',
   'finance.afterLesson': 'After the lesson',

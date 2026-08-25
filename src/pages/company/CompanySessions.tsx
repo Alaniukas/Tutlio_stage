@@ -180,8 +180,9 @@ export default function CompanySessions() {
 
   const loadData = async () => {
     if (!getCached('company_sessions')) setLoading(true);
+    try {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setLoading(false); return; }
+    if (!user) return;
 
     const { data: adminRow } = await supabase
       .from('organization_admins')
@@ -213,7 +214,7 @@ export default function CompanySessions() {
     setStudents(studentsResult.data || []);
     setSubjects(subjectsResult.data || []);
 
-    if (tutorList.length === 0) { setLoading(false); return; }
+    if (tutorList.length === 0) return;
 
     const tutorIds = tutorList.map(t => t.id);
 
@@ -232,7 +233,9 @@ export default function CompanySessions() {
 
     setSessions(enriched);
     setCache('company_sessions', { sessions: enriched, tutors: tutorList, students: studentsResult.data || [] });
-    setLoading(false);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleMarkStudentNoShow = async () => {
