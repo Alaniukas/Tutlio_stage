@@ -2230,6 +2230,58 @@ function schoolContract(d: any, locale: Locale) {
   };
 }
 
+function schoolContractExtraOffer(d: any, locale: Locale) {
+  const acceptUrl = String(d.acceptUrl || '').trim();
+  return {
+    subject: `Papildomų pamokų sutartis${d.contractNumber ? ` Nr. ${d.contractNumber}` : ''} — ${d.studentName || 'Mokinys'}`,
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#059669', '#047857')}">
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Papildomų pamokų sutartis</h1>
+        <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'Mokykla')}</p>
+      </div>
+      <div class="body">
+        <p class="greeting">Sveiki, ${esc(d.parentName || d.studentName || '')},</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          Peržiūrėkite nuotolinių papildomų pamokų sutartį mokiniui <strong>${esc(d.studentName)}</strong> ir pateikite užsakymą su prievole sumokėti.
+        </p>
+        <div class="info-card">
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            ${td('Sutarties Nr.', esc(d.contractNumber || '—'))}
+            ${td('Paslauga', esc(d.serviceName || '—'))}
+            ${td('Grafikas', esc(d.schedule || '—'))}
+            ${td('Pamokos kaina', d.unitPrice ? `${esc(d.unitPrice)} €` : '—')}
+            ${td('Orientacinė mėnesio kaina', d.monthlyPrice ? `${esc(d.monthlyPrice)} €` : '—')}
+          </table>
+        </div>
+        ${acceptUrl ? `<div style="margin:16px 0 10px;">${outlookEmailButton(acceptUrl, 'Peržiūrėti sutartį ir užsakyti', '#059669', { fontWeight: '600', fontSize: '14px', padding: '12px 24px' })}</div>` : ''}
+      </div>${footerFor(locale)}`, locale),
+  };
+}
+
+function schoolContractExtraAccepted(d: any, locale: Locale) {
+  return {
+    subject: `Sutartis sudaryta${d.contractNumber ? ` Nr. ${d.contractNumber}` : ''} — ${d.studentName || 'Mokinys'}`,
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#059669', '#047857')}">
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Sutartis sudaryta</h1>
+        <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'Mokykla')}</p>
+      </div>
+      <div class="body">
+        <p class="greeting">Sveiki, ${esc(d.parentName || d.studentName || '')},</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          Užregistravome jūsų užsakymą su prievole sumokėti. Žemiau — sudarymo įrašas. Išsaugota būtent ta redakcija, kurią matėte prieš pateikdami užsakymą.
+        </p>
+        <div class="info-card">
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            ${td('Sutarties Nr.', esc(d.contractNumber || '—'))}
+            ${td('Sudarymo data', esc(d.acceptedAt || '—'))}
+            ${td('Dokumento SHA-256', esc(d.sha256 || '—'))}
+          </table>
+        </div>
+      </div>${footerFor(locale)}`, locale),
+  };
+}
+
 function schoolContractFeeDue(d: any, locale: Locale) {
   const appUrl = getAppUrl();
   const amountEur = Number(d.amount || 50);
@@ -2723,6 +2775,7 @@ const USER_TRIGGERABLE_EMAIL_TYPES = new Set([
   'school_installment_request',
   'school_contract_sign_request',
   'school_contract_fully_signed',
+  'school_contract_extra_offer',
 ]);
 
 async function getAuthenticatedUserId(req: VercelRequest): Promise<string | null> {
@@ -3151,6 +3204,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'product_update_whiteboard_parent': emailContent = productUpdateWhiteboardParent(data, locale); break;
       case 'custom_html_announcement': emailContent = customHtmlAnnouncement(data, locale); break;
       case 'school_contract': emailContent = schoolContract(data, locale); break;
+      case 'school_contract_extra_offer': emailContent = schoolContractExtraOffer(data, locale); break;
+      case 'school_contract_extra_accepted': emailContent = schoolContractExtraAccepted(data, locale); break;
       case 'school_contract_fee_due': emailContent = schoolContractFeeDue(data, locale); break;
       case 'school_installment_request': emailContent = schoolInstallmentRequest(data, locale); break;
       case 'tutor_student_assigned': emailContent = tutorStudentAssigned(data, locale); break;

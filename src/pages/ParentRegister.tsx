@@ -1,11 +1,15 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { fetchParentInvitePreviewByCode, fetchParentInvitePreviewByToken } from '@/lib/parentInvitePreview';
 import { supabase } from '@/lib/supabase';
 import { useTranslation } from '@/lib/i18n';
 import { Check, Eye, EyeOff, Users } from 'lucide-react';
+import { parentLegalAcceptanceMissing, proKlaseLegalHref, usesProKlaseLegalDocs } from '@/lib/proKlaseLegal';
+import { DateInput } from '@/components/ui/date-input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { formatLocalYmd } from '@/lib/monthlyPackagePlan';
+import { normalizeStudentGrade1to12 } from '@/lib/studentGrade';
 
-/** Whole-years age from an ISO (yyyy-mm-dd) birth date, or null if unparseable. */
 function ageFromIso(iso: string): number | null {
   if (!iso) return null;
   const d = new Date(iso);
@@ -37,6 +41,11 @@ export default function ParentRegister() {
   const [fullName, setFullName] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [agreePrivacy, setAgreePrivacy] = useState(false);
+  const [agreeTerms, setAgreeTerms] = useState(false);
+  const [agreeProKlasePrivacy, setAgreeProKlasePrivacy] = useState(false);
+  const [agreeProKlaseTerms, setAgreeProKlaseTerms] = useState(false);
+  const [legalOrgId, setLegalOrgId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
 
@@ -64,6 +73,7 @@ export default function ParentRegister() {
           student_name: data.student_full_name || '',
           parent_phone: data.parent_phone ?? null,
         });
+        setLegalOrgId(data.organization_id ? String(data.organization_id) : null);
         setFullName(data.parent_name || '');
         setResolvedToken(data.token?.trim() || tokenFromUrl);
       }
@@ -98,8 +108,9 @@ export default function ParentRegister() {
         parent_email: data.parent_email,
         parent_name: data.parent_name || '',
         student_name: data.student_full_name || '',
-        parent_phone: (data as any).parent_phone ?? null,
+        parent_phone: data.parent_phone ?? null,
       });
+      setLegalOrgId(data.organization_id ? String(data.organization_id) : null);
       setFullName(data.parent_name || '');
       setResolvedToken(data.token);
     } catch {
@@ -115,8 +126,26 @@ export default function ParentRegister() {
       setError(t('parent.fillAll'));
       return;
     }
+    const grade = normalizeStudentGrade1to12(childGrade);
+    if (!grade) {
+      setError(t('parent.gradeRequired'));
+      return;
+    }
+    if (!(invite?.parent_email || '').trim() && !manualEmail.trim()) {
+      setError(t('parent.fillAll'));
+      return;
+    }
     if (!resolvedToken && (!manualCode.trim() || !manualEmail.trim())) {
       setError(t('parent.invalidToken'));
+      return;
+    }
+
+    if (parentLegalAcceptanceMissing({
+      orgIdOrSlug: legalOrgId,
+      acceptedPrivacy: agreePrivacy && agreeProKlasePrivacy,
+      acceptedTerms: agreeTerms && agreeProKlaseTerms,
+    })) {
+      setError(t('parent.mustAcceptLegal'));
       return;
     }
 
@@ -135,12 +164,18 @@ export default function ParentRegister() {
         body.email = manualEmail.trim();
       }
       if (childBirthDate.trim()) body.childBirthDate = childBirthDate.trim();
-      if (childGrade.trim()) body.childGrade = childGrade.trim();
+      body.childGrade = grade;
+      const payload = {
+        ...body,
+        acceptedPrivacy: agreePrivacy && (!usesProKlaseLegalDocs(legalOrgId) || agreeProKlasePrivacy),
+        acceptedTerms: agreeTerms && (!usesProKlaseLegalDocs(legalOrgId) || agreeProKlaseTerms),
+        acceptedAt: new Date().toISOString(),
+      };
 
       const resp = await fetch('/api/register-parent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(payload),
       });
 
       if (!resp.ok) {
@@ -152,6 +187,10 @@ export default function ParentRegister() {
           setError(t('parent.tokenUsed'));
         } else if (code === 'registration_failed') {
           setError(t('parent.registerFailed'));
+        } else if (code === 'grade_required') {
+          setError(t('parent.gradeRequired'));
+        } else if (code === 'legal_required') {
+          setError(t('parent.mustAcceptLegal'));
         } else {
           setError(err.error || t('parent.registerFailed'));
         }
@@ -267,7 +306,7 @@ export default function ParentRegister() {
               {t('parent.registerFor', { student: invite.student_name })}
             </p>
             <div>
-              <label className="text-sm font-medium text-gray-700">{t('common.email')}</label>
+              <label className="text-sm font-medium text-gray-700">{t('common.email')} <span className="text-red-500">*</span></label>
               <input
                 type="email"
                 value={invite.parent_email}
@@ -287,7 +326,7 @@ export default function ParentRegister() {
               </div>
             )}
             <div>
-              <label className="text-sm font-medium text-gray-700">{t('parent.fullName')}</label>
+              <label className="text-sm font-medium text-gray-700">{t('parent.fullName')} <span className="text-red-500">*</span></label>
               <input
                 type="text"
                 value={fullName}
@@ -300,35 +339,41 @@ export default function ParentRegister() {
               <p className="text-xs font-semibold text-violet-700">
                 {t('parent.childInfoTitle', { student: invite.student_name })}
               </p>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-gray-600">{t('parent.childBirthDate')}</label>
-                  <input
-                    type="date"
-                    value={childBirthDate}
-                    onChange={(e) => setChildBirthDate(e.target.value)}
-                    className="w-full mt-1 rounded-xl border border-gray-200 px-3 py-2.5 text-sm"
-                  />
-                  {childBirthDate && (
-                    <p className="text-[11px] text-gray-500 mt-1">
-                      {t('parent.childAge', { age: String(ageFromIso(childBirthDate) ?? '—') })}
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-gray-600">{t('parent.childGrade')}</label>
-                  <input
-                    type="text"
-                    value={childGrade}
-                    onChange={(e) => setChildGrade(e.target.value)}
-                    className="w-full mt-1 rounded-xl border border-gray-200 px-3 py-2.5 text-sm"
-                    placeholder={t('parent.childGradePlaceholder')}
-                  />
-                </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-gray-600">{t('parent.childGrade')} <span className="text-red-500">*</span></label>
+                <Select value={childGrade || undefined} onValueChange={setChildGrade}>
+                  <SelectTrigger className="h-10 mt-1 rounded-xl bg-white">
+                    <SelectValue placeholder={t('parent.childGradePlaceholder')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 12 }, (_, index) => (
+                      <SelectItem key={index + 1} value={String(index + 1)}>
+                        {t('onboard.gradeN', { n: index + 1 })}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-gray-600">
+                  {t('parent.childBirthDate')} ({t('common.optional')})
+                </label>
+                <DateInput
+                  value={childBirthDate}
+                  max={formatLocalYmd(new Date())}
+                  defaultMonth={new Date(new Date().getFullYear() - 10, 0, 1)}
+                  onChange={(e) => setChildBirthDate(e.target.value)}
+                  className="mt-1 rounded-xl bg-white"
+                />
+                {childBirthDate && (
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    {t('parent.childAge', { age: String(ageFromIso(childBirthDate) ?? '—') })}
+                  </p>
+                )}
               </div>
             </div>
             <div>
-              <label className="text-sm font-medium text-gray-700">{t('parent.password')}</label>
+              <label className="text-sm font-medium text-gray-700">{t('parent.password')} <span className="text-red-500">*</span></label>
               <div className="relative">
                 <input
                   type={showPassword ? 'text' : 'password'}
@@ -346,8 +391,44 @@ export default function ParentRegister() {
                 </button>
               </div>
             </div>
+            {usesProKlaseLegalDocs(legalOrgId) && (
+              <div className="space-y-3 pt-1">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input type="checkbox" checked={agreePrivacy} onChange={(e) => setAgreePrivacy(e.target.checked)} className="mt-1 h-4 w-4 rounded border-gray-300 text-violet-600" />
+                  <span className="text-sm text-gray-600">
+                    {t('auth.agreeWith')}{' '}
+                    <Link to="/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-violet-600 hover:underline font-medium">{t('auth.privacyPolicy')}</Link>
+                    . <span className="text-red-500">*</span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input type="checkbox" checked={agreeTerms} onChange={(e) => setAgreeTerms(e.target.checked)} className="mt-1 h-4 w-4 rounded border-gray-300 text-violet-600" />
+                  <span className="text-sm text-gray-600">
+                    {t('auth.agreeWith')}{' '}
+                    <Link to="/terms" target="_blank" rel="noopener noreferrer" className="text-violet-600 hover:underline font-medium">{t('auth.termsOfService')}</Link>
+                    . <span className="text-red-500">*</span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input type="checkbox" checked={agreeProKlasePrivacy} onChange={(e) => setAgreeProKlasePrivacy(e.target.checked)} className="mt-1 h-4 w-4 rounded border-gray-300 text-violet-600" />
+                  <span className="text-sm text-gray-600">
+                    {t('auth.agreeWith')}{' '}
+                    <a href={proKlaseLegalHref('privacy')} target="_blank" rel="noopener noreferrer" className="text-violet-600 hover:underline font-medium">{t('auth.proklasePrivacyPolicy')}</a>
+                    . <span className="text-red-500">*</span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input type="checkbox" checked={agreeProKlaseTerms} onChange={(e) => setAgreeProKlaseTerms(e.target.checked)} className="mt-1 h-4 w-4 rounded border-gray-300 text-violet-600" />
+                  <span className="text-sm text-gray-600">
+                    {t('auth.agreeWith')}{' '}
+                    <a href={proKlaseLegalHref('terms')} target="_blank" rel="noopener noreferrer" className="text-violet-600 hover:underline font-medium">{t('auth.proklaseTermsOfService')}</a>
+                    . <span className="text-red-500">*</span>
+                  </span>
+                </label>
+              </div>
+            )}
             {error && <p className="text-red-500 text-xs">{error}</p>}
-            <button type="submit" disabled={submitting} className="w-full py-3 rounded-2xl bg-violet-600 text-white font-bold text-sm hover:bg-violet-700 disabled:opacity-50">
+            <button type="submit" disabled={submitting || !fullName.trim() || password.length < 6 || !normalizeStudentGrade1to12(childGrade) || (usesProKlaseLegalDocs(legalOrgId) && (!agreePrivacy || !agreeTerms || !agreeProKlasePrivacy || !agreeProKlaseTerms))} className="w-full py-3 rounded-2xl bg-violet-600 text-white font-bold text-sm hover:bg-violet-700 disabled:opacity-50">
               {submitting ? t('common.loading') : t('parent.registerBtn')}
             </button>
           </form>

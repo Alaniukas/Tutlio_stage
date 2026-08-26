@@ -455,6 +455,72 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     pricingTier: 'premium',
   },
 
+  school_extra_lessons_contract: {
+    id: 'school_extra_lessons_contract',
+    name: 'Papildomų pamokų sutartys (klik-akceptas)',
+    nameEn: 'Extra-lessons contracts (click-wrap)',
+    description:
+      'Mokykla pildo užsakymo formą (grafikas, kaina, bazinis pamokų skaičius). Tėvai Tutlio paskyroje peržiūri visą tekstą ir spaudžia „Užsakymas su prievole sumokėti“. Užšaldoma parodyta redakcija (SHA-256), galima 14 d. atsisakyti. GoSign lieka neprivalomas.',
+    descriptionEn:
+      'School fills an order form (schedule, price, base lesson count). Parents review the full text in Tutlio and click “Order with obligation to pay”. The shown redaction is frozen (SHA-256); 14-day withdrawal is available. GoSign stays optional.',
+    category: 'advanced',
+    defaultValue: false,
+    pricingTier: 'enterprise',
+  },
+
+  school_class_groups: {
+    id: 'school_class_groups',
+    name: 'Klasės grupės visiems mokslo metams',
+    nameEn: 'Year-long class groups',
+    description:
+      'Mokytojas ar administracija sukuria pastovią grupę (pvz. LT 2kl) su savaitės tvarkaraščiu ir mokinių sąrašu visiems mokslo metams. Pamokos materializuojamos iš grupės slotų.',
+    descriptionEn:
+      'A teacher or admin creates a stable group (e.g. LT grade 2) with a weekly timetable and roster for the school year. Lessons are materialized from group slots.',
+    category: 'advanced',
+    defaultValue: false,
+    pricingTier: 'enterprise',
+  },
+
+  school_join_no_show: {
+    id: 'school_join_no_show',
+    name: 'Neprisijungęs mokinys = neatvykęs',
+    nameEn: 'Missed join click = student no-show',
+    description:
+      'Jei mokinys per 10 min. nuo pamokos pradžios Tutlio platformoje nepaspaudė „Prisijungti“, pamoka pažymima kaip neatvykimas ir patenka į statistiką. Mokytojo neprisijungimas mokinio neatvykimu nelaikomas.',
+    descriptionEn:
+      'If the student does not click Join in Tutlio within 10 minutes of the start, the lesson is marked no-show and counted in statistics. A teacher who never joined is not treated as a student no-show.',
+    category: 'automation',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
+
+  school_teacher_labels: {
+    id: 'school_teacher_labels',
+    name: 'Terminologija „mokytojas“ / „mokinys“',
+    nameEn: 'Teacher / student wording',
+    description:
+      'Mokyklos portale vietoj „korepetitorius“ rodoma „mokytojas“. Solo ir company org tekstai lieka kaip buvo.',
+    descriptionEn:
+      'School portal uses “teacher” instead of “tutor”. Solo and company wording is unchanged.',
+    category: 'appearance',
+    defaultValue: false,
+    pricingTier: 'basic',
+  },
+
+  school_lesson_recordings: {
+    id: 'school_lesson_recordings',
+    name: 'Pamokų įrašai (Drive) ir grupių prieiga',
+    nameEn: 'Lesson recordings (Drive) and group access',
+    description:
+      'Google Meet įrašai iš Drive gali būti priskirti pamokai. Mokytojas ar administratorius parenka, kurios klasės grupės mato įrašą. Reikia Google Workspace ir Drive API raktų.',
+    descriptionEn:
+      'Google Meet recordings from Drive can be attached to a lesson. The teacher or admin chooses which class groups may view it. Requires Google Workspace and Drive API credentials.',
+    category: 'integrations',
+    defaultValue: false,
+    requiresSetup: true,
+    pricingTier: 'enterprise',
+  },
+
   pvm_education_invoice: {
     id: 'pvm_education_invoice',
     name: 'PVM sąskaita faktūra (ugdymo paslaugos)',

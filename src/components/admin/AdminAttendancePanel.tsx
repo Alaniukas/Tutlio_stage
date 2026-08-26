@@ -133,7 +133,7 @@ export default function AdminAttendancePanel({ adminSecret }: Props) {
           <div>
             <h3 className="text-white font-semibold">Pamokų lankomumas</h3>
             <p className="text-sm text-slate-400 mt-1">
-              Nuotolinės pamokos, kuriose korepetitorius ar mokinys nepaspaudė „prisijungti" per 10 min. nuo pamokos pradžios.
+              Nuotolinės pamokos, kuriose korepetitorius / mokytojas ar mokinys nepaspaudė „prisijungti" per 10 min. nuo pamokos pradžios.
               Fiksuojami paspaudimai programėlėje, laiškuose ir kalendoriuje.
             </p>
           </div>

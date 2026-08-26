@@ -51,6 +51,7 @@ import {
 import { buildSchoolContractExportRows, schoolContractsExportFilename } from '@/lib/schoolContractsExport';
 import { downloadSchoolContractsXlsx } from '@/lib/schoolContractsXlsxExport';
 import { fetchOrganizationRow } from '@/lib/orgLookup';
+import ExtraLessonsOfferDialog from '@/components/company/ExtraLessonsOfferDialog';
 
 interface Student {
   id: string;
@@ -99,6 +100,8 @@ interface Contract {
   media_publicity_consent?: string | null;
   additional_fee_amount?: number | null;
   additional_fee_purpose?: string | null;
+  kind?: 'annual' | 'extra_lessons' | null;
+  accepted_at?: string | null;
   signatures?: { role: string; status: string; signed_at?: string | null; gosign_transaction_id?: string | null; manually_marked_at?: string | null; signed_pdf_path?: string | null }[];
   installments?: { installment_number: number; amount: number; due_date: string | null; payment_status: string | null }[];
   student?: { full_name: string; email: string; phone?: string | null; payer_name: string | null; payer_email: string | null; payer_phone?: string | null; payer_personal_code?: string | null; parent_secondary_name?: string | null; parent_secondary_email?: string | null; parent_secondary_phone?: string | null; parent_secondary_personal_code?: string | null; parent_secondary_address?: string | null; student_address?: string | null; student_city?: string | null; child_birth_date?: string | null; media_publicity_consent?: string | null };
@@ -233,6 +236,8 @@ export default function CompanyContracts() {
   const [editTemplate, setEditTemplate] = useState<Template | null>(null);
   const [tForm, setTForm] = useState({ name: '', body: '', annual_fee_default: '', pdf_url: '' });
   const [templatePdfFile, setTemplatePdfFile] = useState<File | null>(null);
+  const [extraOfferOpen, setExtraOfferOpen] = useState(false);
+  const [classGroups, setClassGroups] = useState<Array<{ id: string; name: string }>>([]);
   const [isTemplateDragActive, setIsTemplateDragActive] = useState(false);
   const templateFileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -1877,9 +1882,27 @@ export default function CompanyContracts() {
               </button>
             </div>
             {tab === 'contracts' ? (
-              <Button onClick={openCreateContract} className="bg-emerald-600 hover:bg-emerald-700">
-                <Plus className="w-4 h-4 mr-2" /> {tr('school.newContract')}
-              </Button>
+              <div className="flex gap-2">
+                {Boolean(orgFeatures.school_extra_lessons_contract) && (
+                  <Button
+                    variant="outline"
+                    onClick={async () => {
+                      try {
+                        const headers = await authHeaders();
+                        const res = await fetch('/api/school-class-groups', { headers });
+                        const data = await res.json();
+                        if (res.ok) setClassGroups((data.groups || []).map((g: { id: string; name: string }) => ({ id: g.id, name: g.name })));
+                      } catch { /* ignore */ }
+                      setExtraOfferOpen(true);
+                    }}
+                  >
+                    <Plus className="w-4 h-4 mr-2" /> {tr('school.extra.newOffer')}
+                  </Button>
+                )}
+                <Button onClick={openCreateContract} className="bg-emerald-600 hover:bg-emerald-700">
+                  <Plus className="w-4 h-4 mr-2" /> {tr('school.newContract')}
+                </Button>
+              </div>
             ) : (
               <Button onClick={() => { setEditTemplate(null); setTemplatePdfFile(null); setTForm({ name: '', body: tr('school.contract.defaultBody'), annual_fee_default: '', pdf_url: '' }); setTemplateOpen(true); }} className="bg-emerald-600 hover:bg-emerald-700">
                 <Plus className="w-4 h-4 mr-2" /> {tr('school.newTemplate')}
@@ -2038,6 +2061,11 @@ export default function CompanyContracts() {
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-xs text-gray-400 tabular-nums">{contractIdx + 1}.</span>
                         <p className="font-semibold text-gray-900">{c.student?.full_name || '—'}</p>
+                        {c.kind === 'extra_lessons' && (
+                          <span className="inline-flex items-center text-xs px-2 py-0.5 rounded-full font-medium bg-teal-50 text-teal-800">
+                            {tr('school.extra.kindBadge')}
+                          </span>
+                        )}
                         {statusBadge(c.signing_status)}
                       </div>
                       <p className="text-sm text-gray-500 mt-1">
@@ -2917,6 +2945,17 @@ export default function CompanyContracts() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ExtraLessonsOfferDialog
+        open={extraOfferOpen}
+        onOpenChange={setExtraOfferOpen}
+        students={students}
+        groups={classGroups}
+        onCreated={(info) => {
+          setToast({ message: `${tr('school.extra.sent')} ${info.contractNumber}`, type: 'success' });
+          invalidateCache(CONTRACTS_CACHE_KEY);
+        }}
+      />
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </>

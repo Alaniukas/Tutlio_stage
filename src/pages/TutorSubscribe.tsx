@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/PasswordInput';
 import { Label } from '@/components/ui/label';
 import { supabase } from '@/lib/supabase';
 import { hasActiveSubscription, tutorHasPlatformSubscriptionAccess } from '@/lib/subscription';
@@ -266,8 +267,7 @@ export default function TutorSubscribe() {
             <DialogDescription>{t('subscribe.manualAccessDesc')}</DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-1">
-            <Input
-              type="password"
+            <PasswordInput
               autoComplete="off"
               value={manualSecret}
               onChange={(e) => setManualSecret(e.target.value)}

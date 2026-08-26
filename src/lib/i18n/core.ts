@@ -75,6 +75,30 @@ const DICT_LOADERS: Record<Locale, () => Promise<Dict>> = {
 };
 
 const pendingLoads = new Map<Locale, Promise<void>>();
+const cacheListeners = new Set<() => void>();
+
+function notifyLocaleCacheListeners(): void {
+  for (const listener of cacheListeners) listener();
+}
+
+/** Dev/HMR: drop cached dictionaries so the next load fetches fresh modules. */
+export function invalidateLocaleCache(locale?: Locale): void {
+  if (locale) {
+    delete translations[locale];
+    pendingLoads.delete(locale);
+  } else {
+    for (const key of Object.keys(translations)) {
+      delete translations[key as Locale];
+    }
+    pendingLoads.clear();
+  }
+  notifyLocaleCacheListeners();
+}
+
+export function subscribeLocaleCache(listener: () => void): () => void {
+  cacheListeners.add(listener);
+  return () => cacheListeners.delete(listener);
+}
 
 export function isLocaleLoaded(locale: Locale): boolean {
   return !!translations[locale];
@@ -87,7 +111,11 @@ export function loadLocaleDict(locale: Locale): Promise<void> {
   if (!load) {
     load = DICT_LOADERS[locale]()
       .then((dict) => {
+        if (!dict || typeof dict !== 'object') {
+          throw new Error(`Locale dictionary "${locale}" did not export a map`);
+        }
         translations[locale] = dict;
+        notifyLocaleCacheListeners();
       })
       .finally(() => pendingLoads.delete(locale));
     pendingLoads.set(locale, load);
@@ -164,4 +192,21 @@ export function detectLocaleFromHost(host: string): Locale {
 
 export function isValidLocale(value: string): value is Locale {
   return SUPPORTED_LOCALES.includes(value as Locale);
+}
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    invalidateLocaleCache();
+    window.dispatchEvent(new Event('tutlio:locale-cache-invalidate'));
+  });
+  import.meta.hot.accept(
+    [
+      './lt.ts', './en.ts', './pl.ts', './lv.ts', './ee.ts', './fr.ts', './es.ts',
+      './de.ts', './se.ts', './dk.ts', './fi.ts', './no.ts', './nl.ts',
+    ],
+    () => {
+      invalidateLocaleCache();
+      window.dispatchEvent(new Event('tutlio:locale-cache-invalidate'));
+    },
+  );
 }

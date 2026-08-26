@@ -97,6 +97,8 @@ function bootApp() {
   if (isLocaleLoaded(initialLocale)) {
     renderApp();
   } else {
-    loadLocaleDict(initialLocale).catch(() => {}).finally(renderApp);
+    loadLocaleDict(initialLocale).catch((err) => {
+      console.error('[i18n] initial locale load failed', initialLocale, err);
+    }).finally(renderApp);
   }
 }

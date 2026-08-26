@@ -134,8 +134,8 @@ interface I18nContextValue {
 export const I18nContext = createContext<I18nContextValue>({
   locale: 'lt',
   setLocale: () => {},
-  t: (key) => key,
-  tHtml: (key) => key,
+  t: (key, params) => coreTranslate('lt', key, params),
+  tHtml: (key, params) => coreTranslateHtml('lt', key, params),
   dateFnsLocale: dateFnsLt,
 });
 

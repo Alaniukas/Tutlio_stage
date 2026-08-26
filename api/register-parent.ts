@@ -1,5 +1,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
+import { parentLegalAcceptanceMissing, usesProKlaseLegalDocs } from '../src/lib/proKlaseLegal.js';
+import { normalizeStudentGrade1to12 } from '../src/lib/studentGrade.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -21,6 +23,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       password: string;
       childBirthDate?: string;
       childGrade?: string;
+      acceptedPrivacy?: boolean;
+      acceptedTerms?: boolean;
+      acceptedAt?: string;
     };
 
     const { token, code, email, fullName, password, childBirthDate, childGrade } = body;
@@ -29,15 +34,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Missing or invalid fields', code: 'invalid_fields' });
     }
 
-    // Parent-oriented registration (req 7): optional child details the parent
-    // confirms during sign-up; written to the linked student row.
+    // Child grade is required (1–12). Birth date is optional.
     const childInfo: { child_birth_date?: string; grade?: string } = {};
     if (typeof childBirthDate === 'string' && childBirthDate.trim()) {
       childInfo.child_birth_date = childBirthDate.trim();
     }
-    if (typeof childGrade === 'string' && childGrade.trim()) {
-      childInfo.grade = childGrade.trim();
+    const normalizedGrade = normalizeStudentGrade1to12(childGrade);
+    if (!normalizedGrade) {
+      return res.status(400).json({ error: 'Pasirinkite klasę (1–12)', code: 'grade_required' });
     }
+    childInfo.grade = normalizedGrade;
 
     let invite:
       | { id: string; parent_email: string; student_id: string; used: boolean }
@@ -86,6 +92,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Invite already used', code: 'invite_used' });
     }
 
+    const { data: studentRow } = await supabase
+      .from('students')
+      .select('organization_id, tutor_id')
+      .eq('id', invite.student_id)
+      .maybeSingle();
+    let orgId: string | null = studentRow?.organization_id || null;
+    if (!orgId && studentRow?.tutor_id) {
+      const { data: tutorRow } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', studentRow.tutor_id)
+        .maybeSingle();
+      orgId = tutorRow?.organization_id || null;
+    }
+    if (parentLegalAcceptanceMissing({
+      orgIdOrSlug: orgId,
+      acceptedPrivacy: body.acceptedPrivacy === true,
+      acceptedTerms: body.acceptedTerms === true,
+    })) {
+      return res.status(400).json({ error: 'Legal acceptance required', code: 'legal_required' });
+    }
+    const acceptedAt = typeof body.acceptedAt === 'string' && body.acceptedAt.trim()
+      ? body.acceptedAt.trim()
+      : new Date().toISOString();
+
     const normalizedEmail = invite.parent_email.trim().toLowerCase();
 
     const { data: authData, error: authErr } = await supabase.auth.admin.createUser({
@@ -109,7 +140,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (pwErr) {
             console.warn('[register-parent] could not update password for existing user:', pwErr.message);
           }
-          await linkParent(supabase, existing.id, fullName.trim(), invite.student_id, invite.id, normalizedEmail, childInfo);
+          await linkParent(supabase, existing.id, fullName.trim(), invite.student_id, invite.id, normalizedEmail, childInfo, {
+            acceptedAt: usesProKlaseLegalDocs(orgId) ? acceptedAt : null,
+          });
           return res.status(200).json({ success: true });
         }
       }
@@ -118,7 +151,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!authData.user) return res.status(500).json({ error: 'User creation failed' });
 
-    await linkParent(supabase, authData.user.id, fullName.trim(), invite.student_id, invite.id, normalizedEmail, childInfo);
+    await linkParent(supabase, authData.user.id, fullName.trim(), invite.student_id, invite.id, normalizedEmail, childInfo, {
+      acceptedAt: usesProKlaseLegalDocs(orgId) ? acceptedAt : null,
+    });
 
     return res.status(200).json({ success: true });
   } catch (err: any) {
@@ -134,7 +169,8 @@ async function linkParent(
   studentId: string,
   inviteId: string,
   parentEmail: string,
-  childInfo?: { child_birth_date?: string; grade?: string }
+  childInfo?: { child_birth_date?: string; grade?: string },
+  legal?: { acceptedAt?: string | null },
 ) {
   const { data: profileRow, error: profErr } = await supabase
     .from('parent_profiles')
@@ -143,6 +179,12 @@ async function linkParent(
         user_id: userId,
         full_name: fullName,
         email: parentEmail,
+        ...(legal?.acceptedAt
+          ? {
+              accepted_privacy_policy_at: legal.acceptedAt,
+              accepted_terms_at: legal.acceptedAt,
+            }
+          : {}),
       },
       { onConflict: 'user_id' }
     )

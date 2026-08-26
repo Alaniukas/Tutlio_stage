@@ -4,6 +4,7 @@ import { supabase, setRememberMe } from '@/lib/supabase';
 import { getPasswordResetRedirectTo } from '@/lib/auth-redirects';
 import { detectAuthLocaleFromHost } from '@/lib/auth-locale';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/PasswordInput';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { AlertCircle, ArrowLeft, Building2 } from 'lucide-react';
@@ -245,7 +246,7 @@ export default function CompanyLogin() {
                         {t('login.forgotPassword')}
                       </button>
                     </div>
-                    <Input id="password" type="password" autoComplete="current-password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required className="rounded-xl border-gray-200" />
+                    <PasswordInput id="password" autoComplete="current-password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required className="rounded-xl border-gray-200" />
                   </div>
 
                   <label className="flex items-center gap-2 cursor-pointer">

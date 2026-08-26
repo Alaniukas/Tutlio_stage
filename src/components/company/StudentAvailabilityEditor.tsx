@@ -61,7 +61,7 @@ export default function StudentAvailabilityEditor({ value, saving, onSave }: Stu
   const invalid = windows.some((window) => window.start_time >= window.end_time);
 
   return (
-    <div className="mt-4 pt-4 border-t border-gray-100">
+    <div>
       <div className="flex items-center justify-between mb-2">
         <h4 className="font-semibold text-gray-900 flex items-center gap-2">
           <CalendarClock className="w-4 h-4 text-indigo-500" />
@@ -98,7 +98,7 @@ export default function StudentAvailabilityEditor({ value, saving, onSave }: Stu
               return (
                 <div
                   key={weekday.dayOfWeek}
-                  className="grid grid-cols-[3.5rem_1fr_auto_1fr] items-center gap-2 rounded-xl border border-gray-100 bg-gray-50 px-3 py-2"
+                  className="grid grid-cols-[3.5rem_1fr_auto_1fr] items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2"
                   onWheel={(e) => e.stopPropagation()}
                 >
                   <p className="text-xs font-semibold text-gray-700">{weekday.label}</p>

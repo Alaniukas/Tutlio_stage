@@ -24,6 +24,8 @@ import {
   BadgeEuro,
   Globe,
   ShieldCheck,
+  Video,
+  UsersRound,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import OrgSuspendedBanner from '@/components/OrgSuspendedBanner';
@@ -61,6 +63,8 @@ export function buildCompanyNavItems(
   showPublicPage = false,
   showInstructions = true,
   showTeam = false,
+  showGroups = false,
+  showRecordings = false,
 ): CompanyNavItem[] {
   const base: CompanyNavItem[] = [
     { href: `${orgBasePath}`, label: t('companyNav.overview'), icon: LayoutDashboard, exact: true, permission: 'dashboard.view', section: 'work' },
@@ -72,6 +76,12 @@ export function buildCompanyNavItems(
     { href: `${orgBasePath}/stats`, label: t('companyNav.stats'), icon: BarChart3, permission: 'stats.view', section: 'manage' },
     { href: `${orgBasePath}/settings`, label: t('companyNav.lessonSettings'), icon: Settings, permission: 'settings.view', section: 'manage' },
   ];
+  if (isSchool && showGroups) {
+    base.push({ href: `${orgBasePath}/groups`, label: t('companyNav.groups'), icon: UsersRound, permission: 'sessions.view', section: 'work' });
+  }
+  if (isSchool && showRecordings) {
+    base.push({ href: `${orgBasePath}/recordings`, label: t('companyNav.recordings'), icon: Video, permission: 'sessions.view', section: 'work' });
+  }
   if (showPublicPage) {
     base.push({ href: `${orgBasePath}/public-page`, label: t('companyNav.publicPage'), icon: Globe, permission: 'settings.view', section: 'manage' });
   }
@@ -139,9 +149,11 @@ export default function CompanyLayout() {
         showPublicPage,
         showInstructions,
         isOwner,
+        isSchool && hasFeature('school_class_groups'),
+        isSchool && hasFeature('school_lesson_recordings'),
       )
       .filter((item) => item.permission === null || can(item.permission)),
-    [t, isSchool, orgBasePath, showDynamicPricing, showPublicPage, showInstructions, isOwner, can],
+    [t, isSchool, orgBasePath, showDynamicPricing, showPublicPage, showInstructions, isOwner, can, hasFeature],
   );
 
   useEffect(() => {

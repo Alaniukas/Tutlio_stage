@@ -79,6 +79,8 @@ const CompanyInstructions = lazy(() => import('@/pages/company/CompanyInstructio
 const CompanyDynamicPricing = lazy(() => import('@/pages/company/CompanyDynamicPricing'));
 const CompanyMessages = lazy(() => import('@/pages/company/CompanyMessages'));
 const CompanyTeam = lazy(() => import('@/pages/company/CompanyTeam'));
+const CompanyClassGroups = lazy(() => import('@/pages/company/CompanyClassGroups'));
+const CompanyLessonRecordings = lazy(() => import('@/pages/company/CompanyLessonRecordings'));
 const PreviewAssignStudentModal = import.meta.env.DEV
   ? lazy(() => import('@/pages/dev/PreviewAssignStudentModal'))
   : null;
@@ -93,6 +95,7 @@ const ParentInstructions = lazy(() => import('@/pages/ParentInstructions'));
 const ParentSettings = lazy(() => import('@/pages/ParentSettings'));
 const ParentRegister = lazy(() => import('@/pages/ParentRegister'));
 const SchoolContractComplete = lazy(() => import('@/pages/SchoolContractComplete'));
+const SchoolExtraLessonsAccept = lazy(() => import('@/pages/SchoolExtraLessonsAccept'));
 const StripeSuccess = lazy(() => import('@/pages/StripeSuccess'));
 const EnterpriseSuccess = lazy(() => import('@/pages/EnterpriseSuccess'));
 const PerlasSuccess = lazy(() => import('@/pages/PerlasSuccess'));
@@ -327,6 +330,7 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/parent-register" element={<ParentRegister />} />
         <Route path="/:locale/parent-register" element={<ParentRegister />} />
         <Route path="/school-contract-complete" element={<SchoolContractComplete />} />
+        <Route path="/school-extra-lessons-accept" element={<SchoolExtraLessonsAccept />} />
         <Route path="/school-sign" element={<SchoolSign />} />
         <Route path="/school-sign/return" element={<SchoolSignReturn />} />
         <Route path="/unsubscribe" element={<UnsubscribeReminders />} />
@@ -354,6 +358,7 @@ export default function App({ basename }: { basename: string }) {
         <Route element={<ProtectedWithUser />}>
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/calendar" element={<CalendarPage />} />
+          <Route path="/groups" element={<CompanyClassGroups />} />
           <Route path="/students" element={<StudentsPage />} />
           <Route path="/waitlist" element={<WaitlistPage />} />
           <Route path="/messages" element={<Messages />} />
@@ -439,6 +444,8 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/school/waitlist" element={<OrgPermissionRoute permission="students.view" editPermission="students.edit"><CompanyWaitlist /></OrgPermissionRoute>} />
             <Route path="/school/sessions" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanySessions /></OrgPermissionRoute>} />
             <Route path="/school/schedule" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanyTvarkarastis /></OrgPermissionRoute>} />
+            <Route path="/school/groups" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanyClassGroups /></OrgPermissionRoute>} />
+            <Route path="/school/recordings" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanyLessonRecordings /></OrgPermissionRoute>} />
             <Route path="/school/messages" element={<OrgPermissionRoute permission="messages.view" editPermission="messages.edit"><CompanyMessages /></OrgPermissionRoute>} />
             <Route path="/school/stats" element={<OrgPermissionRoute permission="stats.view"><CompanyStats /></OrgPermissionRoute>} />
             <Route path="/school/instructions" element={<CompanyInstructions />} />

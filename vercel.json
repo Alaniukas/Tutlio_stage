@@ -225,6 +225,14 @@
             "schedule": "0 3 1 * *"
         },
         {
+            "path": "/api/school-join-no-show",
+            "schedule": "*/5 * * * *"
+        },
+        {
+            "path": "/api/bill-school-extra-lessons",
+            "schedule": "0 4 1 * *"
+        },
+        {
             "path": "/api/cleanup-whiteboard-data",
             "schedule": "20 * * * *"
         },

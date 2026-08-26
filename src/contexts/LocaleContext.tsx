@@ -3,20 +3,19 @@ import {
   I18nContext,
   detectLocale,
   storeLocale,
-  getStoredLocale,
-  getLocaleFromPathname,
-  t as translate,
-  tHtml as translateHtml,
   getDateFnsLocale,
-  loadLocaleDict,
-  isLocaleLoaded,
   type Locale,
 } from '@/lib/i18n';
-import { isValidLocale } from '@/lib/i18n/core';
-import { htmlLanguageCode } from '@/lib/i18n/core';
+import {
+  htmlLanguageCode,
+  t as translate,
+  tHtml as translateHtml,
+  loadLocaleDict,
+  isLocaleLoaded,
+  invalidateLocaleCache,
+} from '@/lib/i18n/core';
 import { supabase } from '@/lib/supabase';
 import { usePlatform } from '@/contexts/PlatformContext';
-import { stripPlatformPrefix } from '@/lib/platform';
 import { applyDefaultDocumentMeta } from '@/lib/documentMeta';
 import { isPlMarket } from '@/lib/market';
 
@@ -26,16 +25,31 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   // Bumped when a lazy-loaded dictionary arrives so consumers re-render
   // with the real translations instead of the en/lt fallback.
   const [dictVersion, setDictVersion] = useState(0);
+  const ready = isLocaleLoaded(locale);
 
   useEffect(() => {
-    if (isLocaleLoaded(locale)) return;
+    if (ready) return;
     let cancelled = false;
-    void loadLocaleDict(locale).then(() => {
-      if (!cancelled) setDictVersion((v) => v + 1);
-    });
+    void loadLocaleDict(locale)
+      .then(() => {
+        if (!cancelled) setDictVersion((v) => v + 1);
+      })
+      .catch((err) => {
+        console.error('[i18n] failed to load locale dictionary', locale, err);
+      });
     return () => {
       cancelled = true;
     };
+  }, [locale, ready]);
+
+  // Vite HMR clears the in-memory dictionary cache without remounting React.
+  useEffect(() => {
+    const reload = () => {
+      invalidateLocaleCache(locale);
+      void loadLocaleDict(locale).then(() => setDictVersion((v) => v + 1));
+    };
+    window.addEventListener('tutlio:locale-cache-invalidate', reload);
+    return () => window.removeEventListener('tutlio:locale-cache-invalidate', reload);
   }, [locale]);
 
   useLayoutEffect(() => {
@@ -67,6 +81,10 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- dictVersion invalidates t/tHtml closures
   }), [locale, setLocale, platform, dictVersion]);
 
+  if (!ready) {
+    return <div className="flex min-h-screen items-center justify-center" role="status" aria-label="Loading" />;
+  }
+
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
 
@@ -91,6 +109,15 @@ export function StaticLocaleProvider({ locale, children }: { locale: Locale; chi
     });
     return () => { cancelled = true; };
   }, [locale, ready]);
+
+  useEffect(() => {
+    const reload = () => {
+      invalidateLocaleCache(locale);
+      void loadLocaleDict(locale).then(() => setDictVersion((v) => v + 1));
+    };
+    window.addEventListener('tutlio:locale-cache-invalidate', reload);
+    return () => window.removeEventListener('tutlio:locale-cache-invalidate', reload);
+  }, [locale]);
 
   const value = useMemo(() => ({
     locale,

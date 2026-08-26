@@ -14,6 +14,7 @@ import {
   type LoginPortal,
 } from '@/lib/account-portal';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/PasswordInput';
 import { Label } from '@/components/ui/label';
 import { AlertCircle, ArrowLeft, ArrowRight, BookOpen, ChevronRight, Sparkles, Building2, Users } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
@@ -1009,9 +1010,8 @@ export default function Login() {
                           {t('login.forgotPassword')}
                         </button>
                       </div>
-                      <Input
+                      <PasswordInput
                         id="password"
-                        type="password"
                         autoComplete="current-password"
                         placeholder="••••••••"
                         value={password}
@@ -1192,9 +1192,8 @@ export default function Login() {
                           {t('login.forgotPassword')}
                         </button>
                       </div>
-                      <Input
+                      <PasswordInput
                         id="p-password"
-                        type="password"
                         autoComplete="current-password"
                         placeholder="••••••••"
                         value={password}
@@ -1387,10 +1386,9 @@ export default function Login() {
                             {t('login.forgotPassword')}
                           </button>
                         </div>
-                        <Input
+                        <PasswordInput
                           id="s-password"
-                          type="password"
-                        autoComplete="current-password"
+                          autoComplete="current-password"
                           placeholder="••••••••"
                           value={password}
                           onChange={(e) => setPassword(e.target.value)}

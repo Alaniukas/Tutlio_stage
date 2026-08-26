@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs';
-import type { SchoolStudentExportRow } from './schoolStudentsExport';
+import type { SchoolStudentExportColumnId, SchoolStudentExportRow } from './schoolStudentsExport';
 import { schoolStudentsTableData } from './schoolStudentsExport';
 
 const BORDER_THIN = { style: 'thin' as const, color: { argb: 'FFD1D5DB' } };
@@ -20,21 +20,16 @@ function addStudentsSheet(
   rows: SchoolStudentExportRow[],
   t: (key: string) => string,
   orgName?: string,
+  columns?: SchoolStudentExportColumnId[],
 ) {
-  const { headers, body } = schoolStudentsTableData(rows, t);
+  const { headers, body } = schoolStudentsTableData(rows, t, columns);
   const ws = workbook.addWorksheet(t('school.studentExportSheet'), {
     views: [{ state: 'frozen', ySplit: 1 }],
   });
 
-  ws.columns = [
-    { width: 28 },
-    { width: 14 },
-    { width: 22 },
-    { width: 22 },
-    { width: 24 },
-    { width: 28 },
-    { width: 16 },
-  ];
+  ws.columns = headers.map((_, i) => ({
+    width: i === 0 ? 28 : i === 1 ? 14 : 20,
+  }));
 
   if (orgName) {
     ws.mergeCells(1, 1, 1, headers.length);
@@ -88,11 +83,12 @@ export async function downloadSchoolStudentsXlsx(
   t: (key: string) => string,
   filename: string,
   orgName?: string,
+  columns?: SchoolStudentExportColumnId[],
 ): Promise<void> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Tutlio';
   workbook.created = new Date();
-  addStudentsSheet(workbook, rows, t, orgName);
+  addStudentsSheet(workbook, rows, t, orgName, columns);
 
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], {

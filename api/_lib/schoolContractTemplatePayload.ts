@@ -33,6 +33,7 @@ export function buildSchoolContractTemplatePayload(params: {
    * completion form; otherwise showing {#consent_agree_selected} can break DOCX→PDF.
    */
   includeMediaConsentFlags?: boolean;
+  extraLessonsPayload?: Record<string, string>;
 }): Record<string, string | boolean> {
   const st = params.student || {};
   const fullAddress = [st.student_address || '', st.student_city || ''].filter(Boolean).join(', ');
@@ -86,6 +87,10 @@ export function buildSchoolContractTemplatePayload(params: {
     payload.consent_pending = !consent;
     payload.consent_agree_selected = consent === 'agree';
     payload.consent_disagree_selected = consent === 'disagree';
+  }
+
+  if (params.extraLessonsPayload) {
+    Object.assign(payload, params.extraLessonsPayload);
   }
 
   return payload;

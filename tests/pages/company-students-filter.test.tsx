@@ -22,6 +22,7 @@ const testState = vi.hoisted(() => ({
         full_name: 'Vėgėlė Ąžuolas',
         grade: '5',
         media_publicity_consent: 'agree',
+        enrollment_status: 'active',
         created_at: '2026-07-01T10:00:00.000Z',
       },
       {
@@ -29,7 +30,16 @@ const testState = vi.hoisted(() => ({
         full_name: 'Petraitis Jonas',
         grade: '7',
         media_publicity_consent: 'disagree',
+        enrollment_status: 'active',
         created_at: '2026-07-02T10:00:00.000Z',
+      },
+      {
+        id: 's3',
+        full_name: 'Išėjęs Mokinys',
+        grade: '6',
+        media_publicity_consent: 'agree',
+        enrollment_status: 'left',
+        created_at: '2026-07-03T10:00:00.000Z',
       },
     ],
     tutors: [],
@@ -98,6 +108,7 @@ describe('CompanyStudents school list filters', () => {
     expect(screen.getAllByText('2.').length).toBeGreaterThan(0);
 
     // Filter dropdowns present with their "all" labels (school view only).
+    expect(screen.getByText('Aktyvūs')).toBeTruthy();
     expect(screen.getByText('Visos klasės')).toBeTruthy();
     expect(screen.getByText('Visos sutartys')).toBeTruthy();
     expect(screen.getByText('Visi atvaizdai')).toBeTruthy();
@@ -107,5 +118,7 @@ describe('CompanyStudents school list filters', () => {
     fireEvent.change(screen.getByPlaceholderText(/Ieškoti|Search/i), { target: { value: 'Petraitis' } });
     expect(screen.queryAllByText(/Vėgėlė Ąžuolas/).length).toBe(0);
     expect(screen.getAllByText(/Petraitis Jonas/).length).toBeGreaterThan(0);
+    // Default enrollment filter hides left students.
+    expect(screen.queryAllByText(/Išėjęs Mokinys/).length).toBe(0);
   });
 });

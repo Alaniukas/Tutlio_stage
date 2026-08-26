@@ -16,11 +16,42 @@ import {
   partitionByStatusConfirmation,
   movePackageCountersToCompleted,
 } from './_lib/sessionStatusConfirmation.js';
+import { orgHasJoinNoShow, shouldMarkStudentNoShowFromMissedJoin } from '../src/lib/schoolJoinNoShow.js';
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
+
+async function partitionJoinNoShow<T extends { id: string; tutor_id?: string | null; start_time?: string; end_time?: string | null; status?: string | null; meeting_link?: string | null; student_joined_at?: string | null; tutor_joined_at?: string | null }>(
+  sb: typeof supabase,
+  sessions: T[],
+): Promise<{ autoCompletable: T[]; skippedJoinNoShow: T[] }> {
+  const tutorIds = [...new Set(sessions.map((s) => s.tutor_id).filter(Boolean))] as string[];
+  if (!tutorIds.length) return { autoCompletable: sessions, skippedJoinNoShow: [] };
+  const { data: tutors } = await sb.from('profiles').select('id, organization_id').in('id', tutorIds);
+  const orgByTutor = new Map((tutors || []).map((t) => [t.id, t.organization_id]));
+  const orgIds = [...new Set([...orgByTutor.values()].filter(Boolean))] as string[];
+  if (!orgIds.length) return { autoCompletable: sessions, skippedJoinNoShow: [] };
+  const { data: orgs } = await sb.from('organizations').select('id, features').in('id', orgIds);
+  const flagged = new Set(
+    (orgs || [])
+      .filter((o) => orgHasJoinNoShow((o.features || {}) as Record<string, unknown>))
+      .map((o) => o.id),
+  );
+  const autoCompletable: T[] = [];
+  const skippedJoinNoShow: T[] = [];
+  const now = new Date();
+  for (const s of sessions) {
+    const orgId = s.tutor_id ? orgByTutor.get(s.tutor_id) : null;
+    if (orgId && flagged.has(orgId) && shouldMarkStudentNoShowFromMissedJoin(s as any, now)) {
+      skippedJoinNoShow.push(s);
+    } else {
+      autoCompletable.push(s);
+    }
+  }
+  return { autoCompletable, skippedJoinNoShow };
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET' && req.method !== 'POST') {
@@ -41,7 +72,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const lookback = new Date(Date.now() - 7 * 24 * 3600000).toISOString();
     const { data: sessions, error } = await supabase
       .from('sessions')
-      .select('id, tutor_id, end_time, status, paid, payment_status, lesson_package_id, subject_id')
+      .select('id, tutor_id, start_time, end_time, status, paid, payment_status, lesson_package_id, subject_id, meeting_link, student_joined_at, tutor_joined_at')
       .eq('status', 'active')
       .lt('end_time', now)
       .gte('end_time', lookback)
@@ -58,15 +89,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Orgs with tutor_lesson_status_confirmation: their lessons stay 'active'
     // until the tutor explicitly confirms the outcome (/api/confirm-session-status).
-    const { autoCompletable, awaitingConfirmation } = await partitionByStatusConfirmation(
+    const { autoCompletable: afterJoinNoShow, skippedJoinNoShow } = await partitionJoinNoShow(
       supabase,
       sessions as any[],
+    );
+    const { autoCompletable, awaitingConfirmation } = await partitionByStatusConfirmation(
+      supabase,
+      afterJoinNoShow as any[],
     );
     if (autoCompletable.length === 0) {
       return res.status(200).json({
         success: true,
         updated: 0,
         awaitingTutorConfirmation: awaitingConfirmation.length,
+        skippedJoinNoShow: skippedJoinNoShow.length,
       });
     }
     const completableSessions = autoCompletable as any[];
@@ -138,6 +174,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       success: true,
       updated: idsToComplete.length,
       awaitingTutorConfirmation: awaitingConfirmation.length,
+      skippedJoinNoShow: skippedJoinNoShow.length,
       packagesUpdated,
       waitlistEntriesRemoved: (waitlistDeleted || 0) + (oldWaitlistDeleted || 0)
     });

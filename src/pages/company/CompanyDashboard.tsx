@@ -99,6 +99,7 @@ export default function CompanyDashboard() {
   const location = useLocation();
   const navigate = useNavigate();
   const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
+  const staffLabel = orgBasePath === '/school' ? t('role.staffSchool') : t('companyDash.tutor');
   const openCompanyLessonModal = (sessionId: string) => {
     navigate(`${orgBasePath}/sessions?open=${encodeURIComponent(sessionId)}`);
   };
@@ -393,7 +394,7 @@ export default function CompanyDashboard() {
           if (b.payment_status === 'paid_by_student' && a.payment_status !== 'paid_by_student') return 1;
           return new Date(b.start_time).getTime() - new Date(a.start_time).getTime();
         })
-        .slice(0, 10);
+        .slice(0, 5);
 
       const cancelledFiltered = rows
       .filter((s) => s.status === 'cancelled' && s.paid)
@@ -702,7 +703,7 @@ export default function CompanyDashboard() {
                           {s.topic ? ` · ${s.topic}` : ''}
                         </p>
                         <p className="text-xs text-indigo-600 mt-0.5">
-                          {t('companyDash.tutor')}: {s.tutor_name || '—'}
+                          {staffLabel}: {s.tutor_name || '—'}
                         </p>
                       </div>
                       {s.price != null && (
