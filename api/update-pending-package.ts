@@ -184,7 +184,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           sendEmailUrl,
           serviceRoleKey,
         });
-        if (!emailed.ok) {
+        if (emailed.ok === false) {
           console.error('[update-pending-package] email after save failed:', emailed.error, emailed.details);
         }
       } catch (bgErr) {

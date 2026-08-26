@@ -47,7 +47,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       sendEmailUrl,
       serviceRoleKey,
     });
-    if (!emailed.ok) return json(res, emailed.status, { error: emailed.error, details: emailed.details });
+    if (emailed.ok === false) {
+      return json(res, emailed.status, { error: emailed.error, details: emailed.details });
+    }
     return json(res, 200, { success: true });
   } catch (err: any) {
     console.error('[resend-package-email] error:', err);
