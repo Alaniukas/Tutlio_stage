@@ -65,7 +65,8 @@ Viešas click-wrap **be login** — token URL iš laiško / seed konsolės:
 
 ## TC-04 — Įrašų sutikimas
 
-Jei org turi `school_lesson_recordings`: atskiras checkbox, ne tas pats kaip 14 d.  
+**Dabar parked:** Demo Mokykla `school_lesson_recordings = false`, todėl accept UI **neturi** įrašų checkbox.  
+Jei org turi flag `true`: atskiras checkbox, ne tas pats kaip 14 d.  
 Jei flag išjungtas — įrašų klausimo nėra (`recording_consent` NETAIKOMA).
 
 ---

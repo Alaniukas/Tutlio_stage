@@ -40,6 +40,9 @@ import { isInstructionsHiddenForOrg } from '@/lib/marketMoney';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import type { OrgAdminPermission } from '@/lib/orgAdminPermissions';
 
+/** Parked until Drive Meet ingest. Restore: true AND org flag `school_lesson_recordings`. */
+const SCHOOL_LESSON_RECORDINGS_NAV_READY = false;
+
 interface CompanyNavItem {
   href: string;
   label: string;
@@ -150,7 +153,7 @@ export default function CompanyLayout() {
         showInstructions,
         isOwner,
         isSchool && hasFeature('school_class_groups'),
-        isSchool && hasFeature('school_lesson_recordings'),
+        SCHOOL_LESSON_RECORDINGS_NAV_READY && isSchool && hasFeature('school_lesson_recordings'),
       )
       .filter((item) => item.permission === null || can(item.permission)),
     [t, isSchool, orgBasePath, showDynamicPricing, showPublicPage, showInstructions, isOwner, can, hasFeature],

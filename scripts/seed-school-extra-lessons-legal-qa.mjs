@@ -74,6 +74,13 @@ function addDays(ymd, days) {
   return dt.toISOString().slice(0, 10);
 }
 
+/** Stable tokens documented in test_school.md so any PC can open the same localhost URLs. */
+const ACCEPT_TOKENS = {
+  within14: 'legalqawithin14aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  after14: 'legalqaafter14bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+  sparse: 'legalqasparsecccccccccccccccccccccccccccccccc',
+};
+
 function randomToken() {
   return `${randomUUID().replace(/-/g, '')}${randomUUID().replace(/-/g, '')}`.slice(0, 48);
 }
@@ -153,8 +160,7 @@ function baseOrder({ startDate, serviceName, sparse = false }) {
   };
 }
 
-async function upsertToken(supabase, contractId) {
-  const token = 'legalqa' + randomToken();
+async function upsertToken(supabase, contractId, token = `legalqa${randomToken()}`) {
   await supabase.from('school_contract_completion_tokens').delete().eq('contract_id', contractId);
   const { error } = await supabase.from('school_contract_completion_tokens').insert({
     contract_id: contractId,
@@ -200,7 +206,14 @@ async function main() {
   const today = vilniusYmd();
   const startWithin = addDays(today, 3);
   const startAfter = addDays(today, 21);
-  const bodyText = defaultBody();
+  const EXTRA_DOCX_TEMPLATE = 'c3a00000-7e57-4000-8000-0000000000a3';
+  const { data: realTpl } = await supabase
+    .from('school_contract_templates')
+    .select('body, pdf_url')
+    .eq('id', EXTRA_DOCX_TEMPLATE)
+    .maybeSingle();
+  const bodyText = String(realTpl?.body || '').trim().length > 500 ? String(realTpl.body) : defaultBody();
+  const extraTemplateId = realTpl?.body ? EXTRA_DOCX_TEMPLATE : IDS.template;
 
   const { data: org, error: orgErr } = await supabase.from('organizations').select('features, name').eq('id', DEMO_ORG).maybeSingle();
   if (orgErr) throw new Error(`organizations: ${orgErr.message}`);
@@ -299,9 +312,10 @@ async function main() {
     body: bodyText,
     annual_fee_default: 0,
     is_default: false,
+    ...(realTpl?.pdf_url ? { pdf_url: realTpl.pdf_url } : {}),
   }, { onConflict: 'id' });
 
-  async function upsertPending({ id, studentId, number, order }) {
+  async function upsertPending({ id, studentId, number, order, token }) {
     const filled = bodyText
       .replaceAll('{{sutarties_nr}}', number)
       .replaceAll('{{vaiko_vardas_pavarde}}', students.find((s) => s.id === studentId)?.full_name || '')
@@ -310,7 +324,7 @@ async function main() {
       id,
       organization_id: DEMO_ORG,
       student_id: studentId,
-      template_id: IDS.template,
+      template_id: extraTemplateId,
       contract_number: number,
       filled_body: filled,
       annual_fee: 144,
@@ -324,7 +338,7 @@ async function main() {
       class_group_id: IDS.group,
     }, { onConflict: 'id' });
     if (error) throw new Error(`contract ${number}: ${error.message}`);
-    return upsertToken(supabase, id);
+    return upsertToken(supabase, id, token);
   }
 
   const tokenWithin = await upsertPending({
@@ -332,18 +346,21 @@ async function main() {
     studentId: IDS.students.within14,
     number: 'PP-LEGAL-WITHIN14',
     order: baseOrder({ startDate: startWithin, serviceName: 'QA Matematika (per 14 d.)' }),
+    token: ACCEPT_TOKENS.within14,
   });
   const tokenAfter = await upsertPending({
     id: IDS.contracts.after14,
     studentId: IDS.students.after14,
     number: 'PP-LEGAL-AFTER14',
     order: baseOrder({ startDate: startAfter, serviceName: 'QA Matematika (po 14 d.)' }),
+    token: ACCEPT_TOKENS.after14,
   });
   const tokenSparse = await upsertPending({
     id: IDS.contracts.sparse,
     studentId: IDS.students.sparse,
     number: 'PP-LEGAL-SPARSE',
     order: baseOrder({ startDate: '', serviceName: 'QA Matematika (tušti laukai)', sparse: true }),
+    token: ACCEPT_TOKENS.sparse,
   });
 
   const shownYes =
@@ -353,7 +370,7 @@ async function main() {
     id: IDS.contracts.withdraw,
     organization_id: DEMO_ORG,
     student_id: IDS.students.withdraw,
-    template_id: IDS.template,
+    template_id: extraTemplateId,
     contract_number: 'PP-LEGAL-WITHDRAW',
     filled_body: `${bodyText}\n\nACCEPTED WITHDRAW QA`,
     annual_fee: 144,
@@ -381,7 +398,7 @@ async function main() {
     id: IDS.contracts.terminate,
     organization_id: DEMO_ORG,
     student_id: IDS.students.terminate,
-    template_id: IDS.template,
+    template_id: extraTemplateId,
     contract_number: 'PP-LEGAL-TERMINATE',
     filled_body: `${bodyText}\n\nACCEPTED TERMINATE QA`,
     annual_fee: 144,

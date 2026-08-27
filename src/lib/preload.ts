@@ -1,5 +1,6 @@
 import type { User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
+import { resolveAuthUser } from '@/lib/authSession';
 import { getCached, setCache, dedupeAsync } from '@/lib/dataCache';
 import { startOfMonth, endOfMonth, isAfter, isBefore, addDays, subDays, subMonths, addMonths } from 'date-fns';
 import { isProKlaseOrg } from '@/lib/marketMoney';
@@ -31,13 +32,10 @@ export function tutorDashboardSessionsDeduped(tutorUserId: string) {
 }
 
 function getAuthUser() {
-  return dedupeAsync('auth_user', async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    return user;
-  });
+  return resolveAuthUser();
 }
 
-/** One in-flight `getUser` per wave (StrictMode, UserContext + page both calling auth). */
+/** One in-flight session read per wave (StrictMode, UserContext + page both calling auth). */
 export function dedupeAuthGetUser(): Promise<User | null> {
   return getAuthUser();
 }

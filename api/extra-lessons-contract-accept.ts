@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from './types';
 import {
+  EXTRA_LESSONS_DEFAULT_BODY,
   EXTRA_LESSONS_TERMS_CHECKBOX_TEXT,
   START_WITHIN_14_CHECKBOX_TEXT,
   canClickWrapAccept,
@@ -12,8 +13,7 @@ import {
   validateExtraLessonsOrder,
   type ExtraLessonsOrderSnapshot,
 } from '../src/lib/extraLessonsContract.js';
-import { createSimpleContractPdf } from './_lib/schoolContractPdf.js';
-import { schoolContractPdfStoragePath, SCHOOL_CONTRACTS_BUCKET } from './_lib/schoolContractPdfPath.js';
+import { renderAndStoreExtraLessonsPdf, signSchoolContractPdf } from './_lib/extraLessonsPdf.js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import {
   appOrigin,
@@ -43,8 +43,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const st = contract.student || {};
   const org = contract.organizations || {};
+  const templateBody = String(contract.filled_body || '').trim().length > 400
+    ? String(contract.filled_body)
+    : EXTRA_LESSONS_DEFAULT_BODY;
 
-  if (req.method === 'GET') {
+  async function renderPreviewPdf(payload: Record<string, string>, filled: string): Promise<string | null> {
+    try {
+      const rendered = await renderAndStoreExtraLessonsPdf(supabase, {
+        contract,
+        student: st,
+        filledBody: filled,
+        indicativeMonthlyEur: order.indicative_monthly_eur,
+        extraLessonsPayload: payload,
+      });
+      if (rendered.uploadedPath) {
+        await supabase.from('school_contracts').update({ pdf_url: rendered.uploadedPath }).eq('id', contract.id);
+        contract.pdf_url = rendered.uploadedPath;
+        return signSchoolContractPdf(supabase, rendered.uploadedPath);
+      }
+    } catch (e) {
+      console.error('[extra-lessons-contract-accept] preview pdf', (e as Error).message);
+    }
+    return null;
+  }
+
+  async function jsonPreview(opts: { alreadyAccepted?: boolean; forceRender?: boolean } = {}) {
     const payload = extraLessonsPayloadForContract({
       contractNumber: String(contract.contract_number || ''),
       order,
@@ -57,14 +80,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       schoolName: String(org.name || ''),
     });
     const filled = fillExtraLessonsBody({
-      templateBody: contract.filled_body,
+      templateBody,
       payload,
     });
     const incomplete = validateExtraLessonsOrder(order);
     const start14 = resolveStartWithin14Status({ order, acceptedAt: new Date(), parentChecked: false });
     const orgFeatures = (org.features || {}) as Record<string, unknown>;
     const recordingsEnabled = orgFeatures.school_lesson_recordings === true;
-    return res.status(200).json({
+
+    let pdfUrl: string | null = null;
+    if (contract.accepted_at || opts.alreadyAccepted) {
+      pdfUrl = await signSchoolContractPdf(supabase, contract.signed_contract_url || contract.pdf_url);
+    } else {
+      if (!opts.forceRender) {
+        pdfUrl = await signSchoolContractPdf(supabase, contract.pdf_url);
+      }
+      if (!pdfUrl) {
+        pdfUrl = await renderPreviewPdf(payload, filled);
+      }
+      if (!pdfUrl) {
+        pdfUrl = await signSchoolContractPdf(supabase, contract.pdf_url);
+      }
+    }
+
+    return {
       ok: true,
       contractId: contract.id,
       contractNumber: contract.contract_number,
@@ -73,11 +112,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       schoolName: org.name,
       schoolEmail: org.email,
       schoolPhone: org.phone,
-      alreadyAccepted: Boolean(contract.accepted_at),
+      alreadyAccepted: Boolean(contract.accepted_at) || Boolean(opts.alreadyAccepted),
       acceptedAt: contract.accepted_at || null,
       withdrawn: Boolean(contract.withdrawal_requested_at),
       extraEndKind: contract.extra_end_kind || null,
-      pdfUrl: contract.signed_contract_url || contract.pdf_url || null,
+      pdfUrl,
       order,
       parentEditableFields: incomplete,
       summary: payload,
@@ -91,18 +130,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         withdrawalForm: '/legal/extra-lessons-withdrawal-form.html',
         privacyMailto: org.email ? `mailto:${org.email}` : null,
       },
-    });
+    };
+  }
+
+  if (req.method === 'GET') {
+    return res.status(200).json(await jsonPreview());
   }
 
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (contract.accepted_at) return res.status(409).json({ error: 'Already accepted' });
-  if (contract.withdrawal_requested_at) return res.status(409).json({ error: 'Withdrawn' });
 
   const body = (req.body || {}) as Record<string, unknown>;
   const orderPatch = (body.order_patch || {}) as Partial<ExtraLessonsOrderSnapshot>;
   if (orderPatch && typeof orderPatch === 'object') {
     order = mergeExtraLessonsOrderPatch(order, orderPatch);
   }
+
+  if (body.preview === true) {
+    return res.status(200).json(await jsonPreview({ forceRender: true }));
+  }
+
+  if (contract.accepted_at) return res.status(409).json({ error: 'Already accepted' });
+  if (contract.withdrawal_requested_at) return res.status(409).json({ error: 'Withdrawn' });
   const incomplete = validateExtraLessonsOrder(order);
   if (incomplete.length) {
     return res.status(400).json({ error: 'Incomplete order', fields: incomplete });
@@ -126,6 +174,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const recordingConsent = !recordingsEnabled
     ? null
     : recordingRaw === true ? true : recordingRaw === false ? false : null;
+  if (recordingsEnabled && recordingConsent === null) {
+    return res.status(400).json({ error: 'Pasirinkite, ar sutinkate su pamokų įrašymu.' });
+  }
   const acceptedAt = new Date();
   const resolved14 = resolveStartWithin14Status({
     order,
@@ -145,7 +196,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   payload.data_laikas_Europe_Vilnius = acceptedAtLabel;
   const start14Label = startWithin14Label(resolved14.status);
   const filled = fillExtraLessonsBody({
-    templateBody: contract.filled_body,
+    templateBody,
     payload,
     startWithin14Label: start14Label,
     recordingConsentLabel: recordingConsentLabel(recordingConsent),
@@ -175,28 +226,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let pdfPath: string | null = contract.pdf_url || null;
   let pdfBase64: string | null = null;
   try {
-    const pdfBytes = await createSimpleContractPdf({
-      contractNumber: String(contract.contract_number || ''),
-      studentName: String(st.full_name || ''),
-      parentName: String(st.payer_name || ''),
-      parentEmail: String(st.payer_email || ''),
-      parentPhone: String(st.payer_phone || ''),
-      parentPersonalCode: '',
-      childBirthDate: '',
-      address: '',
-      annualFee: order.indicative_monthly_eur,
-      body: frozenBody,
+    const rendered = await renderAndStoreExtraLessonsPdf(supabase, {
+      contract,
+      student: st,
+      filledBody: frozenBody,
+      indicativeMonthlyEur: order.indicative_monthly_eur,
+      extraLessonsPayload: payload,
     });
-    pdfPath = schoolContractPdfStoragePath({
-      organizationId: String(contract.organization_id),
-      contractId: String(contract.id),
-      contractNumber: contract.contract_number ?? null,
-    });
-    await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET).upload(pdfPath, Buffer.from(pdfBytes), {
-      upsert: true,
-      contentType: 'application/pdf',
-    });
-    pdfBase64 = Buffer.from(pdfBytes).toString('base64');
+    if (rendered.uploadedPath) pdfPath = rendered.uploadedPath;
+    if (rendered.pdfBase64) pdfBase64 = rendered.pdfBase64;
   } catch (e) {
     console.error('[extra-lessons-contract-accept] pdf', (e as Error).message);
   }
@@ -257,10 +295,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }).catch((err) => console.error('[extra-lessons-contract-accept] email', err));
   }
 
+  const signedPdfUrl = pdfPath ? await signSchoolContractPdf(supabase, pdfPath) : null;
+
   return res.status(200).json({
     ok: true,
     contractId: contract.id,
     document_sha256: documentSha256,
     accepted_at: acceptedAt.toISOString(),
+    pdfUrl: signedPdfUrl,
   });
 }

@@ -97,8 +97,8 @@ Maršrutai apibrėžti `src/App.tsx`.
 |--------|-------------|-----------|
 | `/school/contracts` | `CompanyContracts.tsx` | Metinės sutartys + extra-lessons pasiūlymas (flag) |
 | `/school/students` | `CompanyStudents.tsx` | Mokinių CRUD, enrollment filtrai, extra-lessons offer |
-| `/school/groups` | `CompanyClassGroups.tsx` | Klasės grupės visiems mokslo metams (`school_class_groups` flag) |
-| `/school/recordings` | `CompanyLessonRecordings.tsx` | Pamokų įrašai / Drive (`school_lesson_recordings` flag) |
+| `/school/groups` | `CompanyClassGroups.tsx` | Klasės grupės: kortelė / **Redaguoti** → `ClassGroupFormDialog` (info + nariai). Keli savaitės slotai su **skirtinga diena ir starto laiku** |
+| `/school/recordings` | `CompanyLessonRecordings.tsx` | **Parkuota** — maršrutas paliktas; nav **Įrašai** visada paslėptas (`SCHOOL_LESSON_RECORDINGS_NAV_READY = false`). Flag `school_lesson_recordings` (Demo = false). |
 | `/school/finance?tab=payments` | `CompanyPayments.tsx` | Įmokų grafikai, mokėjimo nuorodos |
 | `/school/finance?tab=report` | `CompanySchoolFinanceReport.tsx` | Suvestinė buhalterijai, filtrai, XLSX |
 | `/school/finance` | `CompanyFinanceHub.tsx` | Tab hub (Mokėjimai / Suvestinė / Finansai / Sąskaitos) |
@@ -189,7 +189,7 @@ Pilnas sąrašas: `.env.example`
 | DOCX | `DOCX_CONVERTER_URL`, `DOCX_CONVERTER_API_KEY` | Sutarčių PDF |
 | Google | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Kalendoriaus sync |
 
-**⚠️ Dažna klaida:** `.env` gali rodyti į nebegaliojantį Supabase projektą. Stage/prod ref dažniausiai `cuhciqwmqfuajeeqjjbm`. Patikrink prieš seed'inimą.
+**⚠️ Dažna klaida:** `.env` gali rodyti į nebegaliojantį Supabase projektą (`xklzjhfztjxltrdkplog`). Aktyvus projektas `cuhciqwmqfuajeeqjjbm` yra **produkcija**. Lokalus school QA — tik Demo Mokykla (`c3a00000-…0001`), **neliesti** tikrų org (pvz. Laisvi vaikai). Extra-lessons seed rašo tik Demo org.
 
 **⚠️ Windows lokalus API:** jei OS env turi seną `SUPABASE_URL` (`xklzjhfztjxltrdkplog`), `scripts/dev-api-local.ts` ir `api/_lib/auth.ts` ignoruoja jį — `.env` raktai turi prioritetą. API log'e turi matytis `cuhciqwmqfuajeeqjjbm.supabase.co`.
 
@@ -303,7 +303,7 @@ Kiekvienas `api/foo-bar.ts` → endpoint `/api/foo-bar`.
 | `school_contract_esign` | GoSign el. parašas (vietoj rankinio) — metinėms sutartims |
 | `school_extra_lessons_contract` | Papildomų pamokų sutartys (click-wrap, SHA-256, 14 d. atsisakymas). GoSign neprivalomas |
 | `school_class_groups` | Klasės grupės visiems mokslo metams; nav `/school/groups` |
-| `school_lesson_recordings` | Pamokų įrašai (Drive); nav `/school/recordings` |
+| `school_lesson_recordings` | Pamokų įrašai (Drive) — **parked**. Nav `/school/recordings` visada paslėptas (`SCHOOL_LESSON_RECORDINGS_NAV_READY`). Extra-lessons įrašų radio tik jei flag `true`. Demo seed = `false`. |
 | `school_join_no_show` | Mokinys nepaspaudė „Prisijungti“ per 10 min → no-show (`school-join-no-show` cron) |
 | `school_teacher_labels` | School portale „mokytojas“ vietoj „korepetitorius“ (`useStaffLabels`) |
 | `extra_lessons_billing` | Mėnesio pabaigos papildomų pamokų sąskaitos (company/Pro Klasė srautas, ne school click-wrap) |
@@ -398,26 +398,26 @@ Tai **nėra** atskira lentelė ir **nėra** sutartis prie kiekvienos pamokos. Ta
 **Srautas:**
 1. School admin `/school/contracts` arba mokinio kortelėje pildo užsakymą (`ExtraLessonsOfferDialog`: grupė/individualu, grafikas, kaina, bazinis pamokų sk./mėn.).
 2. `POST /api/extra-lessons-contract-offer` — snapshot, PDF, token, laiškas tėvams.
-3. Tėvai `/school-extra-lessons-accept` — visą tekstą + privalomas sąlygų checkbox + **„Užsakymas su prievole sumokėti“**. Jei pirma pamoka **per 14 kalendorinių dienų** (Vilnius) nuo sudarymo — atskiras nepažymėtas checkbox (TAIP/NE); jei pirma pamoka jau po 14 d. — laukelis nerodomas (NETAIKOMA). Užšaldoma redakcija (`document_sha256`) su parodytu tekstu, `accepted_by_user_id`, `start_within_14_status`.
+3. Tėvai `/school-extra-lessons-accept` — layout kaip `SchoolContractComplete`: PDF iframe + **Atidaryti visą PDF**, trūkstami užsakymo laukai, privalomas sąlygų checkbox, **„Užsakymas su prievole sumokėti“**. 14 d. (Vilnius): radio **Sutinku pradėti iš karto** / **Palaukti**; jei pirma pamoka jau po 14 d. — laukelis nerodomas (`na`). GET pasirašo esamą PDF arba generuoja peržiūrą (`api/_lib/extraLessonsPdf.ts`: DOCX converter, fallback paginuotas tekstinis PDF). Po laukų pakeitimo `POST preview: true` atnaujina PDF. Užšaldoma redakcija (`document_sha256`), `accepted_by_user_id`, `start_within_14_status`.
 4. 14 d. **„Atsisakyti sutarties“** vs po lango **„Nutraukti sutartį“** (tėvų portalas ir token puslapis) → `extra-lessons-contract-withdraw` + pareiškimo PDF + el. pašto patvirtinimas. Mokytojo atskirai neinformuoti.
 5. Mėnesio sąskaita: baziniai kreditai + extra joined pamokos (`schoolExtraLessonsBilling.ts`, cron `bill-school-extra-lessons` 1 d. 04:00 UTC). Extra pamoka mokama tik jei `school_billing_kind === 'extra'` ir mokinys prisijungė / `completed`; `no_show` neskaičiuojamas. Jei tėvas **ne** prašė ankstyvos pradžios (`start_within_14_status = no`), pamokos/sąskaita ne anksčiau nei `accepted_at + 14 d.`
 
-**Failai:** `src/lib/extraLessonsContract.ts`, `api/_lib/extraLessonsContractShared.ts`, `api/extra-lessons-contract-*.ts`, `api/extra-lessons-parent-contracts.ts`, `src/pages/SchoolExtraLessonsAccept.tsx`, `ParentExtraLessonsContracts.tsx`.  
+**Failai:** `src/lib/extraLessonsContract.ts`, `api/_lib/extraLessonsContractShared.ts`, `api/_lib/extraLessonsPdf.ts`, `api/extra-lessons-contract-*.ts`, `api/extra-lessons-parent-contracts.ts`, `src/pages/SchoolExtraLessonsAccept.tsx`, `ParentExtraLessonsContracts.tsx`.  
 **Migracija:** `20260826140000_school_extra_lessons.sql`, `20260827120000_extra_lessons_start_within_14.sql`.  
-**QA seed:** `scripts/seed-school-extra-lessons-qa.mjs`, `scripts/seed-school-extra-lessons-legal-qa.mjs`.  
+**QA seed:** `scripts/seed-school-extra-lessons-qa.mjs` (tik Demo Mokykla, ne Laisvi vaikai), `scripts/seed-school-extra-lessons-legal-qa.mjs` (stabilūs tokenai kaip `test_school.md`).  
 **QA laiškai:** visi extra-lessons / school įmokų / sutarčių tėvų laiškai Demo Mokykloje eina į `alaniukasa@gmail.com` (`students.payer_email`).  
-**Testai:** `tests/lib/extra-lessons-contract.test.ts`, `tests/lib/school-extra-lessons-billing.test.ts`, `tests/lib/extra-lessons-parent-portal.test.ts`, `tests/api/send-email-extra-lessons.test.ts`.  
+**Testai:** `tests/lib/extra-lessons-contract.test.ts`, `tests/pages/school-extra-lessons-accept.test.tsx`, `tests/lib/school-extra-lessons-billing.test.ts`, `tests/lib/extra-lessons-parent-portal.test.ts`, `tests/api/send-email-extra-lessons.test.ts`.  
 **Rankinis QA:** `test_school.md`.
 
 ### Klasės grupės, įrašai, join no-show
 
 | Flag | UI / API |
 |------|----------|
-| `school_class_groups` | `/school/groups` → `CompanyClassGroups.tsx`, `api/school-class-groups.ts`. Pamokos materializuojamos iš grupės slotų (`materialize-recurring-sessions.ts`) |
-| `school_lesson_recordings` | `/school/recordings` → `CompanyLessonRecordings.tsx`, `api/school-lesson-recordings.ts` |
+| `school_class_groups` | `/school/groups` → `CompanyClassGroups.tsx` + `ClassGroupFormDialog.tsx`, `PATCH /api/school-class-groups`. Slotai: kiekviena eilutė = savaitės diena + startas (pabaiga iš grupės `duration_minutes`). Pamokos materializuojamos iš slotų (`materialize-recurring-sessions.ts`) |
+| `school_lesson_recordings` | **Parked.** Nav visada off (`SCHOOL_LESSON_RECORDINGS_NAV_READY`). Kodas `/school/recordings` paliktas; tėvų įrašų radio tik jei org flag `true`. Būsimas kelias: Workspace Meet įrašas → Drive → Drive API → priskirti grupei. |
 | `school_join_no_show` | `api/school-join-no-show.ts` kas 5 min — jei mokinys per 10 min nepaspaudė Join |
 
-**Testai:** `tests/lib/school-class-groups-recordings.test.ts`, `tests/lib/school-join-no-show.test.ts`.
+**Testai:** `tests/pages/company-class-groups.test.tsx`, `tests/lib/school-class-groups-recordings.test.ts`, `tests/lib/school-join-no-show.test.ts`.
 
 ### Mokytojų sutartys (committed WIP — nedeployinti į prod)
 
@@ -466,6 +466,10 @@ Failai **yra** git'e (`9fe5009`), bet srautas **neužbaigtas**:
 | Savivaldybė | `students.municipality` (`ltMunicipalities.ts`) |
 
 Išėję / baigę (`left`, `graduated`) — archyvas (šiukšlinė), ne pagrindinis sąrašas. Logika: `src/lib/schoolStudentEnrollment.ts`. Extra-lessons pasiūlymą galima atidaryti ir iš mokinio kortelės.
+
+**Mokinio info dialogas:** `max-w-3xl` (arba `max-w-5xl` jei tvarkaraščio juosta); desktop **MOKINYS | MOKĖTOJAS** du stulpeliai.
+
+**Load / auth:** nenaudok `supabase.auth.getUser()` kiekviename puslapio mount — lock race su Strict Mode palieka amžiną spinnerį. Sesija per `UserContext` + `src/lib/authSession.ts` (`getSession` cache). `preload.ts` / `useOrgFeatures` eina per tą patį helperį.
 
 **Excel eksportas:** `schoolStudentsExport.ts` + `schoolStudentsXlsxExport.ts` — mokinys, klasė, mokslo metai, statusas, sutikimas, sutarties statusas, mokėtojas, kontaktai. Surūšiuota pagal `parseStudentGrade()`.
 
@@ -587,11 +591,13 @@ npm run security:pencheck
 - `tests/lib/school-finance-export.test.ts`
 - `tests/lib/school-contract-filters.test.ts` — missing fields, 5 filtrų matching, e-sign incomplete (be `completion_submitted_at`), `shouldPromptSchoolSignedOnScan()`, `schoolHasSigned()`
 - `tests/lib/school-students-export.test.ts` — export rows, consent labels
-- `tests/pages/company-students-filter.test.tsx` — school list filtrai (enrollment / mokslo metai)
+- `tests/pages/company-students-filter.test.tsx` — school list filtrai + mokinio info dialogas
 - `tests/lib/school-student-enrollment.test.ts`
-- `tests/lib/extra-lessons-contract.test.ts`, `tests/lib/school-extra-lessons-billing.test.ts`, `tests/lib/extra-lessons-parent-portal.test.ts`
-- `tests/api/send-email-extra-lessons.test.ts`
+- `tests/lib/auth-session.test.ts` — sesijos cache (be `getUser` stampede)
+- `tests/lib/extra-lessons-contract.test.ts`, `tests/pages/school-extra-lessons-accept.test.tsx`
+- `tests/lib/school-extra-lessons-billing.test.ts`, `tests/lib/extra-lessons-parent-portal.test.ts`
 - `tests/api/send-email-extra-lessons.test.ts` — offer/accept/withdraw/terminate, gavėjas `alaniukasa@gmail.com`
+- `tests/pages/company-class-groups.test.tsx` — grupės modalas, nariai, keli slotai
 - `tests/lib/school-class-groups-recordings.test.ts`, `tests/lib/school-join-no-show.test.ts`
 - `tests/integration/school-contract-signing-flow.test.ts`
 - `tests/api/school-split-fee-installment.test.ts`
@@ -664,6 +670,8 @@ npm run security:pencheck
 15. **Extra-lessons / mokytojų sutartys** — kodas `alano-local` QA. **Nestumk** tų migracijų ir **nedeployink** į prod be atskiro patvirtinimo. Extra-lessons ≠ metinė GoSign sutartis; `kind` filtruok.
 16. **Nėra `lesson_contracts` lentelės** — papildomos pamokos = `school_contracts.kind = 'extra_lessons'`.
 17. **School QA laiškai** — Demo Mokykla mokėtojo el. paštas turi būti `alaniukasa@gmail.com`, ne `*@tutlio.lt` inbox'ai kurių niekas neskaito.
+18. **Auth lock** — lygiagretūs `getUser()` (students + preload + analytics) → `navigatorLock` 5s + `AbortError` steal. Naudok `authSession.ts`.
+19. **Įrašai parked** — negrąžink nav, kol Drive ingest. Restore: `SCHOOL_LESSON_RECORDINGS_NAV_READY = true` ir org flag.
 
 ---
 
@@ -673,13 +681,13 @@ npm run security:pencheck
 |----------|-------------|
 | Naujas maršrutas | `src/App.tsx` |
 | School sutartis (metinė) | `CompanyContracts.tsx`, `schoolContractFilters.ts`, `api/school-contract-*.ts`, `schoolContractsExport.ts` |
-| Extra-lessons sutartis | `extraLessonsContract.ts`, `extraLessonsParentPortal.ts`, `ExtraLessonsOfferDialog.tsx`, `SchoolExtraLessonsAccept.tsx`, `api/extra-lessons-contract-*.ts`, `bill-school-extra-lessons.ts` |
+| Extra-lessons sutartis | `extraLessonsContract.ts`, `extraLessonsPdf.ts`, `SchoolExtraLessonsAccept.tsx`, `api/extra-lessons-contract-*.ts` |
 | Rankinis school QA | `test_school.md` |
 | Rankinis Pro Klasė QA | `test_proklase.md` |
 | Skeno folderio dialogas | `shouldPromptSchoolSignedOnScan()` `schoolContractFilters.ts` |
 | Mokytojų sutartys (WIP) | `CompanyStaffContracts.tsx`, `schoolContractParty.ts`, `school-contract-teacher-invite.ts` |
-| Klasės grupės / įrašai | `CompanyClassGroups.tsx`, `CompanyLessonRecordings.tsx`, `schoolClassGroups.ts` |
-| School mokiniai + filtrai | `CompanyStudents.tsx`, `schoolStudentEnrollment.ts`, `schoolStudentsExport.ts` |
+| Klasės grupės | `CompanyClassGroups.tsx`, `ClassGroupFormDialog.tsx`, `schoolClassGroups.ts`, `api/school-class-groups.ts` |
+| School mokiniai + filtrai | `CompanyStudents.tsx`, `schoolStudentEnrollment.ts`, `authSession.ts`, `schoolStudentsExport.ts` |
 | School mokėjimai | `CompanyPayments.tsx`, `useSchoolPaymentsData.ts` |
 | School finansų eksportas | `schoolFinanceExport.ts`, `schoolFinanceXlsxExport.ts` |
 | Complimentary pamoka | `sessionComplimentary.ts`, `api/mark-session-complimentary.ts` |
@@ -731,4 +739,4 @@ npm run security:pencheck
 
 ---
 
-*Paskutinis atnaujinimas: 2026-08-27 (`alano-local`: extra-lessons 14 d., parent portal, QA laiškai `alaniukasa@gmail.com`, `test_school.md`). Jei radai neatitikimų su kodu — prioritetas kodui, atnaujink šį failą.*
+*Paskutinis atnaujinimas: 2026-08-27 (`alano-local`: extra-lessons PDF click-wrap, grupių redagavimas + keli slotai, mokinių load/auth, Įrašai parked, Demo QA tik fake org ant prod DB). Jei radai neatitikimų su kodu — prioritetas kodui, atnaujink šį failą.*

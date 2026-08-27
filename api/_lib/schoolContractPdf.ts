@@ -48,6 +48,44 @@ function safePdfText(value: string): string {
     .replace(/ž/g, 'z').replace(/Ž/g, 'Z');
 }
 
+function wrapPdfLine(
+  text: string,
+  font: { widthOfTextAtSize: (t: string, size: number) => number },
+  size: number,
+  maxWidth: number,
+): string[] {
+  const raw = safePdfText(text);
+  if (!raw) return [''];
+  if (font.widthOfTextAtSize(raw, size) <= maxWidth) return [raw];
+  const words = raw.split(/\s+/);
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+    if (font.widthOfTextAtSize(next, size) <= maxWidth) {
+      current = next;
+      continue;
+    }
+    if (current) lines.push(current);
+    if (font.widthOfTextAtSize(word, size) <= maxWidth) {
+      current = word;
+    } else {
+      let chunk = '';
+      for (const ch of word) {
+        const tryChunk = chunk + ch;
+        if (font.widthOfTextAtSize(tryChunk, size) <= maxWidth) chunk = tryChunk;
+        else {
+          if (chunk) lines.push(chunk);
+          chunk = ch;
+        }
+      }
+      current = chunk;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.length ? lines : [''];
+}
+
 export async function createSimpleContractPdf(params: {
   contractNumber: string;
   studentName: string;
@@ -59,39 +97,55 @@ export async function createSimpleContractPdf(params: {
   address: string;
   annualFee: number | string;
   body: string;
+  title?: string;
+  feeLabel?: string;
 }): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
-  const page = pdfDoc.addPage([595, 842]);
   const font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
   const bold = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
+  const pageSize: [number, number] = [595, 842];
   const left = 44;
+  const maxWidth = 507;
+  const bottom = 56;
+  let page = pdfDoc.addPage(pageSize);
   let y = 804;
 
-  page.drawText(safePdfText('Metinio mokesčio sutartis'), { x: left, y, size: 18, font: bold, color: rgb(0.1, 0.1, 0.1) });
-  y -= 28;
+  const newPage = () => {
+    page = pdfDoc.addPage(pageSize);
+    y = 804;
+  };
+
+  const drawWrapped = (text: string, size: number, useBold = false, color = rgb(0.23, 0.23, 0.23)) => {
+    const f = useBold ? bold : font;
+    for (const line of wrapPdfLine(text, f, size, maxWidth)) {
+      if (y < bottom) newPage();
+      page.drawText(line, { x: left, y, size, font: f, color });
+      y -= size + 4;
+    }
+  };
+
+  drawWrapped(params.title || 'Metinio mokesčio sutartis', 18, true, rgb(0.1, 0.1, 0.1));
+  y -= 8;
+  const feeLabel = params.feeLabel || 'Metinis mokestis';
   const rows = [
     `Sutarties Nr.: ${params.contractNumber || ''}`,
     `Mokinys: ${params.studentName || ''}`,
     `Tevai: ${params.parentName || ''}`,
     `Tevu el. pastas: ${params.parentEmail || ''}`,
     `Tevu tel.: ${params.parentPhone || ''}`,
-    `Tevu asm. kodas: ${params.parentPersonalCode || ''}`,
-    `Vaiko gimimo data: ${params.childBirthDate || ''}`,
-    `Adresas: ${params.address || ''}`,
-    `Metinis mokestis: EUR ${Number(params.annualFee || 0).toFixed(2)}`,
+    params.parentPersonalCode ? `Tevu asm. kodas: ${params.parentPersonalCode}` : '',
+    params.childBirthDate ? `Vaiko gimimo data: ${params.childBirthDate}` : '',
+    params.address ? `Adresas: ${params.address}` : '',
+    `${feeLabel}: EUR ${Number(params.annualFee || 0).toFixed(2)}`,
     `Data: ${new Date().toLocaleDateString('lt-LT')}`,
-  ];
+  ].filter(Boolean);
   for (const row of rows) {
-    page.drawText(safePdfText(row), { x: left, y, size: 12, font, color: rgb(0.2, 0.2, 0.2) });
-    y -= 18;
+    drawWrapped(row, 12, false, rgb(0.2, 0.2, 0.2));
   }
   y -= 8;
-  page.drawText(safePdfText('Sutarties tekstas:'), { x: left, y, size: 12, font: bold, color: rgb(0.12, 0.12, 0.12) });
-  y -= 18;
+  drawWrapped('Sutarties tekstas:', 12, true, rgb(0.12, 0.12, 0.12));
   for (const line of String(params.body || '').split(/\r?\n/)) {
-    if (y < 56) break;
-    page.drawText(safePdfText(line), { x: left, y, size: 11, font, color: rgb(0.23, 0.23, 0.23) });
-    y -= 15;
+    drawWrapped(line, 11);
   }
   return pdfDoc.save();
 }

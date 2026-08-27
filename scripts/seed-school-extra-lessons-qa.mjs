@@ -118,40 +118,61 @@ async function main() {
 
   const supabase = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
   const docxPath = DOCX_CANDIDATES.find((p) => existsSync(p));
-  if (!docxPath) throw new Error('DOCX not found. Set EXTRA_LESSONS_DOCX or place file in Downloads.');
-  const bytes = readFileSync(docxPath);
-  const extracted = await mammoth.extractRawText({ buffer: bytes });
-  const bodyText = String(extracted.value || '').trim();
-  if (bodyText.length < 500) throw new Error('DOCX text extraction too short');
-  console.log('DOCX:', docxPath, 'chars:', bodyText.length);
+  let bytes = null;
+  let bodyText = '';
+  if (docxPath) {
+    bytes = readFileSync(docxPath);
+    const extracted = await mammoth.extractRawText({ buffer: bytes });
+    bodyText = String(extracted.value || '').trim();
+    if (bodyText.length < 500) throw new Error('DOCX text extraction too short');
+    console.log('DOCX:', docxPath, 'chars:', bodyText.length);
+  } else {
+    const { data: existingTpl } = await supabase
+      .from('school_contract_templates')
+      .select('body')
+      .eq('id', IDS.templateDemo)
+      .maybeSingle();
+    bodyText = String(existingTpl?.body || '').trim();
+    if (bodyText.length < 500) {
+      throw new Error('DOCX not found and existing Demo template body is missing. Set EXTRA_LESSONS_DOCX.');
+    }
+    console.warn('DOCX missing — reusing existing Demo extra-lessons template body, chars:', bodyText.length);
+  }
 
-  // Feature flags (idempotent)
-  for (const orgId of [DEMO_ORG, LAISVI_ORG]) {
-    const { data: org } = await supabase.from('organizations').select('features').eq('id', orgId).maybeSingle();
+  // Feature flags — Demo Mokykla only. Do not touch live schools on prod.
+  {
+    const { data: org } = await supabase.from('organizations').select('features').eq('id', DEMO_ORG).maybeSingle();
     const features = {
       ...(org?.features || {}),
       school_extra_lessons_contract: true,
       school_class_groups: true,
       school_join_no_show: true,
       school_teacher_labels: true,
-      school_lesson_recordings: true,
+      // Parked: hide Įrašai nav + extra-lessons recording-consent checkbox for QA.
+      school_lesson_recordings: false,
     };
-    await supabase.from('organizations').update({ features }).eq('id', orgId);
+    await supabase.from('organizations').update({ features }).eq('id', DEMO_ORG);
   }
 
-  await uploadTemplate(supabase, {
-    orgId: DEMO_ORG,
-    templateId: IDS.templateDemo,
-    bytes,
-    bodyText,
-  });
-  await uploadTemplate(supabase, {
-    orgId: LAISVI_ORG,
-    templateId: IDS.templateLaisvi,
-    bytes,
-    bodyText,
-  });
-  console.log('Templates uploaded for Demo Mokykla + Laisvi vaikai');
+  if (bytes) {
+    await uploadTemplate(supabase, {
+      orgId: DEMO_ORG,
+      templateId: IDS.templateDemo,
+      bytes,
+      bodyText,
+    });
+    console.log('Template uploaded for Demo Mokykla');
+  } else {
+    await supabase.from('school_contract_templates').upsert({
+      id: IDS.templateDemo,
+      organization_id: DEMO_ORG,
+      name: 'Papildomų pamokų sutartis (DOCX)',
+      body: bodyText,
+      annual_fee_default: 0,
+      is_default: false,
+    }, { onConflict: 'id' });
+    console.log('Templates reused (no DOCX file on this PC)');
+  }
 
   // Ensure tutor profile exists for Demo
   const { data: tutor } = await supabase.from('profiles').select('id').eq('id', TUTOR_ID).maybeSingle();
@@ -463,7 +484,7 @@ async function main() {
   console.log('  pass:  TutlioQaDemo2026!');
   console.log('Extra accept URL:\n ', acceptUrl);
   console.log('School groups: /school/groups');
-  console.log('Recordings:    /school/recordings');
+  console.log('Recordings:    parked (school_lesson_recordings=false; nav hidden)');
   console.log('Students:      /school/students  (default = Aktyvus only)');
   console.log('Contracts:     /school/contracts → Papildomų pamokų sutartis');
   console.log('QA emails:     alaniukasa@gmail.com (offer / accept / installment)');

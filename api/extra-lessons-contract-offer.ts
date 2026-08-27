@@ -7,8 +7,7 @@ import {
   buildExtraLessonsOrderSnapshot,
   validateExtraLessonsOffer,
 } from '../src/lib/extraLessonsContract.js';
-import { createSimpleContractPdf } from './_lib/schoolContractPdf.js';
-import { schoolContractPdfStoragePath, SCHOOL_CONTRACTS_BUCKET } from './_lib/schoolContractPdfPath.js';
+import { renderAndStoreExtraLessonsPdf } from './_lib/extraLessonsPdf.js';
 import {
   appOrigin,
   extraLessonsAcceptUrl,
@@ -145,28 +144,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   let pdfPath: string | null = null;
   try {
-    const pdfBytes = await createSimpleContractPdf({
-      contractNumber,
-      studentName: String(student.full_name || ''),
-      parentName: String(student.payer_name || ''),
-      parentEmail: String(student.payer_email || ''),
-      parentPhone: String(student.payer_phone || ''),
-      parentPersonalCode: '',
-      childBirthDate: '',
-      address: '',
-      annualFee: order.indicative_monthly_eur,
-      body: filledBody,
+    const rendered = await renderAndStoreExtraLessonsPdf(supabase, {
+      contract: { id: created.id, organization_id: access.access.organizationId, contract_number: contractNumber, template_id: templateId },
+      student,
+      filledBody,
+      indicativeMonthlyEur: order.indicative_monthly_eur,
+      extraLessonsPayload: payload,
     });
-    pdfPath = schoolContractPdfStoragePath({
-      organizationId: access.access.organizationId,
-      contractId: created.id,
-      contractNumber,
-    });
-    await supabase.storage.from(SCHOOL_CONTRACTS_BUCKET).upload(pdfPath, Buffer.from(pdfBytes), {
-      upsert: true,
-      contentType: 'application/pdf',
-    });
-    await supabase.from('school_contracts').update({ pdf_url: pdfPath }).eq('id', created.id);
+    pdfPath = rendered.uploadedPath;
+    if (pdfPath) {
+      await supabase.from('school_contracts').update({ pdf_url: pdfPath }).eq('id', created.id);
+    }
   } catch (e) {
     console.error('[extra-lessons-contract-offer] pdf', (e as Error).message);
   }

@@ -87,6 +87,12 @@ const SCHOOL_FEATURES = {
   org_admin_calendar_view: true,
   org_admin_calendar_full_control: true,
   school_contract_esign: false,
+  school_extra_lessons_contract: true,
+  school_class_groups: true,
+  school_join_no_show: true,
+  school_teacher_labels: true,
+  // Parked: school recordings UI (Įrašai) is hidden for now. Re-enable: true + SCHOOL_LESSON_RECORDINGS_NAV_READY.
+  school_lesson_recordings: false,
 };
 
 const ORGS = [

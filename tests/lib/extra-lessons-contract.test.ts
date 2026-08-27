@@ -9,6 +9,7 @@ import {
   freezeDocumentSource,
   indicativeMonthlyPrice,
   isWithinWithdrawalWindow,
+  mergeExtraLessonsOrderPatch,
   resolveStartWithin14Status,
   sha256Hex,
   startWithin14Applies,
@@ -168,5 +169,26 @@ describe('extraLessonsContract', () => {
     const accepted = '2026-08-01T10:00:00.000Z';
     expect(extraLessonsEndKind(accepted, new Date('2026-08-10T10:00:00Z'))).toBe('withdrawal');
     expect(extraLessonsEndKind(accepted, new Date('2026-08-20T10:00:00Z'))).toBe('termination');
+  });
+
+  it('merges parent-filled order fields without dropping school-set price', () => {
+    const base = buildExtraLessonsOrderSnapshot({
+      service_name: '',
+      service_type: 'group',
+      duration_minutes: 45,
+      start_date: '',
+      end_date: '',
+      unit_price_eur: 18,
+      base_lessons_per_month: 8,
+    });
+    const merged = mergeExtraLessonsOrderPatch(base, {
+      service_name: 'QA Matematika',
+      start_date: '2026-09-01',
+      end_date: '2027-06-13',
+    });
+    expect(merged.unit_price_eur).toBe(18);
+    expect(merged.base_lessons_per_month).toBe(8);
+    expect(merged.service_name).toBe('QA Matematika');
+    expect(merged.start_date).toBe('2026-09-01');
   });
 });

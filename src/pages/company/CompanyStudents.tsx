@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { extractStoragePath, openContractFileInNewTab } from '@/lib/contractStorage';
 import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
+import { finishGuardedLoad } from '@/lib/authSession';
 import { authHeaders } from '@/lib/apiHelpers';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -94,6 +95,8 @@ import { pickStudentContactsForTutorEmail } from '@/lib/orgContactVisibility';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { findOrgTutorEmailConflict } from '@/lib/orgStudentTutorGuards';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
+import { useUser } from '@/contexts/UserContext';
+import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import { hasProKlaseIntakeFeatures } from '@/lib/orgIntakeMode';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import {
@@ -289,6 +292,8 @@ export default function CompanyStudents() {
   const { t, locale } = useTranslation();
   const { fmt } = useMarketMoney();
   const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
+  const { user: authUser } = useUser();
+  const { membership } = useOrgAdminAccess();
   const proKlaseIntake =
     !isSchoolView && !orgFeaturesLoading && hasProKlaseIntakeFeatures(hasFeature);
   const orgUsesManualPackages = !orgFeaturesLoading && hasFeature('manual_payments');
@@ -722,6 +727,10 @@ export default function CompanyStudents() {
   };
 
   const shouldShowParentContacts = (student: Student) => hasSchoolParentContacts(student);
+  const showStudentSchedulePane =
+    Boolean(selectedStudent) &&
+    ((proKlaseIntake && hasFeature('student_schedule_overview')) ||
+      (!orgFeaturesLoading && hasFeature('student_availability_profile')));
 
   const paymentActions = useMemo(() => {
     if (!selectedStudent) return { canSendInvoice: false, canSendPackage: false };
@@ -729,9 +738,13 @@ export default function CompanyStudents() {
   }, [selectedStudent, tutorPaymentFlags, showPaymentModelUi]);
 
   useEffect(() => {
-    void fetchData();
+    let cancelled = false;
+    void fetchData(() => cancelled);
     setBaseUrl(window.location.origin);
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser?.id, membership?.organizationId]); // fetchData closes over these ids
 
   useEffect(() => {
     if (!orgId) return;
@@ -996,28 +1009,36 @@ export default function CompanyStudents() {
     };
   }, [selectedStudent?.id, isStudentModalOpen, modalSessionsRefreshKey]);
 
-  const fetchData = async () => {
+  const fetchData = async (isCancelled?: () => boolean) => {
+    const cancelled = () => Boolean(isCancelled?.());
     if (!getCached('company_students')) setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setLoading(false); return; }
+    await finishGuardedLoad({
+      isCancelled: cancelled,
+      setLoading,
+      run: async () => {
+    const userId = authUser?.id;
+    if (!userId) return;
 
-    // Get organization ID from organization_admins
-    const { data: adminRow } = await supabase
-      .from('organization_admins')
-      .select('organization_id')
-      .eq('user_id', user.id)
-      .maybeSingle();
+    let organizationId = membership?.organizationId ?? null;
+    if (!organizationId) {
+      const { data: adminRow } = await supabase
+        .from('organization_admins')
+        .select('organization_id')
+        .eq('user_id', userId)
+        .maybeSingle();
 
-    if (!adminRow) {
-      console.log('🔴 User is NOT an org admin!');
-      setLoading(false);
-      return;
+      if (!adminRow) {
+        console.log('🔴 User is NOT an org admin!');
+        return;
+      }
+      organizationId = adminRow.organization_id;
     }
-    setOrgId(adminRow.organization_id);
+    if (cancelled()) return;
+    setOrgId(organizationId);
 
     const tutorsList = await getOrgVisibleTutors(
       supabase as any,
-      adminRow.organization_id,
+      organizationId,
       'id, full_name, email',
     );
 
@@ -1044,6 +1065,7 @@ export default function CompanyStudents() {
       }));
     }
 
+    if (cancelled()) return;
     setTutors(tutorsWithSubjects);
     let fetchedStudents: Student[] = [];
     let studentsErr: { message: string } | null = null;
@@ -1061,7 +1083,7 @@ export default function CompanyStudents() {
           .from('students')
           .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
           .is('tutor_id', null)
-          .eq('organization_id', adminRow.organization_id)
+          .eq('organization_id', organizationId)
           .order('created_at', { ascending: false }),
       ]);
       studentsErr = byTutorRes.error || unassignedRes.error;
@@ -1080,12 +1102,13 @@ export default function CompanyStudents() {
         .from('students')
         .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
         .is('tutor_id', null)
-        .eq('organization_id', adminRow.organization_id)
+        .eq('organization_id', organizationId)
         .order('created_at', { ascending: false });
       studentsErr = error;
       fetchedStudents = (data || []) as Student[];
     }
 
+    if (cancelled()) return;
     if (studentsErr) {
       console.error('Error fetching students:', studentsErr);
       setStudents([]);
@@ -1100,7 +1123,7 @@ export default function CompanyStudents() {
       const { data: contractRows } = await supabase
         .from('school_contracts')
         .select('id, student_id, signing_status, pdf_url, signed_contract_url, created_at')
-        .eq('organization_id', adminRow.organization_id)
+        .eq('organization_id', organizationId)
         .is('archived_at', null)
         .order('created_at', { ascending: false });
       const contractIdToStudent = new Map<string, string>();
@@ -1133,7 +1156,7 @@ export default function CompanyStudents() {
           ? supabase
               .from('school_monthly_invoices')
               .select('student_id, payment_status')
-              .eq('organization_id', adminRow.organization_id)
+              .eq('organization_id', organizationId)
               .in('student_id', studentIds)
               .neq('payment_status', 'paid')
               .neq('payment_status', 'cancelled')
@@ -1159,6 +1182,7 @@ export default function CompanyStudents() {
         });
       }
     }
+    if (cancelled()) return;
     setContractsByStudent(contractMap);
     setStudentDebtById(debtMap);
 
@@ -1170,7 +1194,7 @@ export default function CompanyStudents() {
       const { data: orgRow } = await supabase
         .from('organizations')
         .select('features')
-        .eq('id', adminRow.organization_id)
+        .eq('id', organizationId)
         .maybeSingle();
       const feats = orgRow?.features && typeof orgRow.features === 'object' && !Array.isArray(orgRow.features)
         ? (orgRow.features as Record<string, unknown>)
@@ -1203,10 +1227,14 @@ export default function CompanyStudents() {
         }
       }
     }
+    if (cancelled()) return;
     setTrialNoPackageStudentIds(trialNoPackageIds);
 
     setCache('company_students', { students: fetchedStudents, tutors: tutorsWithSubjects, contractsByStudent: contractMap });
-    setLoading(false);
+      },
+    }).catch((err) => {
+      console.error('Error fetching students:', err);
+    });
   };
 
   useEffect(() => {
@@ -1649,8 +1677,7 @@ export default function CompanyStudents() {
 
     let effectiveOrgId: string | null = orgId;
     if (isSchoolView) {
-      const { data: authUserRes } = await supabase.auth.getUser();
-      const uid = authUserRes?.user?.id;
+      const uid = authUser?.id;
       if (!uid) {
         setToastMessage({ message: t('compStu.orgResolveNeedLogin'), type: 'error' });
         return;
@@ -1712,7 +1739,7 @@ export default function CompanyStudents() {
           full_name: newStudent.full_name,
           email: newStudent.email,
           phone: newStudent.phone?.trim() || null,
-          grade: normalizeStudentGrade1to12(newStudent.grade) ?? newStudent.grade || null,
+          grade: (normalizeStudentGrade1to12(newStudent.grade) ?? newStudent.grade) || null,
           school_year: isSchoolView ? (newStudent.school_year || null) : null,
           enrollment_status: isSchoolView ? newStudent.enrollment_status : 'active',
           municipality: isSchoolView ? (newStudent.municipality || null) : null,
@@ -3531,12 +3558,17 @@ export default function CompanyStudents() {
 
         {/* Student Detail Modal */}
         <Dialog open={isStudentModalOpen} onOpenChange={(open) => { setIsStudentModalOpen(open); if (!open) { setSendPackageOpen(false); } }}>
-          <DialogContent className="w-[95vw] sm:max-w-3xl lg:max-w-5xl xl:max-w-6xl max-h-[90vh] overflow-y-auto p-5 sm:p-6">
+          <DialogContent
+            className={cn(
+              'w-[calc(100%-1.5rem)] max-h-[90vh] overflow-y-auto p-5 sm:p-6',
+              showStudentSchedulePane ? 'max-w-5xl' : 'max-w-3xl',
+            )}
+          >
             <DialogHeader>
               <DialogTitle>{t('compStu.studentInfo')}</DialogTitle>
             </DialogHeader>
             {selectedStudent && (
-              <div className="space-y-5">
+              <div className="w-full min-w-0 space-y-5">
                 {selectedStudentGroup.length > 1 && (
                   <div className="p-3 rounded-xl border border-gray-100 bg-gray-50">
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">{t('compStu.thTutor')}</p>
@@ -3566,8 +3598,13 @@ export default function CompanyStudents() {
                   </div>
                 )}
                 {/* Info */}
-                <div className="grid lg:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)] gap-5 items-start pb-4 border-b border-gray-100">
-                  <div className="space-y-2 min-w-0">
+                <div
+                  className={cn(
+                    'grid w-full gap-5 items-start pb-4 border-b border-gray-100',
+                    showStudentSchedulePane && 'lg:grid-cols-2',
+                  )}
+                >
+                  <div className="space-y-3 min-w-0 w-full">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         {isEditingStudentName ? (
@@ -3639,8 +3676,15 @@ export default function CompanyStudents() {
                         </Button>
                       )}
                     </div>
-                    <div className="text-gray-600 text-sm space-y-3">
-                      <div>
+                    <div
+                      className={cn(
+                        'text-gray-600 text-sm w-full',
+                        (isSchoolView || shouldShowParentContacts(selectedStudent))
+                          ? 'grid grid-cols-1 sm:grid-cols-2 gap-4'
+                          : 'space-y-3',
+                      )}
+                    >
+                      <div className="min-w-0 w-full rounded-xl border border-gray-100 bg-gray-50/70 p-3">
                         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">{t('compStu.studentLabel')}</p>
                         <p>
                           {t('compStu.emailInline')} <span className="text-gray-900">{adminShowEmail(selectedStudent.email)}</span>
@@ -3649,8 +3693,8 @@ export default function CompanyStudents() {
                           {t('compStu.phoneInline')} <span className="text-gray-900">{adminShowPhone(selectedStudent.phone, locale)}</span>
                         </p>
                       </div>
-                      {shouldShowParentContacts(selectedStudent) && (
-                        <div className="pt-2 border-t border-gray-100">
+                      {(isSchoolView || shouldShowParentContacts(selectedStudent)) && (
+                        <div className="min-w-0 w-full rounded-xl border border-gray-100 bg-gray-50/70 p-3">
                           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">{t('compStu.payerLabel')}</p>
                           {(selectedStudent.payer_name || '').trim() && (
                             <p>
@@ -3666,38 +3710,50 @@ export default function CompanyStudents() {
                         </div>
                       )}
                     </div>
-                    <p className="text-sm font-semibold">
-                      {t('compStu.tutorInline')}{' '}
-                      {selectedStudent.tutor_id ? (
-                        <span className="text-indigo-600">{selectedStudent.tutor?.full_name || '—'}</span>
-                      ) : (
-                        <span className="text-amber-600">{t('compStu.tutorNotAssigned')}</span>
-                      )}
-                    </p>
-                    <p className="text-gray-600 text-sm">
-                      {t('compStu.codeInline')} <code className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">{selectedStudent.invite_code}</code>
-                    </p>
+                    <div className="text-sm grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <p className="font-semibold">
+                        {t('compStu.tutorInline')}{' '}
+                        {selectedStudent.tutor_id ? (
+                          <span className="text-indigo-600">{selectedStudent.tutor?.full_name || '—'}</span>
+                        ) : (
+                          <span className="text-amber-600">{t('compStu.tutorNotAssigned')}</span>
+                        )}
+                      </p>
+                      <p className="text-gray-600">
+                        {t('compStu.codeInline')} <code className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">{selectedStudent.invite_code}</code>
+                      </p>
+                    </div>
                     {isSchoolView && (
-                    <div className="mt-3 w-full space-y-1.5">
-                      <Label className="text-xs text-gray-500">{t('studentSettings.grade')}</Label>
-                      <Select
-                        value={selectedStudent.grade || 'unset'}
-                        onValueChange={(value) => void handleUpdateStudentGrade(value)}
-                      >
-                        <SelectTrigger className="h-9 rounded-xl bg-white">
-                          <SelectValue placeholder={t('dynamicPricing.gradeUnset')} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="unset">{t('dynamicPricing.gradeUnset')}</SelectItem>
-                          {GRADE_OPTIONS.map((g) => (
-                            <SelectItem key={g} value={g}>{g}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {(studentDebtById[selectedStudent.id] || selectedStudent.has_debt_manual) && (
-                        <span className="inline-flex text-[11px] border rounded-md px-2 py-0.5 text-amber-800 bg-amber-50 border-amber-200">
-                          {t('compStu.hasDebtBadge')}
-                        </span>
+                    <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-5">
+                      <div className="w-full min-w-0 space-y-1.5">
+                        <Label className="text-xs text-gray-500">{t('studentSettings.grade')}</Label>
+                        <Select
+                          value={selectedStudent.grade || 'unset'}
+                          onValueChange={(value) => void handleUpdateStudentGrade(value)}
+                        >
+                          <SelectTrigger className="h-9 rounded-xl bg-white">
+                            <SelectValue placeholder={t('dynamicPricing.gradeUnset')} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="unset">{t('dynamicPricing.gradeUnset')}</SelectItem>
+                            {GRADE_OPTIONS.map((g) => (
+                              <SelectItem key={g} value={g}>{g}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {(studentDebtById[selectedStudent.id] || selectedStudent.has_debt_manual) && (
+                          <span className="inline-flex text-[11px] border rounded-md px-2 py-0.5 text-amber-800 bg-amber-50 border-amber-200">
+                            {t('compStu.hasDebtBadge')}
+                          </span>
+                        )}
+                      </div>
+                      {selectedStudent && (
+                        <SchoolStudentContractStatus
+                          student={selectedStudent}
+                          contractInfo={contractsByStudent[selectedStudent.id]}
+                          onDownload={(path) => void openContractFile(path)}
+                          t={t}
+                        />
                       )}
                     </div>
                     )}
@@ -3754,14 +3810,6 @@ export default function CompanyStudents() {
                         <p className="text-[11px] text-amber-700">{t('dynamicPricing.studentGradeRequired')}</p>
                       )}
                     </div>
-                    )}
-                    {isSchoolView && selectedStudent && (
-                      <SchoolStudentContractStatus
-                        student={selectedStudent}
-                        contractInfo={contractsByStudent[selectedStudent.id]}
-                        onDownload={(path) => void openContractFile(path)}
-                        t={t}
-                      />
                     )}
                     {canFullEditStudent && (
                       <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-3">
@@ -4014,8 +4062,7 @@ export default function CompanyStudents() {
                     </div>
                   </div>
 
-                  {(selectedStudent && proKlaseIntake && hasFeature('student_schedule_overview')) ||
-                  (selectedStudent && !orgFeaturesLoading && hasFeature('student_availability_profile')) ? (
+                  {showStudentSchedulePane ? (
                     <div className="min-w-0 space-y-4 rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
                       {selectedStudent && proKlaseIntake && hasFeature('student_schedule_overview') && (
                         <StudentScheduleSummary
