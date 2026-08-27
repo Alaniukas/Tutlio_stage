@@ -5,6 +5,7 @@
  * - Class group + slots + members
  * - Pending extra-lessons contract with accept token URL
  * - Past session (missed join) + monthly invoice row
+ * - Offer / accept emails go to alaniukasa@gmail.com (payer_email)
  *
  * Usage:
  *   ENV_FILE=.env.local node scripts/seed-school-extra-lessons-qa.mjs
@@ -169,7 +170,7 @@ async function main() {
       municipality: 'Vilnius',
       media_publicity_consent: 'agree',
       payer_name: 'Tėvas Vilnius',
-      payer_email: 'qa.school.parent.vilnius@tutlio.lt',
+      payer_email: 'alaniukasa@gmail.com',
       payer_phone: '+37060000001',
       has_debt_manual: false,
     },
@@ -183,7 +184,7 @@ async function main() {
       municipality: 'Kaunas',
       media_publicity_consent: 'disagree',
       payer_name: 'Mama Kaunas',
-      payer_email: 'qa.school.parent.kaunas@tutlio.lt',
+      payer_email: 'alaniukasa@gmail.com',
       payer_phone: '+37060000002',
       has_debt_manual: true,
     },
@@ -197,7 +198,7 @@ async function main() {
       municipality: 'Klaipėda',
       media_publicity_consent: null,
       payer_name: 'Tėvas Future',
-      payer_email: 'qa.school.parent.future@tutlio.lt',
+      payer_email: 'alaniukasa@gmail.com',
       payer_phone: '+37060000003',
       has_debt_manual: false,
     },
@@ -211,7 +212,7 @@ async function main() {
       municipality: 'Šiauliai',
       media_publicity_consent: 'agree',
       payer_name: 'Mama Left',
-      payer_email: 'qa.school.parent.left@tutlio.lt',
+      payer_email: 'alaniukasa@gmail.com',
       payer_phone: '+37060000004',
       exit_date: '2026-03-15',
       exit_reason: 'chose_other_school',
@@ -228,7 +229,7 @@ async function main() {
       municipality: 'Panevėžys',
       media_publicity_consent: 'agree',
       payer_name: 'Tėvas Grad',
-      payer_email: 'qa.school.parent.grad@tutlio.lt',
+      payer_email: 'alaniukasa@gmail.com',
       payer_phone: '+37060000005',
       exit_date: '2026-06-13',
       exit_reason: 'other',
@@ -245,7 +246,7 @@ async function main() {
       municipality: 'Klaipėda',
       media_publicity_consent: 'agree',
       payer_name: 'Mama Extra',
-      payer_email: 'qa.school.parent.extra@tutlio.lt',
+      payer_email: 'alaniukasa@gmail.com',
       payer_phone: '+37060000006',
       has_debt_manual: false,
     },
@@ -465,6 +466,7 @@ async function main() {
   console.log('Recordings:    /school/recordings');
   console.log('Students:      /school/students  (default = Aktyvus only)');
   console.log('Contracts:     /school/contracts → Papildomų pamokų sutartis');
+  console.log('QA emails:     alaniukasa@gmail.com (offer / accept / installment)');
 }
 
 main().catch((e) => {

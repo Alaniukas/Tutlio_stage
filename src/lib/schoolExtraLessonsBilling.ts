@@ -17,6 +17,8 @@ export type ExtraLessonsBillingInput = {
   period_start: string;
   period_end: string;
   sessions: ExtraLessonsBillableSession[];
+  serviceStartYmd?: string | null;
+  endedAtIso?: string | null;
 };
 
 export type ExtraLessonsBillingResult = {
@@ -43,20 +45,48 @@ function isPayableExtra(session: ExtraLessonsBillableSession): boolean {
   return Boolean(session.student_joined_at) || session.status === 'completed';
 }
 
+export function sessionYmdUtc(iso: string): string {
+  return String(iso || '').slice(0, 10);
+}
+
+/** Skip lessons before allowed start and after withdrawal/termination. */
+export function isSessionInExtraLessonsServiceWindow(
+  sessionStartIso: string,
+  opts: { serviceStartYmd: string; endedAtIso?: string | null },
+): boolean {
+  const day = sessionYmdUtc(sessionStartIso);
+  if (!day) return false;
+  if (opts.serviceStartYmd && day < opts.serviceStartYmd) return false;
+  if (opts.endedAtIso) {
+    const endDay = sessionYmdUtc(opts.endedAtIso);
+    if (endDay && day > endDay) return false;
+    if (Date.parse(sessionStartIso) >= Date.parse(opts.endedAtIso)) return false;
+  }
+  return true;
+}
+
 export function computeExtraLessonsMonthlyBill(input: ExtraLessonsBillingInput): ExtraLessonsBillingResult {
   const unit = Math.round(Number(input.unit_price_eur) * 100) / 100;
   const baseLessons = Math.max(0, Math.round(Number(input.base_lessons_per_month) || 0));
   const extraIds = input.sessions
-    .filter((s) => inPeriod(s.start_time, input.period_start, input.period_end) && isPayableExtra(s))
+    .filter((s) => inPeriod(s.start_time, input.period_start, input.period_end)
+      && (!input.serviceStartYmd || isSessionInExtraLessonsServiceWindow(s.start_time, {
+        serviceStartYmd: input.serviceStartYmd,
+        endedAtIso: input.endedAtIso,
+      }))
+      && isPayableExtra(s))
     .map((s) => s.id);
   const extraLessons = extraIds.length;
-  const baseAmount = Math.round(baseLessons * unit * 100) / 100;
+  const periodOverlapsService = !input.serviceStartYmd
+    || input.period_end >= input.serviceStartYmd;
+  const billableBase = periodOverlapsService ? baseLessons : 0;
   const extraAmount = Math.round(extraLessons * unit * 100) / 100;
+  const baseAmount = Math.round(billableBase * unit * 100) / 100;
   return {
     period_start: input.period_start,
     period_end: input.period_end,
     unit_price_eur: unit,
-    base_lessons: baseLessons,
+    base_lessons: billableBase,
     base_amount_eur: baseAmount,
     extra_lessons: extraLessons,
     extra_amount_eur: extraAmount,

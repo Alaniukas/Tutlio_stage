@@ -1,9 +1,12 @@
 import type { VercelRequest, VercelResponse } from './types';
 import {
+  EXTRA_LESSONS_TERMS_CHECKBOX_TEXT,
+  START_WITHIN_14_CHECKBOX_TEXT,
   canClickWrapAccept,
   freezeDocumentSource,
   mergeExtraLessonsOrderPatch,
   recordingConsentLabel,
+  resolveStartWithin14Status,
   sha256Hex,
   startWithin14Label,
   validateExtraLessonsOrder,
@@ -11,6 +14,7 @@ import {
 } from '../src/lib/extraLessonsContract.js';
 import { createSimpleContractPdf } from './_lib/schoolContractPdf.js';
 import { schoolContractPdfStoragePath, SCHOOL_CONTRACTS_BUCKET } from './_lib/schoolContractPdfPath.js';
+import { verifyRequestAuth } from './_lib/auth.js';
 import {
   appOrigin,
   extraLessonsPayloadForContract,
@@ -57,18 +61,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       payload,
     });
     const incomplete = validateExtraLessonsOrder(order);
+    const start14 = resolveStartWithin14Status({ order, acceptedAt: new Date(), parentChecked: false });
+    const orgFeatures = (org.features || {}) as Record<string, unknown>;
+    const recordingsEnabled = orgFeatures.school_lesson_recordings === true;
     return res.status(200).json({
       ok: true,
       contractId: contract.id,
       contractNumber: contract.contract_number,
+      revisionLabel: order.revision_label,
       studentName: st.full_name,
       schoolName: org.name,
+      schoolEmail: org.email,
+      schoolPhone: org.phone,
       alreadyAccepted: Boolean(contract.accepted_at),
+      acceptedAt: contract.accepted_at || null,
       withdrawn: Boolean(contract.withdrawal_requested_at),
+      extraEndKind: contract.extra_end_kind || null,
+      pdfUrl: contract.signed_contract_url || contract.pdf_url || null,
       order,
       parentEditableFields: incomplete,
       summary: payload,
       body: filled,
+      startWithin14Applies: start14.applies,
+      firstLessonDate: start14.firstLessonYmd,
+      termsCheckboxText: EXTRA_LESSONS_TERMS_CHECKBOX_TEXT,
+      startWithin14CheckboxText: START_WITHIN_14_CHECKBOX_TEXT,
+      recordingsEnabled,
+      legalLinks: {
+        withdrawalForm: '/legal/extra-lessons-withdrawal-form.html',
+        privacyMailto: org.email ? `mailto:${org.email}` : null,
+      },
     });
   }
 
@@ -94,25 +116,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     parentPhone: String(st.payer_phone || ''),
     studentName: String(st.full_name || ''),
     studentGrade: String(st.grade || ''),
-    userId: String(st.id || contract.student_id || ''),
+    userId: '',
     schoolName: String(org.name || ''),
   });
 
   const acceptedTerms = body.accepted_terms === true;
-  const startWithin14 = body.start_within_14_days === true;
+  const recordingsEnabled = ((org.features || {}) as Record<string, unknown>).school_lesson_recordings === true;
   const recordingRaw = body.recording_consent;
-  const recordingConsent = recordingRaw === true ? true : recordingRaw === false ? false : null;
+  const recordingConsent = !recordingsEnabled
+    ? null
+    : recordingRaw === true ? true : recordingRaw === false ? false : null;
+  const acceptedAt = new Date();
+  const resolved14 = resolveStartWithin14Status({
+    order,
+    acceptedAt,
+    parentChecked: body.start_within_14_days === true,
+  });
+  const startWithin14 = resolved14.status === 'yes';
   if (!canClickWrapAccept({ accepted_terms: acceptedTerms, start_within_14_days: startWithin14, recording_consent: recordingConsent })) {
     return res.status(400).json({ error: 'Terms checkbox is required' });
   }
 
-  const acceptedAt = new Date();
+  const auth = await verifyRequestAuth(req);
+  const acceptedByUserId = auth?.userId || st.linked_user_id || null;
+  payload.naudotojo_ID = String(acceptedByUserId || st.payer_email || '');
+
   const acceptedAtLabel = vilniusDateTimeLabel(acceptedAt);
   payload.data_laikas_Europe_Vilnius = acceptedAtLabel;
+  const start14Label = startWithin14Label(resolved14.status);
   const filled = fillExtraLessonsBody({
     templateBody: contract.filled_body,
     payload,
-    startWithin14Label: startWithin14Label(startWithin14),
+    startWithin14Label: start14Label,
     recordingConsentLabel: recordingConsentLabel(recordingConsent),
     acceptedAtLabel,
   });
@@ -122,6 +157,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     acceptance: {
       accepted_terms: acceptedTerms,
       start_within_14_days: startWithin14,
+      start_within_14_status: resolved14.status,
+      start_within_14_shown_text: resolved14.shownText,
       recording_consent: recordingConsent,
     },
   });
@@ -130,12 +167,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     templateBody: filled,
     payload: { ...payload, 'SHA-256_ar_kitas_integralumo_ID': documentSha256 },
     sha256: documentSha256,
-    startWithin14Label: startWithin14Label(startWithin14),
+    startWithin14Label: start14Label,
     recordingConsentLabel: recordingConsentLabel(recordingConsent),
     acceptedAtLabel,
   });
 
   let pdfPath: string | null = contract.pdf_url || null;
+  let pdfBase64: string | null = null;
   try {
     const pdfBytes = await createSimpleContractPdf({
       contractNumber: String(contract.contract_number || ''),
@@ -158,6 +196,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       upsert: true,
       contentType: 'application/pdf',
     });
+    pdfBase64 = Buffer.from(pdfBytes).toString('base64');
   } catch (e) {
     console.error('[extra-lessons-contract-accept] pdf', (e as Error).message);
   }
@@ -166,10 +205,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     accepted_at: acceptedAt.toISOString(),
     accepted_terms: true,
     start_within_14_days: startWithin14,
+    start_within_14_status: resolved14.status,
+    start_within_14_shown_text: resolved14.shownText,
+    start_within_14_chosen_at: acceptedAt.toISOString(),
+    accepted_by_user_id: acceptedByUserId,
     recording_consent: recordingConsent,
     document_sha256: documentSha256,
     filled_body: frozenBody,
     order_snapshot: order,
+    revision_label: order.revision_label,
     base_lessons_per_month: order.base_lessons_per_month,
     unit_price_eur: order.unit_price_eur,
     annual_fee: order.indicative_monthly_eur,
@@ -206,6 +250,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           sha256: documentSha256,
           acceptedAt: acceptedAtLabel,
         },
+        attachments: pdfBase64
+          ? [{ filename: `sutartis-${contract.contract_number || contract.id}.pdf`, content: pdfBase64 }]
+          : undefined,
       }),
     }).catch((err) => console.error('[extra-lessons-contract-accept] email', err));
   }

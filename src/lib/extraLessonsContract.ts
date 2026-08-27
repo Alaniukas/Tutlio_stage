@@ -40,10 +40,20 @@ export type ExtraLessonsOrderSnapshot = {
   group_name?: string | null;
 };
 
+export const START_WITHIN_14_CHECKBOX_TEXT =
+  'Noriu, kad vaikas galėtų pradėti lankyti pamokas iš karto. Suprantu, kad per pirmąsias 14 dienų atsisakęs Sutarties turėsiu sumokėti už iki Sutarties atsisakymo jau suteiktas pamokas.';
+
+export const EXTRA_LESSONS_TERMS_CHECKBOX_TEXT =
+  'Perskaičiau Sutartį, susipažinau su jos priedais ir privatumo pranešimu, pateikti duomenys yra teisingi ir sutinku su Sutarties sąlygomis.';
+
+export type StartWithin14Status = 'yes' | 'no' | 'na';
+
 export type ExtraLessonsAcceptanceFlags = {
   accepted_terms: boolean;
   start_within_14_days: boolean;
   recording_consent: boolean | null;
+  start_within_14_status?: StartWithin14Status;
+  start_within_14_shown_text?: string | null;
 };
 
 const WEEKDAY_LT = ['sekmadienis', 'pirmadienis', 'antradienis', 'trečiadienis', 'ketvirtadienis', 'penktadienis', 'šeštadienis'];
@@ -206,11 +216,15 @@ export function freezeDocumentSource(params: {
   filled_body: string;
   acceptance: ExtraLessonsAcceptanceFlags;
 }): string {
+  const status = params.acceptance.start_within_14_status
+    || (params.acceptance.start_within_14_days ? 'yes' : 'no');
   return JSON.stringify({
     payload: params.payload,
     filled_body: params.filled_body,
     accepted_terms: params.acceptance.accepted_terms,
     start_within_14_days: params.acceptance.start_within_14_days,
+    start_within_14_status: status,
+    start_within_14_shown_text: params.acceptance.start_within_14_shown_text ?? null,
     recording_consent: params.acceptance.recording_consent,
   });
 }
@@ -235,20 +249,122 @@ export function recordingConsentLabel(value: boolean | null): 'TAIP' | 'NE' | 'N
   return 'NETAIKOMA';
 }
 
-export function startWithin14Label(value: boolean): 'TAIP' | 'NE' {
+export function startWithin14Label(value: boolean | StartWithin14Status): 'TAIP' | 'NE' | 'NETAIKOMA' {
+  if (value === 'na' || value === 'yes' || value === 'no') {
+    if (value === 'yes') return 'TAIP';
+    if (value === 'no') return 'NE';
+    return 'NETAIKOMA';
+  }
   return value ? 'TAIP' : 'NE';
+}
+
+export function vilniusYmd(at: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Vilnius',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(at);
+}
+
+export function addCalendarDaysYmd(ymd: string, days: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  if (!y || !m || !d) return '';
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  return dt.toISOString().slice(0, 10);
+}
+
+/** First scheduled lesson date on/after start_date (YYYY-MM-DD). No slots → start_date. */
+export function firstLessonOnOrAfter(
+  startDate: string,
+  slots: ExtraLessonsScheduleSlot[] | null | undefined,
+  endDate?: string | null,
+): string {
+  const start = String(startDate || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return '';
+  const list = Array.isArray(slots) ? slots : [];
+  if (!list.length) return start;
+  const weekdays = [...new Set(list.map((s) => Number(s.weekday)).filter((n) => n >= 0 && n <= 6))];
+  if (!weekdays.length) return start;
+  const [y, m, d] = start.split('-').map(Number);
+  const cursor = new Date(Date.UTC(y, m - 1, d));
+  const limit = endDate && /^\d{4}-\d{2}-\d{2}$/.test(endDate.slice(0, 10))
+    ? endDate.slice(0, 10)
+    : addCalendarDaysYmd(start, 366);
+  for (let i = 0; i < 400; i++) {
+    const ymd = cursor.toISOString().slice(0, 10);
+    if (ymd > limit) break;
+    if (weekdays.includes(cursor.getUTCDay())) return ymd;
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return start;
+}
+
+/** True when first lesson falls on/before accepted date + 14 calendar days (Vilnius). */
+export function startWithin14Applies(firstLessonYmd: string, acceptedAt: Date = new Date()): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(firstLessonYmd)) return false;
+  const acceptedYmd = vilniusYmd(acceptedAt);
+  const windowEnd = addCalendarDaysYmd(acceptedYmd, 14);
+  return firstLessonYmd <= windowEnd;
+}
+
+export function resolveStartWithin14Status(input: {
+  order: ExtraLessonsOrderSnapshot;
+  acceptedAt?: Date;
+  parentChecked?: boolean;
+}): { status: StartWithin14Status; shownText: string | null; applies: boolean; firstLessonYmd: string } {
+  const firstLessonYmd = firstLessonOnOrAfter(
+    input.order.start_date,
+    input.order.schedule_slots,
+    input.order.end_date,
+  );
+  const applies = startWithin14Applies(firstLessonYmd, input.acceptedAt || new Date());
+  if (!applies) {
+    return { status: 'na', shownText: null, applies: false, firstLessonYmd };
+  }
+  return {
+    status: input.parentChecked === true ? 'yes' : 'no',
+    shownText: START_WITHIN_14_CHECKBOX_TEXT,
+    applies: true,
+    firstLessonYmd,
+  };
+}
+
+/** Earliest calendar day services may be delivered. */
+export function extraLessonsServiceStartYmd(input: {
+  status: StartWithin14Status | null | undefined;
+  acceptedAtIso: string;
+  order: ExtraLessonsOrderSnapshot;
+}): string {
+  const first = firstLessonOnOrAfter(input.order.start_date, input.order.schedule_slots, input.order.end_date);
+  const acceptedYmd = vilniusYmd(new Date(input.acceptedAtIso));
+  if (input.status === 'no') {
+    const afterWindow = addCalendarDaysYmd(acceptedYmd, 14);
+    return first && first > afterWindow ? first : afterWindow;
+  }
+  return first || acceptedYmd;
 }
 
 export function withdrawalDeadlineIso(acceptedAtIso: string, days = 14): string {
   const t = Date.parse(acceptedAtIso);
   if (!Number.isFinite(t)) return '';
-  return new Date(t + days * 24 * 60 * 60 * 1000).toISOString();
+  const acceptedYmd = vilniusYmd(new Date(t));
+  const endYmd = addCalendarDaysYmd(acceptedYmd, days);
+  return `${endYmd}T20:59:59.000Z`;
 }
 
 export function isWithinWithdrawalWindow(acceptedAtIso: string, now = new Date(), days = 14): boolean {
   const t = Date.parse(acceptedAtIso);
   if (!Number.isFinite(t)) return false;
-  return now.getTime() <= t + days * 24 * 60 * 60 * 1000;
+  const acceptedYmd = vilniusYmd(new Date(t));
+  const endYmd = addCalendarDaysYmd(acceptedYmd, days);
+  return vilniusYmd(now) <= endYmd;
+}
+
+export type ExtraLessonsEndKind = 'withdrawal' | 'termination';
+
+export function extraLessonsEndKind(acceptedAtIso: string, now = new Date()): ExtraLessonsEndKind {
+  return isWithinWithdrawalWindow(acceptedAtIso, now) ? 'withdrawal' : 'termination';
 }
 
 export function isExtraLessonsContract(row: { kind?: string | null } | null | undefined): boolean {

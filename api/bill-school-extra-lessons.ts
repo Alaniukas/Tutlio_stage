@@ -5,7 +5,13 @@ import {
   computeExtraLessonsMonthlyBill,
   previousCalendarMonthVilnius,
 } from '../src/lib/schoolExtraLessonsBilling.js';
-import { EXTRA_LESSONS_CONTRACT_KIND } from '../src/lib/extraLessonsContract.js';
+import {
+  EXTRA_LESSONS_CONTRACT_KIND,
+  extraLessonsServiceStartYmd,
+  type ExtraLessonsOrderSnapshot,
+  type StartWithin14Status,
+} from '../src/lib/extraLessonsContract.js';
+import { snapshotFromRow } from './_lib/extraLessonsContractShared.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET' && req.method !== 'POST') {
@@ -21,7 +27,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { start, end } = previousCalendarMonthVilnius();
   const { data: contracts, error } = await supabase
     .from('school_contracts')
-    .select('id, organization_id, student_id, unit_price_eur, base_lessons_per_month, accepted_at, withdrawal_requested_at, kind')
+    .select('id, organization_id, student_id, unit_price_eur, base_lessons_per_month, accepted_at, withdrawal_requested_at, kind, start_within_14_status, start_within_14_days, order_snapshot')
     .eq('kind', EXTRA_LESSONS_CONTRACT_KIND)
     .eq('signing_status', 'signed')
     .not('accepted_at', 'is', null)
@@ -50,6 +56,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       continue;
     }
 
+    const order = snapshotFromRow(contract) as ExtraLessonsOrderSnapshot | null;
+    const serviceStartYmd = contract.accepted_at && order
+      ? extraLessonsServiceStartYmd({
+        status: (contract.start_within_14_status || (contract.start_within_14_days ? 'yes' : 'no')) as StartWithin14Status,
+        acceptedAtIso: contract.accepted_at,
+        order,
+      })
+      : null;
+    if (serviceStartYmd && end < serviceStartYmd) {
+      skipped += 1;
+      continue;
+    }
+
     const { data: sessions } = await supabase
       .from('sessions')
       .select('id, start_time, status, student_joined_at, school_billing_kind')
@@ -63,7 +82,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       period_start: start,
       period_end: end,
       sessions: (sessions || []) as any,
+      serviceStartYmd,
+      endedAtIso: contract.withdrawal_requested_at || null,
     });
+    if (!(bill.total_eur > 0)) {
+      skipped += 1;
+      continue;
+    }
 
     const due = new Date(`${end}T12:00:00Z`);
     due.setUTCDate(due.getUTCDate() + 7);

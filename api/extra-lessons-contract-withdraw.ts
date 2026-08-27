@@ -1,6 +1,12 @@
 import type { VercelRequest, VercelResponse } from './types';
-import { isWithinWithdrawalWindow } from '../src/lib/extraLessonsContract.js';
-import { loadExtraLessonsContractByToken, serviceSupabase } from './_lib/extraLessonsContractShared.js';
+import { extraLessonsEndKind, isWithinWithdrawalWindow } from '../src/lib/extraLessonsContract.js';
+import { parentMayEndExtraLessonsContract } from '../src/lib/extraLessonsParentPortal.js';
+import {
+  appOrigin,
+  endExtraLessonsContract,
+  loadExtraLessonsContractByToken,
+  serviceSupabase,
+} from './_lib/extraLessonsContractShared.js';
 import { verifyRequestAuth } from './_lib/auth.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -9,6 +15,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const body = (req.body || {}) as Record<string, unknown>;
   const token = String(body.token || '').trim();
   const contractId = String(body.contract_id || '').trim();
+  const intendedKind = body.intended_kind === 'termination' || body.intended_kind === 'withdrawal'
+    ? body.intended_kind
+    : null;
 
   let contract: any = null;
   if (token) {
@@ -22,29 +31,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!auth?.userId) return res.status(401).json({ error: 'Unauthorized' });
     const { data } = await supabase
       .from('school_contracts')
-      .select('*, student:students(id, linked_user_id, payer_email)')
+      .select('*')
       .eq('id', contractId)
       .maybeSingle();
-    contract = data;
+    if (!data) return res.status(404).json({ error: 'not_found' });
+    const { data: student } = await supabase
+      .from('students')
+      .select('id, full_name, payer_name, payer_email, payer_phone, linked_user_id, parent_user_id')
+      .eq('id', data.student_id)
+      .maybeSingle();
+    const allowed = parentMayEndExtraLessonsContract({
+      authUserId: auth.userId,
+      acceptedByUserId: data.accepted_by_user_id,
+      studentLinkedUserId: student?.linked_user_id,
+      studentParentUserId: student?.parent_user_id,
+    });
+    if (!allowed) return res.status(403).json({ error: 'Forbidden' });
+    const { data: organization } = await supabase
+      .from('organizations')
+      .select('id, name, email, phone')
+      .eq('id', data.organization_id)
+      .maybeSingle();
+    contract = { ...data, student, organizations: organization };
   } else {
     return res.status(400).json({ error: 'Missing token or contract_id' });
   }
 
-  if (!contract?.accepted_at) return res.status(400).json({ error: 'Not accepted yet' });
-  if (contract.withdrawal_requested_at) return res.status(409).json({ error: 'Already withdrawn' });
-  if (!isWithinWithdrawalWindow(contract.accepted_at) && body.force !== true) {
-    // After 14 days this is ordinary termination (PDF 7.2) — still allowed, flagged.
-  }
-
-  const { error } = await supabase.from('school_contracts').update({
-    withdrawal_requested_at: new Date().toISOString(),
-    withdrawal_reason: String(body.reason || 'parent_withdrawal').slice(0, 500),
-  }).eq('id', contract.id);
-  if (error) return res.status(500).json({ error: error.message });
-
+  const result = await endExtraLessonsContract({
+    supabase,
+    contract,
+    intendedKind,
+    origin: appOrigin(req),
+  });
+  if (!result.ok) return res.status(result.status).json({ error: result.error });
   return res.status(200).json({
     ok: true,
+    kind: result.kind,
     within14Days: isWithinWithdrawalWindow(contract.accepted_at),
     startWithin14: contract.start_within_14_days === true,
+    extraEndKind: extraLessonsEndKind(contract.accepted_at),
+    statementPath: result.statementPath,
   });
 }

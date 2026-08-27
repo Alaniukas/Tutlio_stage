@@ -9,6 +9,13 @@ import {
 } from './_lib/recurringOccurrences.js';
 import { findActivePackageForBooking } from '../src/lib/lessonPackageBooking.js';
 import { defaultSessionPaymentStatusForStudent } from '../src/lib/studentPaymentModel.js';
+import {
+  EXTRA_LESSONS_CONTRACT_KIND,
+  extraLessonsServiceStartYmd,
+  type ExtraLessonsOrderSnapshot,
+  type StartWithin14Status,
+} from '../src/lib/extraLessonsContract.js';
+import { snapshotFromRow } from './_lib/extraLessonsContractShared.js';
 
 const HORIZON_DAYS = 60;
 export const MATERIALIZER_BATCH_SIZE = 100;
@@ -237,6 +244,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .from('organizations')
     .select('id, features')
     .contains('features', { school_class_groups: true });
+  const extraStartByStudent = new Map<string, string>();
+  const { data: extraContracts } = await supabase
+    .from('school_contracts')
+    .select('student_id, class_group_id, accepted_at, start_within_14_status, start_within_14_days, order_snapshot, withdrawal_requested_at')
+    .eq('kind', EXTRA_LESSONS_CONTRACT_KIND)
+    .eq('signing_status', 'signed')
+    .not('accepted_at', 'is', null);
+  for (const row of extraContracts || []) {
+    if (row.withdrawal_requested_at) continue;
+    const order = snapshotFromRow(row) as ExtraLessonsOrderSnapshot | null;
+    if (!order || !row.accepted_at || !row.student_id) continue;
+    const ymd = extraLessonsServiceStartYmd({
+      status: (row.start_within_14_status || (row.start_within_14_days ? 'yes' : 'no')) as StartWithin14Status,
+      acceptedAtIso: row.accepted_at,
+      order,
+    });
+    const key = `${row.student_id}:${row.class_group_id || order.group_id || ''}`;
+    extraStartByStudent.set(key, ymd);
+  }
+
   for (const org of orgsWithGroups || []) {
     const { data: groups } = await supabase
       .from('school_class_groups')
@@ -280,6 +307,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               .eq('start_time', startUtc.toISOString())
               .maybeSingle();
             if (existing) continue;
+            const startYmd = ymd;
+            const extraGate = extraStartByStudent.get(`${member.student_id}:${group.id}`);
+            if (extraGate && startYmd < extraGate) continue;
             const { error: insErr } = await supabase.from('sessions').insert({
               tutor_id: group.tutor_id,
               student_id: member.student_id,

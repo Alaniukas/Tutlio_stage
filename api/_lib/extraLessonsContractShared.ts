@@ -55,7 +55,7 @@ export function fillExtraLessonsBody(params: {
     ...braced,
     '{{data_laikas_Europe_Vilnius}}': params.acceptedAtLabel || params.payload.data_laikas_Europe_Vilnius || vilniusDateTimeLabel(),
     '{{SHA-256_ar_kitas_integralumo_ID}}': params.sha256 || '—',
-    '{{start_within_14_label}}': params.startWithin14Label || 'NE',
+    '{{start_within_14_label}}': params.startWithin14Label || 'NETAIKOMA',
     '{{recording_consent_label}}': params.recordingConsentLabel || 'NETAIKOMA',
     '{{TAIP}}': 'TAIP',
   });
@@ -159,3 +159,108 @@ export function extraLessonsPayloadForContract(params: {
   payload.data_laikas_Europe_Vilnius = vilniusDateTimeLabel();
   return payload;
 }
+
+export async function endExtraLessonsContract(params: {
+  supabase: SupabaseClient;
+  contract: any;
+  intendedKind?: 'withdrawal' | 'termination' | null;
+  origin: string;
+}): Promise<{ ok: true; kind: 'withdrawal' | 'termination'; statementPath: string | null } | { ok: false; status: number; error: string }> {
+  const { extraLessonsEndKind } = await import('../../src/lib/extraLessonsContract.js');
+  const { createSimpleContractPdf } = await import('./schoolContractPdf.js');
+  const { schoolContractPdfStoragePath, SCHOOL_CONTRACTS_BUCKET } = await import('./schoolContractPdfPath.js');
+
+  if (!params.contract?.accepted_at) return { ok: false, status: 400, error: 'Not accepted yet' };
+  if (params.contract.withdrawal_requested_at) return { ok: false, status: 409, error: 'Already ended' };
+
+  const kind = extraLessonsEndKind(params.contract.accepted_at);
+  if (params.intendedKind && params.intendedKind !== kind) {
+    return {
+      ok: false,
+      status: 400,
+      error: kind === 'withdrawal'
+        ? 'Per 14 dienų naudokite atsisakymą, ne nutraukimą.'
+        : '14 dienų atsisakymo terminas pasibaigė — naudokite nutraukimą.',
+    };
+  }
+
+  const now = new Date();
+  const st = params.contract.student || {};
+  const org = params.contract.organizations || {};
+  const title = kind === 'withdrawal' ? 'Sutarties atsisakymas' : 'Sutarties nutraukimas';
+  const body = `${title}
+
+Sutarties Nr. ${params.contract.contract_number || params.contract.id}
+Redakcija ${params.contract.revision_label || ''}
+Vaikas ${st.full_name || ''}
+Mokykla ${org.name || ''}
+Data ir laikas (Europe/Vilnius) ${vilniusDateTimeLabel(now)}
+
+Sis pranesimas uzregistruotas Tutlio paskyroje. Mokytojo atskirai informuoti nereikia.
+`;
+
+  let statementPath: string | null = null;
+  let pdfBase64: string | null = null;
+  try {
+    const pdfBytes = await createSimpleContractPdf({
+      contractNumber: String(params.contract.contract_number || ''),
+      studentName: String(st.full_name || ''),
+      parentName: String(st.payer_name || ''),
+      parentEmail: String(st.payer_email || ''),
+      parentPhone: String(st.payer_phone || ''),
+      parentPersonalCode: '',
+      childBirthDate: '',
+      address: '',
+      annualFee: 0,
+      body,
+    });
+    statementPath = schoolContractPdfStoragePath({
+      organizationId: String(params.contract.organization_id),
+      contractId: String(params.contract.id),
+      contractNumber: `${params.contract.contract_number || 'extra'}-${kind}`,
+    });
+    await params.supabase.storage.from(SCHOOL_CONTRACTS_BUCKET).upload(statementPath, Buffer.from(pdfBytes), {
+      upsert: true,
+      contentType: 'application/pdf',
+    });
+    pdfBase64 = Buffer.from(pdfBytes).toString('base64');
+  } catch (e) {
+    console.error('[extra-lessons] statement pdf', (e as Error).message);
+  }
+
+  const { error } = await params.supabase.from('school_contracts').update({
+    withdrawal_requested_at: now.toISOString(),
+    withdrawal_reason: kind === 'withdrawal' ? 'parent_withdrawal' : 'parent_termination',
+    extra_end_kind: kind,
+    extra_end_statement_path: statementPath,
+  }).eq('id', params.contract.id);
+  if (error) return { ok: false, status: 500, error: error.message };
+
+  const to = String(st.payer_email || '').trim();
+  if (to) {
+    await fetch(`${params.origin}/api/send-email`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-internal-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+      },
+      body: JSON.stringify({
+        type: kind === 'withdrawal' ? 'school_contract_extra_withdrawn' : 'school_contract_extra_terminated',
+        to,
+        data: {
+          schoolName: org.name,
+          studentName: st.full_name,
+          parentName: st.payer_name,
+          contractNumber: params.contract.contract_number,
+          at: vilniusDateTimeLabel(now),
+        },
+        attachments: pdfBase64
+          ? [{ filename: `${kind}-${params.contract.contract_number || 'sutartis'}.pdf`, content: pdfBase64 }]
+          : undefined,
+      }),
+    }).catch((err) => console.error('[extra-lessons] end email', err));
+  }
+
+  return { ok: true, kind, statementPath };
+}
+
