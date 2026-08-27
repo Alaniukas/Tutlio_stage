@@ -8,7 +8,7 @@ import { parentLegalAcceptanceMissing, proKlaseLegalHref, usesProKlaseLegalDocs 
 import { DateInput } from '@/components/ui/date-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { formatLocalYmd } from '@/lib/monthlyPackagePlan';
-import { normalizeStudentGrade1to12 } from '@/lib/studentGrade';
+import { normalizeStudentGrade1to12, studentGradeSelectValue } from '@/lib/studentGrade';
 
 function ageFromIso(iso: string): number | null {
   if (!iso) return null;
@@ -75,6 +75,8 @@ export default function ParentRegister() {
         });
         setLegalOrgId(data.organization_id ? String(data.organization_id) : null);
         setFullName(data.parent_name || '');
+        setChildGrade(studentGradeSelectValue(data.student_grade || ''));
+        setChildBirthDate(String(data.student_birth_date || '').slice(0, 10));
         setResolvedToken(data.token?.trim() || tokenFromUrl);
       }
       setLoading(false);
@@ -112,6 +114,8 @@ export default function ParentRegister() {
       });
       setLegalOrgId(data.organization_id ? String(data.organization_id) : null);
       setFullName(data.parent_name || '');
+      setChildGrade(studentGradeSelectValue(data.student_grade || ''));
+      setChildBirthDate(String(data.student_birth_date || '').slice(0, 10));
       setResolvedToken(data.token);
     } catch {
       setError(t('common.error'));
@@ -140,10 +144,12 @@ export default function ParentRegister() {
       return;
     }
 
+    const privacyOk = agreePrivacy && (!usesProKlaseLegalDocs(legalOrgId) || agreeProKlasePrivacy);
+    const termsOk = agreeTerms && (!usesProKlaseLegalDocs(legalOrgId) || agreeProKlaseTerms);
     if (parentLegalAcceptanceMissing({
       orgIdOrSlug: legalOrgId,
-      acceptedPrivacy: agreePrivacy && agreeProKlasePrivacy,
-      acceptedTerms: agreeTerms && agreeProKlaseTerms,
+      acceptedPrivacy: privacyOk,
+      acceptedTerms: termsOk,
     })) {
       setError(t('parent.mustAcceptLegal'));
       return;
@@ -185,7 +191,7 @@ export default function ParentRegister() {
           setError(t('parent.invalidManualInvite'));
         } else if (code === 'invite_used') {
           setError(t('parent.tokenUsed'));
-        } else if (code === 'registration_failed') {
+        } else if (code === 'registration_failed' || code === 'email_already_registered') {
           setError(t('parent.registerFailed'));
         } else if (code === 'grade_required') {
           setError(t('parent.gradeRequired'));
@@ -391,24 +397,25 @@ export default function ParentRegister() {
                 </button>
               </div>
             </div>
-            {usesProKlaseLegalDocs(legalOrgId) && (
-              <div className="space-y-3 pt-1">
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input type="checkbox" checked={agreePrivacy} onChange={(e) => setAgreePrivacy(e.target.checked)} className="mt-1 h-4 w-4 rounded border-gray-300 text-violet-600" />
-                  <span className="text-sm text-gray-600">
-                    {t('auth.agreeWith')}{' '}
-                    <Link to="/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-violet-600 hover:underline font-medium">{t('auth.privacyPolicy')}</Link>
-                    . <span className="text-red-500">*</span>
-                  </span>
-                </label>
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input type="checkbox" checked={agreeTerms} onChange={(e) => setAgreeTerms(e.target.checked)} className="mt-1 h-4 w-4 rounded border-gray-300 text-violet-600" />
-                  <span className="text-sm text-gray-600">
-                    {t('auth.agreeWith')}{' '}
-                    <Link to="/terms" target="_blank" rel="noopener noreferrer" className="text-violet-600 hover:underline font-medium">{t('auth.termsOfService')}</Link>
-                    . <span className="text-red-500">*</span>
-                  </span>
-                </label>
+            <div className="space-y-3 pt-1">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" checked={agreePrivacy} onChange={(e) => setAgreePrivacy(e.target.checked)} className="mt-1 h-4 w-4 rounded border-gray-300 text-violet-600" />
+                <span className="text-sm text-gray-600">
+                  {t('auth.agreeWith')}{' '}
+                  <Link to="/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-violet-600 hover:underline font-medium">{t('auth.privacyPolicy')}</Link>
+                  . <span className="text-red-500">*</span>
+                </span>
+              </label>
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" checked={agreeTerms} onChange={(e) => setAgreeTerms(e.target.checked)} className="mt-1 h-4 w-4 rounded border-gray-300 text-violet-600" />
+                <span className="text-sm text-gray-600">
+                  {t('auth.agreeWith')}{' '}
+                  <Link to="/terms" target="_blank" rel="noopener noreferrer" className="text-violet-600 hover:underline font-medium">{t('auth.termsOfService')}</Link>
+                  . <span className="text-red-500">*</span>
+                </span>
+              </label>
+              {usesProKlaseLegalDocs(legalOrgId) && (
+                <>
                 <label className="flex items-start gap-3 cursor-pointer">
                   <input type="checkbox" checked={agreeProKlasePrivacy} onChange={(e) => setAgreeProKlasePrivacy(e.target.checked)} className="mt-1 h-4 w-4 rounded border-gray-300 text-violet-600" />
                   <span className="text-sm text-gray-600">
@@ -425,8 +432,9 @@ export default function ParentRegister() {
                     . <span className="text-red-500">*</span>
                   </span>
                 </label>
-              </div>
-            )}
+                </>
+              )}
+            </div>
             {error && (
               <div className="space-y-2">
                 <p className="text-red-500 text-xs">{error}</p>
@@ -438,7 +446,7 @@ export default function ParentRegister() {
                 </Link>
               </div>
             )}
-            <button type="submit" disabled={submitting || !fullName.trim() || password.length < 6 || !normalizeStudentGrade1to12(childGrade) || (usesProKlaseLegalDocs(legalOrgId) && (!agreePrivacy || !agreeTerms || !agreeProKlasePrivacy || !agreeProKlaseTerms))} className="w-full py-3 rounded-2xl bg-violet-600 text-white font-bold text-sm hover:bg-violet-700 disabled:opacity-50">
+            <button type="submit" disabled={submitting || !fullName.trim() || password.length < 6 || !normalizeStudentGrade1to12(childGrade) || !agreePrivacy || !agreeTerms || (usesProKlaseLegalDocs(legalOrgId) && (!agreeProKlasePrivacy || !agreeProKlaseTerms))} className="w-full py-3 rounded-2xl bg-violet-600 text-white font-bold text-sm hover:bg-violet-700 disabled:opacity-50">
               {submitting ? t('common.loading') : t('parent.registerBtn')}
             </button>
           </form>

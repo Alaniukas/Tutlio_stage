@@ -2,9 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { matchRecordingToSession, groupsCanViewRecording } from '../../src/lib/schoolLessonRecordings';
 import {
   addGroupScheduleSlot,
+  classGroupLessonPrefill,
   classGroupRowFields,
   groupToWriteDraft,
+  groupsContainingStudent,
+  groupsTaughtByTutor,
+  nextClassGroupOccurrence,
   parseClassGroupWriteBody,
+  resolveTutorSubjectForClassGroup,
   scheduleLabelFromGroupSlots,
   studentsForGroupPicker,
   toggleMemberIds,
@@ -149,5 +154,65 @@ describe('schoolLessonRecordings + class groups', () => {
     expect(studentsForGroupPicker(students, []).map((s) => s.id)).toEqual(['active']);
     expect(toggleMemberIds(['s1'], 's2')).toEqual(['s1', 's2']);
     expect(toggleMemberIds(['s1', 's2'], 's1')).toEqual(['s2']);
+  });
+
+  it('lists class groups by student and tutor', () => {
+    const groups = [
+      {
+        id: 'g1',
+        name: 'LT 2kl',
+        tutor_id: 't1',
+        school_year_start: '2026-09-01',
+        school_year_end: '2027-06-15',
+        slots: [{ weekday: 2, start_time: '16:00', end_time: '16:45' }],
+        members: [{ student_id: 's1' }, { student_id: 's2' }],
+      },
+      {
+        id: 'g2',
+        name: 'MAT 5kl',
+        tutor_id: 't2',
+        school_year_start: '2026-09-01',
+        school_year_end: '2027-06-15',
+        slots: [{ weekday: 4, start_time: '17:00', end_time: '17:45' }],
+        members: [{ student_id: 's1' }],
+      },
+    ];
+    expect(groupsContainingStudent(groups, 's1').map((g) => g.id)).toEqual(['g1', 'g2']);
+    expect(groupsContainingStudent(groups, 's2').map((g) => g.id)).toEqual(['g1']);
+    expect(groupsTaughtByTutor(groups, 't2').map((g) => g.id)).toEqual(['g2']);
+  });
+
+  it('prefills a lesson from the next matching group slot', () => {
+    const group = {
+      id: 'g1',
+      name: 'QA Legal Matematika',
+      tutor_id: 't1',
+      subject_id: 'subj-1',
+      school_year_start: '2026-09-01',
+      school_year_end: '2027-06-15',
+      duration_minutes: 45,
+      meeting_link: 'https://meet.google.com/abc-defg-hij',
+      slots: [
+        { weekday: 2, start_time: '16:00', end_time: '16:45' },
+        { weekday: 4, start_time: '17:00', end_time: '17:45' },
+      ],
+      members: [{ student_id: 's1' }, { student_id: 's2' }],
+    };
+    const mondayMorning = new Date(2026, 7, 24, 10, 0, 0);
+    const occ = nextClassGroupOccurrence(group.slots, 45, mondayMorning);
+    expect(occ?.start.getDay()).toBe(2);
+    expect(occ?.start.getHours()).toBe(16);
+    expect(occ?.end.getMinutes()).toBe(45);
+
+    const tuesdayClick = new Date(2026, 7, 25, 14, 0, 0);
+    const prefill = classGroupLessonPrefill(group, { from: mondayMorning, preferDate: tuesdayClick });
+    expect(prefill.tutorId).toBe('t1');
+    expect(prefill.studentIds).toEqual(['s1', 's2']);
+    expect(prefill.topic).toBe('QA Legal Matematika');
+    expect(prefill.meetingLink).toBe('https://meet.google.com/abc-defg-hij');
+    expect(prefill.start?.getDay()).toBe(2);
+    expect(prefill.start?.getHours()).toBe(16);
+    expect(prefill.recurringEndDate).toBe('2027-06-15');
+    expect(resolveTutorSubjectForClassGroup(group, [{ id: 'subj-1', name: 'Matematika' }])).toBe('subj-1');
   });
 });

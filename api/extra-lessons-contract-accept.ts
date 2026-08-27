@@ -1,6 +1,5 @@
 import type { VercelRequest, VercelResponse } from './types';
 import {
-  EXTRA_LESSONS_DEFAULT_BODY,
   EXTRA_LESSONS_TERMS_CHECKBOX_TEXT,
   START_WITHIN_14_CHECKBOX_TEXT,
   canClickWrapAccept,
@@ -16,9 +15,10 @@ import {
 import { renderAndStoreExtraLessonsPdf, signSchoolContractPdf } from './_lib/extraLessonsPdf.js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import {
-  appOrigin,
   extraLessonsPayloadForContract,
+  extraLessonsTemplateSource,
   fillExtraLessonsBody,
+  internalApiOrigin,
   loadExtraLessonsContractByToken,
   serviceSupabase,
   snapshotFromRow,
@@ -43,9 +43,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const st = contract.student || {};
   const org = contract.organizations || {};
-  const templateBody = String(contract.filled_body || '').trim().length > 400
-    ? String(contract.filled_body)
-    : EXTRA_LESSONS_DEFAULT_BODY;
+  const templateBody = extraLessonsTemplateSource({
+    organizationId: contract.organization_id,
+    storedBody: contract.filled_body,
+  });
 
   async function renderPreviewPdf(payload: Record<string, string>, filled: string): Promise<string | null> {
     try {
@@ -79,25 +80,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       userId: String(st.id || contract.student_id || ''),
       schoolName: String(org.name || ''),
     });
-    const filled = fillExtraLessonsBody({
-      templateBody,
-      payload,
-    });
     const incomplete = validateExtraLessonsOrder(order);
     const start14 = resolveStartWithin14Status({ order, acceptedAt: new Date(), parentChecked: false });
     const orgFeatures = (org.features || {}) as Record<string, unknown>;
     const recordingsEnabled = orgFeatures.school_lesson_recordings === true;
+    payload.start_within_14_label = startWithin14Label(start14.status);
+    payload.recording_consent_label = recordingsEnabled ? '—' : 'NETAIKOMA';
+    payload.sutikimo_su_salygomis_busena = contract.accepted_at ? 'TAIP' : '—';
+    const filled = fillExtraLessonsBody({
+      templateBody,
+      organizationId: contract.organization_id,
+      payload,
+      startWithin14Label: payload.start_within_14_label,
+      recordingConsentLabel: payload.recording_consent_label,
+      termsAcceptedLabel: payload.sutikimo_su_salygomis_busena,
+    });
 
     let pdfUrl: string | null = null;
     if (contract.accepted_at || opts.alreadyAccepted) {
       pdfUrl = await signSchoolContractPdf(supabase, contract.signed_contract_url || contract.pdf_url);
     } else {
-      if (!opts.forceRender) {
-        pdfUrl = await signSchoolContractPdf(supabase, contract.pdf_url);
-      }
-      if (!pdfUrl) {
-        pdfUrl = await renderPreviewPdf(payload, filled);
-      }
+      pdfUrl = await renderPreviewPdf(payload, filled);
       if (!pdfUrl) {
         pdfUrl = await signSchoolContractPdf(supabase, contract.pdf_url);
       }
@@ -164,7 +167,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     parentPhone: String(st.payer_phone || ''),
     studentName: String(st.full_name || ''),
     studentGrade: String(st.grade || ''),
-    userId: '',
+    userId: String(st.id || contract.student_id || ''),
     schoolName: String(org.name || ''),
   });
 
@@ -195,12 +198,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const acceptedAtLabel = vilniusDateTimeLabel(acceptedAt);
   payload.data_laikas_Europe_Vilnius = acceptedAtLabel;
   const start14Label = startWithin14Label(resolved14.status);
+  const recLabel = recordingConsentLabel(recordingConsent);
+  payload.sutikimo_su_salygomis_busena = 'TAIP';
+  payload.start_within_14_label = start14Label;
+  payload.recording_consent_label = recLabel;
   const filled = fillExtraLessonsBody({
     templateBody,
+    organizationId: contract.organization_id,
     payload,
     startWithin14Label: start14Label,
-    recordingConsentLabel: recordingConsentLabel(recordingConsent),
+    recordingConsentLabel: recLabel,
     acceptedAtLabel,
+    termsAcceptedLabel: 'TAIP',
   });
   const freezeSource = freezeDocumentSource({
     payload,
@@ -214,13 +223,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     },
   });
   const documentSha256 = await sha256Hex(freezeSource);
+  payload.dokumento_sha256 = documentSha256;
+  payload['SHA-256_ar_kitas_integralumo_ID'] = documentSha256;
+  payload.el_pastas_ir_issiuntimo_data_laikas = [String(st.payer_email || '').trim(), acceptedAtLabel]
+    .filter(Boolean)
+    .join(' · ');
   const frozenBody = fillExtraLessonsBody({
-    templateBody: filled,
-    payload: { ...payload, 'SHA-256_ar_kitas_integralumo_ID': documentSha256 },
+    templateBody,
+    organizationId: contract.organization_id,
+    payload,
     sha256: documentSha256,
     startWithin14Label: start14Label,
-    recordingConsentLabel: recordingConsentLabel(recordingConsent),
+    recordingConsentLabel: recLabel,
     acceptedAtLabel,
+    termsAcceptedLabel: 'TAIP',
+    confirmationSentLabel: payload.el_pastas_ir_issiuntimo_data_laikas,
   });
 
   let pdfPath: string | null = contract.pdf_url || null;
@@ -268,7 +285,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq('id', tokenRow.id);
   }
 
-  const origin = appOrigin(req);
+  const origin = internalApiOrigin(req);
   const to = String(st.payer_email || '').trim();
   if (to) {
     await fetch(`${origin}/api/send-email`, {
@@ -281,6 +298,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         type: 'school_contract_extra_accepted',
         to,
         data: {
+          organizationId: contract.organization_id,
           schoolName: org.name,
           studentName: st.full_name,
           parentName: st.payer_name,

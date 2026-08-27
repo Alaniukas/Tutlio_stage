@@ -90,6 +90,7 @@ const PreviewComplimentaryLesson = import.meta.env.DEV
 const ParentDashboard = lazy(() => import('@/pages/ParentDashboard'));
 const ParentSessions = lazy(() => import('@/pages/ParentSessions'));
 const ParentInvoices = lazy(() => import('@/pages/ParentInvoices'));
+const ParentContracts = lazy(() => import('@/pages/ParentContracts'));
 const ParentMessages = lazy(() => import('@/pages/ParentMessages'));
 const ParentInstructions = lazy(() => import('@/pages/ParentInstructions'));
 const ParentSettings = lazy(() => import('@/pages/ParentSettings'));
@@ -401,6 +402,7 @@ export default function App({ basename }: { basename: string }) {
           <Route path="/parent/child/:studentId" element={<ParentLegacyChildToLessonsRedirect />} />
           <Route path="/parent/child/:studentId/waitlist" element={<ParentLegacyChildToLessonsRedirect />} />
           <Route path="/parent/invoices" element={<ParentInvoices />} />
+          <Route path="/parent/contracts" element={<ParentContracts />} />
           <Route path="/parent/messages" element={<ParentMessages />} />
           <Route path="/parent/settings" element={<ParentSettings />} />
           <Route path="/parent/instructions" element={<ParentInstructions />} />

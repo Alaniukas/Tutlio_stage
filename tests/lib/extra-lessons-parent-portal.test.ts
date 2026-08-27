@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isParentVisibleSchoolContract,
   mapExtraLessonsParentContract,
+  mapParentSchoolContract,
   parentMayEndExtraLessonsContract,
+  parentSchoolContractStatusI18nKey,
   uniqueStudentIds,
 } from '../../src/lib/extraLessonsParentPortal';
 
@@ -72,5 +75,30 @@ describe('extraLessonsParentPortal', () => {
     expect(done.canWithdraw).toBe(false);
     expect(done.canTerminate).toBe(false);
     expect(done.withdrawn).toBe(true);
+  });
+
+  it('lists annual school contracts without extra-lessons end actions', () => {
+    const mapped = mapParentSchoolContract({
+      id: 'annual-1',
+      contract_number: 'UG-1',
+      revision_label: null,
+      accepted_at: null,
+      signed_contract_url: 'org/a.pdf',
+      pdf_url: null,
+      extra_end_statement_path: null,
+      withdrawal_requested_at: null,
+      extra_end_kind: null,
+      start_within_14_status: null,
+      student_id: 's1',
+      kind: 'annual',
+      signing_status: 'signed',
+    }, 'QA Vaikas');
+    expect(mapped.kind).toBe('annual');
+    expect(mapped.hasPdf).toBe(true);
+    expect(mapped.canWithdraw).toBe(false);
+    expect(mapped.canTerminate).toBe(false);
+    expect(parentSchoolContractStatusI18nKey('signed')).toBe('school.filterSigned');
+    expect(isParentVisibleSchoolContract({ party_kind: 'teacher' })).toBe(false);
+    expect(isParentVisibleSchoolContract({ party_kind: 'student' })).toBe(true);
   });
 });

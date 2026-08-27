@@ -7,10 +7,11 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
  * text-dump PDF over the real contract (that dump would then be reviewed and
  * e-signed via GoSign).
  */
-const mocks = vi.hoisted(() => ({ renderDocx: vi.fn() }));
+const mocks = vi.hoisted(() => ({ renderDocx: vi.fn(), renderDocxBuffer: vi.fn() }));
 
 vi.mock('../../api/_lib/renderSchoolContractDocxToPdf', () => ({
   renderDocxTemplateUrlToPdfBuffer: mocks.renderDocx,
+  renderDocxTemplateBufferToPdfBuffer: mocks.renderDocxBuffer,
 }));
 
 import { PDFDocument } from 'pdf-lib';
@@ -60,6 +61,7 @@ const DOCX_TEMPLATE_URL =
 
 beforeEach(() => {
   mocks.renderDocx.mockReset();
+  mocks.renderDocxBuffer.mockReset();
 });
 
 describe('renderAndStoreSchoolContractPdf — DOCX template fidelity', () => {
@@ -145,7 +147,7 @@ describe('renderAndStoreExtraLessonsPdf', () => {
         select: () => ({
           eq: () => ({
             maybeSingle: async () => ({
-              data: { pdf_url: DOCX_TEMPLATE_URL },
+              data: { pdf_url: DOCX_TEMPLATE_URL, name: 'Papildomų pamokų sutartis (DOCX)' },
             }),
           }),
         }),
@@ -202,6 +204,25 @@ describe('renderAndStoreExtraLessonsPdf', () => {
     expect(Buffer.from(bytes).subarray(0, 5).toString()).toBe('%PDF-');
     const doc = await PDFDocument.load(bytes);
     expect(doc.getPageCount()).toBeGreaterThan(1);
+    expect(result.uploadedPath).toBe(uploads[0].path);
+  });
+
+  it('uses the bundled Laisvi vaikai DOCX for Demo Mokykla', async () => {
+    const { supabase, uploads } = makeExtraSupabase();
+    const converted = Buffer.from('%PDF-1.7 bundled-docx');
+    mocks.renderDocxBuffer.mockResolvedValueOnce(converted);
+
+    const result = await renderAndStoreExtraLessonsPdf(supabase as any, {
+      ...extraParams,
+      contract: {
+        ...extraParams.contract,
+        organization_id: 'c3a00000-7e57-4000-8000-000000000001',
+      },
+    });
+
+    expect(mocks.renderDocxBuffer).toHaveBeenCalledOnce();
+    expect(mocks.renderDocx).not.toHaveBeenCalled();
+    expect(Buffer.from(uploads[0].data)).toEqual(converted);
     expect(result.uploadedPath).toBe(uploads[0].path);
   });
 });

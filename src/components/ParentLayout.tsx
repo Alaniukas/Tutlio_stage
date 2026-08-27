@@ -8,11 +8,12 @@ import {
   FileText,
   BookOpen,
   Settings,
+  ScrollText,
 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { useTotalChatUnread } from '@/hooks/useChat';
+import { useParentHasSchoolOrg } from '@/hooks/useParentHasSchoolOrg';
 import { preloadParentData } from '@/lib/preload';
-import PwaInstallPrompt from '@/components/PwaInstallPrompt';
 import BrandedLogo from '@/components/BrandedLogo';
 
 interface ParentLayoutProps {
@@ -23,30 +24,36 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
   const { t } = useTranslation();
   const location = useLocation();
   const chatUnreadTotal = useTotalChatUnread();
+  const hasSchoolOrg = useParentHasSchoolOrg();
 
   useEffect(() => {
     void preloadParentData();
   }, []);
 
   const navItems = useMemo(
-    () => [
-      { href: '/parent', label: t('parent.dashboard'), icon: LayoutDashboard },
-      { href: '/parent/calendar', label: t('nav.calendar'), icon: CalendarDays },
-      {
-        href: '/parent/lessons',
-        label: t('parent.sessionsTitle') || 'Pamokos',
-        icon: BookOpen,
-      },
-      { href: '/parent/messages', label: t('parent.messages'), icon: MessageSquare, badge: 'chat' as const },
-      { href: '/parent/invoices', label: t('parent.invoices'), icon: FileText },
-      { href: '/parent/settings', label: t('parent.settingsNav'), icon: Settings },
-    ],
-    [t],
+    () => {
+      const items = [
+        { href: '/parent', label: t('parent.dashboard'), icon: LayoutDashboard },
+        { href: '/parent/calendar', label: t('nav.calendar'), icon: CalendarDays },
+        {
+          href: '/parent/lessons',
+          label: t('parent.sessionsTitle') || 'Pamokos',
+          icon: BookOpen,
+        },
+        { href: '/parent/messages', label: t('parent.messages'), icon: MessageSquare, badge: 'chat' as const },
+        ...(hasSchoolOrg
+          ? [{ href: '/parent/contracts', label: t('parent.contracts'), icon: ScrollText }]
+          : []),
+        { href: '/parent/invoices', label: t('parent.invoices'), icon: FileText },
+        { href: '/parent/settings', label: t('parent.settingsNav'), icon: Settings },
+      ];
+      return items;
+    },
+    [t, hasSchoolOrg],
   );
 
   return (
     <div className="min-h-screen bg-[#fffefc] flex flex-col relative overflow-x-hidden">
-      <PwaInstallPrompt settingsPath="/parent/settings" />
       <div className="absolute top-0 right-0 w-96 h-96 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none z-0 bg-[color-mix(in_srgb,var(--org-brand)_14%,#ffffff)]" />
       <div className="absolute bottom-32 left-0 w-96 h-96 bg-rose-100/30 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 pointer-events-none z-0" />
 
@@ -65,7 +72,7 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
         className="fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur-sm border-t border-gray-100 z-50 shadow-[0_-4px_20px_-8px_rgba(0,0,0,0.08)] max-w-[100vw] overflow-x-hidden"
         style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
       >
-        <div className="grid grid-cols-6 gap-0 px-0.5 sm:px-1 pt-2 pb-1">
+        <div className={`grid gap-0 px-0.5 sm:px-1 pt-2 pb-1 ${hasSchoolOrg ? 'grid-cols-7' : 'grid-cols-6'}`}>
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = location.pathname === item.href;
@@ -91,7 +98,7 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
                   )}
                 </div>
                 <span
-                  className={`block w-full text-[11px] sm:text-xs font-semibold leading-tight text-center px-1 ${
+                  className={`block w-full text-[10px] sm:text-xs font-semibold leading-tight text-center px-0.5 ${
                     active ? 'text-[var(--org-brand)]' : ''
                   }`}
                 >

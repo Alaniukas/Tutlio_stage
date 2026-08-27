@@ -460,7 +460,7 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     name: 'Papildomų pamokų sutartys (klik-akceptas)',
     nameEn: 'Extra-lessons contracts (click-wrap)',
     description:
-      'Mokykla pildo užsakymo formą (grafikas, kaina, bazinis pamokų skaičius). Tėvai Tutlio paskyroje peržiūri visą tekstą ir spaudžia „Užsakymas su prievole sumokėti“. Užšaldoma parodyta redakcija (SHA-256), galima 14 d. atsisakyti. GoSign lieka neprivalomas.',
+      'Mokykla pildo užsakymo formą (grafikas, kaina, bazinis pamokų skaičius). Tėvai Tutlio paskyroje peržiūri visą tekstą ir spaudžia „Patvirtinti sutartį“. Užšaldoma parodyta redakcija (SHA-256), 14 d. atsisakyti galima tėvų portale. GoSign lieka neprivalomas.',
     descriptionEn:
       'School fills an order form (schedule, price, base lesson count). Parents review the full text in Tutlio and click “Order with obligation to pay”. The shown redaction is frozen (SHA-256); 14-day withdrawal is available. GoSign stays optional.',
     category: 'advanced',

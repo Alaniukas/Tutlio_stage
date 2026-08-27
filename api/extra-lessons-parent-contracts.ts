@@ -1,6 +1,5 @@
 import type { VercelRequest, VercelResponse } from './types';
-import { EXTRA_LESSONS_CONTRACT_KIND } from '../src/lib/extraLessonsContract.js';
-import { mapExtraLessonsParentContract, uniqueStudentIds } from '../src/lib/extraLessonsParentPortal.js';
+import { isParentVisibleSchoolContract, mapParentSchoolContract, uniqueStudentIds } from '../src/lib/extraLessonsParentPortal.js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { serviceSupabase } from './_lib/extraLessonsContractShared.js';
 import { extractSchoolContractStoragePath, SCHOOL_CONTRACTS_BUCKET } from './_lib/schoolContractPdfPath.js';
@@ -32,19 +31,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const studentIds = uniqueStudentIds(linked);
   if (!studentIds.length) return res.status(200).json({ ok: true, contracts: [] });
 
-  const { data: rows, error } = await supabase
+  const selectCols =
+    'id, contract_number, revision_label, accepted_at, signing_status, signed_contract_url, pdf_url, extra_end_statement_path, withdrawal_requested_at, extra_end_kind, start_within_14_status, student_id, kind, party_kind, created_at';
+  let { data: rows, error } = await supabase
     .from('school_contracts')
-    .select('id, contract_number, revision_label, accepted_at, signing_status, signed_contract_url, pdf_url, extra_end_statement_path, withdrawal_requested_at, extra_end_kind, start_within_14_status, student_id, kind')
-    .eq('kind', EXTRA_LESSONS_CONTRACT_KIND)
-    .eq('signing_status', 'signed')
+    .select(selectCols)
+    .is('archived_at', null)
     .in('student_id', studentIds)
-    .order('accepted_at', { ascending: false });
+    .order('created_at', { ascending: false });
+  if (error && /party_kind/i.test(error.message)) {
+    ({ data: rows, error } = await supabase
+      .from('school_contracts')
+      .select(selectCols.replace(', party_kind', ''))
+      .is('archived_at', null)
+      .in('student_id', studentIds)
+      .order('created_at', { ascending: false }));
+  }
   if (error) return res.status(500).json({ error: error.message });
+  const visible = (rows || []).filter(isParentVisibleSchoolContract);
 
   const file = String(req.query?.file || '').trim();
   const contractId = String(req.query?.contract_id || '').trim();
   if (file && contractId) {
-    const row = (rows || []).find((r) => r.id === contractId);
+    const row = visible.find((r) => r.id === contractId);
     if (!row) return res.status(404).json({ error: 'not_found' });
     const raw = file === 'statement' ? row.extra_end_statement_path : (row.signed_contract_url || row.pdf_url);
     const path = raw ? extractSchoolContractStoragePath(String(raw)) : '';
@@ -56,6 +65,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const nameById = new Map((linked || []).map((s) => [s.id, s.full_name]));
   return res.status(200).json({
     ok: true,
-    contracts: (rows || []).map((row) => mapExtraLessonsParentContract(row, nameById.get(row.student_id) || '')),
+    contracts: visible.map((row) => mapParentSchoolContract(row, nameById.get(row.student_id) || '')),
   });
 }

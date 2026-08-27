@@ -152,12 +152,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     let subjectId: string | null = null;
-    const { data: existingTrial } = await supabase
+    const { data: existingTrials } = await supabase
       .from('subjects')
-      .select('id, price')
+      .select('id, price, name')
       .eq('tutor_id', tutorId)
-      .eq('is_trial', true)
-      .maybeSingle();
+      .eq('is_trial', true);
+    const existingTrial =
+      (existingTrials || []).find((s: { name?: string | null }) =>
+        String(s.name || '').toLowerCase().includes('bandom'),
+      ) || (existingTrials || [])[0] ||
+      null;
 
     if (existingTrial) {
       subjectId = existingTrial.id;
@@ -197,9 +201,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq('id', adminRow.organizationId)
       .single();
 
-    if (!orgStripe?.stripe_onboarding_complete) {
-      return json(res, 400, { error: 'Organization Stripe account is not connected' });
-    }
+    const canTransferToOrg = Boolean(
+      orgStripe?.stripe_onboarding_complete && orgStripe.stripe_account_id,
+    );
 
     const feeProfile = orgFeeProfile((orgStripe as { slug?: string | null }).slug) ?? orgFeeProfile(adminRow.organizationId);
     // A custom org fee profile is always charged on top (payer pays the fee), even for schools.
@@ -327,6 +331,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // gracefully fall back to charging platform account only (no transfer_data).
     let checkoutSession;
     try {
+      if (!canTransferToOrg) {
+        throw Object.assign(new Error('Organization Stripe is not connected'), {
+          code: 'resource_missing',
+          raw: { param: 'transfer_data[destination]' },
+        });
+      }
       if (useSchoolOrgAbsorbedFees) {
         const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(basePriceEur, market);
         const applicationFeeCents = chargeCents - transferToSchoolCents;

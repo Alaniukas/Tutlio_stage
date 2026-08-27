@@ -7,12 +7,12 @@ import { supabase } from '@/lib/supabase';
 import {
   EXTRA_LESSONS_TERMS_CHECKBOX_TEXT,
   START_WITHIN_14_CHECKBOX_TEXT,
-  extraLessonsEndKind,
   formatScheduleLabel,
-  isWithinWithdrawalWindow,
+  parseExtraLessonsServiceType,
   resolveStartWithin14Status,
   type ExtraLessonsOrderSnapshot,
   type ExtraLessonsScheduleSlot,
+  type ExtraLessonsServiceTypeOrUnset,
 } from '@/lib/extraLessonsContract';
 import { DateRangeFields, ScheduleSlotPicker } from '@/components/company/ScheduleSlotPicker';
 
@@ -86,6 +86,9 @@ export default function SchoolExtraLessonsAccept() {
   const skipNextPreviewRefresh = useRef(true);
 
   const [serviceName, setServiceName] = useState('');
+  const [serviceType, setServiceType] = useState<ExtraLessonsServiceTypeOrUnset>('');
+  const [platform, setPlatform] = useState('');
+  const [duration, setDuration] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [baseLessons, setBaseLessons] = useState('');
@@ -95,6 +98,9 @@ export default function SchoolExtraLessonsAccept() {
     setPreview(data);
     const o = data.order;
     setServiceName(o?.service_name || '');
+    setServiceType(parseExtraLessonsServiceType(o?.service_type));
+    setPlatform(o?.platform || '');
+    setDuration(o?.duration_minutes ? String(o.duration_minutes) : '');
     setStartDate(o?.start_date || '');
     setEndDate(o?.end_date || '');
     setBaseLessons(o?.base_lessons_per_month ? String(o.base_lessons_per_month) : '');
@@ -155,13 +161,16 @@ export default function SchoolExtraLessonsAccept() {
     return {
       ...preview.order,
       service_name: serviceName || preview.order.service_name,
+      service_type: serviceType || parseExtraLessonsServiceType(preview.order.service_type),
+      platform: platform || preview.order.platform,
+      duration_minutes: Number(duration) || preview.order.duration_minutes,
       start_date: startDate || preview.order.start_date,
       end_date: endDate || preview.order.end_date,
       schedule_slots: slots,
       schedule_label: formatScheduleLabel(slots) || preview.order.schedule_label,
       base_lessons_per_month: Number(baseLessons) || preview.order.base_lessons_per_month,
     };
-  }, [preview, serviceName, startDate, endDate, slots, baseLessons]);
+  }, [preview, serviceName, serviceType, platform, duration, startDate, endDate, slots, baseLessons]);
 
   const start14 = useMemo(() => {
     if (!liveOrder) return { applies: false, shownText: START_WITHIN_14_CHECKBOX_TEXT };
@@ -172,6 +181,9 @@ export default function SchoolExtraLessonsAccept() {
     const fields = new Set(preview?.parentEditableFields || []);
     return {
       service: fields.has('service_name'),
+      type: fields.has('service_type'),
+      platform: fields.has('platform'),
+      duration: fields.has('duration_minutes'),
       schedule: fields.has('schedule_label'),
       start: fields.has('start_date'),
       end: fields.has('end_date'),
@@ -182,12 +194,15 @@ export default function SchoolExtraLessonsAccept() {
 
   const orderPatch = useMemo((): Partial<ExtraLessonsOrderSnapshot> => ({
     service_name: serviceName,
+    service_type: serviceType,
+    platform,
+    duration_minutes: Number(duration) || 0,
     start_date: startDate,
     end_date: endDate,
     base_lessons_per_month: Number(baseLessons) || 0,
     schedule_slots: slots,
     schedule_label: formatScheduleLabel(slots),
-  }), [serviceName, startDate, endDate, baseLessons, slots]);
+  }), [serviceName, serviceType, platform, duration, startDate, endDate, baseLessons, slots]);
 
   useEffect(() => {
     if (!token || !preview || done) return;
@@ -223,7 +238,7 @@ export default function SchoolExtraLessonsAccept() {
       }
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [token, orderPatch.service_name, orderPatch.start_date, orderPatch.end_date, orderPatch.schedule_label, orderPatch.base_lessons_per_month]);
+  }, [token, orderPatch.service_name, orderPatch.service_type, orderPatch.platform, orderPatch.duration_minutes, orderPatch.start_date, orderPatch.end_date, orderPatch.schedule_label, orderPatch.base_lessons_per_month]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -267,29 +282,6 @@ export default function SchoolExtraLessonsAccept() {
     setSubmitting(false);
   };
 
-  const endContract = async (intended: 'withdrawal' | 'termination') => {
-    setSubmitting(true);
-    setError(null);
-    const { data: session } = await supabase.auth.getSession();
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (session.session?.access_token) {
-      headers.Authorization = `Bearer ${session.session.access_token}`;
-    }
-    const res = await fetch('/api/extra-lessons-contract-withdraw', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ token, intended_kind: intended }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok) {
-      setWithdrawn(true);
-      setEndKind(data.kind || intended);
-    } else {
-      setError(data.error || 'Nepavyko pateikti prašymo.');
-    }
-    setSubmitting(false);
-  };
-
   if (loading) {
     return (
       <PageShell centered>
@@ -310,17 +302,14 @@ export default function SchoolExtraLessonsAccept() {
   if (!preview) return null;
 
   if (done) {
-    const acceptedAt = done.acceptedAt || preview.acceptedAt || new Date().toISOString();
-    const canWithdraw = !withdrawn && isWithinWithdrawalWindow(acceptedAt);
-    const canTerminate = !withdrawn && extraLessonsEndKind(acceptedAt) === 'termination';
     return (
       <PageShell centered>
         <Card className="space-y-4">
           <BrandMark />
-          <h1 className="text-2xl font-bold text-gray-900">Užsakymas priimtas</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Sutartis sudaryta</h1>
           <p className="text-sm text-gray-600">
             Sutartis Nr. {preview.contractNumber} su {preview.schoolName} dėl {preview.studentName} sudaryta.
-            Galutinė redakcija išsiųsta el. paštu ir išsaugota jūsų paskyroje.
+            Galutinė kopija išsiųsta el. paštu. 14 dienų atsisakymą ir nutraukimą rasite tėvų paskyroje.
           </p>
           {preview.pdfUrl && (
             <Button
@@ -333,16 +322,6 @@ export default function SchoolExtraLessonsAccept() {
           )}
           {done.sha256 && <p className="text-xs text-gray-500 break-all">Dokumento SHA-256: {done.sha256}</p>}
           {error && <p className="text-sm text-red-600">{error}</p>}
-          {!withdrawn && canWithdraw && (
-            <Button variant="outline" disabled={submitting} onClick={() => void endContract('withdrawal')}>
-              Atsisakyti sutarties
-            </Button>
-          )}
-          {!withdrawn && canTerminate && (
-            <Button variant="outline" disabled={submitting} onClick={() => void endContract('termination')}>
-              Nutraukti sutartį
-            </Button>
-          )}
           {withdrawn && (
             <p className="text-sm text-amber-700">
               {endKind === 'termination' ? 'Sutarties nutraukimas pateiktas.' : 'Sutarties atsisakymas pateiktas.'}
@@ -429,10 +408,37 @@ export default function SchoolExtraLessonsAccept() {
                 <Input className="mt-1 rounded-xl" value={serviceName} onChange={(e) => setServiceName(e.target.value)} />
               </div>
             )}
+            {(needsParentFields.type || !serviceType) && (
+              <div>
+                <Label>Paslaugos tipas</Label>
+                <div className="mt-2 flex flex-col gap-2 text-sm">
+                  <label className="flex items-center gap-2">
+                    <input type="radio" name="service_type" checked={serviceType === 'group'} onChange={() => setServiceType('group')} />
+                    Grupinė
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input type="radio" name="service_type" checked={serviceType === 'individual'} onChange={() => setServiceType('individual')} />
+                    Individuali
+                  </label>
+                </div>
+              </div>
+            )}
+            {(needsParentFields.platform || !platform) && (
+              <div>
+                <Label>Platforma</Label>
+                <Input className="mt-1 rounded-xl" value={platform} onChange={(e) => setPlatform(e.target.value)} placeholder="Google Meet" />
+              </div>
+            )}
+            {(needsParentFields.duration || !duration) && (
+              <div>
+                <Label>Pamokos trukmė (min)</Label>
+                <Input className="mt-1 rounded-xl" value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="45" />
+              </div>
+            )}
             {(needsParentFields.schedule || slots.length === 0) && (
               <div>
                 <Label>Grafikas</Label>
-                <ScheduleSlotPicker slots={slots} onChange={setSlots} durationMinutes={o.duration_minutes} />
+                <ScheduleSlotPicker slots={slots} onChange={setSlots} durationMinutes={Number(duration) || o.duration_minutes || 45} />
               </div>
             )}
             {(needsParentFields.start || needsParentFields.end || !startDate || !endDate) && (
@@ -450,9 +456,9 @@ export default function SchoolExtraLessonsAccept() {
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700 space-y-1">
           <p className="font-semibold text-gray-900 mb-1">Užsakymo suvestinė</p>
           <div><span className="font-semibold">Paslauga:</span> {serviceName || o.service_name || '—'}</div>
-          <div><span className="font-semibold">Tipas:</span> {o.service_type === 'individual' ? 'individuali' : 'grupinė'}</div>
-          <div><span className="font-semibold">Platforma:</span> {o.platform}</div>
-          <div><span className="font-semibold">Trukmė:</span> {o.duration_minutes} min.</div>
+          <div><span className="font-semibold">Tipas:</span> {serviceType === 'individual' || o.service_type === 'individual' ? 'individuali' : serviceType === 'group' || o.service_type === 'group' ? 'grupinė' : '—'}</div>
+          <div><span className="font-semibold">Platforma:</span> {platform || o.platform || '—'}</div>
+          <div><span className="font-semibold">Trukmė:</span> {duration || o.duration_minutes || '—'} min.</div>
           <div><span className="font-semibold">Grafikas:</span> {formatScheduleLabel(slots) || o.schedule_label || '—'}</div>
           <div><span className="font-semibold">Laikotarpis:</span> {startDate || o.start_date || '—'} – {endDate || o.end_date || '—'}</div>
           <div><span className="font-semibold">Kaina:</span> {Number(o.unit_price_eur).toFixed(2)} € / pamoka</div>
@@ -545,7 +551,7 @@ export default function SchoolExtraLessonsAccept() {
             className="w-full rounded-xl bg-emerald-600 hover:bg-emerald-700"
             disabled={!acceptedTerms || !recordingReady || submitting}
           >
-            {submitting ? 'Siunčiama…' : 'Užsakymas su prievole sumokėti'}
+            {submitting ? 'Siunčiama…' : 'Patvirtinti sutartį'}
           </Button>
         </form>
       </Card>

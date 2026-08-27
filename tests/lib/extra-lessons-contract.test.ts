@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  EXTRA_LESSONS_DEFAULT_BODY,
+  EXTRA_LESSONS_DOCX_PLACEHOLDERS,
   START_WITHIN_14_CHECKBOX_TEXT,
   buildExtraLessonsOrderSnapshot,
+  canonicalExtraLessonsPayload,
   canClickWrapAccept,
   extraLessonsEndKind,
   extraLessonsServiceStartYmd,
@@ -9,10 +12,13 @@ import {
   freezeDocumentSource,
   indicativeMonthlyPrice,
   isWithinWithdrawalWindow,
+  isExtraLessonsContractKind,
   mergeExtraLessonsOrderPatch,
   resolveStartWithin14Status,
   sha256Hex,
   startWithin14Applies,
+  usesBundledExtraLessonsDocx,
+  validateExtraLessonsOffer,
   validateExtraLessonsOrder,
 } from '../../src/lib/extraLessonsContract';
 
@@ -190,5 +196,87 @@ describe('extraLessonsContract', () => {
     expect(merged.base_lessons_per_month).toBe(8);
     expect(merged.service_name).toBe('QA Matematika');
     expect(merged.start_date).toBe('2026-09-01');
+  });
+
+  it('lets the school send a sparse offer; parents must finish type and quantities', () => {
+    const sparse = buildExtraLessonsOrderSnapshot({
+      service_name: '',
+      service_type: '',
+      duration_minutes: 0,
+      start_date: '',
+      end_date: '',
+      unit_price_eur: 18,
+      base_lessons_per_month: 0,
+      platform: '',
+    });
+    expect(sparse.service_type).toBe('');
+    expect(sparse.duration_minutes).toBe(0);
+    expect(sparse.platform).toBe('');
+    expect(validateExtraLessonsOffer(sparse)).toEqual([]);
+    expect(validateExtraLessonsOrder(sparse)).toEqual(expect.arrayContaining([
+      'service_name',
+      'service_type',
+      'platform',
+      'duration_minutes',
+      'base_lessons_per_month',
+      'start_date',
+      'end_date',
+      'schedule_label',
+    ]));
+    const finished = mergeExtraLessonsOrderPatch(sparse, {
+      service_name: 'Matematika',
+      service_type: 'group',
+      platform: 'Google Meet',
+      duration_minutes: 45,
+      start_date: '2026-09-01',
+      end_date: '2027-06-13',
+      base_lessons_per_month: 8,
+      schedule_slots: [{ weekday: 2, start_time: '16:00', end_time: '16:45' }],
+      schedule_label: 'antradienis 16:00–16:45',
+    });
+    expect(validateExtraLessonsOrder(finished)).toEqual([]);
+    expect(finished.service_type).toBe('group');
+    expect(finished.individual_cancel_terms).toBe('netaikoma');
+  });
+
+  it('maps every DOCX placeholder used by the Laisvi vaikai template', () => {
+    const order = buildExtraLessonsOrderSnapshot({
+      service_name: 'Matematika LT 2kl',
+      service_type: 'group',
+      duration_minutes: 45,
+      start_date: '2026-09-01',
+      end_date: '2027-06-15',
+      unit_price_eur: 12,
+      base_lessons_per_month: 8,
+      school_email: 'info@laisvivaikai.lt',
+    });
+    const payload = canonicalExtraLessonsPayload({
+      contract_number: 'PP-1',
+      order,
+      parent_name: 'Tėvas Pavyzdys',
+      parent_email: 'tevas@example.com',
+      parent_phone: '+37060000000',
+      student_name: 'Vaikas Pavyzdys',
+      student_grade: '2 klasė',
+      user_id: 'user-1',
+      school_name: 'VšĮ Laisvi vaikai',
+    });
+    for (const key of EXTRA_LESSONS_DOCX_PLACEHOLDERS) {
+      expect(payload).toHaveProperty(key);
+    }
+    expect(payload).not.toHaveProperty('TAIP / NE / NETAIKOMA');
+    expect(EXTRA_LESSONS_DEFAULT_BODY).toContain('1 PRIEDAS');
+    expect(EXTRA_LESSONS_DEFAULT_BODY).toContain('{{dokumento_sha256}}');
+    expect(EXTRA_LESSONS_DEFAULT_BODY).not.toContain('{{TAIP / NE / NETAIKOMA}}');
+    expect(START_WITHIN_14_CHECKBOX_TEXT).toContain('Prašau pradėti teikti paslaugas');
+    expect(usesBundledExtraLessonsDocx('c3a00000-7e57-4000-8000-000000000001')).toBe(true);
+    expect(usesBundledExtraLessonsDocx('2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17')).toBe(true);
+    expect(usesBundledExtraLessonsDocx('org-other')).toBe(false);
+  });
+
+  it('treats extra_lessons kind separately from annual school contracts', () => {
+    expect(isExtraLessonsContractKind('extra_lessons')).toBe(true);
+    expect(isExtraLessonsContractKind('annual')).toBe(false);
+    expect(isExtraLessonsContractKind(null)).toBe(false);
   });
 });

@@ -2,8 +2,8 @@ import type { VercelRequest, VercelResponse } from './types';
 import { extraLessonsEndKind, isWithinWithdrawalWindow } from '../src/lib/extraLessonsContract.js';
 import { parentMayEndExtraLessonsContract } from '../src/lib/extraLessonsParentPortal.js';
 import {
-  appOrigin,
   endExtraLessonsContract,
+  internalApiOrigin,
   loadExtraLessonsContractByToken,
   serviceSupabase,
 } from './_lib/extraLessonsContractShared.js';
@@ -61,7 +61,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     supabase,
     contract,
     intendedKind,
-    origin: appOrigin(req),
+    origin: internalApiOrigin(req),
   });
   if (!result.ok) return res.status(result.status).json({ error: result.error });
   return res.status(200).json({

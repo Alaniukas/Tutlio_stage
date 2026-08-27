@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from 'fs';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   BUCKET,
@@ -9,6 +12,8 @@ import {
   schoolContractPdfStoragePath,
 } from './schoolContractPdfPath.js';
 import { buildSchoolContractTemplatePayload } from './schoolContractTemplatePayload.js';
+import { renderDocxTemplateBufferToPdfBuffer } from './renderSchoolContractDocxToPdf.js';
+import { usesBundledExtraLessonsDocx } from '../../src/lib/extraLessonsContract.js';
 
 export async function signSchoolContractPdf(
   supabase: SupabaseClient,
@@ -36,7 +41,40 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   }
 }
 
-/** Extra-lessons: try the school's DOCX layout, fall back to a paginated text PDF. */
+export function resolveExtraLessonsBundledDocxPath(): string {
+  const here = typeof __dirname !== 'undefined'
+    ? __dirname
+    : dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    join(here, 'templates', 'extra-lessons-laisvi-vaikai.docx'),
+    join(process.cwd(), 'api/_lib/templates/extra-lessons-laisvi-vaikai.docx'),
+    join(process.cwd(), 'docs/legal/extra-lessons-laisvi-vaikai.docx'),
+    join(here, '../../docs/legal/extra-lessons-laisvi-vaikai.docx'),
+  ];
+  return candidates.find((p) => existsSync(p)) || candidates[0];
+}
+
+function extraLessonsDocxPayload(params: {
+  student: {
+    full_name?: string | null;
+    payer_name?: string | null;
+    payer_email?: string | null;
+    payer_phone?: string | null;
+  };
+  indicativeMonthlyEur: number;
+  extraLessonsPayload?: Record<string, string>;
+  contractNumber?: string | null;
+}): Record<string, string | boolean> {
+  return buildSchoolContractTemplatePayload({
+    contractNumber: params.contractNumber,
+    annualFee: params.indicativeMonthlyEur,
+    schoolName: params.extraLessonsPayload?.school_name,
+    student: params.student,
+    extraLessonsPayload: params.extraLessonsPayload,
+  });
+}
+
+/** Extra-lessons: bundled Laisvi vaikai DOCX for Demo/Laisvi; other orgs use their extra DOCX. */
 export async function renderAndStoreExtraLessonsPdf(
   supabase: SupabaseClient,
   params: {
@@ -54,34 +92,46 @@ export async function renderAndStoreExtraLessonsPdf(
 ): Promise<{ uploadedPath: string | null; pdfBase64?: string }> {
   const st = params.student || {};
   let pdfBytes: Uint8Array | null = null;
+  const payload = extraLessonsDocxPayload({
+    student: st,
+    indicativeMonthlyEur: params.indicativeMonthlyEur,
+    extraLessonsPayload: params.extraLessonsPayload,
+    contractNumber: params.contract.contract_number,
+  });
 
-  if (params.contract.template_id) {
+  if (usesBundledExtraLessonsDocx(params.contract.organization_id)) {
+    try {
+      const templateBytes = readFileSync(resolveExtraLessonsBundledDocxPath());
+      pdfBytes = new Uint8Array(await withTimeout(
+        renderDocxTemplateBufferToPdfBuffer({ templateBytes, payload }),
+        20000,
+      ));
+    } catch (e) {
+      console.error('[extra-lessons] bundled docx pdf fallback to text', (e as Error).message);
+      pdfBytes = null;
+    }
+  } else if (params.contract.template_id) {
     const { data: tpl } = await supabase
       .from('school_contract_templates')
-      .select('pdf_url')
+      .select('pdf_url, name')
       .eq('id', params.contract.template_id)
       .maybeSingle();
     const templatePath = tpl?.pdf_url ? extractSchoolContractStoragePath(String(tpl.pdf_url)) : '';
-    if (templatePath.toLowerCase().endsWith('.docx')) {
+    const name = String(tpl?.name || '').toLowerCase();
+    const looksExtra = name.includes('papildom') || name.includes('extra');
+    if (looksExtra && templatePath.toLowerCase().endsWith('.docx')) {
       try {
         const { data: signedData, error: signErr } = await supabase.storage
           .from(BUCKET)
           .createSignedUrl(templatePath, 300);
         if (!signErr && signedData?.signedUrl) {
-          const payload = buildSchoolContractTemplatePayload({
-            contractNumber: params.contract.contract_number,
-            annualFee: params.indicativeMonthlyEur,
-            schoolName: params.extraLessonsPayload?.school_name,
-            student: st,
-            extraLessonsPayload: params.extraLessonsPayload,
-          });
           pdfBytes = await withTimeout(
             createDocxTemplatePdf({ fetchUrl: signedData.signedUrl, payload }),
             12000,
           );
         }
       } catch (e) {
-        console.error('[extra-lessons] docx pdf fallback to text', (e as Error).message);
+        console.error('[extra-lessons] org docx pdf fallback to text', (e as Error).message);
         pdfBytes = null;
       }
     }
@@ -99,7 +149,7 @@ export async function renderAndStoreExtraLessonsPdf(
       address: '',
       annualFee: params.indicativeMonthlyEur,
       body: params.filledBody,
-      title: 'Papildomu pamoku sutartis',
+      title: 'Nuotoliniu papildomu pamoku paslaugu sutartis',
       feeLabel: 'Orientacine menesio kaina',
     });
   }

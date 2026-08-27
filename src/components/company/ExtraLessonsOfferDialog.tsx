@@ -20,17 +20,22 @@ export default function ExtraLessonsOfferDialog(props: {
   onOpenChange: (v: boolean) => void;
   students: Student[];
   groups: Group[];
-  onCreated: (info: { acceptUrl: string; contractNumber: string }) => void;
+  onCreated: (info: {
+    acceptUrl: string;
+    contractNumber: string;
+    emailSent?: boolean;
+    emailTo?: string | null;
+  }) => void;
 }) {
   const [studentId, setStudentId] = useState('');
   const [serviceName, setServiceName] = useState('');
-  const [serviceType, setServiceType] = useState<'group' | 'individual'>('group');
-  const [platform, setPlatform] = useState('Google Meet');
-  const [duration, setDuration] = useState('45');
+  const [serviceType, setServiceType] = useState<'' | 'group' | 'individual'>('');
+  const [platform, setPlatform] = useState('');
+  const [duration, setDuration] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [unitPrice, setUnitPrice] = useState('');
-  const [baseLessons, setBaseLessons] = useState('8');
+  const [baseLessons, setBaseLessons] = useState('');
   const [slots, setSlots] = useState<ExtraLessonsScheduleSlot[]>([]);
   const [groupId, setGroupId] = useState('');
   const [busy, setBusy] = useState(false);
@@ -47,7 +52,7 @@ export default function ExtraLessonsOfferDialog(props: {
       service_name: serviceName || group?.name || '',
       service_type: serviceType,
       platform,
-      duration_minutes: Number(duration) || 45,
+      duration_minutes: Number(duration) || 0,
       schedule_slots: slots,
       schedule_label: scheduleLabel,
       start_date: startDate,
@@ -74,7 +79,12 @@ export default function ExtraLessonsOfferDialog(props: {
         setBusy(false);
         return;
       }
-      props.onCreated({ acceptUrl: data.acceptUrl, contractNumber: data.contractNumber });
+      props.onCreated({
+        acceptUrl: data.acceptUrl,
+        contractNumber: data.contractNumber,
+        emailSent: data.emailSent === true,
+        emailTo: data.emailTo || null,
+      });
       props.onOpenChange(false);
     } catch {
       setError('Nepavyko sukurti pasiūlymo.');
@@ -89,8 +99,8 @@ export default function ExtraLessonsOfferDialog(props: {
           <DialogTitle>Papildomų pamokų sutartis</DialogTitle>
         </DialogHeader>
         <p className="text-xs text-gray-500">
-          Privaloma: mokinys ir pamokos kaina. Grafiką, datas ir kitus laukus galite palikti tuščius —
-          tėvai juos užpildys priimdami sutartį.
+          Privaloma: mokinys ir pamokos kaina. Tipą (grupinė / individuali), trukmę, grafiką, datas ir kiekius
+          galite palikti tuščius — tėvai juos užpildys priimdami sutartį.
         </p>
         <div className="space-y-3">
           {error && <p className="text-sm text-red-600">{error}</p>}
@@ -110,7 +120,8 @@ export default function ExtraLessonsOfferDialog(props: {
           <div className="grid grid-cols-2 gap-2">
             <div>
               <Label>Tipas</Label>
-              <select className="w-full border rounded-md h-9 px-2 text-sm" value={serviceType} onChange={(e) => setServiceType(e.target.value as 'group' | 'individual')}>
+              <select className="w-full border rounded-md h-9 px-2 text-sm" value={serviceType} onChange={(e) => setServiceType(e.target.value as '' | 'group' | 'individual')}>
+                <option value="">Tėvai pasirinks</option>
                 <option value="group">Grupinė</option>
                 <option value="individual">Individuali</option>
               </select>
@@ -122,6 +133,7 @@ export default function ExtraLessonsOfferDialog(props: {
                 setGroupId(id);
                 const g = props.groups.find((x) => x.id === id);
                 if (g) {
+                  setServiceType('group');
                   setServiceName((prev) => prev || g.name);
                   if (g.slots?.length) {
                     setSlots(g.slots.map((s) => ({
@@ -142,11 +154,11 @@ export default function ExtraLessonsOfferDialog(props: {
           <div className="grid grid-cols-2 gap-2">
             <div>
               <Label>Platforma</Label>
-              <Input value={platform} onChange={(e) => setPlatform(e.target.value)} />
+              <Input value={platform} onChange={(e) => setPlatform(e.target.value)} placeholder="pvz. Google Meet" />
             </div>
             <div>
               <Label>Trukmė (min)</Label>
-              <Input value={duration} onChange={(e) => setDuration(e.target.value)} />
+              <Input value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="45" />
             </div>
           </div>
           <div>
@@ -161,7 +173,7 @@ export default function ExtraLessonsOfferDialog(props: {
             </div>
             <div>
               <Label>Bazinis kiekis / mėn.</Label>
-              <Input value={baseLessons} onChange={(e) => setBaseLessons(e.target.value)} />
+              <Input value={baseLessons} onChange={(e) => setBaseLessons(e.target.value)} placeholder="8" />
             </div>
           </div>
           <p className="text-sm text-gray-600">Orientacinė mėnesio kaina: <strong>{previewMonthly.toFixed(2)} €</strong></p>

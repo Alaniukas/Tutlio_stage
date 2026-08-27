@@ -16,6 +16,5 @@ export function parentLegalAcceptanceMissing(opts: {
   acceptedPrivacy?: boolean;
   acceptedTerms?: boolean;
 }): boolean {
-  if (!usesProKlaseLegalDocs(opts.orgIdOrSlug)) return false;
   return opts.acceptedPrivacy !== true || opts.acceptedTerms !== true;
 }

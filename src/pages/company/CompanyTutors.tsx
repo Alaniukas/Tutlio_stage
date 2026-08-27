@@ -13,6 +13,13 @@ import { cn } from '@/lib/utils';
 import { dedupeSubjectPresets, subjectPresetKey, tutorSubjectsContainLessonDuplicate } from '@/lib/subjectPresetDedupe';
 import { removeOrgSubjectTemplatesMatchingPreset } from '@/lib/orgSubjectTemplateCleanup';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
+import { useOrgEntityType } from '@/contexts/OrgEntityContext';
+import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import {
+  groupsTaughtByTutor,
+  scheduleLabelFromGroupSlots,
+  type SchoolClassGroupRecord,
+} from '@/lib/schoolClassGroups';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -370,9 +377,13 @@ function TutorSubjectPriceRow({ template, existing, onSave, onDelete }: {
 
 export default function CompanyTutors() {
   const { t, locale, dateFnsLocale } = useTranslation();
+  const orgEntityType = useOrgEntityType();
+  const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
+  const isSchoolView = orgEntityType === 'school';
   const tc = getCached<any>(COMPANY_TUTORS_CACHE_KEY);
   const [loading, setLoading] = useState(!tc);
   const [orgId, setOrgId] = useState<string | null>(tc?.orgId ?? null);
+  const [classGroups, setClassGroups] = useState<SchoolClassGroupRecord[]>([]);
   const [tutorLicenseCount, setTutorLicenseCount] = useState<number>(tc?.tutorLicenseCount ?? 0);
   const [tutors, setTutors] = useState<Tutor[]>(tc?.tutors ?? []);
   const [invites, setInvites] = useState<Invite[]>(tc?.invites ?? []);
@@ -465,6 +476,22 @@ export default function CompanyTutors() {
   const [applyingPenaltyType, setApplyingPenaltyType] = useState<string | null>(null);
   const [penaltyFeedback, setPenaltyFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const isProKlaseAdmin = isProKlaseOrg(orgId);
+  const classGroupsEnabled = isSchoolView && !orgFeaturesLoading && hasFeature('school_class_groups');
+
+  useEffect(() => {
+    if (!classGroupsEnabled) {
+      setClassGroups([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const headers = await authHeaders();
+      const res = await fetch('/api/school-class-groups', { headers });
+      const data = await res.json().catch(() => ({}));
+      if (!cancelled && res.ok) setClassGroups((data.groups || []) as SchoolClassGroupRecord[]);
+    })();
+    return () => { cancelled = true; };
+  }, [classGroupsEnabled]);
 
   const applyTutorAdjustment = async (
     type: 'penalty_tutor_no_show' | 'penalty_missing_report' | 'penalty_manual',
@@ -1506,6 +1533,27 @@ export default function CompanyTutors() {
                   />
                   <p className="text-[11px] text-gray-500">{t('compTut.teachingNotesDesc')}</p>
                 </div>
+                {classGroupsEnabled && (
+                  <div className="space-y-1.5 rounded-xl border border-gray-100 bg-gray-50/70 p-3">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                      {t('school.groups.tutorMembership')}
+                    </p>
+                    {groupsTaughtByTutor(classGroups, selectedTutor.id).length === 0 ? (
+                      <p className="text-sm text-gray-500">{t('school.groups.tutorMembershipNone')}</p>
+                    ) : (
+                      <ul className="text-sm text-gray-900 space-y-1">
+                        {groupsTaughtByTutor(classGroups, selectedTutor.id).map((group) => (
+                          <li key={group.id}>
+                            <span className="font-medium">{group.name}</span>
+                            {group.slots?.length ? (
+                              <span className="text-gray-500"> · {scheduleLabelFromGroupSlots(group.slots)}</span>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2 pt-3 border-t border-gray-100">

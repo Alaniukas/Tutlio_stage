@@ -50,7 +50,7 @@ const preview = {
   startWithin14Applies: true,
   recordingsEnabled: true,
   termsCheckboxText: 'Perskaičiau Sutartį',
-  startWithin14CheckboxText: 'Noriu, kad vaikas galėtų pradėti',
+  startWithin14CheckboxText: 'Prašau pradėti teikti paslaugas nepasibaigus 14 dienų',
   legalLinks: { withdrawalForm: '/legal/extra-lessons-withdrawal-form.html' },
 };
 
@@ -81,7 +81,7 @@ describe('SchoolExtraLessonsAccept', () => {
     expect(screen.getByText('Palaukti')).toBeTruthy();
     expect(screen.getByText('Sutinku')).toBeTruthy();
     expect(screen.getByText('Nesutinku')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Užsakymas su prievole sumokėti' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Patvirtinti sutartį' })).toBeTruthy();
     expect(screen.getByText('Tutlio 🎓')).toBeTruthy();
   });
 
@@ -124,10 +124,13 @@ describe('SchoolExtraLessonsAccept', () => {
         pdfUrl: null,
         startWithin14Applies: false,
         recordingsEnabled: false,
-        parentEditableFields: ['service_name', 'start_date', 'end_date'],
+        parentEditableFields: ['service_name', 'service_type', 'platform', 'duration_minutes', 'start_date', 'end_date'],
         order: {
           ...preview.order,
           service_name: '',
+          service_type: '',
+          platform: '',
+          duration_minutes: 0,
           start_date: '',
           end_date: '',
           schedule_slots: [{ weekday: 4, start_time: '16:00', end_time: '16:45' }],
@@ -145,5 +148,34 @@ describe('SchoolExtraLessonsAccept', () => {
       expect(screen.getByText('Prašome papildyti trūkstamus užsakymo duomenis:')).toBeTruthy();
     });
     expect(screen.getByText('Paslaugos pavadinimas')).toBeTruthy();
+    expect(screen.getByText('Paslaugos tipas')).toBeTruthy();
+    expect(screen.getByText('Grupinė')).toBeTruthy();
+    expect(screen.getByText('Individuali')).toBeTruthy();
+    expect(screen.getByText('Pamokos trukmė (min)')).toBeTruthy();
+  });
+
+  it('does not offer withdrawal on the post-accept success screen', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({
+        ...preview,
+        alreadyAccepted: true,
+        acceptedAt: new Date().toISOString(),
+        recordingsEnabled: false,
+      }),
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/school-extra-lessons-accept?token=legalqawithin14aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']}>
+        <SchoolExtraLessonsAccept />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Sutartis sudaryta')).toBeTruthy();
+    });
+    expect(screen.queryByRole('button', { name: /Atsisakyti sutarties/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Nutraukti sutartį' })).toBeNull();
+    expect(screen.getByText(/tėvų paskyroje/)).toBeTruthy();
   });
 });

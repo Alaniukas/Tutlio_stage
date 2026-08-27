@@ -17,7 +17,7 @@ describe('Pro Klasė legal docs', () => {
     expect(proKlaseLegalHref('terms')).toBe(PROKLASE_TERMS_PDF_PATH);
   });
 
-  it('requires parent checkboxes only for Pro Klasė', () => {
+  it('requires parent checkboxes for every org', () => {
     expect(parentLegalAcceptanceMissing({
       orgIdOrSlug: 'b0a00000-7e57-4000-8000-000000000001',
       acceptedPrivacy: false,
@@ -32,6 +32,11 @@ describe('Pro Klasė legal docs', () => {
       orgIdOrSlug: 'c1a00000-7e57-4000-8000-000000000001',
       acceptedPrivacy: false,
       acceptedTerms: false,
+    })).toBe(true);
+    expect(parentLegalAcceptanceMissing({
+      orgIdOrSlug: 'c1a00000-7e57-4000-8000-000000000001',
+      acceptedPrivacy: true,
+      acceptedTerms: true,
     })).toBe(false);
   });
 });

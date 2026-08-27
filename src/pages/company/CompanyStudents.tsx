@@ -93,6 +93,11 @@ import type { BusyInterval } from '@/lib/tutorMatching';
 import PackageItemsEditor, { type PackageEditorItem, type PackageEditorSubject } from '@/components/PackageItemsEditor';
 import { pickStudentContactsForTutorEmail } from '@/lib/orgContactVisibility';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
+import {
+  groupsContainingStudent,
+  scheduleLabelFromGroupSlots,
+  type SchoolClassGroupRecord,
+} from '@/lib/schoolClassGroups';
 import { findOrgTutorEmailConflict } from '@/lib/orgStudentTutorGuards';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { useUser } from '@/contexts/UserContext';
@@ -310,6 +315,7 @@ export default function CompanyStudents() {
   const [addStudentFindTutorOpen, setAddStudentFindTutorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [orgId, setOrgId] = useState<string | null>(null);
+  const [classGroups, setClassGroups] = useState<SchoolClassGroupRecord[]>([]);
   const [baseUrl, setBaseUrl] = useState('');
   /** Org preferred_locale — invite links use the org's canonical domain (.lt for Pro Klasė). */
   const [orgPreferredLocale, setOrgPreferredLocale] = useState<string | null>(null);
@@ -503,6 +509,22 @@ export default function CompanyStudents() {
     () => monthlyPackagePeriodFrom(formatLocalYmd(new Date()), pkgLessonsPerWeek),
     [pkgLessonsPerWeek],
   );
+  const classGroupsEnabled = isSchoolView && !orgFeaturesLoading && hasFeature('school_class_groups');
+
+  useEffect(() => {
+    if (!classGroupsEnabled) {
+      setClassGroups([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const headers = await authHeaders();
+      const res = await fetch('/api/school-class-groups', { headers });
+      const data = await res.json().catch(() => ({}));
+      if (!cancelled && res.ok) setClassGroups((data.groups || []) as SchoolClassGroupRecord[]);
+    })();
+    return () => { cancelled = true; };
+  }, [classGroupsEnabled]);
 
   // Org admin: source of truth is organizations.enable_* (sync to profiles may be delayed after login).
   useEffect(() => {
@@ -3756,6 +3778,27 @@ export default function CompanyStudents() {
                         />
                       )}
                     </div>
+                    )}
+                    {classGroupsEnabled && selectedStudent && (
+                      <div className="mt-2 rounded-xl border border-gray-100 bg-gray-50/70 p-3 space-y-1">
+                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                          {t('school.groups.studentMembership')}
+                        </p>
+                        {groupsContainingStudent(classGroups, selectedStudent.id).length === 0 ? (
+                          <p className="text-sm text-gray-500">{t('school.groups.membershipNone')}</p>
+                        ) : (
+                          <ul className="text-sm text-gray-900 space-y-1">
+                            {groupsContainingStudent(classGroups, selectedStudent.id).map((group) => (
+                              <li key={group.id}>
+                                <span className="font-medium">{group.name}</span>
+                                {group.slots?.length ? (
+                                  <span className="text-gray-500"> · {scheduleLabelFromGroupSlots(group.slots)}</span>
+                                ) : null}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
                     )}
                     {proKlaseIntake && (
                     <div className="mt-3 w-full space-y-1.5">

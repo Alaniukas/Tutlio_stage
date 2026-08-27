@@ -2231,8 +2231,26 @@ function schoolContract(d: any, locale: Locale) {
   };
 }
 
+function extraLessonsOfferRow(label: string, raw: unknown, opts?: { money?: boolean }): string {
+  const value = String(raw ?? '').trim();
+  if (!value || value === '—' || value === '0' || value === '0.00') return '';
+  if (opts?.money) return td(label, `${esc(value)} €`);
+  return td(label, esc(value));
+}
+
 function schoolContractExtraOffer(d: any, locale: Locale) {
   const acceptUrl = String(d.acceptUrl || '').trim();
+  const period = [String(d.startDate || '').trim(), String(d.endDate || '').trim()].filter(Boolean).join(' – ');
+  const rows = [
+    extraLessonsOfferRow('Sutarties Nr.', d.contractNumber),
+    extraLessonsOfferRow('Mokinys', d.studentName),
+    extraLessonsOfferRow('Paslauga', d.serviceName),
+    extraLessonsOfferRow('Grafikas', d.schedule),
+    extraLessonsOfferRow('Laikotarpis', period || d.period),
+    extraLessonsOfferRow('Pamokos kaina', d.unitPrice, { money: true }),
+    extraLessonsOfferRow('Orientacinė mėnesio kaina', d.monthlyPrice, { money: true }),
+  ].filter(Boolean).join('');
+  const contact = schoolParentContactEmail(d);
   return {
     subject: `Papildomų pamokų sutartis${d.contractNumber ? ` Nr. ${d.contractNumber}` : ''} — ${d.studentName || 'Mokinys'}`,
     html: wrap(`
@@ -2243,18 +2261,12 @@ function schoolContractExtraOffer(d: any, locale: Locale) {
       <div class="body">
         <p class="greeting">Sveiki, ${esc(d.parentName || d.studentName || '')},</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          Peržiūrėkite nuotolinių papildomų pamokų sutartį mokiniui <strong>${esc(d.studentName)}</strong> ir pateikite užsakymą su prievole sumokėti.
+          ${esc(d.schoolName || 'Mokykla')} parengė nuotolinių papildomų pamokų sutartį mokiniui
+          <strong>${esc(d.studentName)}</strong>. Atidarykite nuorodą, peržiūrėkite dokumentą ir, jei viskas tinka, patvirtinkite sutartį.
         </p>
-        <div class="info-card">
-          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-            ${td('Sutarties Nr.', esc(d.contractNumber || '—'))}
-            ${td('Paslauga', esc(d.serviceName || '—'))}
-            ${td('Grafikas', esc(d.schedule || '—'))}
-            ${td('Pamokos kaina', d.unitPrice ? `${esc(d.unitPrice)} €` : '—')}
-            ${td('Orientacinė mėnesio kaina', d.monthlyPrice ? `${esc(d.monthlyPrice)} €` : '—')}
-          </table>
-        </div>
-        ${acceptUrl ? `<div style="margin:16px 0 10px;">${outlookEmailButton(acceptUrl, 'Peržiūrėti sutartį ir užsakyti', '#059669', { fontWeight: '600', fontSize: '14px', padding: '12px 24px' })}</div>` : ''}
+        ${rows ? `<div class="info-card"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${rows}</table></div>` : ''}
+        ${acceptUrl ? `<div style="text-align:center; margin:24px 0 10px;">${outlookEmailButton(acceptUrl, 'Peržiūrėti ir patvirtinti sutartį', '#059669', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}</div>` : ''}
+        ${contact ? `<p style="color:#6b7280; font-size:13px;">Jei turite klausimų, susisiekite su mokykla: ${esc(contact)}.</p>` : ''}
       </div>${footerFor(locale)}`, locale),
   };
 }
@@ -2270,7 +2282,7 @@ function schoolContractExtraAccepted(d: any, locale: Locale) {
       <div class="body">
         <p class="greeting">Sveiki, ${esc(d.parentName || d.studentName || '')},</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          Užregistravome jūsų užsakymą su prievole sumokėti. Žemiau — sudarymo įrašas. Išsaugota būtent ta redakcija, kurią matėte prieš pateikdami užsakymą.
+          Jūsų sutartis sudaryta. Galutinė PDF kopija pridėta prie šio laiško — tai ta pati redakcija, kurią patvirtinote.
         </p>
         <div class="info-card">
           <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">

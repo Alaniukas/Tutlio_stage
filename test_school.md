@@ -1,11 +1,12 @@
 # Demo Mokykla — pilnas testavimo planas
 
-Dokumentas skirtas eiti visą school modulį (įskaitant `alano-local` commitus ir vėlesnius 14 d. click-wrap pataisymus). Galima atsidaryti kitame PC.
+Dokumentas skirtas eiti visą school modulį ant `alano-local` (extra-lessons, 14 d. click-wrap, **tikra Laisvi vaikai DOCX sutartis**). Galima atsidaryti kitame PC ir eiti checkbox’us iš eilės.
 
 **Šaka:** `alano-local`  
 **DB:** stage Supabase `cuhciqwmqfuajeeqjjbm` (ne `tutlio.lt` produkcija)  
 **App:** `http://localhost:3000` · API `http://localhost:3002`  
-**Laiškai:** `alaniukasa@gmail.com` (QA mokinių `payer_email`)
+**Laiškai:** `alaniukasa@gmail.com` (QA mokinių `payer_email`)  
+**Sutarties šablonas (repo):** `docs/legal/extra-lessons-laisvi-vaikai.docx` (API kopija `api/_lib/templates/`)
 
 **Nedėti į produkciją** extra-lessons, klasės grupių, įrašų, join no-show, mokytojų sutarčių WIP ir 14 d. legal stulpelio be atskiro patvirtinimo.
 
@@ -13,12 +14,12 @@ Dokumentas skirtas eiti visą school modulį (įskaitant `alano-local` commitus 
 
 ## 0. Kitas PC — paruošimas
 
-1. `git clone` / `git fetch` ir `git checkout alano-local`.
-2. Jei testuoji **14 d. atsisakymą / Atsisakyti vs Nutraukti**, darbo kopijoje turi būti ir nekomituoti failai (arba vėlesnis commit): `SchoolExtraLessonsAccept.tsx`, `extra-lessons-parent-contracts.ts`, migracija `20260827120000_extra_lessons_start_within_14.sql`. Be jų veikia tik `9fe5009` bazinis extra-lessons.
+1. `git fetch` ir `git checkout alano-local`. Šiame PC turi būti ir **DOCX šablonas** (`docs/legal/extra-lessons-laisvi-vaikai.docx`). Jei failo nėra — tai sena kopija; be jo tėvas vėl matys tekstinį dump’ą.
+2. 14 d. atsisakymas / **Atsisakyti vs Nutraukti** jau yra `alano-local` (nebesitikėk atskirų nekomituotų failų). Migracija `20260827120000_extra_lessons_start_within_14.sql` stage turi būti uždėta. Jei accept/withdraw krenta dėl stulpelio — trūksta `start_within_14_status`.
 3. `.env.local` iš stage raktų (URL turi būti `cuhciqwmqfuajeeqjjbm.supabase.co`). **Nenaudok** senojo `xklzjhfztjxltrdkplog`. Windows: jei OS env turi seną `SUPABASE_URL`, vis tiek turi laimėti `.env.local` / `.env` failas.
-4. `npm install` tada `npm run dev` (PowerShell: komandas skirk `;`, ne `&&`).
-5. Stage migracijos extra-lessons + 14 d. stulpeliai jau turi būti uždėti. Jei accept/withdraw krenta dėl stulpelio — trūksta `start_within_14_status`.
-6. Seed (pasirinktinai, jei nėra QA mokinių):
+4. **DOCX→PDF converter** turi veikti, kitaip iframe’e bus Times-Roman tekstas, ne 7 psl. Word maketas. Lokaliai: `DOCX_CONVERTER_URL` + `DOCX_CONVERTER_API_KEY` (Railway) **arba** LibreOffice `soffice` PATH. API log’e ieškok `[extra-lessons] bundled docx`.
+5. `npm install` tada `npm run dev` (PowerShell: komandas skirk `;`, ne `&&`).
+6. Seed (jei nėra QA mokinių / nori šviežių extra sutarčių):
 
 ```bash
 node scripts/seed-qa-demo-orgs.mjs
@@ -81,9 +82,42 @@ Jei kitas PC turi savo `localhost:3000` ir tą pačią stage DB:
 
 - Per 14 d.: `http://localhost:3000/school-extra-lessons-accept?token=legalqawithin14aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`
 - Po 14 d.: `http://localhost:3000/school-extra-lessons-accept?token=legalqaafter14bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb`
-- Tušti laukai: `http://localhost:3000/school-extra-lessons-accept?token=legalqasparsecccccccccccccccccccccccccccccccc`
+- Pusiau užpildyta walkthrough: `http://localhost:3000/school-extra-lessons-accept?token=walkthroughhalfaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` (`PP-QA-HALF`)
 
 Po vieno sėkmingo accept tokenas sunaudojamas — tada naują pasiūlymą siųsk iš admin UI (laiškas į Gmail).
+
+---
+
+## 3b. Extra-lessons DOCX — ką TURI pamatyti tėvas (daryk pirmiausia)
+
+Tai **ne** metinė GoSign sutartis ir **ne** 6 skyrių santrauka. Demo Mokykla / Laisvi vaikai pildo kanoninį Word: *„NUOTOLINIŲ PAPILDOMŲ PAMOKŲ (UGDOMŲJŲ VEIKLŲ) PASLAUGŲ SUTARTIS“* (VšĮ „Laisvi vaikai“, ~7 psl. + 1 priedas).
+
+**Kaip eiti (5–8 min):**
+
+1. Paleisk `npm run dev`.
+2. Atidaryk WITHIN14 URL iš §3 (be school login).
+3. Palauk, kol užsikraus iframe **Sutarties dokumentas** (converter gali užtrukti iki ~20 s; viršuje gali būti „Atnaujinama peržiūra…“).
+4. Spausk **Atidaryti visą PDF** — naujas tabas, galima scrollinti visus puslapius.
+
+**Pass — iframe / PDF:**
+
+- [ ] Antraštė kaip Word’e, **ne** „Papildomu pamoku sutartis“ Times Roman be lietuviškų raidžių.
+- [ ] ~7 puslapiai (poraštė: *VšĮ „Laisvi vaikai“ | Tutlio sistemos sutarties šablonas | Redakcija 2026-08-19*).
+- [ ] 1 skyrius: paslaugų teikėjas **VšĮ „Laisvi vaikai“**, kodas `306698942`, direktorė Akvilė Adomaitytė (šie laukai **nėra** `{{...}}` — hardcoded).
+- [ ] Dinaminiai laukai **užpildyti**, ne palikti kaip `{{sutarties_nr}}`: sutarties nr. `PP-LEGAL-WITHIN14`, vaikas (QA Legal Per 14 d.), tėvas, paslauga, grafikas, kaina, orientacinė mėnesio suma.
+- [ ] 5.2 bankas: Swedbank `LT467300010185024788`.
+- [ ] Skyriai 1–11 + **1 PRIEDAS** (atsisakymo forma) pabaigoje.
+- [ ] Elektroninio sudarymo įrašas: redakcija, SHA (`—` kol nepriimta), autentifikavimo būdas Tutlio paskyra, 14 d. prašymas TAIP/NE/NETAIKOMA, įrašymas NETAIKOMA (Demo flag parked).
+
+**Fail — stabdyk ir nebekartok click-wrap, kol PDF netaisomas:**
+
+- [ ] Vienas puslapis / santrauka „1. Šalys… 6. Teisė per 14 dienų“.
+- [ ] Tušti `{{laukeliai}}` viduryje teksto.
+- [ ] Metinės mokyklos sutarties maketas (kitas DOCX).
+- [ ] Tik `<details>` tekstas be iframe (nėra `https://` PDF URL).
+
+Po to eik A6 (naujas pasiūlymas iš admin) ir C1 (checkbox’ai). Po **Patvirtinti sutartį** PDF turi persigeneruoti: SHA nebe `—`, sutikimo būsena **TAIP**, 14 d. **TAIP** arba **NE**.
+Sėkmės ekrane **nėra** „Atsisakyti sutarties“ — 14 d. atsisakymas tik tėvų paskyroje `/parent`.
 
 ---
 
@@ -163,21 +197,27 @@ Pažymi `no_show` **tik jei**: yra `meeting_link`, statusas `active`, praėjo **
 Tai **ne** atskira lentelė. `school_contracts.kind = extra_lessons`. **Ne** GoSign.
 
 - [ ] Pasirinkti mokinį (turi `payer_email`).
-- [ ] Tipas grupė / individualu; grupė iš sąrašo užpildo slotus.
-- [ ] Kaina / bazinės pamokos mėn. → orientacinė mėnesio suma.
-- [ ] Galima palikti tuščią grafiką/datą — tėvas pildo accept puslapyje.
+- [ ] Tipas grupė / individualu — galima palikti „Tėvai pasirinks“.
+- [ ] Kaina privaloma mokyklai. Bazinis kiekis, trukmė, grafikas, datos — nebūtini.
+- [ ] Galima palikti tuščią grafiką/datą/tipą — tėvas pildo accept puslapyje.
 - [ ] Siųsti → laiškas `school_contract_extra_offer` į mokėtoją, nuoroda `/school-extra-lessons-accept?token=`.
-- [ ] Sąraše matosi extra sutartis atskirai nuo metinės.
+- [ ] Sąraše matosi extra sutartis atskirai nuo metinės (žyma + filtras **Papildomos pamokos** / **Metinės**).
+- [ ] Siuntus turi ateiti laiškas į `payer_email` (ne tėvų registracijos kvietimas). Jei mokėtojo el. pašto nėra — klaida, ne tylus skip.
 
 
 
-## A7. Extra-lessons — tėvų accept (bazinis `9fe5009`)
+## A7. Extra-lessons — tėvų accept (DOCX + click-wrap)
 
-- [ ] Viešas puslapis be school login.
-- [ ] Visas sutarties tekstas.
-- [ ] Sutikimo checkbox + užsakymas.
-- [ ] Po accept: `signing_status = signed`, `document_sha256`, `accepted_at`.
-- [ ] Laiškas tėvui (su PDF, jei converter veikia).
+Pirmiausia §3b (maketas). Tada:
+
+- [ ] Viešas `/school-extra-lessons-accept?token=` **be** school login.
+- [ ] Iframe + **Atidaryti visą PDF** (ne vien tekstinis `<details>`).
+- [ ] Užsakymo suvestinė po dokumentu (paslauga, tipas, platforma, trukmė, grafikas, kaina).
+- [ ] Teisinis checkbox *Perskaičiau Sutartį…* privalomas, **ne** pažymėtas iš karto.
+- [ ] Mygtukas **Patvirtinti sutartį**.
+- [ ] Po accept: sėkmės antraštė **Sutartis sudaryta**; **nėra** mygtuko „Atsisakyti / Nutraukti“. 14 d. atsisakymas — `/parent` (prisijungus kaip extra tėvas).
+- [ ] `signing_status = signed`, `document_sha256`, `accepted_at`; laiškas `school_contract_extra_accepted` su PDF priedu (jei converter veikė).
+- [ ] Tušti admin laukai: geltona juosta „Prašome papildyti…“ (tipas, trukmė, platforma, grafikas, datos, kiekis); PDF persigeneruoja po įvesties.
 
 
 
@@ -274,25 +314,26 @@ Jei school naudoja tuos pačius `CompanyTvarkarastis` veiksmus:
 
 
 
-# C. Po `9fe5009` — 14 d. teisė (darbo kopija / legal seed)
+# C. 14 d. teisė (legal seed — jau `alano-local`)
 
-Be šių failų skyrių C praleisk.
+Seed: `node scripts/seed-school-extra-lessons-legal-qa.mjs` (PowerShell: `ENV_FILE=.env.local` neveikia; naudok `$env:ENV_FILE='.env.local'; node scripts/seed-school-extra-lessons-legal-qa.mjs` arba `.env.local` jau užkraunamas skripto).
 
-## C1. Accept UI
+## C1. Accept UI + DOCX
 
-Tekstai:
+Tekstai (turi sutapti su DOCX 3.2 ir 6.4):
 
-- Teisinis: *Perskaičiau Sutartį, susipažinau su jos priedais…*
-- 14 d. (tik jei pirma pamoka **per 14 kalendorinių dienų, Europe/Vilnius**): *Noriu, kad vaikas galėtų pradėti lankyti pamokas iš karto…* — **nepažymėtas**.
-- Mygtukas: **Užsakymas su prievole sumokėti**.
+- Teisinis: *Perskaičiau Sutartį, susipažinau su jos priedais ir privatumo pranešimu…*
+- 14 d. (tik jei pirma pamoka **per 14 kalendorinių dienų, Europe/Vilnius**): *Prašau pradėti teikti paslaugas nepasibaigus 14 dienų sutarties atsisakymo terminui…* — radio **Sutinku pradėti iš karto** / **Palaukti**, pagal nutylėjimą ne „iš karto“.
+- Mygtukas: **Patvirtinti sutartį**. Po sėkmės **nėra** atsisakymo mygtuko.
 - Nuoroda į `/legal/extra-lessons-withdrawal-form.html`.
+- PDF: §3b checklist (7 psl., užpildyti laukai).
 
 
 | Sutartis            | Checkbox 14 d.                             | Po accept `start_within_14_status` |
 | ------------------- | ------------------------------------------ | ---------------------------------- |
 | `PP-LEGAL-WITHIN14` | matomas                                    | be varnelės `no`; su varnele `yes` |
 | `PP-LEGAL-AFTER14`  | nėra                                       | `na`, shown text tuščias           |
-| `PP-LEGAL-SPARSE`   | priklauso nuo tėvo užpildytos pirmos datos | SHA nuo **sujungto** order         |
+| `PP-LEGAL-SPARSE`   | tėvas pildo tipą, trukmę, grafiką, datas, kiekį | SHA nuo **sujungto** order         |
 
 
 - [ ] API ignoruoja kliento `yes`, jei pagal order išeina `na`.
@@ -312,12 +353,12 @@ Tekstai:
 
 ## C3. Atsisakyti vs Nutraukti
 
-Tėvas: `demo-mokykla.extra.parent@tutlio.lt` → tėvų dashboard extra-lessons blokas.
+Tėvas: `demo-mokykla.extra.parent@tutlio.lt` → `/parent` → blokas **Papildomų pamokų sutartys**.
 
-- [ ] `PP-LEGAL-WITHDRAW` (~2 d.): **Atsisakyti** → `extra_end_kind = withdrawal`, pareiškimas PDF, laiškas withdrawn. **Mokytojui laiško nėra.**
-- [ ] `PP-LEGAL-TERMINATE` (~20 d.): **Nutraukti** → `termination`.
+- [ ] `PP-LEGAL-WITHDRAW` (~2 d.): **Atsisakyti sutarties** → `extra_end_kind = withdrawal`, pareiškimas PDF, laiškas withdrawn į mokėtoją. **Mokyklai / mokytojui atskiro laiško nėra.**
+- [ ] `PP-LEGAL-TERMINATE` (~20 d.): **Nutraukti sutartį** → `termination`.
 - [ ] Po veiksmo mygtukai dingsta; PDF / pareiškimas atsisiunčiami.
-- [ ] Tas pats iš token puslapio po accept, kol langas galioja.
+- [ ] Click-wrap sėkmės ekrane ir token URL po accept **nėra** atsisakymo / nutraukimo mygtukų.
 
 
 
@@ -337,12 +378,13 @@ Sąrašas eina per `parent_profiles.user_id` → `parent_students` **ir** `stude
 2. Grupės meniu (**Įrašai** parked — neturi būti).
 3. Sutartys: filtrai + skeno dialogas (be eSign = iškart pasirašyta).
 4. Finansai: įmokos placeholder + suvestinė XLSX.
-5. Extra pasiūlymas iš mokinio → Gmail.
-6. Trys accept URL (C1).
-7. Tėvo login → atsisakyti / nutraukti.
-8. Mokytojo login: etiketės, kalendorius; **nėra** school admin meniu.
-9. Buhalterė / limited — teisės.
-10. WIP mokytojų sutarčių **neieškoti** kaip gatavo.
+5. **WITHIN14 URL → §3b DOCX** (7 psl., ne santrauka). Jei failina — čia stabdyk extra srautą.
+6. Extra pasiūlymas iš mokinio → Gmail → naujas token, vėl PDF.
+7. Trys accept URL (C1): WITHIN14 / AFTER14 / SPARSE.
+8. Tėvo login `/parent` → **Papildomų pamokų sutartys**: atsisakyti (`PP-LEGAL-WITHDRAW`) / nutraukti (`PP-LEGAL-TERMINATE`). Ne click-wrap sėkmės ekrane.
+9. Mokytojo login: etiketės, kalendorius; **nėra** school admin meniu.
+10. Buhalterė / limited — teisės.
+11. WIP mokytojų sutarčių **neieškoti** kaip gatavo.
 
 ---
 
@@ -362,6 +404,9 @@ Sąrašas eina per `parent_profiles.user_id` → `parent_students` **ir** `stude
 | `100.00` įmokose                  | placeholder, ne suma                                                                     |
 | Sutikimas „jau yra“ filtre        | žiūrėk sutarties `media_publicity_consent`, ne sibling mokinį                            |
 | Extra pamoka ir metinė GoSign     | skirtingi `kind`; extra be GoSign                                                        |
+| PDF = Times Roman santrauka       | converter neveikia (`DOCX_CONVERTER_*` / LibreOffice) arba sena šaka be `docs/legal/*.docx` |
+| PDF rodo `{{sutarties_nr}}`       | payload neužsipildė — perkrauk accept; jei vis dar — bug, ne „normalu“                   |
+| Iframe tuščias, tekstas `<details>` | nėra pasirašyto PDF URL; žiūrėk API log `[extra-lessons]`                                |
 | Pro Klasė legal / pending package | kitas agentas; čia netestuoti nebent atskirai                                            |
 
 
@@ -383,7 +428,8 @@ Sąrašas eina per `parent_profiles.user_id` → `parent_students` **ir** `stude
 | `8c4b730`             | Mokėjimai tik `signed`                                                                       |
 | `0e411e2` / `0dabc96` | Split fee, parašų eilutės po rankinio upload                                                 |
 | `6318ade` / `a37ca4d` | Pasibaigęs school-sign, Dokobit PDF                                                          |
-| darbo kopija          | 14 d. TAIP/NE/NETAIKOMA, atsisakyti vs nutraukti, parent PDF, billing vartai                 |
+| `96c8dae` + DOCX darbas | Kanoninis Laisvi vaikai extra-lessons DOCX tėvams; 14 d. 6.4 tekstas; grupės slotai         |
+| darbo kopija / HEAD     | 14 d. TAIP/NE/NETAIKOMA, atsisakyti vs nutraukti, parent PDF, billing vartai                 |
 
 
 Detalesnis 14 d. mini planas: `docs/SCHOOL_EXTRA_LESSONS_LEGAL_TEST_PLAN.md`.

@@ -68,6 +68,7 @@ export function validateDocxTemplateBytes(bytes: ArrayBuffer | Uint8Array): stri
       delimiters: { start: '{{', end: '}}' },
       paragraphLoop: true,
       linebreaks: true,
+      nullGetter: () => '',
     });
     return null;
   } catch (error) {

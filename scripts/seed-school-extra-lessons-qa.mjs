@@ -27,7 +27,10 @@ const TUTOR_ID = 'c3a00000-7e57-4000-8000-000000000003';
 
 const DOCX_CANDIDATES = [
   process.env.EXTRA_LESSONS_DOCX,
+  join(ROOT, 'docs', 'legal', 'extra-lessons-laisvi-vaikai.docx'),
+  join(ROOT, 'api', '_lib', 'templates', 'extra-lessons-laisvi-vaikai.docx'),
   join(ROOT, 'docs', 'Tutlio_papildomu_pamoku_sutartis_pataisyta.docx'),
+  'c:/Users/37062/Downloads/Tutlio_papildomu_pamoku_sutartis_pataisyta (1).docx',
   'c:/Users/Alanas/Downloads/Tutlio_papildomu_pamoku_sutartis_pataisyta (1).docx',
 ].filter(Boolean);
 
@@ -162,6 +165,17 @@ async function main() {
       bodyText,
     });
     console.log('Template uploaded for Demo Mokykla');
+    try {
+      await uploadTemplate(supabase, {
+        orgId: LAISVI_ORG,
+        templateId: IDS.templateLaisvi,
+        bytes,
+        bodyText,
+      });
+      console.log('Template uploaded for Laisvi vaikai');
+    } catch (e) {
+      console.warn('Laisvi vaikai template skipped:', e?.message || e);
+    }
   } else {
     await supabase.from('school_contract_templates').upsert({
       id: IDS.templateDemo,

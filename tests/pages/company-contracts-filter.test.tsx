@@ -87,9 +87,11 @@ describe('CompanyContracts list filter', () => {
     ];
   });
 
+  const statusFilterTrigger = () => screen.getAllByRole('combobox')[1];
+
   // School view filters through a Select; pick a bucket by its labelled option.
   const pickFilter = (label: string) => {
-    fireEvent.keyDown(screen.getByRole('combobox'), { key: 'Enter' });
+    fireEvent.keyDown(statusFilterTrigger(), { key: 'Enter' });
     const option = screen.getByText(label).closest('[role="option"]');
     expect(option).toBeTruthy();
     fireEvent.keyDown(option!, { key: 'Enter' });
@@ -105,7 +107,7 @@ describe('CompanyContracts list filter', () => {
     // Both cards + counts visible by default.
     expect(screen.getByText('Vėgėlė Ąžuolas')).toBeTruthy();
     expect(screen.getByText('Petraitis Jonas')).toBeTruthy();
-    expect(screen.getByRole('combobox').textContent).toContain('Visos (2)');
+    expect(statusFilterTrigger().textContent).toContain('Visos (2)');
 
     // Cards are numbered and show the installment schedule sorted by number,
     // with paid entries marked.

@@ -5,6 +5,7 @@ import {
   EXTRA_LESSONS_CONTRACT_KIND,
   buildExtraLessonsOrderSnapshot,
   canonicalExtraLessonsPayload,
+  usesBundledExtraLessonsDocx,
   type ExtraLessonsOrderSnapshot,
 } from '../../src/lib/extraLessonsContract.js';
 import { fillPlaceholders } from './schoolContractPdf.js';
@@ -15,15 +16,32 @@ export function serviceSupabase(): SupabaseClient {
   return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
 }
 
-export function appOrigin(req: VercelRequest): string {
-  const host = typeof req.headers.host === 'string' ? req.headers.host : '';
+function requestHostOrigin(req: VercelRequest): string | null {
+  const host = typeof req.headers.host === 'string' ? req.headers.host.trim() : '';
+  if (!host) return null;
   const protoHeader = typeof req.headers['x-forwarded-proto'] === 'string'
     ? req.headers['x-forwarded-proto']
     : Array.isArray(req.headers['x-forwarded-proto'])
       ? req.headers['x-forwarded-proto'][0]
       : '';
-  const inferred = host ? `${protoHeader || 'https'}://${host}` : '';
-  return (process.env.APP_URL || process.env.VITE_APP_URL || inferred || 'https://tutlio.lt').replace(/\/$/, '');
+  const isLocal = /localhost|127\.0\.0\.1/i.test(host);
+  const proto = String(protoHeader || (isLocal ? 'http' : 'https')).split(',')[0].trim();
+  return `${proto}://${host}`.replace(/\/$/, '');
+}
+
+/** Browser-facing origin for accept links. Localhost must ignore a stale APP_URL port. */
+export function appOrigin(req: VercelRequest): string {
+  const hostOrigin = requestHostOrigin(req);
+  if (hostOrigin && /localhost|127\.0\.0\.1/i.test(hostOrigin)) return hostOrigin;
+  return (process.env.APP_URL || process.env.VITE_APP_URL || hostOrigin || 'https://tutlio.lt').replace(/\/$/, '');
+}
+
+/** Where this process can reach /api/send-email (local API port, not Vite). */
+export function internalApiOrigin(req: VercelRequest): string {
+  if (process.env.TUTLIO_DEV_API_LOCAL === '1') {
+    return `http://127.0.0.1:${process.env.DEV_API_PORT || '3002'}`;
+  }
+  return appOrigin(req);
 }
 
 export function randomToken(): string {
@@ -38,25 +56,47 @@ export function vilniusDateTimeLabel(at = new Date()): string {
   }).format(at);
 }
 
+export function extraLessonsTemplateSource(params: {
+  organizationId?: string | null;
+  storedBody?: string | null;
+}): string {
+  const stored = String(params.storedBody || '');
+  if (usesBundledExtraLessonsDocx(params.organizationId)) return EXTRA_LESSONS_DEFAULT_BODY;
+  if (stored.includes('{{sutarties_nr}}') || stored.includes('{{paslaugos_pavadinimas}}')) return stored;
+  if (stored.includes('1 PRIEDAS') && stored.includes('{{')) return stored;
+  return EXTRA_LESSONS_DEFAULT_BODY;
+}
+
 export function fillExtraLessonsBody(params: {
   templateBody?: string | null;
+  organizationId?: string | null;
   payload: Record<string, string>;
   sha256?: string;
   startWithin14Label?: string;
   recordingConsentLabel?: string;
   acceptedAtLabel?: string;
+  termsAcceptedLabel?: string;
+  confirmationSentLabel?: string;
 }): string {
-  const body = String(params.templateBody || EXTRA_LESSONS_DEFAULT_BODY);
+  const body = extraLessonsTemplateSource({
+    organizationId: params.organizationId,
+    storedBody: params.templateBody,
+  });
   const braced: Record<string, string> = {};
   for (const [key, value] of Object.entries(params.payload)) {
     braced[`{{${key}}}`] = value;
   }
+  const when = params.acceptedAtLabel || params.payload.data_laikas_Europe_Vilnius || vilniusDateTimeLabel();
+  const sha = params.sha256 || params.payload.dokumento_sha256 || '—';
   return fillPlaceholders(body, {
     ...braced,
-    '{{data_laikas_Europe_Vilnius}}': params.acceptedAtLabel || params.payload.data_laikas_Europe_Vilnius || vilniusDateTimeLabel(),
-    '{{SHA-256_ar_kitas_integralumo_ID}}': params.sha256 || '—',
-    '{{start_within_14_label}}': params.startWithin14Label || 'NETAIKOMA',
-    '{{recording_consent_label}}': params.recordingConsentLabel || 'NETAIKOMA',
+    '{{data_laikas_Europe_Vilnius}}': when,
+    '{{dokumento_sha256}}': sha,
+    '{{SHA-256_ar_kitas_integralumo_ID}}': sha,
+    '{{start_within_14_label}}': params.startWithin14Label || params.payload.start_within_14_label || 'NETAIKOMA',
+    '{{recording_consent_label}}': params.recordingConsentLabel || params.payload.recording_consent_label || 'NETAIKOMA',
+    '{{sutikimo_su_salygomis_busena}}': params.termsAcceptedLabel || params.payload.sutikimo_su_salygomis_busena || '—',
+    '{{el_pastas_ir_issiuntimo_data_laikas}}': params.confirmationSentLabel || params.payload.el_pastas_ir_issiuntimo_data_laikas || '—',
     '{{TAIP}}': 'TAIP',
   });
 }
@@ -157,6 +197,7 @@ export function extraLessonsPayloadForContract(params: {
     school_name: params.schoolName,
   });
   payload.data_laikas_Europe_Vilnius = vilniusDateTimeLabel();
+  payload.data = payload.data_laikas_Europe_Vilnius.split(' ')[0] || payload.data_laikas_Europe_Vilnius;
   return payload;
 }
 

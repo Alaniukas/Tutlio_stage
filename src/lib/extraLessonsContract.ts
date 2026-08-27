@@ -4,13 +4,76 @@
  * Pure — no React / Supabase / DOM.
  */
 
+import { EXTRA_LESSONS_LEGAL_BODY } from './extraLessonsLegalBody';
+
+export { EXTRA_LESSONS_LEGAL_BODY };
+
 export const EXTRA_LESSONS_CONTRACT_KIND = 'extra_lessons' as const;
 export const ANNUAL_CONTRACT_KIND = 'annual' as const;
+
+export function isExtraLessonsContractKind(kind?: string | null): boolean {
+  return kind === EXTRA_LESSONS_CONTRACT_KIND;
+}
 export type SchoolContractKind = typeof ANNUAL_CONTRACT_KIND | typeof EXTRA_LESSONS_CONTRACT_KIND;
 
 export const EXTRA_LESSONS_REVISION_LABEL = '2026-08-19';
+export const EXTRA_LESSONS_AUTH_METHOD = 'Tutlio paskyra (el. paštas ir slaptažodis)';
+export const EXTRA_LESSONS_RECORDING_NA = 'netaikoma';
+
+/** Demo Mokykla + VšĮ Laisvi vaikai — always use the bundled legal DOCX. */
+export const EXTRA_LESSONS_BUNDLED_DOCX_ORG_IDS = [
+  'c3a00000-7e57-4000-8000-000000000001',
+  '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17',
+] as const;
+
+export function usesBundledExtraLessonsDocx(organizationId: string | null | undefined): boolean {
+  return Boolean(organizationId && (EXTRA_LESSONS_BUNDLED_DOCX_ORG_IDS as readonly string[]).includes(organizationId));
+}
+
+export const EXTRA_LESSONS_DOCX_PLACEHOLDERS = [
+  'sutarties_nr',
+  'data_laikas_Europe_Vilnius',
+  'mokyklos_el_pastas',
+  'mokyklos_telefonas',
+  'tevo_globejo_vardas_pavarde',
+  'naudotojo_ID',
+  'tevo_el_pastas',
+  'tevo_telefonas',
+  'vaiko_vardas_pavarde',
+  'klase',
+  'paslaugos_pavadinimas',
+  'grupine_ar_individuali',
+  'platforma',
+  'pamokos_trukme_min',
+  'savaites_dienos_ir_laikas',
+  'pradzios_data',
+  'pabaigos_data_ar_mokslo_metu_pabaiga',
+  'kaina',
+  'PVM_statusas',
+  'orientacine_menesio_kaina',
+  'individualios_pamokos_atšaukimo_sąlygos',
+  'tikslas',
+  'gavejai',
+  'saugojimo_terminas',
+  'duomenu_apsaugos_kontaktas',
+  'redakcijos_ID',
+  'dokumento_sha256',
+  'autentifikavimo_budas',
+  'sutikimo_su_salygomis_busena',
+  'start_within_14_label',
+  'recording_consent_label',
+  'el_pastas_ir_issiuntimo_data_laikas',
+  'data',
+  'vardas_pavarde',
+  'adresas_ar_el_pastas',
+] as const;
 
 export type ExtraLessonsServiceType = 'group' | 'individual';
+export type ExtraLessonsServiceTypeOrUnset = ExtraLessonsServiceType | '';
+
+export function parseExtraLessonsServiceType(value: unknown): ExtraLessonsServiceTypeOrUnset {
+  return value === 'individual' || value === 'group' ? value : '';
+}
 
 export type ExtraLessonsScheduleSlot = {
   weekday: number;
@@ -21,7 +84,7 @@ export type ExtraLessonsScheduleSlot = {
 export type ExtraLessonsOrderSnapshot = {
   revision_label: string;
   service_name: string;
-  service_type: ExtraLessonsServiceType;
+  service_type: ExtraLessonsServiceTypeOrUnset;
   platform: string;
   duration_minutes: number;
   schedule_slots: ExtraLessonsScheduleSlot[];
@@ -41,7 +104,7 @@ export type ExtraLessonsOrderSnapshot = {
 };
 
 export const START_WITHIN_14_CHECKBOX_TEXT =
-  'Noriu, kad vaikas galėtų pradėti lankyti pamokas iš karto. Suprantu, kad per pirmąsias 14 dienų atsisakęs Sutarties turėsiu sumokėti už iki Sutarties atsisakymo jau suteiktas pamokas.';
+  'Prašau pradėti teikti paslaugas nepasibaigus 14 dienų sutarties atsisakymo terminui. Suprantu, kad atsisakęs Sutarties turėsiu sumokėti už iki atsisakymo suteiktas paslaugas.';
 
 export const EXTRA_LESSONS_TERMS_CHECKBOX_TEXT =
   'Perskaičiau Sutartį, susipažinau su jos priedais ir privatumo pranešimu, pateikti duomenys yra teisingi ir sutinku su Sutarties sąlygomis.';
@@ -77,7 +140,7 @@ export function indicativeMonthlyPrice(baseLessonsPerMonth: number, unitPriceEur
 
 export function buildExtraLessonsOrderSnapshot(input: {
   service_name: string;
-  service_type: ExtraLessonsServiceType;
+  service_type?: ExtraLessonsServiceTypeOrUnset;
   platform?: string;
   duration_minutes: number;
   schedule_slots?: ExtraLessonsScheduleSlot[];
@@ -98,13 +161,16 @@ export function buildExtraLessonsOrderSnapshot(input: {
   const slots = input.schedule_slots || [];
   const unit = Math.round(Number(input.unit_price_eur) * 100) / 100;
   const base = Math.max(0, Math.round(Number(input.base_lessons_per_month) || 0));
-  const type = input.service_type === 'individual' ? 'individual' : 'group';
+  const type = parseExtraLessonsServiceType(input.service_type);
+  const durationRaw = Number(input.duration_minutes);
   return {
     revision_label: input.revision_label || EXTRA_LESSONS_REVISION_LABEL,
     service_name: String(input.service_name || '').trim(),
     service_type: type,
-    platform: String(input.platform || 'Google Meet').trim() || 'Google Meet',
-    duration_minutes: Math.max(1, Math.round(Number(input.duration_minutes) || 45)),
+    platform: input.platform === undefined || input.platform === null
+      ? 'Google Meet'
+      : String(input.platform).trim(),
+    duration_minutes: durationRaw > 0 ? Math.round(durationRaw) : 0,
     schedule_slots: slots,
     schedule_label: String(input.schedule_label || formatScheduleLabel(slots)).trim(),
     start_date: String(input.start_date || '').trim(),
@@ -116,7 +182,9 @@ export function buildExtraLessonsOrderSnapshot(input: {
     individual_cancel_terms:
       type === 'individual'
         ? String(input.individual_cancel_terms || 'Individuali pamoka atšaukiama ne vėliau kaip 24 val. iki pradžios; vėliau pamoka apmokama.').trim()
-        : 'netaikoma',
+        : type === 'group'
+          ? 'netaikoma'
+          : String(input.individual_cancel_terms || '').trim(),
     school_email: String(input.school_email || '').trim(),
     school_phone: String(input.school_phone || '').trim(),
     data_protection_contact: String(input.data_protection_contact || input.school_email || '').trim(),
@@ -125,12 +193,10 @@ export function buildExtraLessonsOrderSnapshot(input: {
   };
 }
 
-/** Admin offer: price + student-side fields can be sparse; parents finish on accept. */
+/** Admin offer: only price is required; parents finish remaining order fields on accept. */
 export function validateExtraLessonsOffer(order: ExtraLessonsOrderSnapshot): string[] {
   const errors: string[] = [];
-  if (!order.service_name && !order.group_name) errors.push('service_name');
   if (!(order.unit_price_eur > 0)) errors.push('unit_price_eur');
-  if (!(order.duration_minutes > 0)) errors.push('duration_minutes');
   return errors;
 }
 
@@ -138,6 +204,8 @@ export function validateExtraLessonsOffer(order: ExtraLessonsOrderSnapshot): str
 export function validateExtraLessonsOrder(order: ExtraLessonsOrderSnapshot): string[] {
   const errors: string[] = [];
   if (!order.service_name) errors.push('service_name');
+  if (order.service_type !== 'group' && order.service_type !== 'individual') errors.push('service_type');
+  if (!order.platform) errors.push('platform');
   if (!order.start_date) errors.push('start_date');
   if (!order.end_date) errors.push('end_date');
   if (!order.schedule_label && !(order.schedule_slots || []).length) errors.push('schedule_label');
@@ -188,9 +256,10 @@ export function canonicalExtraLessonsPayload(input: {
     redakcijos_ID: o.revision_label,
     revision_label: o.revision_label,
     paslaugos_pavadinimas: o.service_name,
-    grupine_ar_individuali: o.service_type === 'group' ? 'grupinė' : 'individuali',
+    grupine_ar_individuali:
+      o.service_type === 'group' ? 'grupinė' : o.service_type === 'individual' ? 'individuali' : '',
     platforma: o.platform,
-    pamokos_trukme_min: String(o.duration_minutes),
+    pamokos_trukme_min: o.duration_minutes > 0 ? String(o.duration_minutes) : '',
     savaites_dienos_ir_laikas: o.schedule_label,
     pradzios_data: o.start_date,
     pabaigos_data_ar_mokslo_metu_pabaiga: o.end_date,
@@ -208,6 +277,20 @@ export function canonicalExtraLessonsPayload(input: {
     mokyklos_telefonas: o.school_phone,
     duomenu_apsaugos_kontaktas: o.data_protection_contact,
     school_name: input.school_name,
+    data_laikas_Europe_Vilnius: '',
+    dokumento_sha256: '—',
+    'SHA-256_ar_kitas_integralumo_ID': '—',
+    autentifikavimo_budas: EXTRA_LESSONS_AUTH_METHOD,
+    sutikimo_su_salygomis_busena: '—',
+    start_within_14_label: 'NETAIKOMA',
+    recording_consent_label: 'NETAIKOMA',
+    el_pastas_ir_issiuntimo_data_laikas: '—',
+    data: '',
+    vardas_pavarde: input.parent_name,
+    adresas_ar_el_pastas: input.parent_email || input.parent_phone,
+    tikslas: EXTRA_LESSONS_RECORDING_NA,
+    gavejai: EXTRA_LESSONS_RECORDING_NA,
+    saugojimo_terminas: EXTRA_LESSONS_RECORDING_NA,
   };
 }
 
@@ -371,48 +454,5 @@ export function isExtraLessonsContract(row: { kind?: string | null } | null | un
   return row?.kind === EXTRA_LESSONS_CONTRACT_KIND;
 }
 
-/** Default LT body shown before accept when the school has not uploaded a DOCX. */
-export const EXTRA_LESSONS_DEFAULT_BODY = `NUOTOLINIŲ PAPILDOMŲ PAMOKŲ (UGDOMŲJŲ VEIKLŲ) PASLAUGŲ SUTARTIS
-
-1. SUTARTIES ŠALYS IR UŽSAKYMO DUOMENYS
-Sutarties numeris {{sutarties_nr}}
-Sutarties sudarymo data ir laikas {{data_laikas_Europe_Vilnius}}
-Paslaugų teikėjas {{school_name}}
-Kontaktai {{mokyklos_el_pastas}}, {{mokyklos_telefonas}}
-Paslaugų gavėjas {{tevo_globejo_vardas_pavarde}}
-Paskyros identifikatorius {{naudotojo_ID}}
-El. paštas / telefonas {{tevo_el_pastas}} / {{tevo_telefonas}}
-Vaikas {{vaiko_vardas_pavarde}}, klasė {{klase}}
-
-2. SUTARTIES DALYKAS
-Pamokos / veiklos pavadinimas {{paslaugos_pavadinimas}}
-Paslaugos tipas {{grupine_ar_individuali}}
-Platforma {{platforma}}
-Pamokos trukmė {{pamokos_trukme_min}} min.
-Grafikas {{savaites_dienos_ir_laikas}}
-Paslaugų teikimo pradžia {{pradzios_data}}
-Numatoma pabaiga {{pabaigos_data_ar_mokslo_metu_pabaiga}}
-Vienos pamokos kaina {{kaina}} Eur ({{PVM_statusas}})
-Numatoma mėnesio kaina {{orientacine_menesio_kaina}} Eur
-Individualių pamokų atšaukimas {{individualios_pamokos_atšaukimo_sąlygos}}
-
-3. SUTARTIES SUDARYMAS ELEKTRONINIU BŪDU
-Sutartis laikoma sudaryta, kai Paslaugų gavėjas Tutlio paskyroje peržiūri visą tekstą ir užsakymo santrauką, atskiru laukeliu patvirtina sąlygas ir paspaudžia „Užsakymas su prievole sumokėti“.
-
-4. LANKYMAS
-Grupinė pamoka pagal tvarkaraštį apmokama ir tada, kai vaikas joje nedalyvavo, jeigu vieta buvo rezervuota. Jeigu pamoka neįvyksta dėl mokytojo, mokestis netaikomas.
-
-5. KAINA IR SĄSKAITOS
-Kiekvieną mėnesį suteikiami baziniai kreditai pagal šioje Sutartyje nurodytą pamokų skaičių. Papildomai prisijungtos pamokos pridedamos mėnesio pabaigoje. Sąskaita pateikiama pasibaigus kalendoriniam mėnesiui ir apmokama per 5 darbo dienas.
-
-6. TEISĖ PER 14 DIENŲ ATSISAKYTI
-Paslaugų gavėjas turi teisę per 14 dienų nuo sudarymo atsisakyti šios nuotolinės Sutarties Tutlio paskyroje.
-
-ELEKTRONINIO SUDARYMO ĮRAŠAS
-Sutarties redakcija {{redakcijos_ID}}
-Dokumento kontrolinė suma {{SHA-256_ar_kitas_integralumo_ID}}
-Naudotojo paskyra {{naudotojo_ID}}
-Sutikimo su sąlygomis būsena {{TAIP}}
-Prašymas pradėti paslaugas per 14 dienų {{start_within_14_label}}
-Atskiras sutikimas dėl įrašymo {{recording_consent_label}}
-`;
+/** Full legal contract text with {{placeholders}} — never the old 6-section summary. */
+export const EXTRA_LESSONS_DEFAULT_BODY = EXTRA_LESSONS_LEGAL_BODY;

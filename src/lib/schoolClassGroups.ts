@@ -195,3 +195,123 @@ export function studentsForGroupPicker<T extends { id: string; enrollment_status
   const selected = new Set(selectedIds);
   return students.filter((student) => selected.has(student.id) || !isArchivedEnrollmentStatus(student.enrollment_status));
 }
+
+export function groupsContainingStudent(
+  groups: SchoolClassGroupRecord[],
+  studentId: string,
+): SchoolClassGroupRecord[] {
+  if (!studentId) return [];
+  return groups.filter((group) => (group.members || []).some((member) => member.student_id === studentId));
+}
+
+export function groupsTaughtByTutor(
+  groups: SchoolClassGroupRecord[],
+  tutorId: string,
+): SchoolClassGroupRecord[] {
+  if (!tutorId) return [];
+  return groups.filter((group) => group.tutor_id === tutorId);
+}
+
+function startOfLocalDay(value: Date): Date {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+}
+
+function occurrenceFromSlot(
+  day: Date,
+  slot: SchoolClassGroupSlot,
+  durationMinutes: number,
+): { start: Date; end: Date } {
+  const [hh, mm] = String(slot.start_time || '16:00').slice(0, 5).split(':').map(Number);
+  const start = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hh || 0, mm || 0, 0, 0);
+  return { start, end: new Date(start.getTime() + durationMinutes * 60 * 1000) };
+}
+
+/** Next (or same-day) lesson window from weekly group slots. */
+export function nextClassGroupOccurrence(
+  slots: SchoolClassGroupSlot[],
+  durationMinutes: number,
+  from: Date = new Date(),
+  preferDate?: Date,
+): { start: Date; end: Date } | null {
+  const duration = Math.max(15, Number(durationMinutes) || 45);
+  const normalized = normalizeGroupSlots(slots, duration);
+  if (!normalized.length) return null;
+
+  if (preferDate && !Number.isNaN(preferDate.getTime())) {
+    const day = startOfLocalDay(preferDate);
+    const sameDay = normalized
+      .filter((slot) => slot.weekday === day.getDay())
+      .sort((a, b) => a.start_time.localeCompare(b.start_time));
+    if (sameDay[0]) return occurrenceFromSlot(day, sameDay[0], duration);
+  }
+
+  const searchFrom = preferDate && !Number.isNaN(preferDate.getTime()) ? preferDate : from;
+  for (let i = 0; i < 21; i++) {
+    const day = startOfLocalDay(new Date(
+      searchFrom.getFullYear(),
+      searchFrom.getMonth(),
+      searchFrom.getDate() + i,
+    ));
+    const candidates = normalized
+      .filter((slot) => slot.weekday === day.getDay())
+      .sort((a, b) => a.start_time.localeCompare(b.start_time));
+    for (const slot of candidates) {
+      const occ = occurrenceFromSlot(day, slot, duration);
+      if (occ.end.getTime() > searchFrom.getTime()) return occ;
+    }
+  }
+  return occurrenceFromSlot(startOfLocalDay(searchFrom), normalized[0], duration);
+}
+
+export type ClassGroupLessonPrefill = {
+  tutorId: string;
+  subjectId: string | null;
+  topic: string;
+  meetingLink: string;
+  studentIds: string[];
+  weekdays: number[];
+  recurringEndDate: string;
+  start: Date | null;
+  end: Date | null;
+};
+
+export function classGroupLessonPrefill(
+  group: SchoolClassGroupRecord,
+  options?: { from?: Date; preferDate?: Date },
+): ClassGroupLessonPrefill {
+  const duration = group.duration_minutes || 45;
+  const occ = nextClassGroupOccurrence(
+    group.slots || [],
+    duration,
+    options?.from || new Date(),
+    options?.preferDate,
+  );
+  const weekdays = [...new Set((group.slots || []).map((slot) => Number(slot.weekday)))]
+    .filter((day) => day >= 0 && day <= 6)
+    .sort((a, b) => a - b);
+  return {
+    tutorId: group.tutor_id,
+    subjectId: group.subject_id ? String(group.subject_id) : null,
+    topic: String(group.name || '').trim(),
+    meetingLink: String(group.meeting_link || '').trim(),
+    studentIds: [...new Set((group.members || []).map((member) => member.student_id).filter(Boolean))],
+    weekdays,
+    recurringEndDate: String(group.school_year_end || '').slice(0, 10),
+    start: occ?.start ?? null,
+    end: occ?.end ?? null,
+  };
+}
+
+export function resolveTutorSubjectForClassGroup(
+  group: SchoolClassGroupRecord,
+  tutorSubjects: Array<{ id: string; name?: string | null }>,
+): string {
+  const forTutor = tutorSubjects.filter(Boolean);
+  if (group.subject_id && forTutor.some((subject) => subject.id === group.subject_id)) {
+    return String(group.subject_id);
+  }
+  const name = String(group.name || '').trim().toLowerCase();
+  if (!name) return '';
+  const byName = forTutor.find((subject) => String(subject.name || '').trim().toLowerCase() === name);
+  return byName?.id || '';
+}

@@ -1,7 +1,8 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
-import { parentLegalAcceptanceMissing, usesProKlaseLegalDocs } from '../src/lib/proKlaseLegal.js';
-import { normalizeStudentGrade1to12 } from '../src/lib/studentGrade.js';
+import { findAuthUserByEmail, isAuthEmailAlreadyRegistered } from './_lib/findAuthUserByEmail.js';
+import { isAcceptedFlag, parentLegalAcceptanceMissing, usesProKlaseLegalDocs } from './_lib/proKlaseLegal.js';
+import { normalizeStudentGrade1to12 } from './_lib/studentGrade.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -108,8 +109,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     if (parentLegalAcceptanceMissing({
       orgIdOrSlug: orgId,
-      acceptedPrivacy: body.acceptedPrivacy === true,
-      acceptedTerms: body.acceptedTerms === true,
+      acceptedPrivacy: isAcceptedFlag(body.acceptedPrivacy),
+      acceptedTerms: isAcceptedFlag(body.acceptedTerms),
     })) {
       return res.status(400).json({ error: 'Legal acceptance required', code: 'legal_required' });
     }
@@ -123,18 +124,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       email: normalizedEmail,
       password,
       email_confirm: true,
+      user_metadata: {
+        role: 'parent',
+        full_name: fullName.trim(),
+      },
     });
 
     if (authErr) {
       const msg = authErr.message || '';
-      if (msg.includes('already registered') || msg.includes('already been registered')) {
-        let existing: { id: string; email?: string } | undefined;
-        for (let page = 1; page <= 20 && !existing; page++) {
-          const { data: { users }, error: listErr } = await supabase.auth.admin.listUsers({ page, perPage: 100 });
-          if (listErr || !users?.length) break;
-          existing = users.find((u: any) => (u.email || '').trim().toLowerCase() === normalizedEmail);
-          if (users.length < 100) break;
-        }
+      const alreadyRegistered = isAuthEmailAlreadyRegistered(msg) || authErr.code === 'email_exists';
+      if (alreadyRegistered) {
+        const existing = await findAuthUserByEmail(supabase, normalizedEmail);
         if (existing?.id) {
           const { error: pwErr } = await supabase.auth.admin.updateUserById(existing.id, { password });
           if (pwErr) {
@@ -146,7 +146,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return res.status(200).json({ success: true });
         }
       }
-      return res.status(400).json({ error: 'Registration failed', code: 'registration_failed' });
+      console.error('[register-parent] createUser failed', {
+        message: msg,
+        code: authErr.code,
+        status: authErr.status,
+      });
+      return res.status(400).json({
+        error: alreadyRegistered
+          ? 'This email is already registered. Sign in or use password reset.'
+          : 'Registration failed',
+        code: alreadyRegistered ? 'email_already_registered' : 'registration_failed',
+      });
     }
 
     if (!authData.user) return res.status(500).json({ error: 'User creation failed' });

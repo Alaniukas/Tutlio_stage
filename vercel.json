@@ -82,6 +82,14 @@
         },
         "api/school-contract-render-docx-pdf.ts": {
             "maxDuration": 60
+        },
+        "api/extra-lessons-contract-offer.ts": {
+            "maxDuration": 60,
+            "includeFiles": "api/_lib/templates/extra-lessons-laisvi-vaikai.docx"
+        },
+        "api/extra-lessons-contract-accept.ts": {
+            "maxDuration": 60,
+            "includeFiles": "api/_lib/templates/extra-lessons-laisvi-vaikai.docx"
         }
     },
     "headers": [

@@ -33,8 +33,6 @@ import { orgFeeProfile } from '@/lib/marketMoney';
 import { format, isAfter } from 'date-fns';
 import { cn, normalizeUrl } from '@/lib/utils';
 import { recordJoinClick } from '@/lib/joinTracking';
-import ParentExtraLessonsContracts from '@/components/parent/ParentExtraLessonsContracts';
-
 type ChildTutorPolicy = ParentTutorContactPolicy;
 
 interface ChildSession {
@@ -510,8 +508,6 @@ export default function ParentDashboard() {
                 </span>
               </button>
             </div>
-
-            <ParentExtraLessonsContracts />
 
             {children.map((child) => (
               <ChildBlock

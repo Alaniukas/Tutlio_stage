@@ -77,8 +77,9 @@ describe('school extra-lessons emails', () => {
       schedule: 'Antradieniais 16:00–16:45',
     });
     expect(sent.subject).toContain('PP-LEGAL-WITHIN14');
-    expect(sent.html).toContain('Peržiūrėti sutartį ir užsakyti');
+    expect(sent.html).toContain('Peržiūrėti ir patvirtinti sutartį');
     expect(sent.html).toContain('school-extra-lessons-accept');
+    expect(sent.html).not.toContain('prievole sumokėti');
   });
 
   it('accepted mail includes SHA freeze', async () => {

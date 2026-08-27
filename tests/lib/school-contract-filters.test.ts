@@ -4,6 +4,7 @@ import {
   currentContractPdfPath,
   getContractMissingFieldLabels,
   matchesContractFilter,
+  matchesContractKindFilter,
   schoolCanInitiateSignature,
   shouldPromptSchoolSignedOnScan,
 } from '@/lib/schoolContractFilters';
@@ -221,5 +222,13 @@ describe('schoolContractFilters', () => {
       signed_contract_url: 'org/scan.pdf',
       signatures: schoolSigned,
     })).toBe('org/signed/school.pdf');
+  });
+
+  it('filters annual vs extra-lessons kinds', () => {
+    expect(matchesContractKindFilter('all', 'annual')).toBe(true);
+    expect(matchesContractKindFilter('annual', 'extra_lessons')).toBe(false);
+    expect(matchesContractKindFilter('annual', null)).toBe(true);
+    expect(matchesContractKindFilter('extra_lessons', 'extra_lessons')).toBe(true);
+    expect(matchesContractKindFilter('extra_lessons', 'annual')).toBe(false);
   });
 });

@@ -48,6 +48,12 @@ import { isProKlaseOrg } from '@/lib/marketMoney';
 import { setSessionComplimentary } from '@/lib/setSessionComplimentary';
 import { ORG_TUTOR_FILTER_SCROLL_CLASS, ORG_TUTOR_SELECT_SCROLL_CLASS } from '@/lib/orgUi';
 import { calendarSessionTitlePrefix, getCalendarSessionEventStyle } from '@/lib/calendarSessionEventStyle';
+import {
+  classGroupLessonPrefill,
+  resolveTutorSubjectForClassGroup,
+  scheduleLabelFromGroupSlots,
+  type SchoolClassGroupRecord,
+} from '@/lib/schoolClassGroups';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -325,6 +331,7 @@ export default function CompanyTvarkarastis() {
       ? hasFeature('trial_reservation_flow') || hasFeature('auto_trial_first_lesson')
       : canView);
   const hideAdminPrices = hasFeature('hide_admin_lesson_prices');
+  const showClassGroupPicker = isSchoolOrgView && !featuresLoading && hasFeature('school_class_groups');
 
   const assertTutorLicensed = async (tutorId: string) => {
     const { data: tutorProf } = await supabase
@@ -462,6 +469,8 @@ export default function CompanyTvarkarastis() {
   const [createTopic, setCreateTopic] = useState('');
   const [createMeetingLink, setCreateMeetingLink] = useState('');
   const [createStudentIds, setCreateStudentIds] = useState<string[]>([]);
+  const [createClassGroupId, setCreateClassGroupId] = useState('');
+  const [classGroups, setClassGroups] = useState<SchoolClassGroupRecord[]>([]);
   const [createIsRecurring, setCreateIsRecurring] = useState(false);
   const [createRecurringEndDate, setCreateRecurringEndDate] = useState('');
   const [createRecurringFrequency, setCreateRecurringFrequency] = useState<'weekly' | 'biweekly' | 'monthly'>('weekly');
@@ -554,6 +563,21 @@ export default function CompanyTvarkarastis() {
       cancelled = true;
     };
   }, [organizationId]);
+
+  useEffect(() => {
+    if (!showClassGroupPicker) {
+      setClassGroups([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const headers = await authHeaders();
+      const res = await fetch('/api/school-class-groups', { headers });
+      const data = await res.json().catch(() => ({}));
+      if (!cancelled && res.ok) setClassGroups((data.groups || []) as SchoolClassGroupRecord[]);
+    })();
+    return () => { cancelled = true; };
+  }, [showClassGroupPicker]);
 
   // Org feature auto_trial_first_lesson (feedback item 10): a student's first
   // lesson defaults to a trial with the org trial topic/duration/price — all
@@ -1240,6 +1264,49 @@ export default function CompanyTvarkarastis() {
         const newEnd = new Date(newStart.getTime() + durationMinutes * 60 * 1000);
         setCreateEndTime(format(newEnd, "yyyy-MM-dd'T'HH:mm"));
       }
+    }
+  };
+
+  const applyClassGroupToCreateForm = (groupId: string) => {
+    if (!groupId) {
+      setCreateClassGroupId('');
+      return;
+    }
+    const group = classGroups.find((row) => row.id === groupId);
+    if (!group) return;
+    const prefer = createStartTime ? new Date(createStartTime) : undefined;
+    const prefill = classGroupLessonPrefill(group, {
+      from: new Date(),
+      preferDate: prefer && !Number.isNaN(prefer.getTime()) ? prefer : undefined,
+    });
+    setCreateClassGroupId(group.id);
+    setCreateTutorId(prefill.tutorId);
+    setCreateStudentIds(prefill.studentIds);
+    setCreateStudentId(prefill.studentIds.length === 1 ? prefill.studentIds[0] : '');
+    setCreateTopic(prefill.topic);
+    setCreateMeetingLink(prefill.meetingLink);
+    if (prefill.start && prefill.end) {
+      setCreateStartTime(format(prefill.start, "yyyy-MM-dd'T'HH:mm"));
+      setCreateEndTime(format(prefill.end, "yyyy-MM-dd'T'HH:mm"));
+    }
+    setCreateRecurringWeekdays(prefill.weekdays);
+    if (prefill.recurringEndDate) setCreateRecurringEndDate(prefill.recurringEndDate);
+    const subjectId = resolveTutorSubjectForClassGroup(
+      group,
+      subjects.filter((row) => row.tutor_id === prefill.tutorId),
+    );
+    setCreateSubjectId(subjectId);
+    if (subjectId) {
+      const subj = subjects.find((row) => row.id === subjectId);
+      const matchedTpl = subj
+        ? orgSubjectTemplates.find((tpl) => tpl.name.toLowerCase() === (subj.name || '').toLowerCase())
+        : undefined;
+      const tsp = matchedTpl
+        ? tutorSubjectPrices.find(
+            (p) => p.tutor_id === prefill.tutorId && p.org_subject_template_id === matchedTpl.id,
+          )
+        : undefined;
+      setCreatePrice(tsp?.price ?? subj?.price ?? 0);
     }
   };
 
@@ -2201,6 +2268,7 @@ export default function CompanyTvarkarastis() {
         tutorSubjectPrices,
         orgSubjectTemplateId: matchedTemplate?.id,
         dynamicPricingRules,
+        classGroupId: createClassGroupId || null,
       });
 
       // Trial payment email on creation: attach a 1-lesson package to the new
@@ -2259,6 +2327,7 @@ export default function CompanyTvarkarastis() {
     setCreateTutorId('');
     setCreateStudentId('');
     setCreateStudentIds([]);
+    setCreateClassGroupId('');
     setCreateSubjectId('');
     setCreateTopic('');
     setCreateMeetingLink('');
@@ -2710,6 +2779,33 @@ export default function CompanyTvarkarastis() {
                 !showDaySummaryAside && 'lg:px-4 xl:px-8',
               )}
             >
+            {showClassGroupPicker && classGroups.length > 0 && (
+              <div className="space-y-2 min-w-0">
+                <Label>{t('school.groups.createLessonLabel')}</Label>
+                <Select
+                  value={createClassGroupId || '__none__'}
+                  onValueChange={(id) => {
+                    if (id === '__none__') applyClassGroupToCreateForm('');
+                    else applyClassGroupToCreateForm(id);
+                  }}
+                >
+                  <SelectTrigger className="rounded-xl">
+                    <SelectValue placeholder={t('school.groups.createLessonNone')} />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72 overflow-y-auto">
+                    <SelectItem value="__none__">{t('school.groups.createLessonNone')}</SelectItem>
+                    {classGroups.map((group) => (
+                      <SelectItem key={group.id} value={group.id}>
+                        {group.name}
+                        {group.slots?.length ? ` · ${scheduleLabelFromGroupSlots(group.slots)}` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-gray-500">{t('school.groups.createLessonHint')}</p>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div className="space-y-2 min-w-0">
                 <Label>{t('compSch.tutorRequired')}</Label>
@@ -2720,6 +2816,10 @@ export default function CompanyTvarkarastis() {
                     setCreateStudentId('');
                     setCreateStudentIds([]);
                     setCreateSubjectId('');
+                    if (createClassGroupId) {
+                      const group = classGroups.find((row) => row.id === createClassGroupId);
+                      if (!group || group.tutor_id !== id) setCreateClassGroupId('');
+                    }
                   }}
                 >
                   <SelectTrigger className="rounded-xl">
@@ -2807,9 +2907,15 @@ export default function CompanyTvarkarastis() {
 
             {(() => {
               const selSubj = subjects.find(s => s.id === createSubjectId);
-              const isGrp = Boolean(selSubj?.is_group);
-              const maxSt = selSubj?.max_students || 1;
-              const list = sortStudentsByFullName(students.filter(s => !createTutorId || s.tutor_id === createTutorId));
+              const isGrp = Boolean(selSubj?.is_group) || Boolean(createClassGroupId);
+              const maxSt = createClassGroupId
+                ? Math.max(selSubj?.max_students || 1, createStudentIds.length, 1)
+                : (selSubj?.max_students || 1);
+              const list = sortStudentsByFullName(students.filter(s =>
+                (createClassGroupId && createStudentIds.includes(s.id))
+                || !createTutorId
+                || s.tutor_id === createTutorId
+              ));
               if (isGrp) {
                 return (
                   <div className="space-y-2">
@@ -3162,7 +3268,7 @@ export default function CompanyTvarkarastis() {
               onClick={handleCreateSession}
               disabled={saving || createSelectionOverlapsBusy || (() => {
                 const selectedSubject = subjects.find(s => s.id === createSubjectId);
-                const isGroupLesson = selectedSubject?.is_group;
+                const isGroupLesson = selectedSubject?.is_group || Boolean(createClassGroupId);
                 const hasStudents = isGroupLesson ? createStudentIds.length > 0 : !!createStudentId;
                 const weekdayMissing =
                   createIsRecurring &&

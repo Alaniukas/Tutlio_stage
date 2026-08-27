@@ -9,6 +9,7 @@ import { readFileSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { randomUUID } from 'crypto';
+import mammoth from 'mammoth';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
@@ -138,19 +139,19 @@ function defaultBody() {
 
 function baseOrder({ startDate, serviceName, sparse = false }) {
   return {
-    service_name: serviceName,
-    service_type: 'group',
+    service_name: sparse ? '' : serviceName,
+    service_type: sparse ? '' : 'group',
     platform: sparse ? '' : 'Google Meet',
-    duration_minutes: 45,
+    duration_minutes: sparse ? 0 : 45,
     schedule_label: sparse ? '' : 'Antradieniais 16:00–16:45',
     start_date: startDate,
-    end_date: '2027-06-13',
+    end_date: sparse ? '' : '2027-06-13',
     unit_price_eur: 18,
-    base_lessons_per_month: 8,
-    indicative_monthly_eur: 144,
+    base_lessons_per_month: sparse ? 0 : 8,
+    indicative_monthly_eur: sparse ? 0 : 144,
     revision_label: 'QA-legal-v1',
-    group_id: IDS.group,
-    group_name: 'QA Legal Matematika',
+    group_id: sparse ? null : IDS.group,
+    group_name: sparse ? null : 'QA Legal Matematika',
     vat_status: 'PVM neapmokestinama',
     school_email: 'demo-mokykla.demo.admin@tutlio.lt',
     school_phone: '+37060000000',
@@ -212,8 +213,19 @@ async function main() {
     .select('body, pdf_url')
     .eq('id', EXTRA_DOCX_TEMPLATE)
     .maybeSingle();
-  const bodyText = String(realTpl?.body || '').trim().length > 500 ? String(realTpl.body) : defaultBody();
-  const extraTemplateId = realTpl?.body ? EXTRA_DOCX_TEMPLATE : IDS.template;
+  const bundledDocx = [
+    join(ROOT, 'docs', 'legal', 'extra-lessons-laisvi-vaikai.docx'),
+    join(ROOT, 'api', '_lib', 'templates', 'extra-lessons-laisvi-vaikai.docx'),
+  ].find((p) => existsSync(p));
+  let bundledText = '';
+  if (bundledDocx) {
+    const extracted = await mammoth.extractRawText({ buffer: readFileSync(bundledDocx) });
+    bundledText = String(extracted.value || '').trim();
+  }
+  const bodyText = bundledText.length > 500
+    ? bundledText
+    : (String(realTpl?.body || '').trim().length > 500 ? String(realTpl.body) : defaultBody());
+  const extraTemplateId = realTpl?.body || bundledText ? EXTRA_DOCX_TEMPLATE : IDS.template;
 
   const { data: org, error: orgErr } = await supabase.from('organizations').select('features, name').eq('id', DEMO_ORG).maybeSingle();
   if (orgErr) throw new Error(`organizations: ${orgErr.message}`);
@@ -364,7 +376,7 @@ async function main() {
   });
 
   const shownYes =
-    'Noriu, kad vaikas galėtų pradėti lankyti pamokas iš karto. Suprantu, kad per pirmąsias 14 dienų atsisakęs Sutarties turėsiu sumokėti už iki Sutarties atsisakymo jau suteiktas pamokas.';
+    'Prašau pradėti teikti paslaugas nepasibaigus 14 dienų sutarties atsisakymo terminui. Suprantu, kad atsisakęs Sutarties turėsiu sumokėti už iki atsisakymo suteiktas paslaugas.';
 
   const { error: wErr } = await supabase.from('school_contracts').upsert({
     id: IDS.contracts.withdraw,

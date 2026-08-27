@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { authHeaders } from '@/lib/apiHelpers';
+import { isExtraLessonsContractKind } from '@/lib/extraLessonsContract';
+import { parentSchoolContractStatusI18nKey } from '@/lib/extraLessonsParentPortal';
+import { useTranslation } from '@/lib/i18n';
 
 type ExtraRow = {
   id: string;
@@ -14,10 +17,13 @@ type ExtraRow = {
   canTerminate: boolean;
   hasPdf: boolean;
   hasStatement: boolean;
+  kind?: string | null;
+  signingStatus?: string | null;
 };
 
-export default function ParentExtraLessonsContracts() {
-  const [rows, setRows] = useState<ExtraRow[]>([]);
+export default function ParentExtraLessonsContracts({ showEmpty = false }: { showEmpty?: boolean }) {
+  const { t } = useTranslation();
+  const [rows, setRows] = useState<ExtraRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -27,17 +33,20 @@ export default function ParentExtraLessonsContracts() {
       const res = await fetch('/api/extra-lessons-parent-contracts', { headers });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error || 'Nepavyko įkelti sutarčių.');
+        setError(data.error || t('parent.contractsLoadError'));
+        setRows([]);
         return;
       }
       setRows(data.contracts || []);
     } catch {
-      setError('Nepavyko įkelti sutarčių.');
+      setError(t('parent.contractsLoadError'));
+      setRows([]);
     }
   };
 
   useEffect(() => {
     void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once on mount
   }, []);
 
   const openFile = async (contractId: string, file: 'pdf' | 'statement') => {
@@ -51,6 +60,10 @@ export default function ParentExtraLessonsContracts() {
   };
 
   const endContract = async (id: string, intended: 'withdrawal' | 'termination') => {
+    const ok = window.confirm(
+      intended === 'withdrawal' ? t('parent.contractsWithdrawConfirm') : t('parent.contractsTerminateConfirm'),
+    );
+    if (!ok) return;
     setBusyId(id);
     setError(null);
     const headers = await authHeaders();
@@ -60,37 +73,58 @@ export default function ParentExtraLessonsContracts() {
       body: JSON.stringify({ contract_id: id, intended_kind: intended }),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) setError(data.error || 'Nepavyko pateikti prašymo.');
+    if (!res.ok) setError(data.error || t('parent.contractsLoadError'));
     else await load();
     setBusyId(null);
   };
 
-  if (!rows.length && !error) return null;
+  if (rows === null && !error) {
+    return (
+      <div className="flex justify-center py-10">
+        <div className="w-8 h-8 border-2 border-violet-200 border-t-violet-600 rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!rows?.length && !error) {
+    if (!showEmpty) return null;
+    return (
+      <div className="rounded-3xl border border-dashed border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
+        {t('parent.contractsEmpty')}
+      </div>
+    );
+  }
 
   return (
-    <div className="rounded-3xl border border-gray-100 bg-white p-4 shadow-sm space-y-3">
-      <h2 className="text-sm font-bold text-gray-900">Papildomų pamokų sutartys</h2>
+    <div className="space-y-3">
       {error && <p className="text-sm text-red-600">{error}</p>}
-      {rows.map((row) => (
-        <div key={row.id} className="border rounded-2xl p-3 space-y-2">
+      {(rows || []).map((row) => (
+        <div key={row.id} className="rounded-3xl border border-gray-100 bg-white p-4 shadow-sm space-y-2">
           <p className="text-sm font-medium text-gray-900">
-            {row.studentName} · Nr. {row.contractNumber || '—'}
+            {t('parent.contractsNumber', { name: row.studentName, n: row.contractNumber || '—' })}
           </p>
-          {row.revisionLabel && <p className="text-xs text-gray-500">Redakcija {row.revisionLabel}</p>}
+          <p className="text-xs text-gray-500">
+            {isExtraLessonsContractKind(row.kind) ? t('parent.contractsKindExtra') : t('parent.contractsKindAnnual')}
+            {' · '}
+            {t(parentSchoolContractStatusI18nKey(row.signingStatus))}
+          </p>
+          {row.revisionLabel && (
+            <p className="text-xs text-gray-500">{t('parent.contractsRevision', { label: row.revisionLabel })}</p>
+          )}
           {row.withdrawn && (
             <p className="text-xs text-amber-700">
-              {row.extraEndKind === 'termination' ? 'Nutraukta' : 'Atsisakyta'}. Mokytojo atskirai informuoti nereikia.
+              {row.extraEndKind === 'termination' ? t('parent.contractsTerminated') : t('parent.contractsWithdrawn')}
             </p>
           )}
           <div className="flex flex-wrap gap-2">
             {row.hasPdf && (
               <Button type="button" variant="outline" size="sm" onClick={() => void openFile(row.id, 'pdf')}>
-                Atsisiųsti sutartį
+                {t('parent.contractsDownload')}
               </Button>
             )}
             {row.hasStatement && (
               <Button type="button" variant="outline" size="sm" onClick={() => void openFile(row.id, 'statement')}>
-                Pareiškimo kopija
+                {t('parent.contractsStatement')}
               </Button>
             )}
             {row.canWithdraw && (
@@ -101,7 +135,7 @@ export default function ParentExtraLessonsContracts() {
                 disabled={busyId === row.id}
                 onClick={() => void endContract(row.id, 'withdrawal')}
               >
-                Atsisakyti sutarties
+                {t('parent.contractsWithdraw')}
               </Button>
             )}
             {row.canTerminate && (
@@ -112,7 +146,7 @@ export default function ParentExtraLessonsContracts() {
                 disabled={busyId === row.id}
                 onClick={() => void endContract(row.id, 'termination')}
               >
-                Nutraukti sutartį
+                {t('parent.contractsTerminate')}
               </Button>
             )}
           </div>
