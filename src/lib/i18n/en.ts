@@ -850,6 +850,12 @@ export const en: Record<string, string> = {
   'findLesson.crossTutorHint':
     'This student is usually with a different tutor. The lesson is still created with the selected tutor; pay/commission follows this tutor and subject pricing.',
   'findLesson.freeWindowSummary': 'Free window',
+  'findLesson.adjustExactTime': 'Set the exact start and end time inside this free window.',
+  'findLesson.startTime': 'Start',
+  'findLesson.endTime': 'End',
+  'findLesson.outsideWindow': 'The lesson must stay inside the selected free window.',
+  'findLesson.clearPickedSlot': 'Remove time',
+  'findLesson.willCreateOnSave': 'Saving the student will also reserve a lesson at this time.',
   'findLesson.noSubSlots':
     'No lesson fits in this free window for the selected subject duration. Adjust availability or the subject duration in lesson settings.',
   'findLesson.meetingLinkHint':
@@ -1500,6 +1506,7 @@ export const en: Record<string, string> = {
   'compStu.manualPackageSendHint':
     'We email payment instructions. If a payment page URL is set in platform admin for your org, the email button opens that link.',
   'compStu.studentAdded': 'Student added',
+  'compStu.studentAddedLessonFailed': 'Student added, but the lesson could not be reserved.',
   'compStu.parentInviteEmailFailed':
     'Student saved, but we could not send parent invite emails automatically — check mail settings or resend invites later.',
   'compStu.orgResolveNeedLogin': 'Could not resolve organization — please sign in again.',

@@ -60,3 +60,13 @@ export function toFindTutorWindows(
     endTime: window.end_time,
   }));
 }
+
+/** Weekly preferred window from a concrete matched availability slot. */
+export function preferredWindowFromDateRange(start: Date, end: Date): StudentPreferredWindow {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return {
+    day_of_week: start.getDay(),
+    start_time: `${pad(start.getHours())}:${pad(start.getMinutes())}`,
+    end_time: `${pad(end.getHours())}:${pad(end.getMinutes())}`,
+  };
+}

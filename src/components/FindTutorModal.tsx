@@ -33,8 +33,8 @@ interface FindTutorModalProps {
   orgId: string | null;
   /** Paspaudus rezultatą – uždaryti paiešką ir atidaryti užsakymą (pvz. org tvarkaraštyje) */
   onPickSlot?: (slot: TutorSlotPick, context?: FindTutorPickContext) => void;
-  /** Student creation flow: select the matching tutor without booking a lesson yet. */
-  onPickTutor?: (tutor: { id: string; name: string }) => void;
+  /** Student creation flow: select the matching tutor and the availability window. */
+  onPickTutor?: (tutor: { id: string; name: string }, slot: TutorSlotPick) => void;
   /** When opened from a student context, this tutor is ranked first. */
   primaryTutorId?: string | null;
   /** Enables the lessons-per-week frequency search + ranked grouping (org feature flag). */
@@ -302,7 +302,7 @@ export default function FindTutorModal({
         const pickContext: FindTutorPickContext | undefined =
           orgAdminMode && filterStudentId !== '__all__' ? { studentId: filterStudentId } : undefined;
         if (onPickSlot) onPickSlot(slot, pickContext);
-        else if (onPickTutor) onPickTutor({ id: slot.tutorId, name: slot.tutorName });
+        else if (onPickTutor) onPickTutor({ id: slot.tutorId, name: slot.tutorName }, slot);
       }}
       className={cn(
         'w-full flex items-center justify-between p-3 border border-gray-200 rounded-xl text-left transition-colors',

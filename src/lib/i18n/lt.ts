@@ -904,6 +904,12 @@ export const lt: Record<string, string> = {
   'findLesson.crossTutorHint':
     'Pasirinktas mokinys pagrįstai priskirtas kitam korepetitoriui. Pamoka vis tiek bus sukurta pas pasirinktą korepetitorių; atlygis skaičiuojamas pagal šį korepetitorių ir dalyko kainą.',
   'findLesson.freeWindowSummary': 'Laisvas laikas',
+  'findLesson.adjustExactTime': 'Patikslinkite tikslią pradžią ir pabaigą šiame laisvame lange.',
+  'findLesson.startTime': 'Pradžia',
+  'findLesson.endTime': 'Pabaiga',
+  'findLesson.outsideWindow': 'Pamoka turi tilpti į pasirinktą laisvą langą.',
+  'findLesson.clearPickedSlot': 'Pašalinti laiką',
+  'findLesson.willCreateOnSave': 'Išsaugojus mokinį šiuo laiku bus rezervuota pamoka.',
   'findLesson.noSubSlots':
     'Pasirinkto dalyko trukmei šiame laisvame lange netelpa nė viena pamoka. Pakeiskite laisvą laiką arba dalyko trukmę pamokų nustatymuose.',
   'findLesson.meetingLinkHint':
@@ -1498,6 +1504,7 @@ export const lt: Record<string, string> = {
   'compStu.manualPackageSendHint':
     'Siunčiamas el. laiškas su mokėjimo instrukcijomis. Jei platformos admin skiltyje nurodėte mokėjimo puslapio URL, laiške bus mygtukas į tą nuorodą.',
   'compStu.studentAdded': 'Mokinys sėkmingai pridėtas',
+  'compStu.studentAddedLessonFailed': 'Mokinys pridėtas, bet pamokos rezervuoti nepavyko.',
   'compStu.parentInviteEmailFailed':
     'Mokinys išsaugotas, bet nepavyko automatiškai išsiųsti kvietimo tėvams – patikrinkite el. paštą arba naudokite „Pakviesti tėvus“ / pakartokite vėliau.',
   'compStu.orgResolveNeedLogin': 'Nepavyko nustatyti organizacijos – prisijunkite iš naujo.',
