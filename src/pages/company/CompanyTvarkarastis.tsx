@@ -95,6 +95,7 @@ import {
   Pencil,
   Trash2,
   Gift,
+  Repeat,
 } from 'lucide-react';
 import StatusBadge from '@/components/StatusBadge';
 import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
@@ -1782,6 +1783,31 @@ export default function CompanyTvarkarastis() {
     setSaving(false);
   };
 
+  const handleContinueLearning = async () => {
+    if (!selectedEvent) return;
+    setSaving(true);
+    try {
+      const resp = await fetch('/api/continue-trial-learning', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ sessionId: selectedEvent.id }),
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (resp.status === 409 || json?.error === 'already_exists') {
+        alert(t('cal.continueLearningAlready'));
+      } else if (!resp.ok || !json?.success) {
+        alert(t('cal.continueLearningFailed', { msg: json?.error || '' }));
+      } else {
+        alert(t('cal.continueLearningSuccess'));
+        setIsEventDetailOpen(false);
+        fetchData();
+      }
+    } catch (err: any) {
+      alert(t('cal.continueLearningFailed', { msg: err.message || '' }));
+    }
+    setSaving(false);
+  };
+
   const hardDeleteScheduleSession = async (sessionId: string, deleteScope: 'single' | 'future' = 'single') => {
     const headers = await authHeaders();
     const resp = await fetch('/api/delete-session', {
@@ -3413,6 +3439,20 @@ export default function CompanyTvarkarastis() {
                     >
                       {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Gift className="w-4 h-4 mr-2" />}
                       {selectedEvent.is_complimentary ? t('compSess.unmarkComplimentary') : t('compSess.markComplimentary')}
+                    </Button>
+                  )}
+                  {isProKlaseOrg(organizationId) &&
+                    !!selectedEvent.subject_id &&
+                    trialSubjectIds.has(selectedEvent.subject_id) &&
+                    selectedEvent.status !== 'cancelled' && (
+                    <Button
+                      variant="outline"
+                      className="w-full rounded-xl border-violet-200 text-violet-800 hover:bg-violet-50"
+                      disabled={saving}
+                      onClick={() => void handleContinueLearning()}
+                    >
+                      {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Repeat className="w-4 h-4 mr-2" />}
+                      {t('cal.continueLearning')}
                     </Button>
                   )}
 

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildPublicAppUrl } from './public-origin.js';
 import { sendParentInviteEmail } from './sendParentInviteEmail.js';
+import { parentRegistrationAlreadyActive } from './registrationInviteGate.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
@@ -17,6 +18,7 @@ export type ParentInviteSource = 'student_self' | 'school_admin';
 
 export type ParentInviteResult =
   | { token: string; code: string; emailSent: boolean; emailError?: string }
+  | { skipped: true; reason: 'already_registered' }
   | { error: string };
 
 export async function insertParentInviteAndSendEmail(opts: {
@@ -57,6 +59,10 @@ export async function insertParentInviteAndSendEmail(opts: {
   const trimmedEmail = parentEmail.trim().toLowerCase();
   if (!trimmedEmail || !trimmedEmail.includes('@')) {
     return { error: 'Invalid parent email' };
+  }
+
+  if (await parentRegistrationAlreadyActive(supabase, trimmedEmail)) {
+    return { skipped: true, reason: 'already_registered' };
   }
 
   const origin = (appUrl || 'https://tutlio.lt').replace(/\/$/, '');

@@ -4,6 +4,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { insertParentInviteAndSendEmail } from './parentInvite.js';
 import { isOrgTutor } from './isOrgTutor.js';
+import { studentRegistrationAlreadyActive } from './registrationInviteGate.js';
 
 export const TRIAL_RESERVATION_DEFAULT_DEADLINE_HOURS = 24;
 const MAX_DEADLINE_HOURS = 24 * 30; // 30 days
@@ -106,10 +107,60 @@ async function postInternalEmail(appUrl: string, payload: unknown): Promise<void
 }
 
 /**
- * After a trial payment is confirmed, notify the tutor (lesson_confirmed_tutor)
- * and send the student/parent platform invites. The invite is intentionally
- * deferred to payment time for the reservation flow ("login and the student
- * invitation start only after payment").
+ * Send student/parent registration invites at trial initiation (before payment),
+ * so the client can finish registration without paying first.
+ */
+export async function sendTrialRegistrationInvites(
+  supabase: SupabaseClient,
+  opts: { appUrl: string; studentId: string; tutorName?: string | null },
+): Promise<void> {
+  const { appUrl, studentId, tutorName } = opts;
+  const baseUrl = appUrl.replace(/\/$/, '');
+  const { data: student } = await supabase
+    .from('students')
+    .select('id, full_name, email, payer_email, payer_name, payment_payer, invite_code, organization_id, linked_user_id')
+    .eq('id', studentId)
+    .maybeSingle();
+  if (!student) return;
+
+  if (
+    student.email &&
+    student.invite_code &&
+    !(await studentRegistrationAlreadyActive(supabase, {
+      email: student.email,
+      linkedUserId: student.linked_user_id,
+    }))
+  ) {
+    await postInternalEmail(baseUrl, {
+      type: 'invite_email',
+      to: student.email,
+      data: {
+        studentName: student.full_name,
+        tutorName: tutorName || 'Korepetitorius',
+        inviteCode: student.invite_code,
+        bookingUrl: `${baseUrl}/book/${student.invite_code}`,
+        ...(student.organization_id ? { organizationId: student.organization_id } : {}),
+      },
+    });
+  }
+
+  if (student.payment_payer === 'parent' && student.payer_email) {
+    await insertParentInviteAndSendEmail({
+      supabase,
+      appUrl: baseUrl,
+      parentEmail: student.payer_email,
+      studentId,
+      studentFullName: student.full_name,
+      parentName: student.payer_name,
+      source: 'student_self',
+      organizationId: student.organization_id,
+    }).catch((e) => console.error('[trialReservation] parent invite failed', e));
+  }
+}
+
+/**
+ * After a trial payment is confirmed, notify the tutor (lesson_confirmed_tutor).
+ * Registration invites are sent at trial initiation, not here.
  */
 export async function sendTrialReservationConfirmedNotifications(
   supabase: SupabaseClient,
@@ -126,13 +177,12 @@ export async function sendTrialReservationConfirmedNotifications(
     supabase.from('profiles').select('id, full_name, email, organization_id').in('id', tutorIds),
     supabase
       .from('students')
-      .select('id, full_name, email, payer_email, payer_name, payment_payer, invite_code, organization_id, linked_user_id')
+      .select('id, full_name')
       .in('id', studentIds),
   ]);
   const tutorById = new Map<string, any>((tutorRows || []).map((t: any) => [t.id, t]));
   const studentById = new Map<string, any>((studentRows || []).map((s: any) => [s.id, s]));
 
-  // Tutor confirmation email (one per held session).
   for (const h of holds) {
     const tutor = tutorById.get(h.tutor_id);
     if (!tutor?.email || !isOrgTutor(tutor.organization_id)) continue;
@@ -152,41 +202,5 @@ export async function sendTrialReservationConfirmedNotifications(
         organizationId: tutor.organization_id,
       },
     });
-  }
-
-  // Student + parent platform invite (once per student).
-  for (const sid of studentIds) {
-    const student = studentById.get(sid);
-    if (!student) continue;
-    const tutorId = holds.find((h) => h.student_id === sid)?.tutor_id;
-    const tutor = tutorId ? tutorById.get(tutorId) : null;
-
-    // Skip the platform invite when the student already has an account
-    // (post-trial package students are usually already registered).
-    if (student.email && student.invite_code && !student.linked_user_id) {
-      await postInternalEmail(baseUrl, {
-        type: 'invite_email',
-        to: student.email,
-        data: {
-          studentName: student.full_name,
-          tutorName: tutor?.full_name || 'Korepetitorius',
-          inviteCode: student.invite_code,
-          bookingUrl: `${baseUrl}/book/${student.invite_code}`,
-          ...(student.organization_id ? { organizationId: student.organization_id } : {}),
-        },
-      });
-    }
-
-    if (student.payment_payer === 'parent' && student.payer_email) {
-      await insertParentInviteAndSendEmail({
-        supabase,
-        appUrl: baseUrl,
-        parentEmail: student.payer_email,
-        studentId: sid,
-        studentFullName: student.full_name,
-        parentName: student.payer_name,
-        source: 'student_self',
-      }).catch((e) => console.error('[trialReservation] parent invite failed', e));
-    }
   }
 }

@@ -13,7 +13,9 @@ import {
   isTrialReservationFlowEnabled,
   getTrialReservationDeadlineHours,
   trialReservationExpiryIso,
+  sendTrialRegistrationInvites,
 } from './_lib/trialReservation.js';
+import { isProKlaseOrg } from './_lib/marketMoney.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
@@ -515,6 +517,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         })
         .catch((e) => console.error('[create-trial-package] Error calling /api/send-email (stripe):', e));
+    }
+
+    const trialOrgId = (tutor as { organization_id?: string | null }).organization_id || adminRow.organizationId;
+    if (isProKlaseOrg(trialOrgId)) {
+      await sendTrialRegistrationInvites(supabase, {
+        appUrl: appOrigin,
+        studentId,
+        tutorName: tutor.full_name,
+      }).catch((e) => console.error('[create-trial-package] registration invite failed', e));
     }
 
     return json(res, 200, { success: true, mode: 'stripe', url: checkoutSession.url, packageId: lessonPackage.id });

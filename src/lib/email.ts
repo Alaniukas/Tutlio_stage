@@ -36,7 +36,9 @@ interface SendEmailParams {
     locale?: string;
 }
 
-export async function sendEmail({ type, to, data, locale }: SendEmailParams): Promise<boolean> {
+export type SendEmailOutcome = { ok: true; skipped?: boolean } | { ok: false };
+
+export async function sendEmailDetailed({ type, to, data, locale }: SendEmailParams): Promise<SendEmailOutcome> {
     try {
         const { data: { session } } = await supabase.auth.getSession();
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -49,20 +51,29 @@ export async function sendEmail({ type, to, data, locale }: SendEmailParams): Pr
             body: JSON.stringify({ type, to, data, locale }),
         });
 
+        const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            const msg = (err && typeof err === 'object' && 'error' in err) ? String(err.error) : 'Request failed';
+            const msg = (payload && typeof payload === 'object' && 'error' in payload) ? String(payload.error) : 'Request failed';
             console.error('[Email] Failed to send:', msg, response.status);
-            return false;
+            return { ok: false };
+        }
+
+        if (payload?.skipped === true) {
+            return { ok: true, skipped: true };
         }
 
         if (import.meta.env?.DEV) {
             console.log(`[Email] ✅ ${type} sent to ${Array.isArray(to) ? to.join(', ') : to}`);
         }
-        return true;
+        return { ok: true };
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error('[Email] Error:', message);
-        return false;
+        return { ok: false };
     }
+}
+
+export async function sendEmail(params: SendEmailParams): Promise<boolean> {
+    const result = await sendEmailDetailed(params);
+    return result.ok;
 }

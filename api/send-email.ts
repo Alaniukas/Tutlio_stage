@@ -28,6 +28,7 @@ import { isCronAuthorized } from './_lib/cronAuth.js';
 import { markdownToEmailHtml } from './_lib/blogMarkdownEmail.js';
 import { canonicalOriginForOrgLocale } from './_lib/public-origin.js';
 import { schoolInstallmentPaymentBreakdown } from './_lib/schoolBookingInvite.js';
+import { studentRegistrationAlreadyActive } from './_lib/registrationInviteGate.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission, type OrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
@@ -2282,6 +2283,54 @@ function schoolContractExtraAccepted(d: any, locale: Locale) {
   };
 }
 
+function schoolContractExtraWithdrawn(d: any, locale: Locale) {
+  return {
+    subject: `Sutarties atsisakymas${d.contractNumber ? ` Nr. ${d.contractNumber}` : ''} — ${d.studentName || 'Mokinys'}`,
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#b45309', '#92400e')}">
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Sutarties atsisakymas</h1>
+        <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'Mokykla')}</p>
+      </div>
+      <div class="body">
+        <p class="greeting">Sveiki, ${esc(d.parentName || d.studentName || '')},</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          Gavome jūsų atsisakymą nuo papildomų pamokų sutarties per 14 dienų terminą. Pareiškimo kopija pridėta.
+          Mokytojo atskirai informuoti nereikia.
+        </p>
+        <div class="info-card">
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            ${td('Sutarties Nr.', esc(d.contractNumber || '—'))}
+            ${td('Registravimo data', esc(d.at || '—'))}
+          </table>
+        </div>
+      </div>${footerFor(locale)}`, locale),
+  };
+}
+
+function schoolContractExtraTerminated(d: any, locale: Locale) {
+  return {
+    subject: `Sutarties nutraukimas${d.contractNumber ? ` Nr. ${d.contractNumber}` : ''} — ${d.studentName || 'Mokinys'}`,
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#4b5563', '#374151')}">
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Sutarties nutraukimas</h1>
+        <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'Mokykla')}</p>
+      </div>
+      <div class="body">
+        <p class="greeting">Sveiki, ${esc(d.parentName || d.studentName || '')},</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          Gavome prašymą nutraukti papildomų pamokų sutartį. Pareiškimo kopija pridėta.
+          Mokytojo atskirai informuoti nereikia.
+        </p>
+        <div class="info-card">
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            ${td('Sutarties Nr.', esc(d.contractNumber || '—'))}
+            ${td('Registravimo data', esc(d.at || '—'))}
+          </table>
+        </div>
+      </div>${footerFor(locale)}`, locale),
+  };
+}
+
 function schoolContractFeeDue(d: any, locale: Locale) {
   const appUrl = getAppUrl();
   const amountEur = Number(d.amount || 50);
@@ -2946,6 +2995,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       null;
     const orgIdForBrandingLookup = orgIdFromPayload || (await resolveOrganizationIdFromAuthBearer(req));
 
+    if (type === 'invite_email') {
+      const toEmail = Array.isArray(to) ? String(to[0] || '') : String(to || '');
+      const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+      if (supabaseUrl && serviceKey && toEmail) {
+        const inviteSb = createClient(supabaseUrl, serviceKey, supabaseServiceRoleClientOptions() as any);
+        if (await studentRegistrationAlreadyActive(inviteSb, { email: toEmail })) {
+          return res.status(200).json({ success: true, skipped: true, reason: 'already_registered' });
+        }
+      }
+    }
+
     function tutorStudentAssigned(d: any, locale: Locale) {
       const hasEmail = d.studentEmail && String(d.studentEmail).trim() !== '';
       const hasPhone = d.studentPhone && String(d.studentPhone).trim() !== '';
@@ -3206,6 +3267,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'school_contract': emailContent = schoolContract(data, locale); break;
       case 'school_contract_extra_offer': emailContent = schoolContractExtraOffer(data, locale); break;
       case 'school_contract_extra_accepted': emailContent = schoolContractExtraAccepted(data, locale); break;
+      case 'school_contract_extra_withdrawn': emailContent = schoolContractExtraWithdrawn(data, locale); break;
+      case 'school_contract_extra_terminated': emailContent = schoolContractExtraTerminated(data, locale); break;
       case 'school_contract_fee_due': emailContent = schoolContractFeeDue(data, locale); break;
       case 'school_installment_request': emailContent = schoolInstallmentRequest(data, locale); break;
       case 'tutor_student_assigned': emailContent = tutorStudentAssigned(data, locale); break;

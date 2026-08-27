@@ -2,6 +2,12 @@ import type { User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { getCached, setCache, dedupeAsync } from '@/lib/dataCache';
 import { startOfMonth, endOfMonth, isAfter, isBefore, addDays, subDays, subMonths, addMonths } from 'date-fns';
+import { isProKlaseOrg } from '@/lib/marketMoney';
+import {
+  packageClientPaidEur,
+  proKlaseAdminFinanceSplit,
+  standaloneSessionClientPaidEur,
+} from '@/lib/proKlaseAdminFinance';
 
 /** Columns the tutor Dashboard needs (avoid `*` + share one deduped round-trip with Layout preload). */
 const TUTOR_DASH_SESSIONS_SELECT =
@@ -421,7 +427,7 @@ export async function preloadOrgAdminData() {
     }
 
     if (!getCached('company_stats')) {
-      preloadStats(visibleTutors, tutorIds);
+      preloadStats(visibleTutors, tutorIds, orgId);
     }
   } finally {
     orgPreloadRunning = false;
@@ -484,32 +490,83 @@ async function preloadDashboard(
   }
 }
 
-async function preloadStats(tutorProfiles: any[], tutorIds: string[]) {
+async function preloadStats(tutorProfiles: any[], tutorIds: string[], orgId?: string) {
   try {
     const { data: sessionsData } = await supabase
       .from('sessions')
-      .select('tutor_id, status, payment_status, price, cancelled_by')
+      .select('tutor_id, status, payment_status, price, cancelled_by, paid, is_complimentary, lesson_package_id, subjects(is_trial)')
       .in('tutor_id', tutorIds);
+
+    const proKlase = isProKlaseOrg(orgId || tutorProfiles[0]?.organization_id);
+    let packagesByTutor = new Map<string, number>();
+    if (proKlase) {
+      const { data: packages } = await supabase
+        .from('lesson_packages')
+        .select('tutor_id, total_price, paid, payment_status')
+        .in('tutor_id', tutorIds)
+        .eq('paid', true);
+      for (const pkg of packages || []) {
+        const tutorId = String((pkg as { tutor_id?: string }).tutor_id || '');
+        packagesByTutor.set(
+          tutorId,
+          (packagesByTutor.get(tutorId) || 0) + packageClientPaidEur(pkg as any),
+        );
+      }
+    }
 
     const stats = tutorProfiles.map((tutor: any) => {
       const tutorSessions = (sessionsData || []).filter((s: any) => s.tutor_id === tutor.id);
-      const paid = tutorSessions.filter((s: any) =>
-        s.status === 'completed' || ['paid', 'confirmed'].includes(s.payment_status)
-      );
       const cancelledByTutor = tutorSessions.filter((s: any) => s.status === 'cancelled' && s.cancelled_by === 'tutor');
       const cancelledByStudent = tutorSessions.filter((s: any) => s.status === 'cancelled' && s.cancelled_by === 'student');
       const totalCancelledCount = tutorSessions.filter((s: any) => s.status === 'cancelled').length;
-      const earnings = paid.reduce((sum: number, s: any) => sum + (s.price || 0), 0);
-      const commPct = (tutor.company_commission_percent ?? 0) / 100;
+      const tutorPayPerSession = tutor.company_commission_percent ?? 0;
 
+      if (proKlase) {
+        const mapped = tutorSessions.map((s: any) => ({
+          status: s.status,
+          payment_status: s.payment_status,
+          paid: s.paid,
+          price: s.price,
+          is_complimentary: s.is_complimentary,
+          lesson_package_id: s.lesson_package_id,
+          subjects: Array.isArray(s.subjects) ? s.subjects[0] : s.subjects,
+        }));
+        const clientPaidEur =
+          (packagesByTutor.get(tutor.id) || 0) +
+          mapped.reduce((sum: number, session: any) => sum + standaloneSessionClientPaidEur(session), 0);
+        const split = proKlaseAdminFinanceSplit({
+          clientPaidEur,
+          sessions: mapped,
+          tutorPayRate: tutorPayPerSession,
+        });
+        const billedCount = mapped.filter(
+          (s: any) => s.status !== 'cancelled' && (s.paid === true || ['paid', 'confirmed'].includes(String(s.payment_status || ''))),
+        ).length;
+        return {
+          id: tutor.id, full_name: tutor.full_name,
+          completedSessions: billedCount,
+          cancelledByTutor: cancelledByTutor.length,
+          cancelledByStudent: cancelledByStudent.length,
+          totalCancelled: totalCancelledCount,
+          earnings: split.clientPaidEur,
+          companyCommission: split.platformShareEur,
+          netEarnings: split.accruedTutorCostEur,
+        };
+      }
+
+      const paid = tutorSessions.filter((s: any) =>
+        s.status === 'completed' || ['paid', 'confirmed'].includes(s.payment_status)
+      );
+      const earnings = paid.reduce((sum: number, s: any) => sum + (s.price || 0), 0);
       return {
         id: tutor.id, full_name: tutor.full_name,
         completedSessions: paid.length,
         cancelledByTutor: cancelledByTutor.length,
         cancelledByStudent: cancelledByStudent.length,
         totalCancelled: totalCancelledCount,
-        earnings, companyCommission: earnings * commPct,
-        netEarnings: earnings * (1 - commPct),
+        earnings,
+        companyCommission: earnings - tutorPayPerSession * paid.length,
+        netEarnings: tutorPayPerSession * paid.length,
       };
     });
 

@@ -427,7 +427,17 @@ export default function ParentRegister() {
                 </label>
               </div>
             )}
-            {error && <p className="text-red-500 text-xs">{error}</p>}
+            {error && (
+              <div className="space-y-2">
+                <p className="text-red-500 text-xs">{error}</p>
+                <Link
+                  to="/login"
+                  className="inline-flex w-full items-center justify-center rounded-2xl border border-gray-200 bg-white py-3 text-sm font-bold text-gray-800 hover:bg-gray-50"
+                >
+                  {t('parent.goToLogin')}
+                </Link>
+              </div>
+            )}
             <button type="submit" disabled={submitting || !fullName.trim() || password.length < 6 || !normalizeStudentGrade1to12(childGrade) || (usesProKlaseLegalDocs(legalOrgId) && (!agreePrivacy || !agreeTerms || !agreeProKlasePrivacy || !agreeProKlaseTerms))} className="w-full py-3 rounded-2xl bg-violet-600 text-white font-bold text-sm hover:bg-violet-700 disabled:opacity-50">
               {submitting ? t('common.loading') : t('parent.registerBtn')}
             </button>

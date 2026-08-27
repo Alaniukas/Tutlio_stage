@@ -745,7 +745,15 @@ export default function StudentOnboarding() {
                         </div>
 
                         {error && (
-                            <p ref={errorBannerRef} className="text-sm text-red-500 mt-3 bg-red-50 rounded-xl px-3 py-2">{error}</p>
+                            <div className="mt-3 space-y-2">
+                                <p ref={errorBannerRef} className="text-sm text-red-500 bg-red-50 rounded-xl px-3 py-2">{error}</p>
+                                <Link
+                                    to="/login"
+                                    className="inline-flex w-full items-center justify-center rounded-2xl border border-gray-200 bg-white py-3 text-sm font-bold text-gray-800 hover:bg-gray-50"
+                                >
+                                    {t('onboard.backToLogin')}
+                                </Link>
+                            </div>
                         )}
 
                         <button

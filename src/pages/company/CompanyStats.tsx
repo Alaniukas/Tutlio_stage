@@ -6,6 +6,13 @@ import { DateRangeFilter } from '@/components/DateRangeFilter';
 import { useTranslation } from '@/lib/i18n';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
+import { isProKlaseOrg } from '@/lib/marketMoney';
+import {
+  packageClientPaidEur,
+  proKlaseAdminFinanceSplit,
+  standaloneSessionClientPaidEur,
+  type ProKlaseAdminSession,
+} from '@/lib/proKlaseAdminFinance';
 
 interface TutorStat {
   id: string;
@@ -65,7 +72,7 @@ export default function CompanyStats() {
 
     let query = supabase
       .from('sessions')
-      .select('tutor_id, status, payment_status, price, cancelled_by')
+      .select('tutor_id, status, payment_status, price, cancelled_by, paid, is_complimentary, lesson_package_id, subjects(is_trial)')
       .in('tutor_id', tutorIds);
 
     if (isFilterActive) {
@@ -90,20 +97,83 @@ export default function CompanyStats() {
     // OPTIMIZED: Add limit for safety
     const { data: sessions } = await query.limit(3000);
     const allSessions = sessions || [];
+    const proKlase = isProKlaseOrg(adminRow.organization_id);
+
+    let packagesByTutor = new Map<string, number>();
+    if (proKlase) {
+      let pkgQuery = supabase
+        .from('lesson_packages')
+        .select('tutor_id, total_price, paid, payment_status, paid_at')
+        .in('tutor_id', tutorIds)
+        .eq('paid', true);
+      if (isFilterActive) {
+        if (filterStartDate) {
+          const start = new Date(filterStartDate);
+          start.setHours(0, 0, 0, 0);
+          pkgQuery = pkgQuery.gte('paid_at', start.toISOString());
+        }
+        if (filterEndDate) {
+          const end = new Date(filterEndDate);
+          end.setHours(23, 59, 59, 999);
+          pkgQuery = pkgQuery.lte('paid_at', end.toISOString());
+        }
+      }
+      const { data: packages } = await pkgQuery.limit(3000);
+      for (const pkg of packages || []) {
+        const tutorId = String((pkg as { tutor_id?: string }).tutor_id || '');
+        packagesByTutor.set(
+          tutorId,
+          (packagesByTutor.get(tutorId) || 0) + packageClientPaidEur(pkg as any),
+        );
+      }
+    }
 
     const stats: TutorStat[] = tutorList.map(tutor => {
       const tutorSessions = allSessions.filter(s => s.tutor_id === tutor.id);
-      // Count paid: Stripe paid, confirmed, or status=completed
-      const paid = tutorSessions.filter(s =>
-        s.status === 'completed' || ['paid', 'confirmed'].includes((s as any).payment_status)
-      );
       const cancelledByTutor = tutorSessions.filter(s => s.status === 'cancelled' && (s as any).cancelled_by === 'tutor');
       const cancelledByStudent = tutorSessions.filter(s => s.status === 'cancelled' && (s as any).cancelled_by === 'student');
       const totalCancelledCount = tutorSessions.filter(s => s.status === 'cancelled').length;
+      const tutorPayPerSession = (tutor as any).company_commission_percent || 0;
+
+      if (proKlase) {
+        const mapped: ProKlaseAdminSession[] = tutorSessions.map((s: any) => ({
+          status: s.status,
+          payment_status: s.payment_status,
+          paid: s.paid,
+          price: s.price,
+          is_complimentary: s.is_complimentary,
+          lesson_package_id: s.lesson_package_id,
+          subjects: Array.isArray(s.subjects) ? s.subjects[0] : s.subjects,
+        }));
+        const clientPaidEur =
+          (packagesByTutor.get(tutor.id) || 0) +
+          mapped.reduce((sum, session) => sum + standaloneSessionClientPaidEur(session), 0);
+        const split = proKlaseAdminFinanceSplit({
+          clientPaidEur,
+          sessions: mapped,
+          tutorPayRate: tutorPayPerSession,
+        });
+        const billedCount = mapped.filter(
+          (s) => s.status !== 'cancelled' && (s.paid === true || ['paid', 'confirmed'].includes(String(s.payment_status || ''))),
+        ).length;
+        return {
+          id: tutor.id,
+          full_name: tutor.full_name,
+          completedSessions: billedCount,
+          cancelledByTutor: cancelledByTutor.length,
+          cancelledByStudent: cancelledByStudent.length,
+          totalCancelled: totalCancelledCount,
+          earnings: split.clientPaidEur,
+          companyCommission: split.platformShareEur,
+          netEarnings: split.accruedTutorCostEur,
+        };
+      }
+
+      const paid = tutorSessions.filter(s =>
+        s.status === 'completed' || ['paid', 'confirmed'].includes((s as any).payment_status)
+      );
       const sessionsEarnings = paid.reduce((sum, s) => sum + (s.price || 0), 0);
       const earnings = sessionsEarnings;
-      // company_commission_percent now stores fixed tutor pay amount (€), not a percentage
-      const tutorPayPerSession = (tutor as any).company_commission_percent || 0;
       const netEarnings = tutorPayPerSession * paid.length;
       const companyCommission = earnings - netEarnings;
 

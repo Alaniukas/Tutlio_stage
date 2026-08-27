@@ -91,10 +91,10 @@ describe('sendTrialReservationConfirmedNotifications', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('emails the org tutor and sends the student invite after payment', async () => {
+  it('emails the org tutor after payment and does not send a registration invite', async () => {
     const { client } = makeSupabase(
       [{ id: 'tutor-1', full_name: 'Alice', email: 'alice@example.com', organization_id: 'org-1' }],
-      [{ id: 'student-1', full_name: 'Sam', email: 'sam@example.com', invite_code: 'INV123', organization_id: 'org-1', payment_payer: 'student' }],
+      [{ id: 'student-1', full_name: 'Sam' }],
     );
 
     await sendTrialReservationConfirmedNotifications(client, {
@@ -104,29 +104,21 @@ describe('sendTrialReservationConfirmedNotifications', () => {
 
     const types = fetchMock.mock.calls.map((c) => JSON.parse((c[1] as any).body).type);
     expect(types).toContain('lesson_confirmed_tutor');
-    expect(types).toContain('invite_email');
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(types).not.toContain('invite_email');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    // The send-email endpoint is called with the internal service key.
     const headers = (fetchMock.mock.calls[0][1] as any).headers;
     expect(headers['x-internal-key']).toBe('svc-key');
-
-    // Trailing slash on appUrl is normalized in the invite booking URL.
-    const inviteCall = fetchMock.mock.calls.find((c) => JSON.parse((c[1] as any).body).type === 'invite_email');
-    const invitePayload = JSON.parse((inviteCall![1] as any).body);
-    expect(invitePayload.data.bookingUrl).toBe('https://app.test/book/INV123');
   });
 
-  it('skips the tutor email for a non-org (private) tutor but still invites the student', async () => {
+  it('skips the tutor email for a non-org (private) tutor and does not invite after payment', async () => {
     const { client } = makeSupabase(
       [{ id: 'tutor-1', full_name: 'Alice', email: 'alice@example.com', organization_id: null }],
-      [{ id: 'student-1', full_name: 'Sam', email: 'sam@example.com', invite_code: 'INV123', payment_payer: 'student' }],
+      [{ id: 'student-1', full_name: 'Sam' }],
     );
 
     await sendTrialReservationConfirmedNotifications(client, { appUrl: 'https://app.test', holds: [baseHold] });
 
-    const types = fetchMock.mock.calls.map((c) => JSON.parse((c[1] as any).body).type);
-    expect(types).not.toContain('lesson_confirmed_tutor');
-    expect(types).toContain('invite_email');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

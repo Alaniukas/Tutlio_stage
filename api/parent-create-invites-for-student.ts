@@ -164,6 +164,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
       if ('error' in r) {
         results.push({ email: t.email, ok: false, error: r.error });
+      } else if ('skipped' in r) {
+        results.push({ email: t.email, ok: true });
       } else if (!r.emailSent) {
         results.push({
           email: t.email,

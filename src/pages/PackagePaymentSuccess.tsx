@@ -60,7 +60,7 @@ export default function PackagePaymentSuccess() {
           {status === 'success' && (
             <>
               {t('payment.packageActivated')}
-              {summary?.subjectName ? ` (${summary.subjectName})` : ''}. {t('payment.lessonsRemaining', { available: summary?.availableLessons ?? 0, total: summary?.totalLessons ?? 0 })}
+              {summary?.subjectName ? ` (${summary.subjectName})` : ''}.
             </>
           )}
         </p>

@@ -25,7 +25,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Plus, Trash2, User, Mail, Phone, GraduationCap, CheckCircle, XCircle, Sparkles, Package, Loader2, FileText, Search, Euro, Clock, MessageSquare, Archive, ArchiveRestore, Download, AlertCircle, Ban, Pencil } from 'lucide-react';
-import { sendEmail } from '@/lib/email';
+import { sendEmail, sendEmailDetailed } from '@/lib/email';
 import Toast from '@/components/Toast';
 import { useTranslation } from '@/lib/i18n';
 import {
@@ -103,6 +103,7 @@ import {
 } from '@/lib/organizationDynamicPricing';
 import { formatLocalYmd, monthlyPackagePeriodFrom } from '@/lib/monthlyPackagePlan';
 import { canEditPendingPackage } from '@/lib/pendingPackageEdit';
+import { normalizeStudentGrade1to12 } from '@/lib/studentGrade';
 
 interface Student {
   id: string;
@@ -1711,7 +1712,7 @@ export default function CompanyStudents() {
           full_name: newStudent.full_name,
           email: newStudent.email,
           phone: newStudent.phone?.trim() || null,
-          grade: newStudent.grade || null,
+          grade: normalizeStudentGrade1to12(newStudent.grade) ?? newStudent.grade || null,
           school_year: isSchoolView ? (newStudent.school_year || null) : null,
           enrollment_status: isSchoolView ? newStudent.enrollment_status : 'active',
           municipality: isSchoolView ? (newStudent.municipality || null) : null,
@@ -1765,6 +1766,7 @@ export default function CompanyStudents() {
     }
 
     let emailOk = true;
+    let inviteSkippedExisting = false;
 
     const shouldSendInviteOnCreate = !isSchoolView;
     if (shouldSendInviteOnCreate && newStudent.email?.trim()) {
@@ -1772,7 +1774,7 @@ export default function CompanyStudents() {
       for (const row of inserted) {
         const tutor = tutors.find((t) => t.id === row.tutor_id);
         const bookingUrl = `${inviteBaseUrl}/book/${row.invite_code}`;
-        const ok = await sendEmail({
+        const inviteResult = await sendEmailDetailed({
           type: 'invite_email',
           to: newStudent.email.trim(),
           locale: orgPreferredLocale || locale,
@@ -1784,7 +1786,8 @@ export default function CompanyStudents() {
             ...(orgId ? { organizationId: orgId } : {}),
           },
         });
-        if (!ok) emailOk = false;
+        if (!inviteResult.ok) emailOk = false;
+        if (inviteResult.ok && inviteResult.skipped) inviteSkippedExisting = true;
       }
     }
 
@@ -1822,7 +1825,9 @@ export default function CompanyStudents() {
     const toastMessage =
       shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk
         ? t('compStu.emailSendFailed')
-        : t('compStu.studentAdded');
+        : inviteSkippedExisting
+          ? t('compStu.inviteSkippedAlreadyRegistered')
+          : t('compStu.studentAdded');
 
     setToastMessage({
       message: toastMessage,
@@ -2122,7 +2127,7 @@ export default function CompanyStudents() {
     const ids = selectedStudentGroup.length > 0
       ? selectedStudentGroup.map((row) => row.id)
       : [selectedStudent.id];
-    const nextGrade = grade === 'unset' ? null : grade;
+    const nextGrade = grade === 'unset' ? null : (normalizeStudentGrade1to12(grade) ?? grade);
     const { error } = await supabase
       .from('students')
       .update({ grade: nextGrade })
@@ -2354,9 +2359,13 @@ export default function CompanyStudents() {
       setToastMessage({ message: t('compStu.inviteMissingCode'), type: 'error' });
       return;
     }
+    if (student.linked_user_id) {
+      setToastMessage({ message: t('compStu.inviteSkippedAlreadyRegistered'), type: 'error' });
+      return;
+    }
     setSendingInviteNow(true);
     const bookingUrl = `${orgCanonicalOrigin(orgPreferredLocale) ?? baseUrl}/book/${student.invite_code}`;
-    const ok = await sendEmail({
+    const ok = await sendEmailDetailed({
       type: 'invite_email',
       to: recipient,
       locale: orgPreferredLocale || locale,
@@ -2370,8 +2379,12 @@ export default function CompanyStudents() {
     });
     setSendingInviteNow(false);
     setToastMessage({
-      message: ok ? t('compStu.inviteSentNowSuccess') : t('compStu.inviteSentNowFailed'),
-      type: ok ? 'success' : 'error',
+      message: !ok.ok
+        ? t('compStu.inviteSentNowFailed')
+        : ok.skipped
+          ? t('compStu.inviteSkippedAlreadyRegistered')
+          : t('compStu.inviteSentNowSuccess'),
+      type: ok.ok ? (ok.skipped ? 'error' : 'success') : 'error',
     });
   };
 
@@ -3692,7 +3705,7 @@ export default function CompanyStudents() {
                     <div className="mt-3 w-full space-y-1.5">
                       <Label className="text-xs text-gray-500">{t('studentSettings.grade')}</Label>
                       <Select
-                        value={selectedStudent.grade || 'unset'}
+                        value={normalizeStudentGrade1to12(selectedStudent.grade) || selectedStudent.grade || 'unset'}
                         onValueChange={(value) => void handleUpdateStudentGrade(value)}
                       >
                         <SelectTrigger className="h-9 rounded-xl bg-white">
