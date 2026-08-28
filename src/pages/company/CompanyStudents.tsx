@@ -3129,14 +3129,13 @@ export default function CompanyStudents() {
                                 onChange={(e) => setSubjectSearch(e.target.value)}
                                 placeholder={t('common.search')}
                                 className="h-9 rounded-xl"
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onKeyDown={(e) => e.stopPropagation()}
                               />
-                              {!subjectSearch && tutorSubjects.length > 5 && (
-                                <p className="mt-1 text-[11px] text-gray-500">{t('common.searchToSeeMore')}</p>
-                              )}
                             </div>
                             {(subjectSearch
                               ? tutorSubjects.filter((s) => (s.name || '').toLowerCase().includes(subjectSearch.trim().toLowerCase()))
-                              : tutorSubjects.slice(0, 5)
+                              : tutorSubjects
                             ).map((subj) => (
                                 <SelectItem key={subj.id} value={subj.id}>
                                   <div className="flex items-center gap-2">
