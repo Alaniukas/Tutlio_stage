@@ -1,19 +1,17 @@
 import { TUTOR_PLANS, eur } from '../../src/lib/pricing.js';
 import { SUBSCRIPTION_PLN, formatSubscriptionPln } from '../../src/lib/subscriptionPricing.js';
+import {
+  PRODUCT_SUPPORT_AREA_IDS,
+  PUBLIC_PRODUCT_FEATURES,
+  normalizeProductSearchValue,
+  productSearchTokens,
+  type ProductSupportAreaId,
+  type PublicProductFeatureId,
+} from '../../src/lib/productFeatureCatalog.js';
 import { getEnterpriseLicenseBounds } from './enterprise-license.js';
 
-export const SUPPORT_AREA_IDS = [
-  'getting_started',
-  'tutor_workspace',
-  'students_parents',
-  'organizations',
-  'schools_contracts',
-  'payments_billing',
-  'integrations_messages',
-  'troubleshooting_security',
-] as const;
-
-export type SupportAreaId = (typeof SUPPORT_AREA_IDS)[number];
+export const SUPPORT_AREA_IDS = PRODUCT_SUPPORT_AREA_IDS;
+export type SupportAreaId = ProductSupportAreaId;
 
 export interface SupportKnowledgeArea {
   id: SupportAreaId;
@@ -41,18 +39,34 @@ export const ENTERPRISE_SELF_SERVE_SUPPORT_KNOWLEDGE = `
 - An organization that already has an active license subscription manages its licenses from the organization dashboard instead of starting a second subscription on /pricing.
 `.trim();
 
-export const ADAPTIVE_SUPPORT_FOLLOW_UP_GUIDANCE = `
-# Adaptive follow-up policy
+export function buildSupportFollowUpGuidance(
+  userQuestionNumber: number,
+  localizedGeneralFollowUp: string,
+): string {
+  const normalizedQuestionNumber = Math.max(1, Math.floor(userQuestionNumber));
 
-- For every answer, including the first one, independently decide whether a follow-up question would materially improve the guidance or unblock the user's next step.
-- Default to ending without a question when the direct answer is complete. Do not ask a question merely to keep the conversation going, collect leads, or move the user toward a purchase.
-- Ask zero or one brief, context-aware question only when one missing detail would change the answer, clarify product fit, or resolve an ambiguous troubleshooting path.
-- Use recent conversation so you never ask for information the user already provided, and do not repeat a question the user has already answered or declined.
-- Do not ask a follow-up merely because the purchase CTA is visible. When purchase intent and the self-service next step are already clear, let the answer end naturally.
-- Never ask generic questions such as “Can I help with anything else?”, never offer a list of questions, and never pressure the user to reply.
-- Do not ask a question when the user is thanking or saying goodbye, has asked not to be questioned, or the answer must stop at a support/security escalation.
-- If a question is genuinely useful, ask it naturally in the answer's language after giving the complete answer first.
+  if (normalizedQuestionNumber <= 3) {
+    return `
+# Follow-up behavior for the first three user questions
+
+- This is user question ${normalizedQuestionNumber} of the first three.
+- Give the complete answer first, then ask exactly one brief, friendly, context-specific follow-up question that helps tailor Tutlio to the visitor or identify their most useful next step.
+- Keep the question low-pressure and easy to answer. Ask about only one missing detail; do not collect a lead, force a purchase, or offer a list of questions.
+- Use the recent conversation so you never ask for information the user already provided, answered, or declined.
+- Do not ask a follow-up if the user is only thanking or saying goodbye, explicitly asked for no follow-up questions, or the answer must stop at a support or security escalation.
 `.trim();
+  }
+
+  return `
+# Follow-up behavior after the first three user questions
+
+- This is user question ${normalizedQuestionNumber}, after the first three.
+- Give the complete answer and do not manufacture another topic-specific question.
+- End with this exact localized sentence as the final sentence: “${localizedGeneralFollowUp}”
+- Do not add any text after that sentence.
+- Omit it only if the user is thanking or saying goodbye, explicitly asked for no follow-up questions, or the answer must stop at a support or security escalation.
+`.trim();
+}
 
 export const SHARED_SUPPORT_KNOWLEDGE = `
 # Tutlio shared product facts
@@ -93,7 +107,6 @@ export const SUPPORT_KNOWLEDGE_AREAS: readonly SupportKnowledgeArea[] = [
 - It is a strong fit for a tutoring company or growing team that needs shared schedules, tutor and student administration, permissions, finance visibility, branding, and operational reporting.
 - It is a strong fit for a school that needs student records plus contracts, parent data collection, signatures, installment schedules, and accounting exports.
 - Students and parents normally use Tutlio through a tutor, organization, or school rather than buying it as a standalone consumer learning app.
-- Tutlio manages tutoring operations; it is not a marketplace that automatically finds tutors or students, and it is not a full course-authoring or video-learning-content platform.
 - When someone is evaluating fit, identify their role and the workflow they most want to simplify. Explain only the capabilities relevant to that situation and invite a Contact us conversation for a tailored B2B setup.
 
 ## Solo pricing and trial
@@ -123,12 +136,13 @@ Tutlio supports Lithuanian, English, Polish, Latvian, Estonian, French, Spanish,
   },
   {
     id: 'tutor_workspace',
-    label: 'Tutor calendar, availability, students, lessons, waitlist, and daily work',
-    routerDescription: 'Tutor calendar, creating/editing lessons, availability/free time, recurring slots, lesson settings, students, packages, attendance, comments, public page, and waitlist.',
+    label: 'Tutor calendar, whiteboard, availability, students, lessons, waitlist, and daily work',
+    routerDescription: 'Tutor calendar, interactive lesson whiteboard, creating/editing lessons, availability/free time, recurring slots, lesson settings, students, packages, attendance, comments, public page, and waitlist.',
     keywords: [
       'calendar', 'lesson', 'availability', 'free time', 'slot', 'recurring', 'student', 'waitlist', 'homework', 'attendance', 'public page',
       'kalend', 'pamok', 'laisvas laikas', 'laisv', 'mokin', 'eil', 'lankom', 'komentar', 'vizitin',
       'kalendarz', 'lekcj', 'dostępn', 'wolny termin', 'termin', 'uczeń', 'lista oczek', 'frekwenc',
+      ...PUBLIC_PRODUCT_FEATURES.whiteboard.aliases,
     ],
     content: `
 # Tutor workspace
@@ -139,6 +153,10 @@ Tutlio supports Lithuanian, English, Polish, Latvian, Estonian, French, Spanish,
 - To create a lesson, select an empty calendar interval and choose Create lesson. Complete the student, subject, duration, and other details, then save.
 - Lesson types/statuses have distinct calendar styling. Trial lessons are violet; completed unpaid lessons are amber; makeup lessons are violet with a return arrow; tutor no-show cancellations are red and dashed.
 - A tutor can review upcoming work on /dashboard and full scheduling on /calendar.
+
+## Interactive lesson whiteboard
+
+${PUBLIC_PRODUCT_FEATURES.whiteboard.facts.map((fact) => `- ${fact}`).join('\n')}
 
 ## Availability / free time
 
@@ -386,6 +404,130 @@ export function supportRouterCatalog(): string {
   return SUPPORT_KNOWLEDGE_AREAS
     .map((area) => `- ${area.id}: ${area.routerDescription}`)
     .join('\n');
+}
+
+export interface RetrievedSupportKnowledgeChunk {
+  id: string;
+  title: string;
+  content: string;
+  source: 'area' | 'feature';
+  featureId?: PublicProductFeatureId;
+}
+
+function supportSearchTokens(value: string): string[] {
+  return productSearchTokens(value);
+}
+
+function splitAreaKnowledge(area: SupportKnowledgeArea): RetrievedSupportKnowledgeChunk[] {
+  const chunks: RetrievedSupportKnowledgeChunk[] = [];
+  let title = area.label;
+  let lines: string[] = [];
+
+  const flush = () => {
+    const content = lines.join('\n').trim();
+    if (content) {
+      chunks.push({
+        id: `${area.id}:${chunks.length}`,
+        title,
+        content,
+        source: 'area',
+      });
+    }
+    lines = [];
+  };
+
+  for (const line of area.content.split('\n')) {
+    if (line.startsWith('## ')) {
+      flush();
+      title = line.slice(3).trim();
+      continue;
+    }
+    if (line.startsWith('# ')) continue;
+    lines.push(line);
+  }
+  flush();
+
+  return chunks.length > 0
+    ? chunks
+    : [{ id: `${area.id}:0`, title: area.label, content: area.content, source: 'area' }];
+}
+
+function scoreAreaChunk(chunk: RetrievedSupportKnowledgeChunk, query: string): number {
+  const normalizedQuery = normalizeProductSearchValue(query);
+  const queryTokens = new Set(supportSearchTokens(query));
+  const normalizedChunk = normalizeProductSearchValue(`${chunk.title} ${chunk.content}`);
+  const chunkTokens = new Set(supportSearchTokens(normalizedChunk));
+  let score = 0;
+
+  if (normalizedQuery && normalizedChunk.includes(normalizedQuery)) score += 12;
+  for (const token of queryTokens) {
+    if (chunkTokens.has(token)) score += 2;
+  }
+  return score;
+}
+
+function featureKnowledgeChunks(
+  featureIds: readonly PublicProductFeatureId[],
+): RetrievedSupportKnowledgeChunk[] {
+  return featureIds.map((featureId) => {
+    const feature = PUBLIC_PRODUCT_FEATURES[featureId];
+    return {
+      id: `feature:${featureId}`,
+      title: feature.label,
+      content: feature.facts.map((fact) => `- ${fact}`).join('\n'),
+      source: 'feature' as const,
+      featureId,
+    };
+  });
+}
+
+function areaChunkDuplicatesFeature(
+  chunk: RetrievedSupportKnowledgeChunk,
+  featureIds: readonly PublicProductFeatureId[],
+): boolean {
+  const normalizedChunk = normalizeProductSearchValue(chunk.content);
+  return featureIds.some((featureId) => PUBLIC_PRODUCT_FEATURES[featureId].facts
+    .every((fact) => normalizedChunk.includes(normalizeProductSearchValue(fact))));
+}
+
+/**
+ * Returns only the most relevant feature facts and area sections. Luna supplies
+ * semantic feature choices; lexical ranking is the free deterministic fallback
+ * and keeps broad area documents out of the final answer prompt.
+ */
+export function retrieveSupportKnowledgeChunks(
+  areaId: SupportAreaId,
+  query: string,
+  featureIds: readonly PublicProductFeatureId[] = [],
+  maxChunks = 4,
+): RetrievedSupportKnowledgeChunk[] {
+  const safeMax = Math.max(1, Math.min(6, Math.floor(maxChunks)));
+  const featureChunks = featureKnowledgeChunks(featureIds).slice(0, safeMax);
+  const remaining = safeMax - featureChunks.length;
+  if (remaining <= 0) return featureChunks;
+
+  const areaChunks = splitAreaKnowledge(getSupportKnowledgeArea(areaId))
+    .filter((chunk) => !areaChunkDuplicatesFeature(chunk, featureIds))
+    .map((chunk, order) => ({ chunk, order, score: scoreAreaChunk(chunk, query) }))
+    .sort((a, b) => b.score - a.score || a.order - b.order);
+  const positiveAreaChunks = areaChunks.filter(({ score }) => score > 0);
+  const chosenAreaChunks = positiveAreaChunks.length > 0
+    ? positiveAreaChunks.slice(0, remaining)
+    : featureChunks.length === 0
+      ? areaChunks.slice(0, Math.min(2, remaining))
+      : [];
+
+  return [...featureChunks, ...chosenAreaChunks.map(({ chunk }) => chunk)];
+}
+
+export function renderSupportKnowledgeContext(
+  areaId: SupportAreaId,
+  query: string,
+  featureIds: readonly PublicProductFeatureId[] = [],
+): string {
+  return retrieveSupportKnowledgeChunks(areaId, query, featureIds)
+    .map((chunk) => `## ${chunk.title}\n${chunk.content}`)
+    .join('\n\n');
 }
 
 function normalizedWords(value: string): string[] {

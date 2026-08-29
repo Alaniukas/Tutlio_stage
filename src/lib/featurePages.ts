@@ -1,3 +1,5 @@
+import { PUBLIC_PRODUCT_FEATURE_HUB_IDS } from './productFeatureCatalog';
+
 /**
  * Single source of truth for the public marketing feature pages
  * (/features/<id>). Used by both the SPA route (src/pages/FeaturePage.tsx)
@@ -82,20 +84,7 @@ export function isFeaturePageId(value: string): value is FeaturePageId {
 }
 
 /** Landing highlight keys shown on /features hub (subset may link to deep pages). */
-export const FEATURE_HUB_HIGHLIGHT_KEYS = [
-  'calendar',
-  'reminders',
-  'messaging',
-  'plans',
-  'autoPayments',
-  'invoices',
-  'parents',
-  'files',
-  'stats',
-  'waitlist',
-  'whiteLabel',
-  'whiteboard',
-] as const;
+export const FEATURE_HUB_HIGHLIGHT_KEYS = PUBLIC_PRODUCT_FEATURE_HUB_IDS;
 
 export type FeatureHubHighlightKey = (typeof FEATURE_HUB_HIGHLIGHT_KEYS)[number];
 

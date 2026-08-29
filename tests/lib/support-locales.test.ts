@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { SUPPORT_LOCALES, supportLocaleName } from '../../api/_lib/supportRequest';
+import {
+  SUPPORT_LOCALES,
+  supportGeneralFollowUp,
+  supportLocaleName,
+} from '../../api/_lib/supportRequest';
 import { buildLocalizedPath, SUPPORTED_LOCALES, type Locale } from '../../src/lib/i18n';
 import { SUPPORT_WIDGET_COPY_KEYS } from '../../src/lib/i18n/supportCopyKeys';
 import { SUPPORT_PAGE_SUGGESTIONS } from '../../src/lib/supportPageSuggestions';
@@ -105,6 +109,22 @@ const expectedContactCopy: Record<Locale, {
   },
 };
 
+const expectedGeneralFollowUp: Record<Locale, string> = {
+  lt: 'Kuo dar galiu jums padėti?',
+  en: 'What else can I help you with?',
+  pl: 'W czym jeszcze mogę pomóc?',
+  lv: 'Ar ko vēl varu jums palīdzēt?',
+  ee: 'Millega saan teid veel aidata?',
+  fr: 'Comment puis-je vous aider autrement ?',
+  es: '¿En qué más puedo ayudarte?',
+  de: 'Wobei kann ich Ihnen noch helfen?',
+  se: 'Vad mer kan jag hjälpa dig med?',
+  dk: 'Hvad kan jeg ellers hjælpe dig med?',
+  fi: 'Miten voin vielä auttaa?',
+  no: 'Hva mer kan jeg hjelpe deg med?',
+  nl: 'Waarmee kan ik je nog meer helpen?',
+};
+
 describe('support widget locale coverage', () => {
   it('keeps the browser and support API locale registries synchronized', () => {
     expect([...SUPPORT_LOCALES]).toEqual(SUPPORTED_LOCALES);
@@ -128,6 +148,10 @@ describe('support widget locale coverage', () => {
     expect(dictionary['support.widget.contact']).toBe(expected.contact);
     expect(dictionary['support.widget.contactHint']).toBe(expected.contactHint);
     expect(dictionary['support.widget.whatsappAlternative']).toBe(expected.whatsappAlternative);
+  });
+
+  it.each(SUPPORTED_LOCALES)('provides the localized general follow-up in %s', (locale) => {
+    expect(supportGeneralFollowUp(locale)).toBe(expectedGeneralFollowUp[locale]);
   });
 
   it.each(SUPPORTED_LOCALES)('provides every recommended-page label in %s', (locale) => {

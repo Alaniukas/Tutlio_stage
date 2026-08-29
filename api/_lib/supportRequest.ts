@@ -55,6 +55,26 @@ export function supportLocaleName(locale: SupportLocale): string {
   return SUPPORT_LOCALE_NAMES[locale];
 }
 
+const SUPPORT_GENERAL_FOLLOW_UP: Record<SupportLocale, string> = {
+  lt: 'Kuo dar galiu jums padėti?',
+  en: 'What else can I help you with?',
+  pl: 'W czym jeszcze mogę pomóc?',
+  lv: 'Ar ko vēl varu jums palīdzēt?',
+  ee: 'Millega saan teid veel aidata?',
+  fr: 'Comment puis-je vous aider autrement ?',
+  es: '¿En qué más puedo ayudarte?',
+  de: 'Wobei kann ich Ihnen noch helfen?',
+  se: 'Vad mer kan jag hjälpa dig med?',
+  dk: 'Hvad kan jeg ellers hjælpe dig med?',
+  fi: 'Miten voin vielä auttaa?',
+  no: 'Hva mer kan jeg hjelpe deg med?',
+  nl: 'Waarmee kan ik je nog meer helpen?',
+};
+
+export function supportGeneralFollowUp(locale: SupportLocale): string {
+  return SUPPORT_GENERAL_FOLLOW_UP[locale];
+}
+
 export function clientIp(req: VercelRequest): string {
   const forwarded = req.headers['x-forwarded-for'];
   const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;

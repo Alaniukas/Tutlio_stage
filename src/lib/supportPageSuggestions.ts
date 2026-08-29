@@ -1,20 +1,12 @@
-export const SUPPORT_PAGE_IDS = [
-  'features_overview',
-  'pricing',
-  'about',
-  'calendar',
-  'digital_business_card',
-  'waitlist',
-  'payments',
-  'comments',
-  'contact',
-  'schools',
-  'cancellation',
-  'reminders',
-  'privacy',
-] as const;
+import {
+  PRODUCT_SUPPORT_PAGE_IDS,
+  PUBLIC_PRODUCT_FEATURES,
+  type ProductSupportPageId,
+  type PublicProductFeatureId,
+} from './productFeatureCatalog';
 
-export type SupportPageId = (typeof SUPPORT_PAGE_IDS)[number];
+export const SUPPORT_PAGE_IDS = PRODUCT_SUPPORT_PAGE_IDS;
+export type SupportPageId = ProductSupportPageId;
 
 export type SupportPageSuggestion = {
   id: SupportPageId;
@@ -28,7 +20,7 @@ export const SUPPORT_PAGE_SUGGESTIONS: Record<SupportPageId, SupportPageSuggesti
     id: 'features_overview',
     href: '/features',
     labelKey: 'nav.features',
-    description: 'General overview of Tutlio product capabilities.',
+    description: 'General overview of Tutlio product capabilities, including the interactive lesson whiteboard, messaging, parent portals, reporting, and branding.',
   },
   pricing: {
     id: 'pricing',
@@ -128,4 +120,15 @@ export function parseSupportPageIds(value: unknown): SupportPageId[] {
   }
 
   return [...seen];
+}
+
+/** Canonical page mappings for feature chunks selected by the support model. */
+export function supportPagesForProductFeatures(
+  featureIds: readonly PublicProductFeatureId[],
+  limit = 3,
+): SupportPageId[] {
+  const pageIds = featureIds.flatMap((featureId) => [
+    ...PUBLIC_PRODUCT_FEATURES[featureId].suggestedPageIds,
+  ]);
+  return parseSupportPageIds(pageIds).slice(0, Math.max(0, limit));
 }

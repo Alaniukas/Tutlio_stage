@@ -1,21 +1,41 @@
 import { describe, expect, it } from 'vitest';
 import {
   ENTERPRISE_SELF_SERVE_SUPPORT_KNOWLEDGE,
-  ADAPTIVE_SUPPORT_FOLLOW_UP_GUIDANCE,
+  buildSupportFollowUpGuidance,
   getSupportKnowledgeArea,
   guessSupportArea,
+  renderSupportKnowledgeContext,
+  retrieveSupportKnowledgeChunks,
   SHARED_SUPPORT_KNOWLEDGE,
   SUPPORT_AREA_IDS,
   supportRouterCatalog,
 } from '../../api/_lib/supportKnowledge';
 import { escapeSupportHtml, parseSupportContact } from '../../api/_lib/supportContact';
-import { parseSupportBody, supportLocaleName } from '../../api/_lib/supportRequest';
+import {
+  parseSupportBody,
+  supportGeneralFollowUp,
+  supportLocaleName,
+} from '../../api/_lib/supportRequest';
 import {
   SUPPORT_PAGE_IDS,
   SUPPORT_PAGE_SUGGESTIONS,
   parseSupportPageIds,
+  supportPagesForProductFeatures,
   supportPageRouterCatalog,
 } from '../../src/lib/supportPageSuggestions';
+import {
+  PUBLIC_PRODUCT_FEATURE_HUB_IDS,
+  PUBLIC_PRODUCT_FEATURE_IDS,
+  PUBLIC_PRODUCT_FEATURES,
+  PRODUCT_SUPPORT_AREA_IDS,
+  PRODUCT_SUPPORT_PAGE_IDS,
+  productFeatureRouterCatalog,
+  rankPublicProductFeatures,
+} from '../../src/lib/productFeatureCatalog';
+import {
+  FEATURE_HUB_HIGHLIGHT_KEYS,
+  FEATURE_PAGE_IDS,
+} from '../../src/lib/featurePages';
 
 describe('Tutlio AI support knowledge routing', () => {
   it.each([
@@ -28,6 +48,7 @@ describe('Tutlio AI support knowledge routing', () => {
     ['Do B2B customers get a WhatsApp support chat?', 'organizations'],
     ['I manage a tutoring team', 'organizations'],
     ['I represent a school', 'schools_contracts'],
+    ['Do you have an interactive whiteboard?', 'tutor_workspace'],
   ])('provides a safe fallback route from %s to %s', (question, expected) => {
     const result = guessSupportArea(question);
     expect(result).toEqual({ id: expected, confident: true });
@@ -59,13 +80,24 @@ describe('Tutlio AI support knowledge routing', () => {
     expect(SUPPORT_PAGE_SUGGESTIONS.pricing.description).toContain('self-service tutor-license calculator');
   });
 
-  it('lets the agent adapt from the first answer without becoming pushy', () => {
-    expect(ADAPTIVE_SUPPORT_FOLLOW_UP_GUIDANCE).toContain('including the first one');
-    expect(ADAPTIVE_SUPPORT_FOLLOW_UP_GUIDANCE).toContain('Default to ending without a question');
-    expect(ADAPTIVE_SUPPORT_FOLLOW_UP_GUIDANCE).toContain('Ask zero or one brief, context-aware question');
-    expect(ADAPTIVE_SUPPORT_FOLLOW_UP_GUIDANCE).toContain('never ask for information the user already provided');
-    expect(ADAPTIVE_SUPPORT_FOLLOW_UP_GUIDANCE).toContain('Do not ask a follow-up merely because the purchase CTA is visible');
-    expect(ADAPTIVE_SUPPORT_FOLLOW_UP_GUIDANCE).toContain('never pressure the user to reply');
+  it('stays proactively helpful for the first three questions without becoming pushy', () => {
+    for (const questionNumber of [1, 2, 3]) {
+      const guidance = buildSupportFollowUpGuidance(questionNumber, 'What else can I help you with?');
+      expect(guidance).toContain(`user question ${questionNumber} of the first three`);
+      expect(guidance).toContain('exactly one brief, friendly, context-specific follow-up question');
+      expect(guidance).toContain('low-pressure');
+      expect(guidance).toContain('never ask for information the user already provided');
+      expect(guidance).not.toContain('What else can I help you with?');
+    }
+  });
+
+  it('uses the exact localized general follow-up after the first three questions', () => {
+    const followUp = supportGeneralFollowUp('en');
+    const guidance = buildSupportFollowUpGuidance(4, followUp);
+
+    expect(guidance).toContain('after the first three');
+    expect(guidance).toContain(`final sentence: “${followUp}”`);
+    expect(guidance).toContain('Do not add any text after that sentence');
   });
 
   it('contains product-fit guidance for first-time visitors', () => {
@@ -74,6 +106,79 @@ describe('Tutlio AI support knowledge routing', () => {
     expect(gettingStarted).toContain('solo tutor');
     expect(gettingStarted).toContain('tutoring company');
     expect(gettingStarted).toContain('school');
+    expect(gettingStarted).not.toContain('not a marketplace');
+    expect(gettingStarted).not.toContain('not a full course-authoring');
+  });
+
+  it('grounds the interactive whiteboard in verified product behavior', () => {
+    const tutorWorkspace = getSupportKnowledgeArea('tutor_workspace').content;
+    const whiteboard = PUBLIC_PRODUCT_FEATURES.whiteboard;
+
+    expect(tutorWorkspace).toContain('Interactive lesson whiteboard');
+    expect(tutorWorkspace).toContain('real-time collaboration');
+    expect(tutorWorkspace).toContain('downloaded as a PDF');
+    expect(tutorWorkspace).toContain('two hours after the scheduled lesson end');
+    expect(whiteboard.suggestedPageIds).toEqual(['features_overview']);
+    expect(SUPPORT_PAGE_SUGGESTIONS.features_overview.description).toContain('interactive lesson whiteboard');
+  });
+
+  it.each([
+    ['en', 'Does Tutlio include a whiteboard?'],
+    ['lt', 'Ar turite interaktyvią lentą?'],
+    ['pl', 'Czy macie tablicę interaktywną?'],
+    ['lv', 'Vai ir interaktīvā tāfele?'],
+    ['ee', 'Kas on olemas interaktiivne tahvel?'],
+    ['fr', 'Avez-vous un tableau blanc?'],
+    ['es', '¿Tenéis una pizarra interactiva?'],
+    ['de', 'Gibt es eine interaktive Tafel?'],
+    ['se', 'Finns det en interaktiv skrivtavla?'],
+    ['dk', 'Har I en interaktiv tavle?'],
+    ['fi', 'Onko käytössä interaktiivinen valkotaulu?'],
+    ['no', 'Har dere en interaktiv tavle?'],
+    ['nl', 'Hebben jullie een interactief whiteboard?'],
+  ])('retrieves the whiteboard feature for the %s locale', (_locale, question) => {
+    expect(rankPublicProductFeatures(question, 1)).toEqual(['whiteboard']);
+  });
+
+  it('injects only the precise feature facts instead of the whole topic document', () => {
+    const fullArea = getSupportKnowledgeArea('tutor_workspace').content;
+    const chunks = retrieveSupportKnowledgeChunks(
+      'tutor_workspace',
+      'Does Tutlio include an interactive whiteboard?',
+      ['whiteboard'],
+    );
+    const context = renderSupportKnowledgeContext(
+      'tutor_workspace',
+      'Does Tutlio include an interactive whiteboard?',
+      ['whiteboard'],
+    );
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]).toMatchObject({ id: 'feature:whiteboard', source: 'feature' });
+    expect(context).toContain('real-time collaboration');
+    expect(context.length).toBeLessThan(fullArea.length / 2);
+  });
+
+  it('keeps the public website, support areas, facts, and page mappings on one catalog', () => {
+    expect(FEATURE_HUB_HIGHLIGHT_KEYS).toEqual(PUBLIC_PRODUCT_FEATURE_HUB_IDS);
+    expect(Object.keys(PUBLIC_PRODUCT_FEATURES).sort()).toEqual([...PUBLIC_PRODUCT_FEATURE_IDS].sort());
+    expect(productFeatureRouterCatalog()).toContain('whiteboard: Interactive lesson whiteboard');
+
+    const coveredDeepPages = new Set(
+      Object.values(PUBLIC_PRODUCT_FEATURES)
+        .flatMap((feature) => feature.deepFeaturePageId ? [feature.deepFeaturePageId] : []),
+    );
+    expect([...coveredDeepPages].sort()).toEqual([...FEATURE_PAGE_IDS].sort());
+
+    for (const feature of Object.values(PUBLIC_PRODUCT_FEATURES)) {
+      expect(PRODUCT_SUPPORT_AREA_IDS).toContain(feature.areaId);
+      expect(feature.aliases.length).toBeGreaterThan(1);
+      expect(feature.facts.length).toBeGreaterThan(1);
+      expect(feature.suggestedPageIds.length).toBeGreaterThan(0);
+      for (const pageId of feature.suggestedPageIds) {
+        expect(PRODUCT_SUPPORT_PAGE_IDS).toContain(pageId);
+      }
+    }
   });
 
   it('keeps the model page choices on a verified public-page allowlist', () => {
@@ -91,6 +196,7 @@ describe('Tutlio AI support knowledge routing', () => {
     expect(parseSupportPageIds('payments,made_up,payments,pricing,contact,privacy'))
       .toEqual(['payments', 'pricing', 'contact']);
     expect(parseSupportPageIds(null)).toEqual([]);
+    expect(supportPagesForProductFeatures(['whiteboard'])).toEqual(['features_overview']);
   });
 });
 
