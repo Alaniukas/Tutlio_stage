@@ -25,6 +25,9 @@ interface InvoiceSettingsBody {
   contact_email?: string;
   contact_phone?: string;
   invoice_series?: string;
+  bank_name?: string;
+  iban?: string;
+  next_invoice_number?: number;
   scope?: 'user' | 'organization';
 }
 
@@ -69,7 +72,13 @@ async function handleGet(req: VercelRequest, res: VercelResponse) {
   if (scope === 'tutor' && tutorIdParam) {
     const adminRow = await getOrgAdminAccessByUserId(supabase, userId);
 
-    if (!adminRow || !hasOrgAdminPermission(adminRow.role, adminRow.permissions, 'finance.view')) {
+    if (!adminRow) {
+      return res.status(403).json({ error: 'Insufficient organization permission' });
+    }
+    const canViewTutorInvoice =
+      hasOrgAdminPermission(adminRow.role, adminRow.permissions, 'finance.view') ||
+      hasOrgAdminPermission(adminRow.role, adminRow.permissions, 'tutors.view');
+    if (!canViewTutorInvoice) {
       return res.status(403).json({ error: 'Insufficient organization permission' });
     }
 
@@ -90,7 +99,7 @@ async function handleGet(req: VercelRequest, res: VercelResponse) {
       .maybeSingle();
 
     if (error) return res.status(500).json({ error: error.message });
-    return res.status(200).json({ data });
+    return res.status(200).json({ data, profile: data });
   }
 
   if (scope === 'organization') {
@@ -145,8 +154,15 @@ async function handleSave(req: VercelRequest, res: VercelResponse) {
     contact_email: body.contact_email?.trim() || null,
     contact_phone: body.contact_phone?.trim() || null,
     invoice_series: body.invoice_series?.trim() || 'SF',
+    bank_name: body.bank_name?.trim() || null,
+    iban: body.iban?.trim() || null,
     updated_at: new Date().toISOString(),
   };
+
+  if (typeof body.next_invoice_number === 'number' && Number.isFinite(body.next_invoice_number)) {
+    const n = Math.floor(body.next_invoice_number);
+    if (n >= 1 && n <= 9999999) payload.next_invoice_number = n;
+  }
 
   if (isOrgScope) {
     const adminRow = await getOrgAdminAccessByUserId(supabase, userId);

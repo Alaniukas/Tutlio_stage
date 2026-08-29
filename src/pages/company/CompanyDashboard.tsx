@@ -21,6 +21,7 @@ import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
 import { useTranslation } from '@/lib/i18n';
 import { useDismissibleDashboardItemIds } from '@/hooks/useDismissibleDashboardItemIds';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
+import { fetchOrganizationRow } from '@/lib/orgLookup';
 import { authHeaders } from '@/lib/apiHelpers';
 import { deriveAttendance, isAttendanceFlagged } from '@/lib/attendance';
 import { buildNoShowSessionPatch, defaultNoShowWhenForNow } from '@/lib/noShowWhen';
@@ -157,7 +158,7 @@ export default function CompanyDashboard() {
 
       const { data: adminRow } = await supabase
         .from('organization_admins')
-        .select('organization_id, organizations(name, tutor_license_count, features)')
+        .select('organization_id')
         .eq('user_id', user.id)
         .maybeSingle();
 
@@ -165,8 +166,11 @@ export default function CompanyDashboard() {
         setLoading(false);
         return;
       }
-      const orgRaw = adminRow.organizations as any;
-      const org = Array.isArray(orgRaw) ? orgRaw[0] : orgRaw;
+      const org = await fetchOrganizationRow<{
+        name?: string;
+        tutor_license_count?: number;
+        features?: Record<string, unknown>;
+      }>(supabase as any, adminRow.organization_id, 'name, tutor_license_count, features');
       const organizationId = adminRow.organization_id;
       const orgFeatures = org?.features && typeof org.features === 'object' && !Array.isArray(org.features)
         ? (org.features as Record<string, unknown>)
@@ -237,7 +241,7 @@ export default function CompanyDashboard() {
 
       const { data: monthSessions } = await supabase
       .from('sessions')
-      .select('price, status, payment_status, start_time, end_time')
+      .select('price, status, payment_status, start_time, end_time, is_complimentary')
       .in('tutor_id', tutorIds)
       .gte('start_time', monthStart)
       .lte('start_time', monthEnd)
@@ -248,6 +252,7 @@ export default function CompanyDashboard() {
       const next7days = addDays(now, 7);
 
       const isPaid = (s: any) => s.paid || ['paid', 'confirmed'].includes(s.payment_status);
+      const billablePrice = (s: any) => (s.is_complimentary === true ? 0 : Number(s.price || 0));
       const completed = (monthSessions || []).filter((s) => s.status === 'completed' || isPaid(s));
       const upcoming = (monthSessions || []).filter(
       (s) =>
@@ -257,18 +262,20 @@ export default function CompanyDashboard() {
     );
       setSessionsThisMonth(completed.length);
       setUpcomingSessions(upcoming.length);
-      setEarningsThisMonth(completed.reduce((sum, s) => sum + (s.price || 0), 0));
+      setEarningsThisMonth(completed.reduce((sum, s) => sum + billablePrice(s), 0));
 
+      const twoYearsAgo = subDays(now, 730).toISOString();
       const { data: allSessions } = await supabase
       .from('sessions')
-      .select('price, status, payment_status')
+      .select('price, status, payment_status, is_complimentary')
       .in('tutor_id', tutorIds)
+      .gte('start_time', twoYearsAgo)
       .neq('status', 'cancelled')
       .limit(5000);
       const totalPaid = (allSessions || []).filter(
       (s: any) => s.status === 'completed' || ['paid', 'confirmed'].includes(s.payment_status)
       );
-      setEarningsTotal(totalPaid.reduce((sum: number, s: any) => sum + (s.price || 0), 0));
+      setEarningsTotal(totalPaid.reduce((sum: number, s: any) => sum + (s.is_complimentary === true ? 0 : Number(s.price || 0)), 0));
 
       const { data: sessionsData } = await supabase
       .from('sessions')
@@ -398,8 +405,8 @@ export default function CompanyDashboard() {
       setCancelledList(cancelledFiltered);
       cacheSessionsMonth = completed.length;
       cacheUpcomingCount = upcoming.length;
-      cacheEarningsMonth = completed.reduce((sum: number, s: any) => sum + (s.price || 0), 0);
-      cacheEarningsTotal = totalPaid.reduce((sum: number, s: any) => sum + (s.price || 0), 0);
+      cacheEarningsMonth = completed.reduce((sum: number, s: any) => sum + (s.is_complimentary === true ? 0 : Number(s.price || 0)), 0);
+      cacheEarningsTotal = totalPaid.reduce((sum: number, s: any) => sum + (s.is_complimentary === true ? 0 : Number(s.price || 0)), 0);
       cacheUpcomingList = upcomingFiltered;
       cacheAttentionList = attentionFiltered;
       cacheCancelledList = cancelledFiltered;
@@ -408,9 +415,10 @@ export default function CompanyDashboard() {
       const [paidLessonsRes, paidPackagesRes, paidInvoicesRes] = await Promise.all([
       supabase
         .from('sessions')
-        .select('id, start_time, price, topic, tutor_id, subject_id, student:students(full_name), subjects(name, is_trial)')
+        .select('id, start_time, price, topic, tutor_id, subject_id, is_complimentary, student:students(full_name), subjects(name, is_trial)')
         .in('tutor_id', tutorIds)
         .eq('paid', true)
+        .eq('is_complimentary', false)
         .is('lesson_package_id', null)
         .is('payment_batch_id', null)
         .neq('status', 'cancelled')

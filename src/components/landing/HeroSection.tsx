@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Building2, CalendarDays, ListOrdered, Users } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
+import { loadPublicLandingLessonCount } from '@/lib/landingStats';
 import { buildLocalizedPath, localizedPagePath, useTranslation } from '@/lib/i18n';
 import { CUSTOMER_LOGOS } from '@/lib/landingLogos';
 import Reveal from './Reveal';
@@ -51,12 +51,13 @@ export default function HeroSection({ variant = 'tutor' }: { variant?: LandingVa
   const [lessonCount, setLessonCount] = useState<number | null>(null);
   useEffect(() => {
     let cancelled = false;
-    supabase.rpc('get_public_landing_stats').then(({ data }) => {
-      if (cancelled || !data) return;
-      const d = data as { completed_lessons: number; upcoming_lessons: number };
-      setLessonCount(d.completed_lessons + d.upcoming_lessons);
+    const stop = loadPublicLandingLessonCount((n) => {
+      if (!cancelled) setLessonCount(n);
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      stop();
+    };
   }, []);
 
   return (

@@ -10,7 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { format } from 'date-fns';
 import { useTranslation } from '@/lib/i18n';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
-import { CalendarDays, Search, ChevronDown, ListOrdered, UserX, XCircle, CheckCircle, Pencil, Ban, Loader2, MessageSquare, Trash2 } from 'lucide-react';
+import { CalendarDays, Search, ChevronDown, ListOrdered, UserX, XCircle, CheckCircle, Pencil, Ban, Loader2, MessageSquare, Trash2, Gift } from 'lucide-react';
 import { defaultNoShowWhenForNow, buildNoShowSessionPatch } from '@/lib/noShowWhen';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -39,7 +39,8 @@ import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
 import { DateRangeFilter } from '@/components/DateRangeFilter';
 import { DateTimeSpinner } from '@/components/TimeSpinner';
 import { useHideWaitlist } from '@/hooks/useHideWaitlist';
-import { isWaitlistHiddenForOrg } from '@/lib/marketMoney';
+import { isWaitlistHiddenForOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import { setSessionComplimentary } from '@/lib/setSessionComplimentary';
 
 interface Session {
   id: string;
@@ -51,6 +52,7 @@ interface Session {
   price: number | null;
   topic: string | null;
   paid: boolean;
+  is_complimentary?: boolean;
   payment_status: string | null;
   cancellation_reason: string | null;
   reschedule_reason?: string | null;
@@ -90,6 +92,7 @@ function mapOrgSessionRow(row: any, tutorList: { id: string; full_name: string }
     price: row.price,
     topic: row.topic,
     paid: row.paid,
+    is_complimentary: row.is_complimentary === true,
     payment_status: row.payment_status || null,
     cancellation_reason: row.cancellation_reason,
     reschedule_reason: row.reschedule_reason ?? null,
@@ -163,6 +166,8 @@ export default function CompanySessions() {
   const [groupEditChoice, setGroupEditChoice] = useState<'single' | 'all_future'>('single');
   const [savingEdit, setSavingEdit] = useState(false);
   const [togglingPaid, setTogglingPaid] = useState(false);
+  const [togglingComplimentary, setTogglingComplimentary] = useState(false);
+  const [organizationId, setOrganizationId] = useState<string | null>(cachedOrgId);
   const [deletingSession, setDeletingSession] = useState(false);
   const [deleteRecurringOpen, setDeleteRecurringOpen] = useState(false);
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -175,8 +180,9 @@ export default function CompanySessions() {
 
   const loadData = async () => {
     if (!getCached('company_sessions')) setLoading(true);
+    try {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setLoading(false); return; }
+    if (!user) return;
 
     const { data: adminRow } = await supabase
       .from('organization_admins')
@@ -184,6 +190,7 @@ export default function CompanySessions() {
       .eq('user_id', user.id)
       .maybeSingle();
     if (!adminRow) return;
+    setOrganizationId(adminRow.organization_id);
 
     const tutorList = await getOrgVisibleTutors(
       supabase as any,
@@ -207,7 +214,7 @@ export default function CompanySessions() {
     setStudents(studentsResult.data || []);
     setSubjects(subjectsResult.data || []);
 
-    if (tutorList.length === 0) { setLoading(false); return; }
+    if (tutorList.length === 0) return;
 
     const tutorIds = tutorList.map(t => t.id);
 
@@ -226,7 +233,9 @@ export default function CompanySessions() {
 
     setSessions(enriched);
     setCache('company_sessions', { sessions: enriched, tutors: tutorList, students: studentsResult.data || [] });
-    setLoading(false);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleMarkStudentNoShow = async () => {
@@ -289,13 +298,43 @@ export default function CompanySessions() {
     const newPaid = !selectedSession.paid;
     const { error } = await supabase
       .from('sessions')
-      .update({ paid: newPaid, payment_status: newPaid ? 'paid' : 'pending' })
+      .update({
+        paid: newPaid,
+        payment_status: newPaid ? 'paid' : 'pending',
+        ...(newPaid ? {} : { is_complimentary: false }),
+      })
       .eq('id', selectedSession.id);
     setTogglingPaid(false);
     if (!error) {
-      setSelectedSession({ ...selectedSession, paid: newPaid, payment_status: newPaid ? 'paid' : 'pending' });
-      setSessions(prev => prev.map(s => s.id === selectedSession.id ? { ...s, paid: newPaid, payment_status: newPaid ? 'paid' : 'pending' } : s));
+      setSelectedSession({
+        ...selectedSession,
+        paid: newPaid,
+        payment_status: newPaid ? 'paid' : 'pending',
+        is_complimentary: newPaid ? selectedSession.is_complimentary : false,
+      });
+      setSessions(prev => prev.map(s => s.id === selectedSession.id
+        ? { ...s, paid: newPaid, payment_status: newPaid ? 'paid' : 'pending', is_complimentary: newPaid ? s.is_complimentary : false }
+        : s));
     }
+  };
+
+  const handleMarkComplimentary = async () => {
+    if (!selectedSession) return;
+    setTogglingComplimentary(true);
+    const next = !selectedSession.is_complimentary;
+    const result = await setSessionComplimentary(selectedSession.id, next);
+    setTogglingComplimentary(false);
+    if (result.ok === false) {
+      alert(result.error);
+      return;
+    }
+    const patch = {
+      is_complimentary: next,
+      paid: next,
+      payment_status: next ? 'paid' : 'pending',
+    };
+    setSelectedSession({ ...selectedSession, ...patch });
+    setSessions(prev => prev.map(s => s.id === selectedSession.id ? { ...s, ...patch } : s));
   };
 
   const hardDeleteCompanySession = async (sessionId: string, deleteScope: 'single' | 'future' = 'single') => {
@@ -708,16 +747,19 @@ export default function CompanySessions() {
                           status={session.status}
                           paymentStatus={session.payment_status ?? undefined}
                           paid={session.paid}
+                          isComplimentary={session.is_complimentary === true}
                           endTime={session.end_time}
                         />
                       </div>
                       <span
                         className={cn(
                           'inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full border',
-                          paid ? 'bg-green-50 text-green-700 border-green-100' : 'bg-amber-50 text-amber-700 border-amber-100'
+                          session.is_complimentary
+                            ? 'bg-sky-50 text-sky-800 border-sky-100'
+                            : paid ? 'bg-green-50 text-green-700 border-green-100' : 'bg-amber-50 text-amber-700 border-amber-100'
                         )}
                       >
-                        {paid ? t('compSess.paidShort') : t('compSess.pendingShort')}
+                        {session.is_complimentary ? t('status.complimentary') : paid ? t('compSess.paidShort') : t('compSess.pendingShort')}
                       </span>
                       <span className="text-sm font-semibold text-gray-900">
                         {session.price != null ? fmt(session.price) : '–'}
@@ -772,6 +814,7 @@ export default function CompanySessions() {
                           status={session.status}
                           paymentStatus={session.payment_status ?? undefined}
                           paid={session.paid}
+                          isComplimentary={session.is_complimentary === true}
                           endTime={session.end_time}
                         />
                         <AttendanceBadge session={session} />
@@ -779,8 +822,13 @@ export default function CompanySessions() {
                     </td>
                     <td className="px-4 py-3">
                       {session.paid || session.payment_status === 'paid' || session.payment_status === 'confirmed' ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-green-50 text-green-700 border border-green-100">
-                          {t('compSess.paidShort')}
+                        <span className={cn(
+                          'inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full border',
+                          session.is_complimentary
+                            ? 'bg-sky-50 text-sky-800 border-sky-100'
+                            : 'bg-green-50 text-green-700 border-green-100',
+                        )}>
+                          {session.is_complimentary ? t('status.complimentary') : t('compSess.paidShort')}
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-100">
@@ -977,6 +1025,7 @@ export default function CompanySessions() {
                           status={selectedSession.status}
                           paymentStatus={selectedSession.payment_status ?? undefined}
                           paid={selectedSession.paid}
+                          isComplimentary={selectedSession.is_complimentary === true}
                           endTime={selectedSession.end_time}
                         />
                         <AttendanceBadge session={selectedSession} />
@@ -1099,6 +1148,17 @@ export default function CompanySessions() {
                         >
                           {togglingPaid ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : selectedSession.paid ? <XCircle className="w-4 h-4 mr-2" /> : <CheckCircle className="w-4 h-4 mr-2" />}
                           {selectedSession.paid ? t('compSess.markUnpaid') : t('compSess.markPaid')}
+                        </Button>
+                      )}
+                      {isProKlaseOrg(organizationId) && (selectedSession.status === 'active' || selectedSession.status === 'completed') && (
+                        <Button
+                          variant="outline"
+                          className="w-full rounded-xl border-sky-200 text-sky-700 hover:bg-sky-50"
+                          disabled={togglingComplimentary}
+                          onClick={() => void handleMarkComplimentary()}
+                        >
+                          {togglingComplimentary ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Gift className="w-4 h-4 mr-2" />}
+                          {selectedSession.is_complimentary ? t('compSess.unmarkComplimentary') : t('compSess.markComplimentary')}
                         </Button>
                       )}
 

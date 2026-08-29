@@ -44,11 +44,12 @@ export default defineConfig({
           'quiz/**',
           'social/**',
           'preview-assign-student-modal.html',
+          'preview-complimentary-lesson.html',
         ],
         maximumFileSizeToCacheInBytes: 7 * 1024 * 1024,
         navigateFallback: 'index.html',
         // SEO/crawler files must never be answered with the SPA shell from the SW.
-        navigateFallbackDenylist: [/^\/api\//, /^\/(robots\.txt|sitemap\.xml|llms(-full)?\.txt)$/, /\/blog\/rss\.xml$/, /^\/preview-assign-student-modal\.html$/],
+        navigateFallbackDenylist: [/^\/api\//, /^\/(robots\.txt|sitemap\.xml|llms(-full)?\.txt)$/, /\/blog\/rss\.xml$/, /^\/preview-assign-student-modal\.html$/, /^\/preview-complimentary-lesson\.html$/],
         importScripts: ['/push-sw.js'],
         runtimeCaching: [
           // Cache visited hashed chunks, but revalidate so a post-deploy shell
@@ -109,7 +110,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: path.resolve(__dirname, 'index.html'),
-        previewAssignStudentModal: path.resolve(__dirname, 'preview-assign-student-modal.html'),
       },
     },
   },

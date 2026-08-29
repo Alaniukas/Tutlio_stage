@@ -45,6 +45,7 @@ import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { isSchoolOrg, hasProKlaseIntakeFeatures } from '@/lib/orgIntakeMode';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { isProKlaseOrg } from '@/lib/marketMoney';
+import { setSessionComplimentary } from '@/lib/setSessionComplimentary';
 import { ORG_TUTOR_FILTER_SCROLL_CLASS, ORG_TUTOR_SELECT_SCROLL_CLASS } from '@/lib/orgUi';
 import { calendarSessionTitlePrefix, getCalendarSessionEventStyle } from '@/lib/calendarSessionEventStyle';
 import { Button } from '@/components/ui/button';
@@ -93,6 +94,7 @@ import {
   Ban,
   Pencil,
   Trash2,
+  Gift,
 } from 'lucide-react';
 import StatusBadge from '@/components/StatusBadge';
 import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
@@ -162,6 +164,7 @@ interface Session {
   end_time: Date;
   status: 'active' | 'cancelled' | 'completed' | 'no_show';
   paid: boolean;
+  is_complimentary?: boolean;
   topic?: string;
   price?: number;
   meeting_link?: string;
@@ -609,11 +612,15 @@ export default function CompanyTvarkarastis() {
       }
 
       // Fetch sessions for org tutors
+      const schedulePast = addDays(new Date(), -90).toISOString();
+      const scheduleFuture = addDays(new Date(), 180).toISOString();
       const { data: sessionsData } = await supabase
         .from('sessions')
         .select(TVARKARASTIS_SESSION_SELECT)
         .in('tutor_id', tutorIds)
         .not('hidden_from_calendar', 'eq', true)
+        .gte('start_time', schedulePast)
+        .lte('start_time', scheduleFuture)
         .limit(1000);
 
       const parsedSessions = (sessionsData || []).map((session: any) => ({
@@ -624,15 +631,17 @@ export default function CompanyTvarkarastis() {
       setSessions(parsedSessions);
 
       // Fetch availability for org tutors
+      const tutorNameById = new Map(filteredTutors.map((t: any) => [t.id, t.full_name || '']));
       const { data: availabilityData } = await supabase
         .from('availability')
-        .select(`
-          *,
-          tutor:profiles!availability_tutor_id_fkey(full_name)
-        `)
+        .select('*')
         .in('tutor_id', tutorIds);
 
-      setAvailability(availabilityData || []);
+      const mappedAvailability = (availabilityData || []).map((row: any) => ({
+        ...row,
+        tutor: { full_name: tutorNameById.get(row.tutor_id) || '' },
+      }));
+      setAvailability(mappedAvailability);
 
       // Fetch subjects for org tutors
       const { data: subjectsData } = await supabase
@@ -703,7 +712,7 @@ export default function CompanyTvarkarastis() {
       setCache('company_tvarkarastis', {
         orgTutors: filteredTutors,
         sessions: parsedSessions,
-        availability: availabilityData || [],
+        availability: mappedAvailability,
         subjects: subjectsData || [],
         students: studentsData || [],
         individualPricing: pricingData || [],
@@ -1729,13 +1738,42 @@ export default function CompanyTvarkarastis() {
         .update({
           paid: nextPaid,
           payment_status: nextPaid ? 'paid' : 'pending',
+          ...(nextPaid ? {} : { is_complimentary: false }),
         })
         .eq('id', selectedEvent.id);
 
       if (error) {
         alert(t('compSch.errorPayment', { msg: error.message }));
       } else {
-        setSelectedEvent((prev) => (prev ? { ...prev, paid: nextPaid } : prev));
+        setSelectedEvent((prev) => (prev ? { ...prev, paid: nextPaid, is_complimentary: nextPaid ? prev.is_complimentary : false } : prev));
+        fetchData();
+      }
+    } catch (err: any) {
+      alert(t('compSch.errorGeneric', { msg: err.message }));
+    }
+    setSaving(false);
+  };
+
+  const handleMarkComplimentary = async () => {
+    if (!selectedEvent) return;
+    setSaving(true);
+    try {
+      const next = !selectedEvent.is_complimentary;
+      const result = await setSessionComplimentary(selectedEvent.id, next);
+      if (result.ok === false) {
+        alert(t('compSch.errorPayment', { msg: result.error }));
+      } else {
+        setSelectedEvent((prev) =>
+          prev
+            ? {
+                ...prev,
+                is_complimentary: next,
+                paid: next,
+                payment_status: next ? 'paid' : 'pending',
+                lesson_package_id: next ? null : (prev as any).lesson_package_id,
+              }
+            : prev,
+        );
         fetchData();
       }
     } catch (err: any) {
@@ -3184,6 +3222,7 @@ export default function CompanyTvarkarastis() {
                       status={selectedEvent.status}
                       paymentStatus={selectedEvent.payment_status ?? undefined}
                       paid={selectedEvent.paid}
+                      isComplimentary={selectedEvent.is_complimentary === true}
                       endTime={selectedEvent.end_time}
                       pendingConfirmation={hasFeature('tutor_lesson_status_confirmation')}
                       moved={hasFeature('monthly_packages') && !!(selectedEvent as any).original_start_time && !!(selectedEvent as any).lesson_package_id}
@@ -3208,15 +3247,19 @@ export default function CompanyTvarkarastis() {
                 <div>
                   <Label className="text-xs text-gray-500">{t('compSess.labelPrice')}</Label>
                   <p className="font-semibold text-sm mt-1">
-                    {selectedEvent.price != null ? fmt(Number(selectedEvent.price)) : '–'}
+                    {selectedEvent.is_complimentary
+                      ? t('status.complimentary')
+                      : selectedEvent.price != null ? fmt(Number(selectedEvent.price)) : '–'}
                   </p>
                 </div>
               </div>
 
               <div>
                 <Label className="text-xs text-gray-500">{t('compSess.labelPayment')}</Label>
-                <p className={`text-sm mt-1 font-medium ${selectedEvent.paid ? 'text-green-600' : 'text-amber-600'}`}>
-                  {selectedEvent.paid || selectedEvent.payment_status === 'paid' || selectedEvent.payment_status === 'confirmed'
+                <p className={`text-sm mt-1 font-medium ${selectedEvent.is_complimentary ? 'text-sky-700' : selectedEvent.paid ? 'text-green-600' : 'text-amber-600'}`}>
+                  {selectedEvent.is_complimentary
+                    ? t('status.complimentary')
+                    : selectedEvent.paid || selectedEvent.payment_status === 'paid' || selectedEvent.payment_status === 'confirmed'
                     ? t('compSess.paid')
                     : t('compSess.paymentPending')}
                 </p>
@@ -3356,6 +3399,22 @@ export default function CompanyTvarkarastis() {
                     {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : selectedEvent.paid ? <XCircle className="w-4 h-4 mr-2" /> : <CheckCircle className="w-4 h-4 mr-2" />}
                     {selectedEvent.paid ? t('compSess.markUnpaid') : t('compSess.markPaid')}
                   </Button>
+                  {isProKlaseOrg(organizationId) && (
+                    <Button
+                      variant="outline"
+                      className={cn(
+                        'w-full rounded-xl',
+                        selectedEvent.is_complimentary
+                          ? 'border-sky-200 text-sky-800 hover:bg-sky-50'
+                          : 'border-sky-200 text-sky-700 hover:bg-sky-50',
+                      )}
+                      disabled={saving}
+                      onClick={() => void handleMarkComplimentary()}
+                    >
+                      {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Gift className="w-4 h-4 mr-2" />}
+                      {selectedEvent.is_complimentary ? t('compSess.unmarkComplimentary') : t('compSess.markComplimentary')}
+                    </Button>
+                  )}
 
                   {selectedEvent.status === 'active' && selectedEvent.start_time > new Date() && (
                     <>

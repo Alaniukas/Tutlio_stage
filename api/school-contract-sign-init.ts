@@ -55,9 +55,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   ) return json(res, 403, { error: 'Forbidden' });
 
   const status = String((contract as any).signing_status || '');
+  const { data: existingSchoolRow } = await supabase
+    .from('school_contract_signatures')
+    .select('id, status')
+    .eq('contract_id', contractId)
+    .eq('role', 'school')
+    .maybeSingle();
+  const schoolAlreadySigned = String(existingSchoolRow?.status || '') === 'signed';
   // Parent review/confirmation is mandatory, even when no fields were missing.
   // Only the completion endpoint advances the contract to this state.
-  if (status !== 'awaiting_school_signature') {
+  // Also allow a mis-tagged "signed_by_school" row that has no school signature yet
+  // (parent copy uploaded into the wrong folder).
+  const readyForSchool =
+    status === 'awaiting_school_signature'
+    || (status === 'signed_by_school' && !schoolAlreadySigned);
+  if (!readyForSchool) {
     return json(res, 409, { error: `Contract not ready for school signature (status: ${status})` });
   }
   if (!String((contract as any).pdf_url || '').trim()) {

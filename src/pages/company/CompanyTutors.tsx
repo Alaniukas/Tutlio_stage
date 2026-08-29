@@ -528,7 +528,7 @@ export default function CompanyTutors() {
 
     const { data: adminRow } = await supabase
       .from('organization_admins')
-      .select('organization_id, organizations(tutor_license_count)')
+      .select('organization_id')
       .eq('user_id', user.id)
       .maybeSingle();
     if (!adminRow) {
@@ -536,10 +536,7 @@ export default function CompanyTutors() {
     }
 
     setOrgId(adminRow.organization_id);
-    const orgJoinedRaw = (adminRow as any).organizations as any;
-    const orgJoined = Array.isArray(orgJoinedRaw) ? orgJoinedRaw[0] : orgJoinedRaw;
-    const joinedLicenseCount = Number(orgJoined?.tutor_license_count) || 0;
-    let effectiveLicenseCount = joinedLicenseCount;
+    let effectiveLicenseCount = 0;
     setLicenseInfoError(null);
 
     // Separate query: column may not exist until the enterprise billing migration runs.
@@ -942,8 +939,12 @@ export default function CompanyTutors() {
         headers: await authHeaders(),
       });
       const json = await res.json().catch(() => ({}));
-      if (res.ok && (json as { profile?: Record<string, string | null> }).profile) {
-        setTutorInvoiceProfile((json as { profile: Record<string, string | null> }).profile);
+      const profile =
+        (json as { data?: Record<string, string | null> | null; profile?: Record<string, string | null> | null }).data ??
+        (json as { profile?: Record<string, string | null> | null }).profile ??
+        null;
+      if (res.ok && profile) {
+        setTutorInvoiceProfile(profile);
       }
     } catch {
       /* optional */
@@ -1511,7 +1512,16 @@ export default function CompanyTutors() {
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('compTut.invoiceRequisites')}</p>
                 {tutorInvoiceProfile ? (
                   <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-sm text-gray-700 space-y-1">
-                    {tutorInvoiceProfile.entity_type && <p><span className="text-gray-500">{t('invoiceSettings.entityType')}:</span> {tutorInvoiceProfile.entity_type}</p>}
+                    {tutorInvoiceProfile.entity_type && (
+                      <p>
+                        <span className="text-gray-500">{t('invoiceSettings.entityType')}:</span>{' '}
+                        {t(`invoiceSettings.entityType_${tutorInvoiceProfile.entity_type}` as 'invoiceSettings.entityType')}
+                      </p>
+                    )}
+                    {tutorInvoiceProfile.business_name && <p><span className="text-gray-500">{t('invoiceSettings.businessName')}:</span> {tutorInvoiceProfile.business_name}</p>}
+                    {tutorInvoiceProfile.company_code && <p><span className="text-gray-500">{t('invoiceSettings.companyCode')}:</span> {tutorInvoiceProfile.company_code}</p>}
+                    {tutorInvoiceProfile.vat_code && <p><span className="text-gray-500">{t('invoiceSettings.vatCode')}:</span> {tutorInvoiceProfile.vat_code}</p>}
+                    {tutorInvoiceProfile.address && <p><span className="text-gray-500">{t('invoiceSettings.address')}:</span> {tutorInvoiceProfile.address}</p>}
                     {tutorInvoiceProfile.activity_number && <p><span className="text-gray-500">{t('invoiceSettings.activityNumber')}:</span> {tutorInvoiceProfile.activity_number}</p>}
                     {tutorInvoiceProfile.personal_code && <p><span className="text-gray-500">{t('invoiceSettings.personalCode')}:</span> {tutorInvoiceProfile.personal_code}</p>}
                     {tutorInvoiceProfile.contact_email && <p><span className="text-gray-500">{t('invoiceSettings.contactEmail')}:</span> {tutorInvoiceProfile.contact_email}</p>}

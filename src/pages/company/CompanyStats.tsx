@@ -42,6 +42,7 @@ export default function CompanyStats() {
 
   const loadData = async () => {
     if (!getCached(STATS_CACHE_KEY)) setLoading(true);
+    try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
@@ -87,7 +88,7 @@ export default function CompanyStats() {
     }
 
     // OPTIMIZED: Add limit for safety
-    const { data: sessions } = await query.limit(10000);
+    const { data: sessions } = await query.limit(3000);
     const allSessions = sessions || [];
 
     const stats: TutorStat[] = tutorList.map(tutor => {
@@ -139,7 +140,9 @@ export default function CompanyStats() {
         totalNetEarnings: tne, totalSessions: ts, totalCancelled: tcn,
       });
     }
-    setLoading(false);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const topEarner = tutorStats[0];

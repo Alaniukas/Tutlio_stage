@@ -18,8 +18,8 @@ const DEMO = {
   slug: 'manokorepetitorius',
   name: 'Mano Korepetitorius',
   email: 'manokorepetitorius.demo.admin@tutlio.lt',
-  brandColor: '#E1557D',
-  brandColorSecondary: '#4B0091',
+  brandColor: '#4F33B2',
+  brandColorSecondary: '#68AE4A',
   password: 'TutlioQaDemo2026!',
   users: {
     admin: {
@@ -158,8 +158,13 @@ async function main() {
 
   const features = {
     custom_branding: true,
+    hide_powered_by: true,
     public_name: 'Mano Korepetitorius',
     contact_email: DEMO.email,
+    email_team_signature: 'Mano Korepetitoriaus komanda',
+    email_sender_name: 'Mano Korepetitorius',
+    login_description:
+      'Individualus dėmesys kiekvienam mokiniui. Patyrę ir kruopščiai atrinkti korepetitoriai — gyvai Vilniuje ir nuotoliu visoje Lietuvoje.',
     manual_payments: false,
     per_student_payment_override: true,
     org_admin_calendar_view: true,

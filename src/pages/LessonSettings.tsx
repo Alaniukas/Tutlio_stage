@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import Layout from '@/components/Layout';
 import { supabase } from '@/lib/supabase';
+import { fetchOrganizationRow } from '@/lib/orgLookup';
 import { useUser } from '@/contexts/UserContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -250,17 +251,19 @@ export default function LessonSettingsPage() {
   const fetchData = async () => {
     if (!ctxUser) return;
     setLoading(true);
+    try {
     const user = ctxUser;
     setUserId(user.id);
 
     const { data: tutorData } = await supabase
       .from('profiles')
-      .select('cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, payment_timing, payment_deadline_hours, personal_meeting_link, organization_id, organizations(name)')
+      .select('cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, payment_timing, payment_deadline_hours, personal_meeting_link, organization_id')
       .eq('id', user.id)
       .single();
 
     if (tutorData?.organization_id) {
-      setOrgName((tutorData.organizations as any)?.name || null);
+      const org = await fetchOrganizationRow<{ name?: string }>(supabase as any, tutorData.organization_id, 'name');
+      setOrgName(org?.name || null);
     }
 
     setSettings({
@@ -282,7 +285,9 @@ export default function LessonSettingsPage() {
       .order('name');
 
     if (!error) setSubjects(subjectsData || []);
-    setLoading(false);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const canEditLessonSettings = !orgName || (!orgPolicy.loading && orgPolicy.canEditLessonPricing);

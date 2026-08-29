@@ -278,7 +278,7 @@ function wrap(content: string, locale: Locale = 'lt', branding?: EmailBranding |
   const brandName = branding?.name || 'Tutlio';
   const fallbackColor = branding?.brand_color || '#4f46e5';
   const logoHtml = branding?.logo_url
-    ? `<img src="${branding.logo_url}" alt="${escapeHtml(brandName)}" style="max-height:36px;max-width:160px;" />`
+    ? `<img src="${branding.logo_url}" alt="${escapeHtml(brandName)}" style="max-height:64px;max-width:200px;" />`
     : branding?.name
       ? `<span style="font-size:26px;font-weight:900;color:${fallbackColor};letter-spacing:-0.5px;">${escapeHtml(branding.name)}</span>`
       : `<span style="font-size:26px;font-weight:900;color:#4f46e5;letter-spacing:-0.5px;">Tutlio <span style="font-size:24px;">🎓</span></span>`;
@@ -3064,11 +3064,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             // Pro Klasė always gets full branding (logo + from + signature).
             const resolved = resolveEmailOrgBranding(orgIdForBrandingLookup, org);
             orgBranding = resolved.branding;
-            if (resolved.isProKlase) {
-              (data as any).isProKlase = true;
-              if (resolved.emailTeamSignature) (data as any).emailTeamSignature = resolved.emailTeamSignature;
-              if (resolved.emailSenderName) (data as any).emailSenderName = resolved.emailSenderName;
-            }
+            if (resolved.isProKlase) (data as any).isProKlase = true;
+            if (resolved.emailTeamSignature) (data as any).emailTeamSignature = resolved.emailTeamSignature;
+            if (resolved.emailSenderName) (data as any).emailSenderName = resolved.emailSenderName;
           }
         }
       } catch {}
@@ -3162,6 +3160,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     emailContent = applyBranding(emailContent);
+
+    if ((req.body as { dryRun?: unknown } | undefined)?.dryRun === true) {
+      if (!isInternalRequest(req)) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+      return res.status(200).json({
+        success: true,
+        dryRun: true,
+        subject: unescapeHtml(emailContent.subject),
+        html: emailContent.html,
+      });
+    }
 
     if (isSchoolOrg && type === 'school_contract') {
       emailContent = {

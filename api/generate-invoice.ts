@@ -8,6 +8,12 @@ import { proKlaseSessionPayEur } from './_lib/proKlaseTutorPay.js';
 import { proKlaseVatExemptionNote } from './_lib/proKlaseInvoice.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
+import { allocateInvoiceNumber, formatInvoiceSeriesHeading } from './_lib/invoiceNumber.js';
+import {
+  buildPvmPdfMeta,
+  groupSessionsByStudent,
+  orgHasPvmEducationInvoice,
+} from './_lib/pvmEducationInvoice.js';
 
 /** EUR per lesson for org-tutor → company invoices (see profiles.company_commission_percent). */
 function orgTutorLessonPayEur(tutorPayRate: number | null | undefined, sessionPrice: number | null | undefined): number {
@@ -123,6 +129,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // name, per-subject quantity and the lesson dates. Org→payer invoices only
     // (the tutor→company product keeps its own format).
     let detailedLineItems = false;
+    let pvmEducationInvoice = false;
     if (!isOrgTutor && profile.organization_id) {
       const { data: orgFeatRow } = await supabase
         .from('organizations')
@@ -132,6 +139,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const feat = (orgFeatRow as { features?: Record<string, unknown> | null } | null)?.features;
       detailedLineItems =
         !!feat && typeof feat === 'object' && !Array.isArray(feat) && feat.invoice_detailed_line_items === true;
+      pvmEducationInvoice = orgHasPvmEducationInvoice(feat);
     }
 
     // Fetch seller invoice profile
@@ -160,8 +168,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const sessionSelect = `
-        id, price, start_time, subject_id, student_id, status,
-        students!inner(id, full_name, email, payer_email, payer_name, payer_phone),
+        id, tutor_id, price, start_time, subject_id, student_id, status, is_complimentary,
+        students!inner(id, full_name, email, payer_email, payer_name, payer_phone, grade),
         subjects(name, is_trial)
       `;
 
@@ -172,15 +180,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const hasPackageIds = resolvedPackageIds.length > 0;
 
     if (hasSessionIds) {
-      const result = await supabase
+      let sessionQuery = supabase
         .from('sessions')
         .select(sessionSelect)
         .in('id', body.sessionIds!)
-        .eq('tutor_id', tutorId)
         .neq('status', 'cancelled')
         .order('start_time', { ascending: true });
+      if (!(pvmEducationInvoice && !isOrgTutor)) {
+        sessionQuery = sessionQuery.eq('tutor_id', tutorId);
+      }
+      const result = await sessionQuery;
       sessions = result.data || [];
       sessErr = result.error;
+      if (pvmEducationInvoice && !isOrgTutor && profile.organization_id && sessions.length) {
+        const { data: orgTutors } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('organization_id', profile.organization_id);
+        const allowed = new Set((orgTutors || []).map((r: { id: string }) => r.id));
+        sessions = sessions.filter((s: any) => allowed.has(s.tutor_id));
+      }
     } else if (!hasPackageIds) {
       let query = supabase
         .from('sessions')
@@ -216,7 +235,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const baseSelect = `
           id, tutor_id, student_id, subject_id, total_price, total_lessons, paid_at, created_at,
           paid, payment_method, manual_sales_invoice_id,
-          students!inner(id, full_name, email, payer_email, payer_name, payer_phone),
+          students!inner(id, full_name, email, payer_email, payer_name, payer_phone, grade),
           subjects(name),
           lesson_package_items(subject_id, total_lessons, total_price, position, subjects!inner(name))
         `;
@@ -345,6 +364,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (sessErr) return res.status(500).json({ error: sessErr.message });
+    if (!isOrgTutor) {
+      sessions = sessions.filter((s: any) => s.__fromPackage || s.is_complimentary !== true);
+    }
     if (!sessions.length) {
       if (precheckOnly) {
         return res.status(200).json({ canGenerate: false, reason: 'no_sessions' });
@@ -355,7 +377,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Server-side duplicate protection for org-tutor/company invoices:
     // if any session in this candidate set is already included in a non-cancelled
     // invoice for the same period/org, do not allow issuing again.
-    if (isOrgTutor && profile.organization_id) {
+    if (profile.organization_id && (isOrgTutor || pvmEducationInvoice)) {
       const candidateSessionIds = new Set(
         sessions
           .filter((s: any) => !s.__fromPackage)
@@ -451,7 +473,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     sessions.sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
 
     // Group sessions and create invoices
-    const groups = groupSessions(sessions, groupingType);
+    const groups = pvmEducationInvoice && !isOrgTutor
+      ? groupSessionsByStudent(sessions).map((sess, i) => ({ key: `student-${i}`, sessions: sess }))
+      : groupSessions(sessions, groupingType);
     const createdInvoices: string[] = [];
 
     for (const group of groups) {
@@ -494,8 +518,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const buyer = organizationAsBuyer ?? buildBuyerFromSessions(group.sessions);
 
-      // Get and increment invoice number
-      const invoiceNumber = await getNextInvoiceNumber(sellerProfile.id);
+      const studentRow = group.sessions[0]?.students as { full_name?: string; grade?: string } | undefined;
+      const pdfMeta = pvmEducationInvoice && !isOrgTutor
+        ? buildPvmPdfMeta(studentRow?.full_name || '', studentRow?.grade, group.sessions)
+        : null;
+
+      const invoiceNumber = await allocateInvoiceNumber(supabase, sellerProfile.id);
 
       // Tag with the billing tutor's org so company /invoices lists and RLS org policies match.
       // (Org admin issues with their user id as issued_by_user_id but tutorId = billed tutor.)
@@ -514,6 +542,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           subtotal: totalAmount,
           total_amount: totalAmount,
           status: 'issued',
+          origin: 'generated',
+          pdf_meta: pdfMeta,
           ...(body.billingBatchId ? { billing_batch_id: body.billingBatchId } : {}),
         })
         .select('id')
@@ -563,6 +593,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           })),
           totalAmount,
           branding: branding ?? undefined,
+          isVatInvoice: !!sellerSnapshot.vatCode || !!pdfMeta,
+          invoiceNumberLabel: pdfMeta
+            ? formatInvoiceSeriesHeading(invoiceNumber)
+            : `Nr. ${invoiceNumber}`,
+          ...(pdfMeta
+            ? {
+                layout: 'pvm_education' as const,
+                notes: pdfMeta.notes,
+                lessonDetails: pdfMeta.lessonDetails,
+                hidePlatformFooter: true,
+              }
+            : {}),
         };
 
         const pdfBytes = await generateInvoicePdf(pdfData);
@@ -675,6 +717,8 @@ function buildSellerSnapshot(invoiceProfile: any, userProfile: any) {
     personalCode: invoiceProfile.personal_code || undefined,
     contactEmail: invoiceProfile.contact_email || userProfile.email || undefined,
     contactPhone: invoiceProfile.contact_phone || userProfile.phone || undefined,
+    bankName: invoiceProfile.bank_name?.trim?.() || undefined,
+    iban: invoiceProfile.iban?.trim?.() || undefined,
   };
 }
 
@@ -871,31 +915,7 @@ function buildLineItems(
 }
 
 async function getNextInvoiceNumber(invoiceProfileId: string): Promise<string> {
-  // Fallback profiles use a timestamp-based number
-  if (invoiceProfileId.startsWith('fallback-')) {
-    const now = new Date();
-    const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
-    return `SF-${ts}`;
-  }
-
-  const { data: profile } = await supabase
-    .from('invoice_profiles')
-    .select('invoice_series, next_invoice_number')
-    .eq('id', invoiceProfileId)
-    .single();
-
-  if (!profile) return 'SF-001';
-
-  const series = profile.invoice_series || 'SF';
-  const num = profile.next_invoice_number || 1;
-  const paddedNum = String(num).padStart(3, '0');
-
-  await supabase
-    .from('invoice_profiles')
-    .update({ next_invoice_number: num + 1, updated_at: new Date().toISOString() })
-    .eq('id', invoiceProfileId);
-
-  return `${series}-${paddedNum}`;
+  return allocateInvoiceNumber(supabase, invoiceProfileId);
 }
 
 function getISOWeekKey(date: Date): string {

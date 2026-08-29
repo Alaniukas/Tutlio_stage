@@ -454,6 +454,19 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     defaultValue: false,
     pricingTier: 'premium',
   },
+
+  pvm_education_invoice: {
+    id: 'pvm_education_invoice',
+    name: 'PVM sąskaita faktūra (ugdymo paslaugos)',
+    nameEn: 'VAT invoice (education services)',
+    description:
+      'S.F. pavadinimas „PVM sąskaita faktūra“, serija Nr. formatas, pamokų detalizacija, pastabos pagal LR PVM įstatymo 22 str. ir išorinių numerių rezervacija.',
+    descriptionEn:
+      'Invoice titled “VAT invoice”, series/number format, lesson breakdown, Article 22 VAT notes, and external number reservation.',
+    category: 'payments',
+    defaultValue: false,
+    pricingTier: 'premium',
+  },
 };
 
 /**

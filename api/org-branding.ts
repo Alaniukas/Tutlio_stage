@@ -69,6 +69,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       custom: customDesc,
       locale,
     }),
-    hide_powered_by: proKlase,
+    hide_powered_by: proKlase || features.hide_powered_by === true,
   });
 }

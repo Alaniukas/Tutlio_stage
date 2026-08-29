@@ -200,7 +200,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { data: sessions, error: sessionsErr } = await supabase
             .from('sessions')
             .select(`
-                id, price, start_time, tutor_id, student_id, subject_id,
+                id, price, start_time, tutor_id, student_id, subject_id, is_complimentary,
                 students!inner(id, full_name, email, payment_payer, payer_email, payer_name),
                 subjects(name)
             `)
@@ -208,6 +208,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .eq('tutor_id', tutorId)
             .neq('status', 'cancelled')
             .eq('paid', false)
+            .eq('is_complimentary', false)
             .is('payment_batch_id', null)
             .is('lesson_package_id', null)
             .lte('start_time', new Date().toISOString());

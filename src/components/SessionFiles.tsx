@@ -4,8 +4,11 @@ import { Button } from '@/components/ui/button';
 import { Paperclip, Upload, Trash2, Download, Loader2 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
 interface StorageFile {
   name: string;
+  folderId: string;
   metadata: { size: number } | null;
 }
 
@@ -69,11 +72,17 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
     );
     const seen = new Set<string>();
     const merged: StorageFile[] = [];
-    for (const { data } of results) {
+    for (let i = 0; i < results.length; i++) {
+      const folderId = allIds[i];
+      const { data } = results[i];
       for (const f of data ?? []) {
         if (seen.has(f.name)) continue;
         seen.add(f.name);
-        merged.push({ name: f.name, metadata: f.metadata?.size != null ? { size: Number(f.metadata.size) } : null });
+        merged.push({
+          name: f.name,
+          folderId,
+          metadata: f.metadata?.size != null ? { size: Number(f.metadata.size) } : null,
+        });
       }
     }
     setFiles(merged);
@@ -88,7 +97,7 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
     if (role !== 'student' || resolvedGroupIds.length === 0) return;
 
     const poll = () => void fetchFiles(true);
-    const interval = window.setInterval(poll, 10_000);
+    const interval = window.setInterval(poll, 30_000);
     const onVisibility = () => {
       if (document.visibilityState === 'visible') poll();
     };
@@ -122,34 +131,32 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setError(t('files.tooLarge'));
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
     setUploading(true);
     setError(null);
     const safeName = safeObjectName(file.name);
-    const allIds = resolvedGroupIds.length > 0 ? resolvedGroupIds : [sessionId];
     const buf = await file.arrayBuffer();
-    const errors: string[] = [];
-    await Promise.all(
-      allIds.map(async (id) => {
-        const { error } = await supabase.storage
-          .from('session-files')
-          .upload(`${id}/${safeName}`, buf, { upsert: true, contentType: file.type });
-        if (error) errors.push(error.message);
-      }),
-    );
-    if (errors.length > 0) setError(errors[0]);
+    const { error } = await supabase.storage
+      .from('session-files')
+      .upload(`${sessionId}/${safeName}`, buf, { upsert: true, contentType: file.type });
+    if (error) setError(error.message);
     else await fetchFiles();
     setUploading(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
-  async function handleDownload(fileName: string) {
+  async function handleDownload(file: StorageFile) {
     const { data, error } = await supabase.storage
       .from('session-files')
-      .createSignedUrl(`${sessionId}/${fileName}`, 60);
+      .createSignedUrl(`${file.folderId}/${file.name}`, 60);
     if (error || !data) { setError(t('files.downloadFailed')); return; }
     const a = document.createElement('a');
     a.href = data.signedUrl;
-    a.download = fileName;
+    a.download = file.name;
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
     a.click();
@@ -218,7 +225,7 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
                 <span className="text-gray-400 flex-shrink-0">{formatBytes(f.metadata.size)}</span>
               )}
               <button
-                onClick={() => handleDownload(f.name)}
+                onClick={() => handleDownload(f)}
                 className="text-indigo-500 hover:text-indigo-700 flex-shrink-0"
                 title={t('common.download')}
               >

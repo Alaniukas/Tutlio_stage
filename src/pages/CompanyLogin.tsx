@@ -65,47 +65,51 @@ export default function CompanyLogin() {
     setRememberMe(rememberMe);
     persistLoginForm(email, password, rememberMe);
 
-    const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
-    if (authError || !data.user) {
-      setError(t('auth.invalidCredentials'));
-      setLoading(false);
-      return;
-    }
+    try {
+      const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
+      if (authError || !data.user) {
+        setError(t('auth.invalidCredentials'));
+        return;
+      }
 
-    const primaryAdmin = await supabase
-      .from('organization_admins')
-      .select('id, status')
-      .eq('user_id', data.user.id)
-      .maybeSingle();
-    const statusColumnsMissing = primaryAdmin.error && (
-      primaryAdmin.error.code === '42703'
-      || primaryAdmin.error.code === 'PGRST204'
-      || primaryAdmin.error.message?.includes('does not exist')
-    );
-    const legacyAdmin = statusColumnsMissing
-      ? await supabase
+      const primaryAdmin = await supabase
         .from('organization_admins')
-        .select('id')
+        .select('id, status')
         .eq('user_id', data.user.id)
-        .maybeSingle()
-      : null;
-    const adminRow = primaryAdmin.data || legacyAdmin?.data;
+        .maybeSingle();
+      const statusColumnsMissing = primaryAdmin.error && (
+        primaryAdmin.error.code === '42703'
+        || primaryAdmin.error.code === 'PGRST204'
+        || primaryAdmin.error.message?.includes('does not exist')
+      );
+      const legacyAdmin = statusColumnsMissing
+        ? await supabase
+          .from('organization_admins')
+          .select('id')
+          .eq('user_id', data.user.id)
+          .maybeSingle()
+        : null;
+      const adminRow = primaryAdmin.data || legacyAdmin?.data;
 
-    if (!adminRow) {
-      await supabase.auth.signOut();
-      setError(isSchoolLogin ? t('school.notSchoolAdmin') : t('companyLogin.noAdminAccount'));
-      setLoading(false);
-      return;
-    }
-    if ('status' in adminRow && adminRow.status !== 'active') {
-      await supabase.auth.signOut();
-      setError(t('orgTeam.suspended'));
-      setLoading(false);
-      return;
-    }
+      if (!adminRow) {
+        await supabase.auth.signOut();
+        setError(isSchoolLogin ? t('school.notSchoolAdmin') : t('companyLogin.noAdminAccount'));
+        return;
+      }
+      if ('status' in adminRow && adminRow.status !== 'active') {
+        await supabase.auth.signOut();
+        setError(t('orgTeam.suspended'));
+        return;
+      }
 
-    const path = await getOrgAdminDashboardPath(supabase, data.user.id);
-    navigate(path);
+      const path = await getOrgAdminDashboardPath(supabase, data.user.id);
+      navigate(path);
+    } catch (err) {
+      console.warn('[CompanyLogin] login failed:', err);
+      setError(t('login.timeout'));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleForgotPassword = async (e: React.FormEvent) => {

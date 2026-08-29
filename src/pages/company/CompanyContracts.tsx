@@ -42,11 +42,15 @@ import {
 } from '@/lib/schoolContractSigningSettings';
 import {
   countContractsByFilter,
+  currentContractPdfPath,
   matchesContractFilter,
+  schoolCanInitiateSignature,
+  shouldPromptSchoolSignedOnScan,
   type SchoolContractFilter,
 } from '@/lib/schoolContractFilters';
 import { buildSchoolContractExportRows, schoolContractsExportFilename } from '@/lib/schoolContractsExport';
 import { downloadSchoolContractsXlsx } from '@/lib/schoolContractsXlsxExport';
+import { fetchOrganizationRow } from '@/lib/orgLookup';
 
 interface Student {
   id: string;
@@ -95,7 +99,7 @@ interface Contract {
   media_publicity_consent?: string | null;
   additional_fee_amount?: number | null;
   additional_fee_purpose?: string | null;
-  signatures?: { role: string; status: string; signed_at?: string | null; gosign_transaction_id?: string | null; manually_marked_at?: string | null }[];
+  signatures?: { role: string; status: string; signed_at?: string | null; gosign_transaction_id?: string | null; manually_marked_at?: string | null; signed_pdf_path?: string | null }[];
   installments?: { installment_number: number; amount: number; due_date: string | null; payment_status: string | null }[];
   student?: { full_name: string; email: string; phone?: string | null; payer_name: string | null; payer_email: string | null; payer_phone?: string | null; payer_personal_code?: string | null; parent_secondary_name?: string | null; parent_secondary_email?: string | null; parent_secondary_phone?: string | null; parent_secondary_personal_code?: string | null; parent_secondary_address?: string | null; student_address?: string | null; student_city?: string | null; child_birth_date?: string | null; media_publicity_consent?: string | null };
 }
@@ -203,7 +207,7 @@ function contractInstallmentEmailExtras(contract: {
 }
 
 const CONTRACTS_CACHE_KEY = 'company_contracts';
-const CONTRACTS_SELECT = '*, media_publicity_consent, student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent), signatures:school_contract_signatures(role, status, signed_at, gosign_transaction_id, manually_marked_at), installments:school_payment_installments(installment_number, amount, due_date, payment_status)';
+const CONTRACTS_SELECT = '*, media_publicity_consent, student:students(full_name, email, phone, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent), signatures:school_contract_signatures(role, status, signed_at, gosign_transaction_id, manually_marked_at, signed_pdf_path), installments:school_payment_installments(installment_number, amount, due_date, payment_status)';
 
 export default function CompanyContracts() {
   const { t: tr } = useTranslation();
@@ -268,21 +272,27 @@ export default function CompanyContracts() {
 
   const load = async () => {
     if (!getCached(CONTRACTS_CACHE_KEY)) setLoading(true);
+    try {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setLoading(false); return; }
+    if (!user) return;
 
     const { data: admin } = await supabase
       .from('organization_admins')
-      .select('organization_id, organizations(name, email, features)')
+      .select('organization_id')
       .eq('user_id', user.id)
       .maybeSingle();
 
-    if (!admin?.organization_id) { setLoading(false); return; }
+    if (!admin?.organization_id) return;
     setOrgId(admin.organization_id);
-    const name = (admin.organizations as any)?.name || '';
-    const email = (admin.organizations as any)?.email || '';
-    const features = (admin.organizations as any)?.features && typeof (admin.organizations as any).features === 'object'
-      ? (admin.organizations as any).features as Record<string, unknown>
+    const org = await fetchOrganizationRow<{
+      name?: string;
+      email?: string;
+      features?: Record<string, unknown>;
+    }>(supabase as any, admin.organization_id, 'name, email, features');
+    const name = org?.name || '';
+    const email = org?.email || '';
+    const features = org?.features && typeof org.features === 'object'
+      ? org.features as Record<string, unknown>
       : {};
     const nextSigningSettings = parseSchoolContractSigningSettings(features, email);
     setOrgName(name);
@@ -293,7 +303,7 @@ export default function CompanyContracts() {
 
     const [tRes, cRes, sRes] = await Promise.all([
       supabase.from('school_contract_templates').select('*').eq('organization_id', admin.organization_id).order('created_at', { ascending: false }),
-      supabase.from('school_contracts').select(CONTRACTS_SELECT).eq('organization_id', admin.organization_id).is('archived_at', null).order('created_at', { ascending: false }),
+      supabase.from('school_contracts').select(CONTRACTS_SELECT).eq('organization_id', admin.organization_id).is('archived_at', null).order('created_at', { ascending: false }).limit(2000),
       supabase.from('students').select('id, full_name, email, phone, grade, payer_name, payer_email, payer_phone, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_phone, parent_secondary_personal_code, parent_secondary_address, student_address, student_city, child_birth_date, media_publicity_consent').eq('organization_id', admin.organization_id).order('full_name'),
     ]);
 
@@ -314,7 +324,11 @@ export default function CompanyContracts() {
       contracts: cData,
       students: sData,
     });
-    setLoading(false);
+    } catch (err) {
+      console.error('[CompanyContracts] load failed:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const reload = () => { invalidateCache(CONTRACTS_CACHE_KEY); load(); };
@@ -1484,6 +1498,7 @@ export default function CompanyContracts() {
   const [manualMarkBusy, setManualMarkBusy] = useState(false);
   const [manualMarkErr, setManualMarkErr] = useState('');
   const [manualMarkNoFileConfirm, setManualMarkNoFileConfirm] = useState(false);
+  const [pendingScanUpload, setPendingScanUpload] = useState<{ contract: Contract; file: File } | null>(null);
 
   const openManualMark = (contract: Contract) => {
     setManualMarkErr('');
@@ -1630,7 +1645,7 @@ export default function CompanyContracts() {
     if (!ok) setToast({ message: tr('school.toastFileOpenFail'), type: 'error' });
   };
 
-  const uploadSignedContract = async (contract: Contract, file: File) => {
+  const uploadSignedContract = async (contract: Contract, file: File, schoolAlreadySigned: boolean) => {
     if (!orgId) return;
     if (!isManualSignedFile(file)) {
       setToast({ message: tr('school.toastSignedUploadInvalidType'), type: 'error' });
@@ -1655,6 +1670,42 @@ export default function CompanyContracts() {
       setToast({ message: uploadErr || tr('school.toastTemplateUploadPrepareFail'), type: 'error' });
       return;
     }
+
+    if (!schoolAlreadySigned) {
+      const { error: updateErr } = await supabase
+        .from('school_contracts')
+        .update({
+          pdf_url: storedPath,
+          signed_uploaded_at: new Date().toISOString(),
+          signing_status: 'awaiting_school_signature',
+          signed_contract_url: null,
+        })
+        .eq('id', contract.id);
+      if (updateErr) {
+        setSaving(false);
+        setToast({ message: updateErr.message, type: 'error' });
+        return;
+      }
+      await supabase
+        .from('school_contract_signatures')
+        .update({
+          status: 'pending',
+          signed_at: null,
+          signed_pdf_path: null,
+          gosign_transaction_id: null,
+          signing_url: null,
+          error_message: null,
+        })
+        .eq('contract_id', contract.id)
+        .eq('role', 'school')
+        .neq('status', 'pending');
+      setSaving(false);
+      setPendingScanUpload(null);
+      setToast({ message: tr('school.toastParentCopyUploadedForSchoolSign'), type: 'success' });
+      reload();
+      return;
+    }
+
     const { error: updateErr } = await supabase
       .from('school_contracts')
       .update({
@@ -1665,6 +1716,7 @@ export default function CompanyContracts() {
       })
       .eq('id', contract.id);
     setSaving(false);
+    setPendingScanUpload(null);
     if (updateErr) {
       setToast({ message: updateErr.message, type: 'error' });
       return;
@@ -1698,7 +1750,15 @@ export default function CompanyContracts() {
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
-      await uploadSignedContract(contract, file);
+      if (!isManualSignedFile(file)) {
+        setToast({ message: tr('school.toastSignedUploadInvalidType'), type: 'error' });
+        return;
+      }
+      if (shouldPromptSchoolSignedOnScan(contract, eSignEnabled)) {
+        setPendingScanUpload({ contract, file });
+        return;
+      }
+      await uploadSignedContract(contract, file, true);
     };
     input.click();
   };
@@ -1746,10 +1806,10 @@ export default function CompanyContracts() {
 
   // Diacritics-insensitive match (Vėgėlė findable as "vegele" and vice versa).
   const searchable = (value: string) => normalizePdfText(value).toLowerCase();
-  const contractFilterCounts = countContractsByFilter(contracts, isSchoolView);
+  const contractFilterCounts = countContractsByFilter(contracts, isSchoolView, { eSignEnabled });
   const visibleContracts = contracts.filter((c) => {
     if (isSchoolView) {
-      if (!matchesContractFilter(contractFilter as SchoolContractFilter, c, isSchoolView)) return false;
+      if (!matchesContractFilter(contractFilter as SchoolContractFilter, c, isSchoolView, { eSignEnabled })) return false;
     } else {
       if (contractFilter === 'signed' && c.signing_status !== 'signed') return false;
       if (contractFilter === 'unsigned' && c.signing_status === 'signed') return false;
@@ -2007,22 +2067,32 @@ export default function CompanyContracts() {
                             ))}
                         </p>
                       )}
-                      {c.signed_contract_url && (
-                        <p className="text-xs text-emerald-700 mt-1">
-                          Pasirašyta sutartis ({c.student?.full_name || 'mokinys'}):{' '}
-                          <button type="button" className="underline" onClick={() => openContractFile(c.signed_contract_url)}>
-                            Atidaryti failą
-                          </button>
-                        </p>
-                      )}
-                      {!c.signed_contract_url && c.pdf_url && (
-                        <p className="text-xs text-indigo-700 mt-1">
-                          Naujausia sutarties versija:{' '}
-                          <button type="button" className="underline" onClick={() => openContractFile(c.pdf_url)}>
-                            Atidaryti PDF
-                          </button>
-                        </p>
-                      )}
+                      {(() => {
+                        const currentPdf = currentContractPdfPath(c);
+                        const schoolSignedPdf = (c.signatures || []).find((s) => s.role === 'school' && s.status === 'signed' && s.signed_pdf_path)?.signed_pdf_path;
+                        const parentScan = c.signed_contract_url && c.signed_contract_url !== currentPdf ? c.signed_contract_url : null;
+                        return (
+                          <>
+                            {currentPdf && (
+                              <p className={`text-xs mt-1 ${schoolSignedPdf ? 'text-emerald-700' : 'text-indigo-700'}`}>
+                                {schoolSignedPdf ? 'Naujausia pasirašyta versija' : 'Naujausia sutarties versija'}
+                                {' '}({c.student?.full_name || 'mokinys'}):{' '}
+                                <button type="button" className="underline" onClick={() => openContractFile(currentPdf)}>
+                                  Atidaryti failą
+                                </button>
+                              </p>
+                            )}
+                            {parentScan && (
+                              <p className="text-xs text-gray-500 mt-1">
+                                Įkelta tėvų kopija (be naujausio mokyklos parašo):{' '}
+                                <button type="button" className="underline" onClick={() => openContractFile(parentScan)}>
+                                  Atidaryti originalą
+                                </button>
+                              </p>
+                            )}
+                          </>
+                        );
+                      })()}
                       {(c.signatures || []).some((s) => s.role.startsWith('parent') && s.status === 'signed' && !s.gosign_transaction_id && !s.manually_marked_at) && (
                         <p className="text-xs text-emerald-700 mt-1">
                           Tėvų parašas gautas per Smart-ID (Dokobit) — PDF vientisumas ir naujas parašas patikrinti automatiškai.
@@ -2041,12 +2111,12 @@ export default function CompanyContracts() {
                           <Send className="w-3.5 h-3.5 mr-1.5" /> {tr('school.send')}
                         </Button>
                       )}
-                      {c.signing_status === 'awaiting_school_signature' && (
+                      {eSignEnabled && schoolCanInitiateSignature(c) && (
                         <Button size="sm" onClick={() => signAsSchool(c)} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
                           <PenLine className="w-3.5 h-3.5 mr-1.5" /> {saving ? 'Ruošiama…' : tr('school.signAsDirector')}
                         </Button>
                       )}
-                      {c.signing_status === 'signed_by_school' && (
+                      {c.signing_status === 'signed_by_school' && !schoolCanInitiateSignature(c) && (
                         <span className="text-xs text-blue-700 font-medium">{tr('school.waitingParentSignature')}</span>
                       )}
 
@@ -2070,7 +2140,7 @@ export default function CompanyContracts() {
                         </PopoverTrigger>
                         <PopoverContent align="end" className="w-64 p-1">
                           <div className="flex flex-col">
-                            {eSignEnabled && c.signing_status === 'signed_by_school' && (
+                            {eSignEnabled && c.signing_status === 'signed_by_school' && !schoolCanInitiateSignature(c) && (
                               <button
                                 type="button"
                                 className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-left hover:bg-gray-50 text-green-700"
@@ -2179,6 +2249,57 @@ export default function CompanyContracts() {
           )
         )}
       </div>
+
+      <Dialog
+        open={Boolean(pendingScanUpload)}
+        onOpenChange={(open) => { if (!open && !saving) setPendingScanUpload(null); }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{tr('school.scanAskSchoolSignedTitle')}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-600">{tr('school.scanAskSchoolSignedBody')}</p>
+          {pendingScanUpload && (
+            <p className="text-sm text-gray-900 font-medium">
+              {pendingScanUpload.contract.student?.full_name || pendingScanUpload.file.name}
+            </p>
+          )}
+          <div className="grid gap-2">
+            <Button
+              disabled={saving || !pendingScanUpload}
+              className="h-auto whitespace-normal py-3"
+              onClick={() => {
+                if (!pendingScanUpload) return;
+                void uploadSignedContract(pendingScanUpload.contract, pendingScanUpload.file, true);
+              }}
+            >
+              <span className="block text-left">
+                <span className="block font-semibold">{tr('school.scanAskSchoolSignedYes')}</span>
+                <span className="block text-xs font-normal opacity-90 mt-0.5">{tr('school.scanAskSchoolSignedYesHint')}</span>
+              </span>
+            </Button>
+            <Button
+              variant="outline"
+              disabled={saving || !pendingScanUpload}
+              className="h-auto whitespace-normal py-3"
+              onClick={() => {
+                if (!pendingScanUpload) return;
+                void uploadSignedContract(pendingScanUpload.contract, pendingScanUpload.file, false);
+              }}
+            >
+              <span className="block text-left">
+                <span className="block font-semibold">{tr('school.scanAskSchoolSignedNo')}</span>
+                <span className="block text-xs font-normal text-gray-600 mt-0.5">{tr('school.scanAskSchoolSignedNoHint')}</span>
+              </span>
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" disabled={saving} onClick={() => setPendingScanUpload(null)}>
+              {tr('common.cancel')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={Boolean(manualMarkContract)} onOpenChange={(open) => { if (!open && !manualMarkBusy) setManualMarkContract(null); }}>
         <DialogContent className="max-w-lg">
