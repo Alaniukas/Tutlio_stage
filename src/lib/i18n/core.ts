@@ -1,9 +1,9 @@
 import { resolvePlatformTranslation } from './platformOverrides';
 import { type Platform, DEFAULT_PLATFORM } from '@/lib/platform';
+import { SUPPORTED_LOCALES, type Locale } from './locales';
 
-export type Locale = 'lt' | 'en' | 'pl' | 'lv' | 'ee' | 'fr' | 'es' | 'de' | 'se' | 'dk' | 'fi' | 'no' | 'nl';
-
-export const SUPPORTED_LOCALES: Locale[] = ['lt', 'en', 'pl', 'lv', 'ee', 'fr', 'es', 'de', 'se', 'dk', 'fi', 'no', 'nl'];
+export { SUPPORTED_LOCALES } from './locales';
+export type { Locale } from './locales';
 
 export const LOCALE_LABELS: Record<Locale, string> = {
   lt: 'LT',

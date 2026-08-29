@@ -1,7 +1,9 @@
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
+import { supportTranslations } from './supportTranslations.js';
 
 export const de: Record<string, string> = {
   ...sharedOrganizationWorkflowTranslations,
+  ...supportTranslations.de,
   'invoiceSettings.bankName': 'Bankname',
   'invoiceSettings.iban': 'Kontonummer (IBAN)',
   'invoiceSettings.nextInvoiceNumber': 'Nächste Rechnungsnummer',

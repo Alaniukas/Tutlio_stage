@@ -15,12 +15,13 @@ const OLD_TOOLS: {
   key: string;
   icon?: typeof Clock;
   img?: string;
+  cropImage?: boolean;
   label: string;
   left: number;
   top: number;
 }[] = [
   { key: 'reminders', icon: Clock, label: 'Reminders', left: 50, top: 22 },
-  { key: 'messages', img: '/logos/apps/whatsapp.svg', label: 'WhatsApp', left: 82, top: 35 },
+  { key: 'messages', img: '/whatsapp-support-icon.png', cropImage: true, label: 'WhatsApp', left: 82, top: 35 },
   { key: 'spreadsheets', img: '/logos/apps/excel.svg', label: 'Excel', left: 18, top: 42 },
   { key: 'calculator', icon: Calculator, label: 'Calculator', left: 72, top: 72 },
   { key: 'contacts', icon: Users, label: 'Contacts', left: 28, top: 65 },
@@ -105,7 +106,7 @@ export default function OldVsNewComparison() {
                 <h3 className="font-display text-lg font-semibold text-zinc-500">{t('landing.v2.oldWay')}</h3>
               </div>
 
-              {OLD_TOOLS.map(({ key, icon: Icon, img, label, left, top }) => (
+              {OLD_TOOLS.map(({ key, icon: Icon, img, cropImage, label, left, top }) => (
                 <div
                   key={key}
                   className="absolute -translate-x-1/2 -translate-y-1/2"
@@ -113,9 +114,20 @@ export default function OldVsNewComparison() {
                 >
                   <div className="flex flex-col items-center gap-1">
                     <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
-                      {img
-                        ? <img src={img} alt={label} className="h-8 w-8 object-contain" loading="lazy" />
-                        : Icon && <Icon className="h-6 w-6 text-zinc-400" />}
+                      {img ? (
+                        cropImage ? (
+                          <span className="h-10 w-10 overflow-hidden rounded-[10px]" role="img" aria-label={label}>
+                            <img
+                              src={img}
+                              alt=""
+                              className="h-[60px] w-[60px] max-w-none -translate-x-[10px] -translate-y-[10px]"
+                              loading="lazy"
+                            />
+                          </span>
+                        ) : (
+                          <img src={img} alt={label} className="h-8 w-8 object-contain" loading="lazy" />
+                        )
+                      ) : Icon && <Icon className="h-6 w-6 text-zinc-400" />}
                     </div>
                     <span className="w-[76px] text-center text-[10px] font-medium leading-tight text-zinc-500">
                       {t(`landing.v2.app.${key}`)}

@@ -1,7 +1,9 @@
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
+import { supportTranslations } from './supportTranslations.js';
 
 export const fi: Record<string, string> = {
   ...sharedOrganizationWorkflowTranslations,
+  ...supportTranslations.fi,
   'invoiceSettings.bankName': 'Pankin nimi',
   'invoiceSettings.iban': 'Tilinumero (IBAN)',
   'invoiceSettings.nextInvoiceNumber': 'Seuraava laskun numero',

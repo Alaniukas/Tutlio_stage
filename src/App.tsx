@@ -101,6 +101,7 @@ const PackagePaymentCancelled = lazy(() => import('@/pages/PackagePaymentCancell
 const SchoolPaymentSuccess = lazy(() => import('@/pages/SchoolPaymentSuccess'));
 const TutorSubscribe = lazy(() => import('@/pages/TutorSubscribe'));
 const WhiteboardPage = lazy(() => import('@/pages/Whiteboard'));
+const SupportWidget = lazy(() => import('@/components/support/SupportWidget'));
 import SupabaseAuthHashErrors from '@/components/SupabaseAuthHashErrors';
 import ThemeColorManager from '@/hooks/useThemeColor';
 import { useTranslation, getLocaleFromPathname } from '@/lib/i18n';
@@ -452,6 +453,9 @@ export default function App({ basename }: { basename: string }) {
 
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
+      </Suspense>
+      <Suspense fallback={null}>
+        <SupportWidget />
       </Suspense>
     </Router>
   );

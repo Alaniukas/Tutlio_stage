@@ -1,4 +1,5 @@
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
+import { supportTranslations } from './supportTranslations.js';
 
 const DK_TERMS_HTML = [
   '<h2>1. Tjenesteudbyder og anvendelsesområde</h2>',
@@ -117,6 +118,7 @@ const DK_DPA_HTML = [
 
 export const dk: Record<string, string> = {
   ...sharedOrganizationWorkflowTranslations,
+  ...supportTranslations.dk,
   'invoiceSettings.bankName': 'Banknavn',
   'invoiceSettings.iban': 'Kontonummer (IBAN)',
   'invoiceSettings.nextInvoiceNumber': 'Næste fakturanummer',
