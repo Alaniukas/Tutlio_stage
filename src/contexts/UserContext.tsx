@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, ReactNode } from 'react';
 import { supabase } from '@/lib/supabase';
 import { dedupeAuthGetUser } from '@/lib/preload';
+import { rememberAuthUser } from '@/lib/authSession';
 import { User } from '@supabase/supabase-js';
 import { buildPlatformPath } from '@/lib/platform';
 import { clearOrgBrandingCache } from '@/contexts/OrgBrandingContext';
@@ -187,6 +188,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
 
         if (cancelled) return;
         if (currentUser) {
+          rememberAuthUser(currentUser);
           setUser(currentUser);
         } else {
           // Never null-out user from initAuth timeout path. SIGNED_OUT handler is the only
@@ -223,6 +225,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         // Do NOT clear `user` to null on transient session restore races.
         // Only clear on confirmed SIGNED_OUT (see branch below).
         if (currentUser) {
+          rememberAuthUser(currentUser);
           setUser(currentUser);
         }
 
@@ -240,6 +243,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
           // Never await extra auth calls here because auth lock races can hang
           // and leave the UI stuck in "loading" on the previous page.
           console.warn('[UserContext] SIGNED_OUT received - redirecting');
+          rememberAuthUser(null);
           setUser(null);
           setProfile(null);
           sessionStorage.removeItem('tutlio_logout_intent');

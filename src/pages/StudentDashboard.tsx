@@ -14,6 +14,7 @@ import {
 import { authHeaders } from '@/lib/apiHelpers';
 import { rpcGetStudentProfilesDeduped } from '@/lib/preload';
 import { schoolContractAllowsInstallmentPayment } from '@/lib/schoolContractPaymentGate';
+import { displayStudentGrade } from '@/lib/studentGrade';
 import { useUser } from '@/contexts/UserContext';
 import { format, isAfter, isBefore } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
@@ -457,9 +458,9 @@ export default function StudentDashboard() {
                         <p className="text-gray-500 font-medium text-sm mb-0.5">{getGreeting()},</p>
                         <h1 className="text-3xl font-black text-gray-900 leading-tight">{firstName} 👋</h1>
                     </div>
-                    {student?.grade && (
+                    {displayStudentGrade(student?.grade) && (
                         <div className="bg-violet-100/80 text-violet-700 px-3 py-1.5 rounded-2xl text-xs font-black shadow-sm border border-violet-200/50">
-                            {student.grade}
+                            {displayStudentGrade(student.grade)}
                         </div>
                     )}
                 </div>

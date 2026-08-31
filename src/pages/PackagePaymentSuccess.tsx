@@ -14,6 +14,15 @@ export default function PackagePaymentSuccess() {
 
   useEffect(() => {
     const sessionId = searchParams.get('session_id');
+    if (import.meta.env.DEV && searchParams.get('preview') === '1') {
+      setSummary({
+        availableLessons: 0,
+        totalLessons: 1,
+        subjectName: searchParams.get('subject') || 'Bandomasis',
+      });
+      setStatus('success');
+      return;
+    }
     if (!sessionId) {
       setStatus('error');
       setError(t('payment.missingSessionId'));
@@ -60,7 +69,7 @@ export default function PackagePaymentSuccess() {
           {status === 'success' && (
             <>
               {t('payment.packageActivated')}
-              {summary?.subjectName ? ` (${summary.subjectName})` : ''}. {t('payment.lessonsRemaining', { available: summary?.availableLessons ?? 0, total: summary?.totalLessons ?? 0 })}
+              {summary?.subjectName ? ` (${summary.subjectName})` : ''}.
             </>
           )}
         </p>

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import CompanyDynamicPricing from '@/pages/company/CompanyDynamicPricing';
+import { PRO_KLASE_QA_ORG_ID } from '@/lib/marketMoney';
 
 const pricingRows = [
   [1, 8, 3, 22],
@@ -14,7 +15,7 @@ const pricingRows = [
   [11, 12, 1, 31],
 ].map(([grade_min, grade_max, lessons_per_week, price], index) => ({
   id: `rule-${index}`,
-  organization_id: 'pro-klase-org',
+  organization_id: PRO_KLASE_QA_ORG_ID,
   grade_min,
   grade_max,
   lessons_per_week,
@@ -46,7 +47,7 @@ vi.mock('@/hooks/useOrgFeatures', () => ({
   useOrgFeatures: () => ({
     loading: false,
     hasFeature: (id: string) => id === 'monthly_packages',
-    organizationId: 'pro-klase-org',
+    organizationId: PRO_KLASE_QA_ORG_ID,
     features: {},
     isOrgUser: true,
     contactVisibility: null,
@@ -77,7 +78,7 @@ describe('CompanyDynamicPricing', () => {
           select: () => ({
             eq: () => ({
               maybeSingle: async () => ({
-                data: { organization_id: 'pro-klase-org' },
+                data: { organization_id: PRO_KLASE_QA_ORG_ID },
                 error: null,
               }),
             }),
@@ -129,7 +130,7 @@ describe('CompanyDynamicPricing', () => {
       expect(supabaseMock.upsert).toHaveBeenCalledWith(
         [
           expect.objectContaining({
-            organization_id: 'pro-klase-org',
+            organization_id: PRO_KLASE_QA_ORG_ID,
             grade_min: 1,
             grade_max: 8,
             lessons_per_week: 1,

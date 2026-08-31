@@ -3,8 +3,12 @@
  * Contract: POST BLOG_AI_API_URL with Bearer BLOG_AI_API_KEY.
  */
 
-export const BLOG_AUTO_LOCALES = ['lt', 'en', 'pl'] as const;
-export type BlogAutoLocale = (typeof BLOG_AUTO_LOCALES)[number];
+import { BLOG_SCHEMA_LOCALES, type BlogSchemaLocale } from '../../src/lib/i18n/localeRelease.js';
+import { BLOG_AUTHOR_NAME } from '../../src/lib/blogAuthor.js';
+import { BLOG_LOCALE_LANGUAGE, BLOG_MARKET_NOTES } from './blogMarkets.js';
+
+export const BLOG_AUTO_LOCALES = BLOG_SCHEMA_LOCALES;
+export type BlogAutoLocale = BlogSchemaLocale;
 
 export interface BlogLocaleContent {
   title: string;
@@ -65,27 +69,28 @@ export interface BlogAiGenerateOptions {
   tag?: string;
 }
 
-/** Shared SEO writing rules — educational first, brand mentioned sparingly. */
+/** Shared SEO + GEO writing rules — education briefing, not a product page. */
 export const BLOG_SEO_WRITING_RULES =
-  'Write an informational SEO article (like nomora.io or hubspot blog), NOT a sales page.\n' +
-  '- The keyword sets the angle: it may be about studying, learning techniques, motivation, exam prep, a specific\n' +
-  '  school subject, helping children learn (for parents), or the craft of tutoring — write a genuinely helpful\n' +
-  '  article on THAT topic. The article is about education, NOT about software.\n' +
-  '- Title: keyword-first, natural, helpful (guide/checklist/tips). Do NOT put "Tutlio" in the title.\n' +
-  '- Avoid titles like "Kaip [Brand] padeda…" or "…su Tutlio". Prefer "…: praktinis gidas", "…: patarimai".\n' +
-  '- 90%+ pure educational value: practical steps, checklists, mistakes to avoid, real examples for students, parents or tutors.\n' +
-  '- Mention Tutlio at most once, only where it truly fits, as a soft contextual aside (e.g. when scheduling, tracking\n' +
-  '  progress or organising online lessons naturally comes up). If it does not fit the topic, do NOT mention it at all.\n' +
-  '- Never use hard-sell phrases: "mūsų platforma", "registruokitės dabar", "geriausia platforma", "tik su Tutlio".\n' +
-  '- No product feature dumps. If mentioning software, keep it generic ("specializuota platforma", "tvarkaraščio įrankis").\n' +
-  '- Include 5–7 ## H2 sections + ### H3 where useful; lists, numbered steps, optional > Pro tip: blockquote.\n' +
-  '- Add one short FAQ section (###) with 2–3 questions if it fits the keyword.\n' +
-  '- excerpt: reader benefit only, no brand name, no CTA.\n' +
-  '- ~550–750 words per locale. LT primary; EN/PL natural adaptations.\n' +
-  '- Internal linking (required): include 2–3 natural markdown links to Tutlio pages using relative paths only, e.g.\n' +
-  '  [pamokų kalendorius](/features/calendar), [laukimo eilė](/features/waitlist), [mokėjimai](/features/payments),\n' +
-  '  [priminimai](/features/reminders), [kainos](/pricing), [tinklaraštis](/blog). Pick links that fit the topic.\n' +
-  '- End with one soft contextual link to /pricing or /blog if it fits naturally.';
+  `You write as ${BLOG_AUTHOR_NAME}, education-market editor at Tutlio (a tutoring-operations company).\n` +
+  'Voice: calm, specific, slightly opinionated — like a briefing note from a school-operations director, not a growth blog.\n' +
+  'The article is about education (parents, students, tutors, schools). Software is not the subject.\n\n' +
+  'GEO / SEO:\n' +
+  '- First paragraph: 40–80 words that ANSWER the search query directly (no throat-clearing).\n' +
+  '- Title: natural search phrasing for THIS market. Never put Tutlio in the title.\n' +
+  '- 5–8 ## H2 headings that sound like real questions or decisions ("When to hire…", "What to check after 6 weeks").\n' +
+  '- One ## FAQ (or local equivalent: DUK / Często zadawane pytania / Häufige Fragen…) with 3 ### questions whose answers are 2–4 sentences each.\n' +
+  '- 1200–1800 words. Concrete steps, checklists, failure modes, what to ignore.\n' +
+  '- excerpt: 1–2 sentences of reader benefit, no brand, no CTA.\n\n' +
+  'Facts:\n' +
+  '- FORBIDDEN: invented percentages, surveys, "studies show", "research indicates", fake year-over-year lifts, unnamed "experts".\n' +
+  '- If you cannot name a real public source (OECD, Eurostat, a ministry, a named exam board) and a real year, describe the mechanism in plain language instead of a number.\n' +
+  '- Do not invent quotes, case studies, or customer names.\n\n' +
+  'Anti-slop (never use): "in today\'s fast-paced world", "delve", "landscape", "unlock your potential", "leverage", "it\'s important to note", "as an AI", emoji, keyword stuffing, numbered "Top 7 secrets".\n\n' +
+  'Brand:\n' +
+  '- Mention Tutlio at most once, only if scheduling / parent communication / lesson admin is genuinely in the reader\'s problem. One short clause, no feature list.\n' +
+  '- Zero required product links. Optional: a single relative link to /blog or /pricing if it is actually useful. Never /features/* dumps.\n' +
+  '- No "sign up now", "best platform", "only with Tutlio".\n\n' +
+  'Do not copy another locale word-for-word. Local exam names, school stages, and parent realities must match the market note.';
 
 export type BlogAiProviderName = 'custom' | 'gemini';
 
@@ -235,12 +240,37 @@ export function coerceJsonObject(text: string): Record<string, unknown> {
   throw new Error(`content was not valid JSON: ${trimmed.slice(0, 200)}`);
 }
 
-/** One Gemini text request → parsed multi-locale blog body (no cover image yet). */
-async function requestGeminiBlogLocales(
-  url: string,
-  prompt: string,
-  keyword: string,
-): Promise<BlogAiGenerateResult> {
+export interface BlogEditorialBrief {
+  tag: string;
+  topic: string;
+  angles: Partial<Record<BlogAutoLocale, string>>;
+}
+
+export function parseEditorialBrief(raw: unknown): BlogEditorialBrief {
+  if (!raw || typeof raw !== 'object') throw new Error('Brief must be a JSON object');
+  const o = raw as Record<string, unknown>;
+  const topic = String(o.topic || '').trim();
+  if (!topic) throw new Error('Brief missing topic');
+  const tag = String(o.tag || 'Education').trim() || 'Education';
+  const angles: Partial<Record<BlogAutoLocale, string>> = {};
+  const rawAngles = o.angles && typeof o.angles === 'object' ? (o.angles as Record<string, unknown>) : {};
+  for (const loc of BLOG_AUTO_LOCALES) {
+    const a = String(rawAngles[loc] || '').trim();
+    if (a) angles[loc] = a;
+  }
+  return { tag, topic, angles };
+}
+
+function geminiEndpoint(apiKey: string): string {
+  const model = (process.env.GEMINI_MODEL || 'gemini-2.5-pro').trim();
+  return `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+}
+
+async function requestGeminiJson(prompt: string, maxOutputTokens: number): Promise<Record<string, unknown>> {
+  const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+  if (!apiKey) throw new Error('GEMINI_API_KEY must be configured for Gemini blog generation');
+
+  const url = geminiEndpoint(apiKey);
   const resp = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -248,11 +278,8 @@ async function requestGeminiBlogLocales(
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
         responseMimeType: 'application/json',
-        temperature: 0.7,
-        // With responseMimeType=json Gemini emits valid JSON unless it runs out of
-        // output budget mid-article (the cause of the intermittent "not valid JSON"
-        // failures). A generous cap fits thinking tokens + 3 locales of markdown.
-        maxOutputTokens: 32768,
+        temperature: 0.75,
+        maxOutputTokens,
       },
     }),
   });
@@ -273,65 +300,91 @@ async function requestGeminiBlogLocales(
     throw new Error(`Gemini API error ${resp.status}: ${msg}`);
   }
 
-  const contentText = extractGeminiText(json);
-  const parsedBodyRaw = coerceJsonObject(contentText);
-
-  return parseBlogAiResponse({
-    ...parsedBodyRaw,
-    cover_image_url: geminiCoverPlaceholder(keyword),
-  });
+  return coerceJsonObject(extractGeminiText(json));
 }
 
-async function generateBlogWithGemini(options: BlogAiGenerateOptions): Promise<BlogAiGenerateResult> {
-  const apiKey = (process.env.GEMINI_API_KEY || '').trim();
-  if (!apiKey) throw new Error('GEMINI_API_KEY must be configured for Gemini blog generation');
-
-  const model = (process.env.GEMINI_MODEL || 'gemini-2.5-flash').trim();
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-
-  const prompt =
-    `You are an expert SEO editor for an education & tutoring blog (informational content, not ads).\n` +
-    `Topics span learning, studying, exams, school subjects, parenting around education, and the tutoring craft.\n` +
-    `Target keyword: "${options.keyword}"` +
-    (options.tag ? ` (category: ${options.tag})` : '') +
-    `\nBrand context (optional, mention at most once and only if it fits): Tutlio online tutoring platform.\n\n` +
-    `Return ONLY valid JSON (no markdown fences):\n` +
-    `{\n` +
-    `  "tag": "short category",\n` +
-    `  "lt": { "title": "...", "excerpt": "...", "content": "markdown body" },\n` +
-    `  "en": { "title": "...", "excerpt": "...", "content": "markdown body" },\n` +
-    `  "pl": { "title": "...", "excerpt": "...", "content": "markdown body" }\n` +
-    `}\n\n` +
-    BLOG_SEO_WRITING_RULES;
-
-  // Gemini occasionally returns truncated / non-JSON content; retry so a single bad
-  // generation never fails the daily cron.
-  let parsedLocales: BlogAiGenerateResult | null = null;
+async function requestGeminiJsonWithRetry(prompt: string, maxOutputTokens: number): Promise<Record<string, unknown>> {
   let lastError = 'unknown error';
   for (let attempt = 1; attempt <= GEMINI_BLOG_MAX_ATTEMPTS; attempt++) {
     try {
-      parsedLocales = await requestGeminiBlogLocales(url, prompt, options.keyword);
-      break;
+      return await requestGeminiJson(prompt, maxOutputTokens);
     } catch (e) {
       lastError = e instanceof Error ? e.message : String(e);
       console.warn(`[blog-ai] Gemini attempt ${attempt}/${GEMINI_BLOG_MAX_ATTEMPTS} failed: ${lastError}`);
     }
   }
-  if (!parsedLocales) {
-    throw new Error(`Gemini blog generation failed after ${GEMINI_BLOG_MAX_ATTEMPTS} attempts: ${lastError}`);
+  throw new Error(`Gemini blog generation failed after ${GEMINI_BLOG_MAX_ATTEMPTS} attempts: ${lastError}`);
+}
+
+export async function generateBlogEditorialBrief(options: BlogAiGenerateOptions): Promise<BlogEditorialBrief> {
+  const localeKeys = BLOG_AUTO_LOCALES.join(', ');
+  const prompt =
+    `You are ${BLOG_AUTHOR_NAME}, education-market editor at Tutlio. Produce a research brief for native articles (not translations).\n` +
+    `Topic seed: "${options.keyword}"` +
+    (options.tag ? ` (category: ${options.tag})` : '') +
+    `\n\nReturn JSON: { "tag": "short category", "topic": "one English sentence naming the reader problem", "angles": { "<locale>": "2-3 sentences: local exam/school vocabulary, who the reader is, what NOT to copy from other markets" } }\n` +
+    `Locales in angles (all required): ${localeKeys}.\n` +
+    `No statistics. No product pitch. No Tutlio mention in the brief.`;
+
+  const raw = await requestGeminiJsonWithRetry(prompt, 8192);
+  return parseEditorialBrief(raw);
+}
+
+export async function generateBlogLocaleArticle(options: {
+  keyword: string;
+  tag?: string;
+  locale: BlogAutoLocale;
+  brief: BlogEditorialBrief;
+}): Promise<BlogLocaleContent> {
+  const loc = options.locale;
+  const language = BLOG_LOCALE_LANGUAGE[loc];
+  const market = BLOG_MARKET_NOTES[loc];
+  const angle = options.brief.angles[loc] || options.brief.topic;
+
+  const prompt =
+    `You are ${BLOG_AUTHOR_NAME}, education-market editor at Tutlio. Write ONE original ${language} article.\n` +
+    `Write the entire JSON values (title, excerpt, content) in ${language} only.\n` +
+    `Topic seed: "${options.keyword}"\n` +
+    `Shared topic: ${options.brief.topic}\n` +
+    `This market angle: ${angle}\n` +
+    `Market note: ${market}\n\n` +
+    `Return JSON: { "title": "...", "excerpt": "...", "content": "markdown body with ## H2 headings and a FAQ section" }\n\n` +
+    BLOG_SEO_WRITING_RULES;
+
+  const raw = await requestGeminiJsonWithRetry(prompt, 12288);
+  const block = localeBlock(raw);
+  if (!block) throw new Error(`Gemini ${loc} article missing title + content`);
+  return block;
+}
+
+async function generateBlogWithGemini(options: BlogAiGenerateOptions): Promise<BlogAiGenerateResult> {
+  const brief = await generateBlogEditorialBrief(options);
+  const locales = {} as Record<BlogAutoLocale, BlogLocaleContent>;
+  for (const loc of BLOG_AUTO_LOCALES) {
+    locales[loc] = await generateBlogLocaleArticle({
+      keyword: options.keyword,
+      tag: options.tag || brief.tag,
+      locale: loc,
+      brief,
+    });
   }
 
+  const coverTitle = locales.lt?.title || locales.en?.title || options.keyword;
   const cover = await generateGeminiCoverImage({
     keyword: options.keyword,
-    title: parsedLocales.locales.lt.title,
-    tag: parsedLocales.tag,
+    title: coverTitle,
+    tag: brief.tag,
+  }).catch((e) => {
+    console.warn('[blog-ai] cover image failed, using placeholder:', e);
+    return null;
   });
 
   return {
-    ...parsedLocales,
-    coverImageUrl: '',
-    coverImageBase64: cover.base64,
-    coverImageContentType: cover.contentType,
+    tag: brief.tag,
+    coverImageUrl: cover ? '' : geminiCoverPlaceholder(options.keyword),
+    coverImageBase64: cover?.base64,
+    coverImageContentType: cover?.contentType,
+    locales,
   };
 }
 

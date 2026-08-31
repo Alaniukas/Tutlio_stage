@@ -87,6 +87,12 @@ const SCHOOL_FEATURES = {
   org_admin_calendar_view: true,
   org_admin_calendar_full_control: true,
   school_contract_esign: false,
+  school_extra_lessons_contract: true,
+  school_class_groups: true,
+  school_join_no_show: true,
+  school_teacher_labels: true,
+  // Parked: school recordings UI (Įrašai) is hidden for now. Re-enable: true + SCHOOL_LESSON_RECORDINGS_NAV_READY.
+  school_lesson_recordings: false,
 };
 
 const ORGS = [
@@ -302,10 +308,10 @@ const ORGS = [
         grade: '5 kl.',
         linkedUserId: 'c3a00000-7e57-4000-8000-0000000000a1',
         payerName: 'Mama Vardenė',
-        payerEmail: 'demo-mokykla.parent1@tutlio.lt',
+        payerEmail: 'alaniukasa@gmail.com',
         payerPersonalCode: '39001010000',
         parentSecondaryName: 'Tata Vardenis',
-        parentSecondaryEmail: 'demo-mokykla.parent2@tutlio.lt',
+        parentSecondaryEmail: 'alaniukasa@gmail.com',
         parentSecondaryPhone: '+37060000099',
         childBirthDate: '2015-03-15',
         studentAddress: 'Gedimino g. 1',
@@ -318,7 +324,7 @@ const ORGS = [
         grade: '7 kl.',
         linkedUserId: 'c3a00000-7e57-4000-8000-0000000000a2',
         payerName: 'Mama Gabijė',
-        payerEmail: 'demo-mokykla.parent3@tutlio.lt',
+        payerEmail: 'alaniukasa@gmail.com',
         payerPersonalCode: '48505151234',
         childBirthDate: '2013-08-20',
         studentAddress: 'Konstitucijos pr. 12',
@@ -331,7 +337,7 @@ const ORGS = [
         grade: '9 kl.',
         linkedUserId: null,
         payerName: 'Mama Nojė',
-        payerEmail: 'demo-mokykla.parent4@tutlio.lt',
+        payerEmail: 'alaniukasa@gmail.com',
         payerPersonalCode: '49001019999',
         childBirthDate: '2011-11-11',
         studentAddress: 'Žirmūnų g. 5',

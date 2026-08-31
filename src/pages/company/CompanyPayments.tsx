@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { DateInput } from '@/components/ui/date-input';
 import { Label } from '@/components/ui/label';
 import {
   Dialog,
@@ -371,7 +372,7 @@ export default function CompanyPayments() {
                   </div>
                   <div className="flex-1 space-y-1">
                     <Label className="text-xs">{t('school.dueDateField')}</Label>
-                    <Input type="date" value={row.due_date} onChange={(e) => updateRow(idx, 'due_date', e.target.value)} />
+                    <DateInput value={row.due_date} onChange={(e) => updateRow(idx, 'due_date', e.target.value)} className="rounded-xl" />
                   </div>
                   {rows.length > 1 && (
                     <button onClick={() => removeRow(idx)} className="p-2 text-gray-400 hover:text-red-500">

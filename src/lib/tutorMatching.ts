@@ -37,6 +37,8 @@ export interface MatchSubject {
   price: number;
   tutor_id: string;
   duration_minutes?: number | null;
+  /** Trial catalogue rows must not appear as duplicate “free time” results. */
+  is_trial?: boolean | null;
 }
 
 export interface MatchSlot {
@@ -98,9 +100,10 @@ export function computeTutorSlots(
   }
 
   const trimmedSubject = (params.subjectName || '').trim();
+  const bookableSubjects = subjects.filter((s) => s.is_trial !== true);
   const matchingSubjects = trimmedSubject
-    ? subjects.filter((s) => s.name === trimmedSubject)
-    : subjects;
+    ? bookableSubjects.filter((s) => s.name === trimmedSubject)
+    : bookableSubjects;
   const tutorSubjectMap: Record<string, MatchSubject[]> = {};
   for (const s of matchingSubjects) {
     (tutorSubjectMap[s.tutor_id] ||= []).push(s);
@@ -194,7 +197,35 @@ export function computeTutorSlots(
   }
 
   slots.sort((a, b) => a.start.getTime() - b.start.getTime());
-  return slots;
+  return dedupeMatchSlots(slots);
+}
+
+/**
+ * Collapse identical free windows that appear twice (typically a €0 trial
+ * subject row next to the regular subject with the same name and times).
+ */
+export function dedupeMatchSlots(slots: MatchSlot[]): MatchSlot[] {
+  const byWindow = new Map<string, MatchSlot>();
+  for (const slot of slots) {
+    const key = [
+      slot.tutorId,
+      slot.start.getTime(),
+      slot.end.getTime(),
+      slot.subjectName.trim().toLowerCase(),
+    ].join('|');
+    const existing = byWindow.get(key);
+    if (!existing) {
+      byWindow.set(key, slot);
+      continue;
+    }
+    if (existing.price <= 0 && slot.price > 0) {
+      byWindow.set(key, slot);
+      continue;
+    }
+    if (existing.price > 0 && slot.price <= 0) continue;
+    if (slot.price > existing.price) byWindow.set(key, slot);
+  }
+  return [...byWindow.values()].sort((a, b) => a.start.getTime() - b.start.getTime());
 }
 
 /**

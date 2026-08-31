@@ -50,6 +50,11 @@ function tableBuilder(table: string) {
     is: () => builder,
     lte: () => builder,
     in: () => builder,
+    contains: () => builder,
+    not: () => builder,
+    gte: () => builder,
+    maybeSingle: () => Promise.resolve({ data: null, error: null }),
+    insert: () => Promise.resolve({ error: null }),
     order(column: string, options: unknown) {
       mocks.orderCalls.push({ column, options });
       return builder;

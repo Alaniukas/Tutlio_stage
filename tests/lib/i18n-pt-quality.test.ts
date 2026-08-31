@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { en } from '../../src/lib/i18n/en';
+import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
 import { pt, ptOverrides } from '../../src/lib/i18n/pt';
 import { loadLocaleDict, t, tHtml } from '../../src/lib/i18n/core';
 import { getDateFnsLocale } from '../../src/lib/i18n';
@@ -12,7 +13,7 @@ import { supportGeneralFollowUp } from '../../api/_lib/supportRequest';
 import { formatLocalizedPhone, getLocalizedPhonePlaceholder, validateLocalizedPhone } from '../../src/lib/utils';
 
 const deferredPrefixes = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
-const expectedKeys = Object.keys(en).filter((key) => !deferredPrefixes.has(key.split('.')[0]));
+const expectedKeys = Object.keys(en).filter((key) => !deferredPrefixes.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 // Parameters supplied by existing callers but omitted from abbreviated English source strings.
 const restoredSourceParameters: Record<string, string[]> = {
   'cal.massCancelChars': ['{count}'],

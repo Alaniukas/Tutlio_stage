@@ -5,12 +5,15 @@ import {
   orgSuspensionRowDeduped,
   tutorSidebarProfileDeduped,
 } from '@/lib/preload';
+import { useUser } from '@/contexts/UserContext';
+import { isAuthLockAbort } from '@/lib/authSession';
 import { FEATURE_REGISTRY } from '@/lib/featureRegistry';
 import { parseOrgContactVisibility, type OrgContactVisibility } from '@/lib/orgContactVisibility';
 
 interface OrgFeaturesState {
   loading: boolean;
   organizationId: string | null;
+  entityType: 'company' | 'school' | null;
   features: Record<string, boolean>;
   hasFeature: (featureId: string) => boolean;
   isOrgUser: boolean;
@@ -25,18 +28,21 @@ interface OrgFeaturesState {
  * if (hasFeature('custom_branding')) { ... }
  */
 export function useOrgFeatures(): OrgFeaturesState {
+  const { user: contextUser } = useUser();
   const [loading, setLoading] = useState(true);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
+  const [entityType, setEntityType] = useState<'company' | 'school' | null>(null);
   const [rawFeatures, setRawFeatures] = useState<Record<string, unknown> | null>(null);
   const [features, setFeatures] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
+    let cancelled = false;
     async function loadFeatures() {
       try {
-        const user = await dedupeAuthGetUser();
+        const user = contextUser ?? await dedupeAuthGetUser();
+        if (cancelled) return;
         if (!user) {
           setRawFeatures(null);
-          setLoading(false);
           return;
         }
 
@@ -50,7 +56,7 @@ export function useOrgFeatures(): OrgFeaturesState {
         }
         if (!orgId) {
           setRawFeatures(null);
-          setLoading(false);
+          setEntityType(null);
           return;
         }
 
@@ -60,10 +66,12 @@ export function useOrgFeatures(): OrgFeaturesState {
 
         if (!org) {
           setRawFeatures(null);
-          setLoading(false);
+          setEntityType(null);
           return;
         }
 
+        const et = (org as { entity_type?: string | null }).entity_type;
+        setEntityType(et === 'school' ? 'school' : et === 'company' ? 'company' : null);
         setRawFeatures((org.features as Record<string, unknown>) ?? {});
 
         // Merge organization features with defaults from registry
@@ -82,14 +90,19 @@ export function useOrgFeatures(): OrgFeaturesState {
 
         setFeatures(mergedFeatures);
       } catch (error) {
-        console.error('Error loading org features:', error);
+        if (!isAuthLockAbort(error)) {
+          console.error('Error loading org features:', error);
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
 
-    loadFeatures();
-  }, []);
+    void loadFeatures();
+    return () => {
+      cancelled = true;
+    };
+  }, [contextUser?.id]);
 
   const hasFeature = (featureId: string): boolean => {
     return features[featureId] ?? false;
@@ -103,6 +116,7 @@ export function useOrgFeatures(): OrgFeaturesState {
   return {
     loading,
     organizationId,
+    entityType,
     features,
     hasFeature,
     isOrgUser: organizationId !== null,

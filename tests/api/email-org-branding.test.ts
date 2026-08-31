@@ -5,7 +5,7 @@ import {
   resolveEmailOrgBranding,
 } from '../../api/_lib/emailOrgBranding';
 import { headerInlineStyle } from '../../api/_lib/outlookEmail';
-import { PRO_KLASE_ORG_ID } from '../../api/_lib/marketMoney';
+import { PRO_KLASE_ORG_ID, MOKSLO_VAISIAI_ORG_ID } from '../../api/_lib/marketMoney';
 
 describe('resolveEmailOrgBranding', () => {
   it('applies full Pro Klasė branding for any role (logo + from + signature)', () => {
@@ -38,6 +38,21 @@ describe('resolveEmailOrgBranding', () => {
     expect(resolved.emailSenderName).toBe('ProKlasė Sistema');
   });
 
+  it('applies full Mokslo vaisiai white-label even if custom_branding is off', () => {
+    const resolved = resolveEmailOrgBranding(MOKSLO_VAISIAI_ORG_ID, {
+      name: 'Mokslo vaisiai',
+      logo_url: 'https://cdn.example/mv.png',
+      brand_color: '#124410',
+      features: { custom_branding: false, contact_email: 'info@mokslovaisiai.lt' },
+    });
+    expect(resolved.emailSenderName).toBe('Mokslo vaisiai sistema');
+    expect(resolved.emailTeamSignature).toBe('Mokslo vaisių komanda');
+    expect(resolved.branding?.hidePoweredBy).toBe(true);
+    expect(resolved.branding?.logoOnDark).toBe(true);
+    expect(resolved.emailFooterPoweredBy).toBeUndefined();
+    expect(resolved.emailContactEmail).toBe('info@mokslovaisiai.lt');
+  });
+
   it('requires custom_branding for non-Pro-Klasė orgs', () => {
     const without = resolveEmailOrgBranding('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', {
       name: 'Other Org',
@@ -58,29 +73,47 @@ describe('resolveEmailOrgBranding', () => {
     expect(withFlag.branding?.hidePoweredBy).toBe(false);
   });
 
-  it('applies full white-label from org features (signature, sender, hide powered-by)', () => {
+  it('keeps Tutlio in the email footer when email_footer_powered_by is on', () => {
     const resolved = resolveEmailOrgBranding('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', {
       name: 'Mano Korepetitorius',
       logo_url: 'https://cdn.example/mano.png',
-      brand_color: '#4F33B2',
-      brand_color_secondary: '#68AE4A',
+      brand_color: '#5C2D91',
       features: {
         custom_branding: true,
         hide_powered_by: true,
+        email_footer_powered_by: true,
         public_name: 'Mano Korepetitorius',
+        email_sender_name: 'Mano Korepetitorius sistema',
         email_team_signature: 'Mano Korepetitoriaus komanda',
-        email_sender_name: 'Mano Korepetitorius',
+        contact_phone: '+370 643 32675',
+        contact_email: 'info@manokorepetitorius.lt',
       },
     });
-    expect(resolved.isProKlase).toBe(false);
-    expect(resolved.emailTeamSignature).toBe('Mano Korepetitoriaus komanda');
-    expect(resolved.emailSenderName).toBe('Mano Korepetitorius');
-    expect(resolved.branding).toMatchObject({
-      name: 'Mano Korepetitorius',
-      logo_url: 'https://cdn.example/mano.png',
-      brand_color: '#4F33B2',
-      hidePoweredBy: true,
+    expect(resolved.emailSenderName).toBe('Mano Korepetitorius sistema');
+    expect(resolved.branding?.hidePoweredBy).toBe(true);
+    expect(resolved.emailFooterPoweredBy).toBe(true);
+    expect(resolved.emailContactPhone).toBe('+370 643 32675');
+
+    const html = `<div class="footer"><p>Mano Korepetitoriaus komanda</p><p style="margin:8px 0 0; font-size:11px; color:#9ca3af;">Jei nebenorite gauti laiškų iš Tutlio, rašykite į info@tutlio.lt.</p></div>`;
+    const out = applyOrgBrandingToHtml(html, {
+      branding: resolved.branding,
+      emailTeamSignature: resolved.emailTeamSignature,
+      emailContactPhone: resolved.emailContactPhone,
+      emailContactEmail: resolved.emailContactEmail,
+      emailFooterPoweredBy: resolved.emailFooterPoweredBy,
+      locale: 'lt',
     });
+    expect(out).not.toContain('info@tutlio.lt');
+    expect(out).not.toContain('iš Tutlio');
+    expect(out).toContain('+370 643 32675');
+    expect(out).toContain('info@manokorepetitorius.lt');
+    expect(out).toContain('powered by Tutlio');
+    const poweredAt = out.lastIndexOf('powered by Tutlio');
+    const phoneAt = out.lastIndexOf('+370 643 32675');
+    const emailAt = out.lastIndexOf('info@manokorepetitorius.lt');
+    expect(poweredAt).toBeGreaterThan(-1);
+    expect(phoneAt).toBeGreaterThan(poweredAt);
+    expect(emailAt).toBeGreaterThan(phoneAt);
   });
 });
 

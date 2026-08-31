@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/select';
 import { useTranslation } from '@/lib/i18n';
 import { useSchoolPaymentsData } from '@/hooks/useSchoolPaymentsData';
+import { DateInput } from '@/components/ui/date-input';
 import {
   buildSchoolFinanceRows,
   filterSchoolFinanceRows,
@@ -155,11 +156,11 @@ export default function CompanySchoolFinanceReport() {
             </div>
             <div className="space-y-1">
               <Label className="text-xs">{t('school.financePaidFrom')}</Label>
-              <Input type="date" value={filters.paidFrom} onChange={(e) => setFilters((prev) => ({ ...prev, paidFrom: e.target.value }))} />
+              <DateInput value={filters.paidFrom} onChange={(e) => setFilters((prev) => ({ ...prev, paidFrom: e.target.value }))} className="rounded-xl" />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">{t('school.financePaidTo')}</Label>
-              <Input type="date" value={filters.paidTo} onChange={(e) => setFilters((prev) => ({ ...prev, paidTo: e.target.value }))} />
+              <DateInput value={filters.paidTo} onChange={(e) => setFilters((prev) => ({ ...prev, paidTo: e.target.value }))} className="rounded-xl" />
             </div>
           </div>
 

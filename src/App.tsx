@@ -79,6 +79,8 @@ const CompanyInstructions = lazy(() => import('@/pages/company/CompanyInstructio
 const CompanyDynamicPricing = lazy(() => import('@/pages/company/CompanyDynamicPricing'));
 const CompanyMessages = lazy(() => import('@/pages/company/CompanyMessages'));
 const CompanyTeam = lazy(() => import('@/pages/company/CompanyTeam'));
+const CompanyClassGroups = lazy(() => import('@/pages/company/CompanyClassGroups'));
+const CompanyLessonRecordings = lazy(() => import('@/pages/company/CompanyLessonRecordings'));
 const PreviewAssignStudentModal = import.meta.env.DEV
   ? lazy(() => import('@/pages/dev/PreviewAssignStudentModal'))
   : null;
@@ -88,11 +90,13 @@ const PreviewComplimentaryLesson = import.meta.env.DEV
 const ParentDashboard = lazy(() => import('@/pages/ParentDashboard'));
 const ParentSessions = lazy(() => import('@/pages/ParentSessions'));
 const ParentInvoices = lazy(() => import('@/pages/ParentInvoices'));
+const ParentContracts = lazy(() => import('@/pages/ParentContracts'));
 const ParentMessages = lazy(() => import('@/pages/ParentMessages'));
 const ParentInstructions = lazy(() => import('@/pages/ParentInstructions'));
 const ParentSettings = lazy(() => import('@/pages/ParentSettings'));
 const ParentRegister = lazy(() => import('@/pages/ParentRegister'));
 const SchoolContractComplete = lazy(() => import('@/pages/SchoolContractComplete'));
+const SchoolExtraLessonsAccept = lazy(() => import('@/pages/SchoolExtraLessonsAccept'));
 const StripeSuccess = lazy(() => import('@/pages/StripeSuccess'));
 const EnterpriseSuccess = lazy(() => import('@/pages/EnterpriseSuccess'));
 const PerlasSuccess = lazy(() => import('@/pages/PerlasSuccess'));
@@ -154,6 +158,19 @@ function RequireStudentBooking({ children }: { children: React.ReactElement }) {
     );
   }
   if (policy.bookingDisabled) return <Navigate to="/student" replace />;
+  return children;
+}
+
+function RequireStudentPayments({ children }: { children: React.ReactElement }) {
+  const policy = useStudentPolicy();
+  if (!policy.resolved) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+      </div>
+    );
+  }
+  if (!policy.paymentsPageEnabled) return <Navigate to="/student" replace />;
   return children;
 }
 
@@ -306,6 +323,7 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/parent-register" element={<ParentRegister />} />
         <Route path="/:locale/parent-register" element={<ParentRegister />} />
         <Route path="/school-contract-complete" element={<SchoolContractComplete />} />
+        <Route path="/school-extra-lessons-accept" element={<SchoolExtraLessonsAccept />} />
         <Route path="/school-sign" element={<SchoolSign />} />
         <Route path="/school-sign/return" element={<SchoolSignReturn />} />
         <Route path="/unsubscribe" element={<UnsubscribeReminders />} />
@@ -333,6 +351,7 @@ export default function App({ basename }: { basename: string }) {
         <Route element={<ProtectedWithUser />}>
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/calendar" element={<CalendarPage />} />
+          <Route path="/groups" element={<CompanyClassGroups />} />
           <Route path="/students" element={<StudentsPage />} />
           <Route path="/waitlist" element={<WaitlistPage />} />
           <Route path="/messages" element={<Messages />} />
@@ -354,7 +373,7 @@ export default function App({ basename }: { basename: string }) {
           <Route path="/student/sessions" element={<StudentSessions />} />
           <Route path="/student/messages" element={<StudentMessages />} />
           <Route path="/student/waitlist" element={<RequireStudentBooking><StudentWaitlist /></RequireStudentBooking>} />
-          <Route path="/student/payments" element={<StudentPayments />} />
+          <Route path="/student/payments" element={<RequireStudentPayments><StudentPayments /></RequireStudentPayments>} />
           <Route path="/student/instructions" element={<StudentInstructions />} />
           <Route path="/student/settings" element={<StudentSettings />} />
         </Route>
@@ -375,6 +394,7 @@ export default function App({ basename }: { basename: string }) {
           <Route path="/parent/child/:studentId" element={<ParentLegacyChildToLessonsRedirect />} />
           <Route path="/parent/child/:studentId/waitlist" element={<ParentLegacyChildToLessonsRedirect />} />
           <Route path="/parent/invoices" element={<ParentInvoices />} />
+          <Route path="/parent/contracts" element={<ParentContracts />} />
           <Route path="/parent/messages" element={<ParentMessages />} />
           <Route path="/parent/settings" element={<ParentSettings />} />
           <Route path="/parent/instructions" element={<ParentInstructions />} />
@@ -418,6 +438,8 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/school/waitlist" element={<OrgPermissionRoute permission="students.view" editPermission="students.edit"><CompanyWaitlist /></OrgPermissionRoute>} />
             <Route path="/school/sessions" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanySessions /></OrgPermissionRoute>} />
             <Route path="/school/schedule" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanyTvarkarastis /></OrgPermissionRoute>} />
+            <Route path="/school/groups" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanyClassGroups /></OrgPermissionRoute>} />
+            <Route path="/school/recordings" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanyLessonRecordings /></OrgPermissionRoute>} />
             <Route path="/school/messages" element={<OrgPermissionRoute permission="messages.view" editPermission="messages.edit"><CompanyMessages /></OrgPermissionRoute>} />
             <Route path="/school/stats" element={<OrgPermissionRoute permission="stats.view"><CompanyStats /></OrgPermissionRoute>} />
             <Route path="/school/instructions" element={<CompanyInstructions />} />

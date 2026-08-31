@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { isLocaleLoaded, loadLocaleDict, type Locale } from '@/lib/i18n';
+import { subscribeLocaleCache } from '@/lib/i18n/core';
 
 /** Keep the last working dictionary while a replacement downloads. Never remount
  * the application or let an obsolete request replace a newer language choice. */
@@ -7,7 +8,11 @@ export function useLocaleDictionary(locale: Locale) {
   const [lastReady, setLastReady] = useState<Locale | null>(() => isLocaleLoaded(locale) ? locale : null);
   const [failedLocale, setFailedLocale] = useState<Locale | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const ready = isLocaleLoaded(locale);
+  const ready = useSyncExternalStore(
+    subscribeLocaleCache,
+    () => isLocaleLoaded(locale),
+    () => isLocaleLoaded(locale),
+  );
 
   useEffect(() => {
     if (ready) {

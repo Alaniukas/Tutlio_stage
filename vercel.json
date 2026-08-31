@@ -48,10 +48,10 @@
             "maxDuration": 30
         },
         "api/blog-auto-generate.ts": {
-            "maxDuration": 120
+            "maxDuration": 300
         },
         "api/admin-blog-auto.ts": {
-            "maxDuration": 120
+            "maxDuration": 300
         },
         "api/send-reminders.ts": {
             "maxDuration": 300
@@ -60,7 +60,17 @@
             "maxDuration": 300
         },
         "api/materialize-recurring-sessions.ts": {
-            "maxDuration": 300
+            "maxDuration": 300,
+            "includeFiles": "src/lib/**"
+        },
+        "api/auto-complete-sessions.ts": {
+            "includeFiles": "src/lib/**"
+        },
+        "api/school-join-no-show.ts": {
+            "includeFiles": "src/lib/**"
+        },
+        "api/school-class-groups.ts": {
+            "includeFiles": "src/lib/**"
         },
         "api/school-contract-sign-reconcile.ts": {
             "maxDuration": 60
@@ -82,6 +92,20 @@
         },
         "api/school-contract-render-docx-pdf.ts": {
             "maxDuration": 60
+        },
+        "api/extra-lessons-contract-offer.ts": {
+            "maxDuration": 60,
+            "includeFiles": "{api/_lib/templates/extra-lessons-laisvi-vaikai.docx,src/lib/**}"
+        },
+        "api/extra-lessons-contract-accept.ts": {
+            "maxDuration": 60,
+            "includeFiles": "{api/_lib/templates/extra-lessons-laisvi-vaikai.docx,src/lib/**}"
+        },
+        "api/extra-lessons-contract-withdraw.ts": {
+            "includeFiles": "src/lib/**"
+        },
+        "api/bill-school-extra-lessons.ts": {
+            "includeFiles": "src/lib/**"
         }
     },
     "headers": [
@@ -223,6 +247,14 @@
         {
             "path": "/api/bill-extra-lessons",
             "schedule": "0 3 1 * *"
+        },
+        {
+            "path": "/api/school-join-no-show",
+            "schedule": "*/5 * * * *"
+        },
+        {
+            "path": "/api/bill-school-extra-lessons",
+            "schedule": "0 4 1 * *"
         },
         {
             "path": "/api/cleanup-whiteboard-data",

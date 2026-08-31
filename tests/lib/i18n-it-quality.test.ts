@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { en } from '../../src/lib/i18n/en';
+import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
 import { it as italian, itOverrides } from '../../src/lib/i18n/it';
 import { loadLocaleDict, t, tHtml } from '../../src/lib/i18n/core';
 import { getDateFnsLocale } from '../../src/lib/i18n';
@@ -13,7 +14,7 @@ import { supportGeneralFollowUp } from '../../api/_lib/supportRequest';
 // Explicit scope: tutor/business UI, connected student/parent flows and marketing.
 // These separate products/policies intentionally retain the English fallback.
 const deferredPrefixes = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
-const expectedKeys = Object.keys(en).filter((key) => !deferredPrefixes.has(key.split('.')[0]));
+const expectedKeys = Object.keys(en).filter((key) => !deferredPrefixes.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 const tokens = (value: string, pattern: RegExp) => (value.match(pattern) ?? []).sort();
 
 beforeAll(async () => {

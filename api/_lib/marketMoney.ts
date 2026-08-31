@@ -49,6 +49,29 @@ export const PRO_KLASE_ORG_ID = '3422031d-6e21-424d-980b-35a9c6d7b8f1';
 /** QA clone org — same Pro Klasė tutor cancel rules for testing. */
 export const PRO_KLASE_QA_ORG_ID = 'b0a00000-7e57-4000-8000-000000000001';
 
+/** Production MB Mano korepetitorius (slug `mb-mano-korepetitorius`). */
+export const MANO_KOREPETITORIUS_ORG_ID = '2c4e4c2a-4e12-44ca-b327-d605bbb0d50b';
+export const MANO_KOREPETITORIUS_SLUG = 'mb-mano-korepetitorius';
+
+/** Production IĮ Mokslo vaisiai (slug `mokslovaisiai`). */
+export const MOKSLO_VAISIAI_ORG_ID = 'c1f36796-c281-4650-bed2-1bd6874764f1';
+export const MOKSLO_VAISIAI_SLUG = 'mokslovaisiai';
+export const MOKSLO_VAISIAI_ADMIN_EMAIL = 'info@mokslovaisiai.lt';
+export const MOKSLO_VAISIAI_BRAND_COLOR = '#124410';
+export const MOKSLO_VAISIAI_BRAND_COLOR_SECONDARY = '#5C2B02';
+
+export function isManoKorepetitoriusOrg(orgIdOrSlug?: string | null): boolean {
+  if (!orgIdOrSlug) return false;
+  const key = orgIdOrSlug.trim().toLowerCase();
+  return key === MANO_KOREPETITORIUS_ORG_ID || key === MANO_KOREPETITORIUS_SLUG;
+}
+
+export function isMoksloVaisiaiOrg(orgIdOrSlug?: string | null): boolean {
+  if (!orgIdOrSlug) return false;
+  const key = orgIdOrSlug.trim().toLowerCase();
+  return key === MOKSLO_VAISIAI_ORG_ID || key === MOKSLO_VAISIAI_SLUG;
+}
+
 export function isProKlaseOrg(orgIdOrSlug?: string | null): boolean {
   if (!orgIdOrSlug) return false;
   const key = orgIdOrSlug.trim().toLowerCase();

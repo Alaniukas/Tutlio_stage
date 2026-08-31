@@ -15,6 +15,7 @@ import {
   contractPdfFileName,
   fetchSignatureRows,
   inputPdfPathForRole,
+  isTeacherContract,
   isSignatureTokenExpired,
   renewParentSignatureAccess,
 } from './_lib/schoolContractSigning.js';
@@ -50,7 +51,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .select('*')
     .eq('token', token)
     .maybeSingle();
-  if (!rowRaw || !String(rowRaw.role).startsWith('parent')) return json(res, 404, { error: 'Invalid link' });
+  const signerRole = String(rowRaw?.role || '');
+  if (!rowRaw || (!signerRole.startsWith('parent') && signerRole !== 'teacher')) {
+    return json(res, 404, { error: 'Invalid link' });
+  }
 
   const { data: contract } = await supabase
     .from('school_contracts')
@@ -95,6 +99,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       studentName: st.full_name || '',
       schoolName: (contract as any).organizations?.name || '',
       signerName: row.signer_name || '',
+      partyKind: isTeacherContract(contract) ? 'teacher' : 'student',
       status: row.status,
       alreadySigned: row.status === 'signed',
       expired: Boolean(expired),
@@ -107,7 +112,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (row.status === 'signed') return json(res, 200, { alreadySigned: true });
   if (expired) return json(res, 410, { error: 'Signing link expired' });
   if (!ready) {
-    return json(res, 409, { error: 'Contract is not ready for parent signature yet' });
+    return json(res, 409, { error: 'Contract is not ready for the next signature yet' });
   }
 
   try {

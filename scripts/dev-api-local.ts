@@ -5,7 +5,7 @@
 process.env.NODE_TLS_REJECT_UNAUTHORIZED ??= '0';
 import http from 'node:http';
 import { Readable } from 'node:stream';
-import { readFileSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -235,10 +235,25 @@ const handlerCache = new Map<
   }
 >();
 
+function apiLibMtimeMs(): number {
+  const libDir = join(apiDir, '_lib');
+  if (!existsSync(libDir)) return 0;
+  let max = 0;
+  for (const name of readdirSync(libDir)) {
+    const p = join(libDir, name);
+    try {
+      max = Math.max(max, statSync(p).mtimeMs);
+    } catch {
+      /* ignore */
+    }
+  }
+  return max;
+}
+
 async function getHandler(route: string) {
   const filePath = join(apiDir, `${route}.ts`);
   if (!existsSync(filePath)) return null;
-  const mtimeMs = statSync(filePath).mtimeMs;
+  const mtimeMs = Math.max(statSync(filePath).mtimeMs, apiLibMtimeMs());
   const hit = handlerCache.get(route);
   if (hit && hit.mtimeMs === mtimeMs) return hit.mod;
   const href = `${pathToFileURL(filePath).href}?t=${mtimeMs}`;

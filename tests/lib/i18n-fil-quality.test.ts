@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { format, parse, formatDistanceStrict, formatRelative } from 'date-fns';
 import { en } from '../../src/lib/i18n/en';
+import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
 import { fil, filOverrides } from '../../src/lib/i18n/fil';
 import { loadLocaleDict, t, tHtml } from '../../src/lib/i18n/core';
 import { getDateFnsLocale } from '../../src/lib/i18n';
@@ -13,7 +14,7 @@ import { supportGeneralFollowUp } from '../../api/_lib/supportRequest';
 import { formatLocalizedPhone, validateLocalizedPhone, getLocalizedPhonePlaceholder } from '../../src/lib/utils';
 
 const deferred = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
-const expectedKeys = Object.keys(en).filter((key) => !deferred.has(key.split('.')[0]));
+const expectedKeys = Object.keys(en).filter((key) => !deferred.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 // Existing non-LT validation already accepts international numbers. These six
 // source messages incorrectly require +370; the Filipino copy reflects reality.
 const correctedPhoneKeys = new Set(['onboard.parentPhoneFormat', 'onboard.phoneFormatError', 'register.phoneError', 'register.phoneHint', 'settings.phoneFormat', 'stu.phoneFormat']);

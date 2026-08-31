@@ -13,7 +13,9 @@ import {
   isTrialReservationFlowEnabled,
   getTrialReservationDeadlineHours,
   trialReservationExpiryIso,
+  sendTrialRegistrationInvites,
 } from './_lib/trialReservation.js';
+import { isProKlaseOrg } from './_lib/marketMoney.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
@@ -82,11 +84,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: org } = await supabase
       .from('organizations')
-      .select('id, name, features')
+      .select('id, name, features, entity_type')
       .eq('id', adminRow.organizationId)
       .single();
 
     const features = (org?.features || {}) as Record<string, unknown>;
+    const orgEntityType = (org as { entity_type?: string | null } | null)?.entity_type ?? null;
     const defaultTopic = typeof features.trial_lesson_topic === 'string' && features.trial_lesson_topic.trim()
       ? String(features.trial_lesson_topic).trim()
       : 'Bandomoji pamoka';
@@ -150,12 +153,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     let subjectId: string | null = null;
-    const { data: existingTrial } = await supabase
+    const { data: existingTrials } = await supabase
       .from('subjects')
-      .select('id, price')
+      .select('id, price, name')
       .eq('tutor_id', tutorId)
-      .eq('is_trial', true)
-      .maybeSingle();
+      .eq('is_trial', true);
+    const existingTrial =
+      (existingTrials || []).find((s: { name?: string | null }) =>
+        String(s.name || '').toLowerCase().includes('bandom'),
+      ) || (existingTrials || [])[0] ||
+      null;
 
     if (existingTrial) {
       subjectId = existingTrial.id;
@@ -195,9 +202,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq('id', adminRow.organizationId)
       .single();
 
-    if (!orgStripe?.stripe_onboarding_complete) {
-      return json(res, 400, { error: 'Organization Stripe account is not connected' });
-    }
+    const canTransferToOrg = Boolean(
+      orgStripe?.stripe_onboarding_complete && orgStripe.stripe_account_id,
+    );
 
     const feeProfile = orgFeeProfile((orgStripe as { slug?: string | null }).slug) ?? orgFeeProfile(adminRow.organizationId);
     // A custom org fee profile is always charged on top (payer pays the fee), even for schools.
@@ -270,7 +277,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Reservation flow: when enabled and a slot is provided, hold the slot now
     // (status='active' so it blocks the calendar; payment_status='reserved' until
     // paid). An unpaid hold auto-releases after the org's deadline via cron.
-    if (!linkedSession && isTrialReservationFlowEnabled(features) && startIso && endIso) {
+    if (!linkedSession && isTrialReservationFlowEnabled(features, org?.id, orgEntityType) && startIso && endIso) {
       const start = new Date(startIso);
       const end = new Date(endIso);
       if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end.getTime() <= start.getTime()) {
@@ -325,6 +332,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // gracefully fall back to charging platform account only (no transfer_data).
     let checkoutSession;
     try {
+      if (!canTransferToOrg) {
+        throw Object.assign(new Error('Organization Stripe is not connected'), {
+          code: 'resource_missing',
+          raw: { param: 'transfer_data[destination]' },
+        });
+      }
       if (useSchoolOrgAbsorbedFees) {
         const { chargeCents, transferToSchoolCents } = schoolInstallmentCheckoutCents(basePriceEur, market);
         const applicationFeeCents = chargeCents - transferToSchoolCents;
@@ -515,6 +528,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         })
         .catch((e) => console.error('[create-trial-package] Error calling /api/send-email (stripe):', e));
+    }
+
+    const trialOrgId = (tutor as { organization_id?: string | null }).organization_id || adminRow.organizationId;
+    if (isProKlaseOrg(trialOrgId)) {
+      await sendTrialRegistrationInvites(supabase, {
+        appUrl: appOrigin,
+        studentId,
+        tutorName: tutor.full_name,
+      }).catch((e) => console.error('[create-trial-package] registration invite failed', e));
     }
 
     return json(res, 200, { success: true, mode: 'stripe', url: checkoutSession.url, packageId: lessonPackage.id });

@@ -22,6 +22,8 @@ import { useTranslation } from '@/lib/i18n';
 import { useDismissibleDashboardItemIds } from '@/hooks/useDismissibleDashboardItemIds';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { fetchOrganizationRow } from '@/lib/orgLookup';
+import { useOrgEntityType } from '@/contexts/OrgEntityContext';
+import { isProKlaseOrg } from '@/lib/marketMoney';
 import { authHeaders } from '@/lib/apiHelpers';
 import { deriveAttendance, isAttendanceFlagged } from '@/lib/attendance';
 import { buildNoShowSessionPatch, defaultNoShowWhenForNow } from '@/lib/noShowWhen';
@@ -96,9 +98,11 @@ function attendanceAttentionSummary(
 export default function CompanyDashboard() {
   const { t, dateFnsLocale } = useTranslation();
   const { fmt } = useMarketMoney();
+  const orgEntityType = useOrgEntityType();
   const location = useLocation();
   const navigate = useNavigate();
   const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
+  const staffLabel = orgBasePath === '/school' ? t('role.staffSchool') : t('companyDash.tutor');
   const openCompanyLessonModal = (sessionId: string) => {
     navigate(`${orgBasePath}/sessions?open=${encodeURIComponent(sessionId)}`);
   };
@@ -175,7 +179,10 @@ export default function CompanyDashboard() {
       const orgFeatures = org?.features && typeof org.features === 'object' && !Array.isArray(org.features)
         ? (org.features as Record<string, unknown>)
         : {};
-      const trialFollowupAlertEnabled = orgFeatures.trial_followup_alert === true;
+      const trialFollowupAlertEnabled =
+        orgEntityType !== 'school' &&
+        isProKlaseOrg(organizationId) &&
+        orgFeatures.trial_followup_alert === true;
       setOrgIdForDismiss(organizationId);
       setOrgName(org?.name || '');
       const cap = Number(org?.tutor_license_count) || 0;
@@ -393,7 +400,7 @@ export default function CompanyDashboard() {
           if (b.payment_status === 'paid_by_student' && a.payment_status !== 'paid_by_student') return 1;
           return new Date(b.start_time).getTime() - new Date(a.start_time).getTime();
         })
-        .slice(0, 10);
+        .slice(0, 5);
 
       const cancelledFiltered = rows
       .filter((s) => s.status === 'cancelled' && s.paid)
@@ -702,7 +709,7 @@ export default function CompanyDashboard() {
                           {s.topic ? ` · ${s.topic}` : ''}
                         </p>
                         <p className="text-xs text-indigo-600 mt-0.5">
-                          {t('companyDash.tutor')}: {s.tutor_name || '—'}
+                          {staffLabel}: {s.tutor_name || '—'}
                         </p>
                       </div>
                       {s.price != null && (

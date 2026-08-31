@@ -44,13 +44,17 @@ import {
   countContractsByFilter,
   currentContractPdfPath,
   matchesContractFilter,
+  matchesContractKindFilter,
   schoolCanInitiateSignature,
   shouldPromptSchoolSignedOnScan,
   type SchoolContractFilter,
+  type SchoolContractKindFilter,
 } from '@/lib/schoolContractFilters';
 import { buildSchoolContractExportRows, schoolContractsExportFilename } from '@/lib/schoolContractsExport';
 import { downloadSchoolContractsXlsx } from '@/lib/schoolContractsXlsxExport';
 import { fetchOrganizationRow } from '@/lib/orgLookup';
+import ExtraLessonsOfferDialog from '@/components/company/ExtraLessonsOfferDialog';
+import { isExtraLessonsContractKind } from '@/lib/extraLessonsContract';
 
 interface Student {
   id: string;
@@ -99,6 +103,8 @@ interface Contract {
   media_publicity_consent?: string | null;
   additional_fee_amount?: number | null;
   additional_fee_purpose?: string | null;
+  kind?: 'annual' | 'extra_lessons' | null;
+  accepted_at?: string | null;
   signatures?: { role: string; status: string; signed_at?: string | null; gosign_transaction_id?: string | null; manually_marked_at?: string | null; signed_pdf_path?: string | null }[];
   installments?: { installment_number: number; amount: number; due_date: string | null; payment_status: string | null }[];
   student?: { full_name: string; email: string; phone?: string | null; payer_name: string | null; payer_email: string | null; payer_phone?: string | null; payer_personal_code?: string | null; parent_secondary_name?: string | null; parent_secondary_email?: string | null; parent_secondary_phone?: string | null; parent_secondary_personal_code?: string | null; parent_secondary_address?: string | null; student_address?: string | null; student_city?: string | null; child_birth_date?: string | null; media_publicity_consent?: string | null };
@@ -233,6 +239,12 @@ export default function CompanyContracts() {
   const [editTemplate, setEditTemplate] = useState<Template | null>(null);
   const [tForm, setTForm] = useState({ name: '', body: '', annual_fee_default: '', pdf_url: '' });
   const [templatePdfFile, setTemplatePdfFile] = useState<File | null>(null);
+  const [extraOfferOpen, setExtraOfferOpen] = useState(false);
+  const [classGroups, setClassGroups] = useState<Array<{
+    id: string;
+    name: string;
+    slots?: { weekday: number; start_time: string; end_time: string }[];
+  }>>([]);
   const [isTemplateDragActive, setIsTemplateDragActive] = useState(false);
   const templateFileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -259,6 +271,7 @@ export default function CompanyContracts() {
 
   // Contract list filter (schools accumulate many contracts — no more scrolling).
   const [contractFilter, setContractFilter] = useState<SchoolContractFilter | 'unsigned'>('all');
+  const [contractKindFilter, setContractKindFilter] = useState<SchoolContractKindFilter>('all');
   const [contractSearch, setContractSearch] = useState('');
   const [exportingContracts, setExportingContracts] = useState(false);
 
@@ -1368,6 +1381,24 @@ export default function CompanyContracts() {
       setToast({ message: tr('school.toastNoEmail'), type: 'error' });
       return;
     }
+    if (isExtraLessonsContractKind(contract.kind)) {
+      try {
+        const res = await fetch('/api/extra-lessons-contract-offer', {
+          method: 'POST',
+          headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contract_id: contract.id, send: true }),
+        });
+        const data = await res.json().catch(() => ({}));
+        const ok = res.ok && data.emailSent !== false;
+        setToast({
+          message: ok ? tr('school.toastContractResent') : (data.error || tr('school.toastContractResendFail')),
+          type: ok ? 'success' : 'error',
+        });
+      } catch {
+        setToast({ message: tr('school.toastContractResendFail'), type: 'error' });
+      }
+      return;
+    }
     const ok = await sendSchoolContractEmail(contract, recipient, contract.pdf_url);
     setToast({
       message: ok ? tr('school.toastContractResent') : tr('school.toastContractResendFail'),
@@ -1641,6 +1672,24 @@ export default function CompanyContracts() {
   };
 
   const openContractFile = async (urlOrPath?: string | null) => {
+    if (!urlOrPath?.trim()) {
+      setToast({ message: tr('school.toastFileOpenFail'), type: 'error' });
+      return;
+    }
+    try {
+      const res = await fetch('/api/school-contract-file-url', {
+        method: 'POST',
+        headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: urlOrPath }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && typeof data?.signedUrl === 'string') {
+        window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+        return;
+      }
+    } catch {
+      // fall through to client signed URL
+    }
     const ok = await openContractFileInNewTab(urlOrPath);
     if (!ok) setToast({ message: tr('school.toastFileOpenFail'), type: 'error' });
   };
@@ -1810,6 +1859,7 @@ export default function CompanyContracts() {
   const visibleContracts = contracts.filter((c) => {
     if (isSchoolView) {
       if (!matchesContractFilter(contractFilter as SchoolContractFilter, c, isSchoolView, { eSignEnabled })) return false;
+      if (!matchesContractKindFilter(contractKindFilter, c.kind)) return false;
     } else {
       if (contractFilter === 'signed' && c.signing_status !== 'signed') return false;
       if (contractFilter === 'unsigned' && c.signing_status === 'signed') return false;
@@ -1877,9 +1927,33 @@ export default function CompanyContracts() {
               </button>
             </div>
             {tab === 'contracts' ? (
-              <Button onClick={openCreateContract} className="bg-emerald-600 hover:bg-emerald-700">
-                <Plus className="w-4 h-4 mr-2" /> {tr('school.newContract')}
-              </Button>
+              <div className="flex gap-2">
+                {Boolean(orgFeatures.school_extra_lessons_contract) && (
+                  <Button
+                    variant="outline"
+                    onClick={async () => {
+                      try {
+                        const headers = await authHeaders();
+                        const res = await fetch('/api/school-class-groups', { headers });
+                        const data = await res.json();
+                        if (res.ok) {
+                          setClassGroups((data.groups || []).map((g: {
+                            id: string;
+                            name: string;
+                            slots?: { weekday: number; start_time: string; end_time: string }[];
+                          }) => ({ id: g.id, name: g.name, slots: g.slots || [] })));
+                        }
+                      } catch { /* ignore */ }
+                      setExtraOfferOpen(true);
+                    }}
+                  >
+                    <Plus className="w-4 h-4 mr-2" /> {tr('school.extra.newOffer')}
+                  </Button>
+                )}
+                <Button onClick={openCreateContract} className="bg-emerald-600 hover:bg-emerald-700">
+                  <Plus className="w-4 h-4 mr-2" /> {tr('school.newContract')}
+                </Button>
+              </div>
             ) : (
               <Button onClick={() => { setEditTemplate(null); setTemplatePdfFile(null); setTForm({ name: '', body: tr('school.contract.defaultBody'), annual_fee_default: '', pdf_url: '' }); setTemplateOpen(true); }} className="bg-emerald-600 hover:bg-emerald-700">
                 <Plus className="w-4 h-4 mr-2" /> {tr('school.newTemplate')}
@@ -1965,6 +2039,24 @@ export default function CompanyContracts() {
             <>
               <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                 {isSchoolView ? (
+                  <>
+                  <Select
+                    value={contractKindFilter}
+                    onValueChange={(v) => setContractKindFilter(v as SchoolContractKindFilter)}
+                  >
+                    <SelectTrigger className="w-full sm:w-[min(100%,220px)] rounded-xl border-gray-200 bg-white">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">{tr('school.filterKindAll')} ({contracts.length})</SelectItem>
+                      <SelectItem value="annual">
+                        {tr('school.filterKindAnnual')} ({contracts.filter((c) => matchesContractKindFilter('annual', c.kind)).length})
+                      </SelectItem>
+                      <SelectItem value="extra_lessons">
+                        {tr('school.filterKindExtra')} ({contracts.filter((c) => matchesContractKindFilter('extra_lessons', c.kind)).length})
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
                   <Select
                     value={contractFilter as SchoolContractFilter}
                     onValueChange={(v) => setContractFilter(v as SchoolContractFilter)}
@@ -1988,6 +2080,7 @@ export default function CompanyContracts() {
                       ))}
                     </SelectContent>
                   </Select>
+                  </>
                 ) : (
                   <div className="bg-gray-100 rounded-lg p-1 flex gap-1 flex-wrap">
                     {([
@@ -2038,6 +2131,11 @@ export default function CompanyContracts() {
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-xs text-gray-400 tabular-nums">{contractIdx + 1}.</span>
                         <p className="font-semibold text-gray-900">{c.student?.full_name || '—'}</p>
+                        {c.kind === 'extra_lessons' && (
+                          <span className="inline-flex items-center text-xs px-2 py-0.5 rounded-full font-medium bg-teal-50 text-teal-800">
+                            {tr('school.extra.kindBadge')}
+                          </span>
+                        )}
                         {statusBadge(c.signing_status)}
                       </div>
                       <p className="text-sm text-gray-500 mt-1">
@@ -2068,7 +2166,14 @@ export default function CompanyContracts() {
                         </p>
                       )}
                       {(() => {
-                        const currentPdf = currentContractPdfPath(c);
+                        const extraFallback = isExtraLessonsContractKind(c.kind) && orgId
+                          ? schoolContractPdfStoragePath({
+                              organizationId: orgId,
+                              contractId: c.id,
+                              contractNumber: c.contract_number,
+                            })
+                          : null;
+                        const currentPdf = currentContractPdfPath(c) || extraFallback;
                         const schoolSignedPdf = (c.signatures || []).find((s) => s.role === 'school' && s.status === 'signed' && s.signed_pdf_path)?.signed_pdf_path;
                         const parentScan = c.signed_contract_url && c.signed_contract_url !== currentPdf ? c.signed_contract_url : null;
                         return (
@@ -2106,28 +2211,29 @@ export default function CompanyContracts() {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-gray-100">
-                      {c.signing_status === 'draft' && (
+                      {c.signing_status === 'draft' && !isExtraLessonsContractKind(c.kind) && (
                         <Button size="sm" onClick={() => sendContract(c)}>
                           <Send className="w-3.5 h-3.5 mr-1.5" /> {tr('school.send')}
                         </Button>
                       )}
-                      {eSignEnabled && schoolCanInitiateSignature(c) && (
+                      {eSignEnabled && !isExtraLessonsContractKind(c.kind) && schoolCanInitiateSignature(c) && (
                         <Button size="sm" onClick={() => signAsSchool(c)} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
                           <PenLine className="w-3.5 h-3.5 mr-1.5" /> {saving ? 'Ruošiama…' : tr('school.signAsDirector')}
                         </Button>
                       )}
-                      {c.signing_status === 'signed_by_school' && !schoolCanInitiateSignature(c) && (
+                      {c.signing_status === 'signed_by_school' && !isExtraLessonsContractKind(c.kind) && !schoolCanInitiateSignature(c) && (
                         <span className="text-xs text-blue-700 font-medium">{tr('school.waitingParentSignature')}</span>
                       )}
 
                       {(() => {
+                        const extra = isExtraLessonsContractKind(c.kind);
                         const menuActions = [
-                          eSignEnabled && c.signing_status === 'signed_by_school',
-                          !eSignEnabled && (c.signing_status === 'sent'
+                          !extra && eSignEnabled && c.signing_status === 'signed_by_school',
+                          !extra && !eSignEnabled && (c.signing_status === 'sent'
                             || c.signing_status === 'awaiting_school_signature'
                             || c.signing_status === 'signed_by_school'),
-                          c.signing_status !== 'draft' && (!eSignEnabled || c.signing_status === 'sent'),
-                          c.signing_status !== 'draft',
+                          c.signing_status !== 'draft' && (extra || !eSignEnabled || c.signing_status === 'sent'),
+                          !extra && c.signing_status !== 'draft',
                         ].some(Boolean);
                         if (!menuActions) return null;
                         return (
@@ -2140,7 +2246,7 @@ export default function CompanyContracts() {
                         </PopoverTrigger>
                         <PopoverContent align="end" className="w-64 p-1">
                           <div className="flex flex-col">
-                            {eSignEnabled && c.signing_status === 'signed_by_school' && !schoolCanInitiateSignature(c) && (
+                            {eSignEnabled && !isExtraLessonsContractKind(c.kind) && c.signing_status === 'signed_by_school' && !schoolCanInitiateSignature(c) && (
                               <button
                                 type="button"
                                 className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-left hover:bg-gray-50 text-green-700"
@@ -2150,7 +2256,7 @@ export default function CompanyContracts() {
                                 {tr('school.markSigned')}
                               </button>
                             )}
-                            {!eSignEnabled && (c.signing_status === 'sent'
+                            {!isExtraLessonsContractKind(c.kind) && !eSignEnabled && (c.signing_status === 'sent'
                               || c.signing_status === 'awaiting_school_signature'
                               || c.signing_status === 'signed_by_school') && (
                               <button
@@ -2162,7 +2268,7 @@ export default function CompanyContracts() {
                                 {tr('school.markSigned')}
                               </button>
                             )}
-                            {c.signing_status !== 'draft' && (!eSignEnabled || c.signing_status === 'sent') && (
+                            {c.signing_status !== 'draft' && (isExtraLessonsContractKind(c.kind) || !eSignEnabled || c.signing_status === 'sent') && (
                               <button
                                 type="button"
                                 className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-left hover:bg-gray-50"
@@ -2172,7 +2278,7 @@ export default function CompanyContracts() {
                                 {tr('school.resend')}
                               </button>
                             )}
-                            {c.signing_status !== 'draft' && (
+                            {!isExtraLessonsContractKind(c.kind) && c.signing_status !== 'draft' && (
                               <button
                                 type="button"
                                 className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-left hover:bg-gray-50"
@@ -2198,12 +2304,12 @@ export default function CompanyContracts() {
                       </button>
                     </div>
                   </div>
-                  {eSignEnabled && c.signing_status === 'sent' && (
+                  {eSignEnabled && !isExtraLessonsContractKind(c.kind) && c.signing_status === 'sent' && (
                     <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                       Laukiama, kol tėvai peržiūrės sutartį ir patvirtins duomenis Tutlio puslapyje.
                     </div>
                   )}
-                  {eSignEnabled && c.signing_status === 'awaiting_school_signature' && c.completion_submitted_at && (
+                  {eSignEnabled && !isExtraLessonsContractKind(c.kind) && c.signing_status === 'awaiting_school_signature' && c.completion_submitted_at && (
                     <div className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-900">
                       Tėvai patvirtino duomenis. Peržiūrėkite naujausią PDF ir pasirašykite naujame GoSign lange.
                     </div>
@@ -2917,6 +3023,22 @@ export default function CompanyContracts() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ExtraLessonsOfferDialog
+        open={extraOfferOpen}
+        onOpenChange={setExtraOfferOpen}
+        students={students}
+        groups={classGroups}
+        onCreated={(info) => {
+          const mail = info.emailTo ? ` ${info.emailTo}` : '';
+          if (info.emailSent) {
+            setToast({ message: `${tr('school.extra.emailSentTo')}${mail} · ${info.contractNumber}`, type: 'success' });
+          } else {
+            setToast({ message: `${tr('school.extra.emailFailed')} ${info.contractNumber}`, type: 'warning' });
+          }
+          reload();
+        }}
+      />
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </>

@@ -7,13 +7,16 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
  * text-dump PDF over the real contract (that dump would then be reviewed and
  * e-signed via GoSign).
  */
-const mocks = vi.hoisted(() => ({ renderDocx: vi.fn() }));
+const mocks = vi.hoisted(() => ({ renderDocx: vi.fn(), renderDocxBuffer: vi.fn() }));
 
 vi.mock('../../api/_lib/renderSchoolContractDocxToPdf', () => ({
   renderDocxTemplateUrlToPdfBuffer: mocks.renderDocx,
+  renderDocxTemplateBufferToPdfBuffer: mocks.renderDocxBuffer,
 }));
 
-import { renderAndStoreSchoolContractPdf } from '../../api/_lib/schoolContractPdf';
+import { PDFDocument } from 'pdf-lib';
+import { createSimpleContractPdf, renderAndStoreSchoolContractPdf } from '../../api/_lib/schoolContractPdf';
+import { renderAndStoreExtraLessonsPdf, signSchoolContractPdf } from '../../api/_lib/extraLessonsPdf';
 
 function makeSupabase(opts: { signError?: boolean } = {}) {
   const uploads: Array<{ path: string; data: Buffer }> = [];
@@ -58,6 +61,7 @@ const DOCX_TEMPLATE_URL =
 
 beforeEach(() => {
   mocks.renderDocx.mockReset();
+  mocks.renderDocxBuffer.mockReset();
 });
 
 describe('renderAndStoreSchoolContractPdf — DOCX template fidelity', () => {
@@ -108,5 +112,125 @@ describe('renderAndStoreSchoolContractPdf — DOCX template fidelity', () => {
     expect(bytes.subarray(0, 5).toString()).toBe('%PDF-');
     expect(result.uploadedPath).toBe(uploads[0].path);
     expect(result.renderedBody).toContain('Jonukas Pet');
+  });
+});
+
+describe('createSimpleContractPdf', () => {
+  it('paginates a long extra-lessons body instead of truncating', async () => {
+    const longBody = Array.from({ length: 80 }, (_, i) => `Straipsnis ${i + 1}. ${'Tekstas '.repeat(12)}`).join('\n');
+    const bytes = await createSimpleContractPdf({
+      contractNumber: 'PP-LEGAL-WITHIN14',
+      studentName: 'QA Legal Per 14 d.',
+      parentName: 'QA Extra Tevas',
+      parentEmail: 'parent@example.com',
+      parentPhone: '+37060000000',
+      parentPersonalCode: '',
+      childBirthDate: '',
+      address: '',
+      annualFee: 144,
+      body: longBody,
+      title: 'Papildomu pamoku sutartis',
+      feeLabel: 'Orientacine menesio kaina',
+    });
+    const doc = await PDFDocument.load(bytes);
+    expect(doc.getPageCount()).toBeGreaterThan(1);
+    expect(Buffer.from(bytes).subarray(0, 5).toString()).toBe('%PDF-');
+  });
+});
+
+describe('renderAndStoreExtraLessonsPdf', () => {
+  function makeExtraSupabase() {
+    const uploads: Array<{ path: string; data: Buffer }> = [];
+    const signed: string[] = [];
+    const supabase = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({
+              data: { pdf_url: DOCX_TEMPLATE_URL, name: 'Papildomų pamokų sutartis (DOCX)' },
+            }),
+          }),
+        }),
+      }),
+      storage: {
+        from: () => ({
+          createSignedUrl: async (path: string) => {
+            signed.push(path);
+            return { data: { signedUrl: `https://storage.example/${path}` }, error: null };
+          },
+          upload: async (path: string, data: Buffer) => {
+            uploads.push({ path, data });
+            return { error: null };
+          },
+        }),
+      },
+    };
+    return { supabase, uploads, signed };
+  }
+
+  const extraParams = {
+    contract: {
+      id: 'e0000000-0000-0000-0000-000000000001',
+      organization_id: 'org-1',
+      contract_number: 'PP-LEGAL-WITHIN14',
+      template_id: 'tpl-1',
+    },
+    student: { full_name: 'QA Legal Per 14 d.', payer_name: 'QA Extra Tevas', payer_email: 'p@example.com' },
+    filledBody: Array.from({ length: 80 }, (_, i) => `Straipsnis ${i + 1}. ${'Tekstas '.repeat(12)}`).join('\n'),
+    indicativeMonthlyEur: 144,
+    extraLessonsPayload: { paslaugos_pavadinimas: 'QA Matematika' },
+  };
+
+  it('stores the converted DOCX PDF when extra-lessons rendering succeeds', async () => {
+    const { supabase, uploads } = makeExtraSupabase();
+    const converted = Buffer.from('%PDF-1.7 extra-docx');
+    mocks.renderDocx.mockResolvedValueOnce(converted);
+
+    const result = await renderAndStoreExtraLessonsPdf(supabase as any, extraParams);
+
+    expect(mocks.renderDocx).toHaveBeenCalledOnce();
+    expect(Buffer.from(uploads[0].data)).toEqual(converted);
+    expect(result.uploadedPath).toBe(uploads[0].path);
+  });
+
+  it('falls back to a paginated text PDF when extra-lessons DOCX conversion fails', async () => {
+    const { supabase, uploads } = makeExtraSupabase();
+    mocks.renderDocx.mockRejectedValueOnce(new Error('converter unavailable'));
+
+    const result = await renderAndStoreExtraLessonsPdf(supabase as any, extraParams);
+
+    expect(uploads).toHaveLength(1);
+    const bytes = new Uint8Array(Buffer.from(uploads[0].data));
+    expect(Buffer.from(bytes).subarray(0, 5).toString()).toBe('%PDF-');
+    const doc = await PDFDocument.load(bytes);
+    expect(doc.getPageCount()).toBeGreaterThan(1);
+    expect(result.uploadedPath).toBe(uploads[0].path);
+  });
+
+  it('uses the bundled Laisvi vaikai DOCX for Demo Mokykla', async () => {
+    const { supabase, uploads } = makeExtraSupabase();
+    const converted = Buffer.from('%PDF-1.7 bundled-docx');
+    mocks.renderDocxBuffer.mockResolvedValueOnce(converted);
+
+    const result = await renderAndStoreExtraLessonsPdf(supabase as any, {
+      ...extraParams,
+      contract: {
+        ...extraParams.contract,
+        organization_id: 'c3a00000-7e57-4000-8000-000000000001',
+      },
+    });
+
+    expect(mocks.renderDocxBuffer).toHaveBeenCalledOnce();
+    expect(mocks.renderDocx).not.toHaveBeenCalled();
+    expect(Buffer.from(uploads[0].data)).toEqual(converted);
+    expect(result.uploadedPath).toBe(uploads[0].path);
+  });
+});
+
+describe('signSchoolContractPdf', () => {
+  it('does not mint a signed URL for a DOCX template path', async () => {
+    const { supabase } = makeSupabase();
+    const url = await signSchoolContractPdf(supabase as any, 'org-1/templates/sutartis.docx');
+    expect(url).toBeNull();
   });
 });

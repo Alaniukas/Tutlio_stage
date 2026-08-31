@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/PasswordInput';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { AlertCircle, CheckCircle2, Lock } from 'lucide-react';
@@ -114,11 +115,11 @@ export default function ResetPassword() {
                     <form onSubmit={handleReset} className="space-y-5">
                         <div className="space-y-2">
                             <Label htmlFor="password">{t('auth.newPassword')}</Label>
-                            <Input id="password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required className="rounded-xl border-gray-200" />
+                            <PasswordInput id="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required className="rounded-xl border-gray-200" />
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="confirmPassword">{t('auth.repeatPassword')}</Label>
-                            <Input id="confirmPassword" type="password" placeholder="••••••••" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required className="rounded-xl border-gray-200" />
+                            <PasswordInput id="confirmPassword" placeholder="••••••••" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required className="rounded-xl border-gray-200" />
                         </div>
                         {error && (
                             <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 rounded-xl px-4 py-3 border border-red-100">

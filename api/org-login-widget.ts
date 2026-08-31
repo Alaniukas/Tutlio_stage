@@ -3,7 +3,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClientOptions.js';
-import { isProKlaseOrg } from './_lib/marketMoney.js';
+import { isMoksloVaisiaiOrg, isProKlaseOrg } from './_lib/marketMoney.js';
 import { orgLoginButtonLabels } from './_lib/orgLoginDescription.js';
 
 function requestOrigin(req: VercelRequest): string {
@@ -44,7 +44,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const features = (org?.features && typeof org.features === 'object' ? org.features : {}) as Record<string, unknown>;
   const proKlase = org ? (isProKlaseOrg(org.id) || isProKlaseOrg(org.slug)) : false;
-  if (!org || (!features.custom_branding && !proKlase)) {
+  const moksloVaisiai = org ? (isMoksloVaisiaiOrg(org.id) || isMoksloVaisiaiOrg(org.slug)) : false;
+  if (!org || (!features.custom_branding && !proKlase && !moksloVaisiai)) {
     res.status(404).setHeader('Content-Type', 'text/javascript; charset=utf-8');
     return res.end('console.warn("Tutlio org-login-widget: branding not found");');
   }
@@ -56,6 +57,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     logo: org.logo_url || '',
     color: org.brand_color || '#6366f1',
     color2: org.brand_color_secondary || org.brand_color || '#8b5cf6',
+    logoOnDark: moksloVaisiai,
     buttons: [
       { href: `${origin}/login?org=${encodeURIComponent(org.slug)}&portal=student`, label: labels.student },
       { href: `${origin}/login?org=${encodeURIComponent(org.slug)}&portal=parent`, label: labels.parent },
@@ -72,7 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   wrap.style.cssText = 'display:flex;flex-direction:column;gap:10px;max-width:320px;font-family:system-ui,-apple-system,Segoe UI,sans-serif';
   if (cfg.logo) {
     var logoWrap = document.createElement('div');
-    logoWrap.style.cssText = 'display:inline-flex;border-radius:16px;overflow:hidden;background:#fff;padding:6px;margin-bottom:4px;width:fit-content';
+    logoWrap.style.cssText = 'display:inline-flex;border-radius:16px;overflow:hidden;background:' + (cfg.logoOnDark ? '#000' : '#fff') + ';padding:6px;margin-bottom:4px;width:fit-content';
     var img = document.createElement('img');
     img.src = cfg.logo;
     img.alt = cfg.name;

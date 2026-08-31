@@ -98,7 +98,7 @@ export function getGoSignConfig(): GoSignConfig | null {
   };
 }
 
-export type SignerRole = 'school' | 'parent_primary' | 'parent_secondary';
+export type SignerRole = 'school' | 'parent_primary' | 'parent_secondary' | 'teacher';
 
 /**
  * Visible signature placement per signer — a row of stamps in the top-left
@@ -112,6 +112,7 @@ export function signaturePositionForRole(role: SignerRole): string {
     school: 'GOSIGN_POS_SCHOOL',
     parent_primary: 'GOSIGN_POS_PARENT1',
     parent_secondary: 'GOSIGN_POS_PARENT2',
+    teacher: 'GOSIGN_POS_TEACHER',
   };
   const override = envStr(perRole[role]);
   if (override) return override;
@@ -120,6 +121,7 @@ export function signaturePositionForRole(role: SignerRole): string {
     school: 'absolute, 1, 0.8cm, 0.8cm, 6cm, 2.4cm',
     parent_primary: 'absolute, 1, 7.2cm, 0.8cm, 6cm, 2.4cm',
     parent_secondary: 'absolute, 1, 13.6cm, 0.8cm, 6cm, 2.4cm',
+    teacher: 'absolute, 1, 7.2cm, 0.8cm, 6cm, 2.4cm',
   };
   return defaults[role];
 }

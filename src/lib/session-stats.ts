@@ -1,4 +1,5 @@
 import { isAfter, isBefore, startOfDay, endOfDay } from 'date-fns';
+import { deriveAttendance, type AttendanceSessionLike } from './attendance';
 
 export interface Session {
   id: string;
@@ -11,6 +12,9 @@ export interface Session {
   topic?: string | null;
   cancelled_by?: 'tutor' | 'student' | null;
   cancellation_reason?: string | null;
+  meeting_link?: string | null;
+  student_joined_at?: string | null;
+  tutor_joined_at?: string | null;
   student?: {
     full_name: string;
     email?: string;
@@ -67,6 +71,18 @@ export function filterSessionsByDateRange(
 }
 
 /**
+ * Student did not attend: explicit no_show status, or join-link attendance shows
+ * student missing after the grace window (even if cron has not flipped status yet).
+ */
+export function isStudentNoShowSession(session: Session, now: Date = new Date()): boolean {
+  if (session.status === 'no_show') return true;
+  if (session.status === 'cancelled') return false;
+  if (!(session.meeting_link || '').trim()) return false;
+  const info = deriveAttendance(session as AttendanceSessionLike, now);
+  return info.applicable && info.student === 'missing';
+}
+
+/**
  * Calculates overall session statistics
  *
  * Note: A session is considered occurred if:
@@ -95,7 +111,7 @@ export function calculateSessionStats(
     const sessionEndTime = new Date(session.end_time);
     const hasEnded = sessionEndTime < now;
 
-    if (session.status === 'no_show') {
+    if (isStudentNoShowSession(session, now)) {
       stats.totalStudentNoShow++;
       return;
     }

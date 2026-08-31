@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { format, parse, formatDistanceStrict } from 'date-fns';
 import { readFileSync } from 'node:fs';
 import { en } from '../../src/lib/i18n/en';
+import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
 import { lt } from '../../src/lib/i18n/lt';
 import { tr, trOverrides } from '../../src/lib/i18n/tr';
 import { loadLocaleDict, t, tHtml } from '../../src/lib/i18n/core';
@@ -17,7 +18,7 @@ import { resolvePlatformTranslation } from '../../src/lib/i18n/platformOverrides
 import { getCaseStudy, getTestimonials, SHOW_PLACEHOLDER_SOCIAL_PROOF } from '../../src/components/landing/v2/socialProof';
 
 const deferred = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
-const expectedKeys = Object.keys(en).filter((key) => !deferred.has(key.split('.')[0]));
+const expectedKeys = Object.keys(en).filter((key) => !deferred.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 // The existing non-LT validator accepts international numbers, not only +370.
 const correctedPhones = new Set(['onboard.parentPhoneFormat', 'onboard.phoneFormatError', 'register.phoneError', 'register.phoneHint', 'settings.phoneFormat', 'stu.phoneFormat']);
 // The English values are incomplete labels; these limits come from Lithuanian copy.

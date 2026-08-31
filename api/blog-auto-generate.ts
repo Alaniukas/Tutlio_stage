@@ -12,7 +12,7 @@ function getSupabase() {
   return createClient(url, key, supabaseServiceRoleClientOptions() as any);
 }
 
-export const config = { maxDuration: 120 };
+export const config = { maxDuration: 300 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET' && req.method !== 'POST') {

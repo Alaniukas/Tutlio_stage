@@ -14,6 +14,7 @@ import { buildRollingOccurrenceDates } from './_lib/recurringOccurrences.js';
 import { endOfMonthYmd, nextMonthFirstYmd } from '../src/lib/monthlyPackagePlan.js';
 import { resolveOrganizationLessonPrice } from '../src/lib/organizationDynamicPricing.js';
 import { getOrgOwnerUserId } from './_lib/orgAdminAccess.js';
+import { proKlaseFeatureEnabledForOrgRecord } from '../src/lib/orgIntakeMode.js';
 
 const TRIAL_LOOKBACK_DAYS = 14;
 
@@ -90,15 +91,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const orgByTutor = new Map((tutorRows || []).map((t: any) => [t.id as string, (t.organization_id as string | null) ?? null]));
   const orgIds = [...new Set([...orgByTutor.values()].filter(Boolean))] as string[];
   const { data: orgRows } = orgIds.length > 0
-    ? await supabase.from('organizations').select('id, features').in('id', orgIds)
+    ? await supabase.from('organizations').select('id, features, entity_type').in('id', orgIds)
     : { data: [] as any[] };
   const orgFeatures = new Map<string, Record<string, unknown>>();
+  const orgEntityType = new Map<string, string | null>();
   for (const org of orgRows || []) {
     const feat = (org as any).features;
     orgFeatures.set(
       (org as any).id as string,
       feat && typeof feat === 'object' && !Array.isArray(feat) ? (feat as Record<string, unknown>) : {},
     );
+    orgEntityType.set((org as any).id as string, (org as any).entity_type ?? null);
   }
 
   let sent = 0;
@@ -110,7 +113,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const pairLabel = `${candidate.tutorId}|${candidate.studentId}`;
     const orgId = orgByTutor.get(candidate.tutorId) ?? null;
     const features = orgId ? orgFeatures.get(orgId) : undefined;
-    if (!orgId || !features || features.post_trial_auto_package !== true) {
+    const entityType = orgId ? orgEntityType.get(orgId) : null;
+    if (!orgId || !features || !proKlaseFeatureEnabledForOrgRecord(orgId, orgEntityType.get(orgId), features, 'post_trial_auto_package')) {
       skipped += 1;
       continue;
     }

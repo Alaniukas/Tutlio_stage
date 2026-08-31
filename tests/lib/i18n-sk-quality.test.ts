@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { format, parse } from 'date-fns';
 import { readFileSync } from 'node:fs';
 import { en } from '../../src/lib/i18n/en';
+import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
 import { sk, skOverrides } from '../../src/lib/i18n/sk';
 import { loadLocaleDict, t, tHtml } from '../../src/lib/i18n/core';
 import { getDateFnsLocale } from '../../src/lib/i18n';
@@ -16,7 +17,7 @@ import { getLandingDemoPersonas } from '../../src/components/landing/v2/demoPers
 import { getCaseStudy, getTestimonials, SHOW_PLACEHOLDER_SOCIAL_PROOF } from '../../src/components/landing/v2/socialProof';
 
 const deferred = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
-const expectedKeys = Object.keys(en).filter((key) => !deferred.has(key.split('.')[0]));
+const expectedKeys = Object.keys(en).filter((key) => !deferred.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 const tokens = (value: string, pattern: RegExp) => (value.match(pattern) ?? []).sort();
 
 

@@ -8,6 +8,7 @@ describe('organization sidebar navigation', () => {
     const paths = buildCompanyNavItems(true, '/school', translate).map((item) => item.href);
 
     expect(paths).not.toContain('/school/dynamic-pricing');
+    expect(paths).not.toContain('/school/recordings');
     expect(paths.at(-1)).toBe('/school/instructions');
   });
 

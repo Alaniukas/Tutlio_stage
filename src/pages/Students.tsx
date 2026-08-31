@@ -39,6 +39,7 @@ import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { isPlMarket } from '@/lib/market';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { isProKlaseOrg } from '@/lib/marketMoney';
+import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import {
   isPerStudentPaymentOverrideEnabled,
@@ -135,8 +136,10 @@ export default function StudentsPage() {
   const orgPolicy = useOrgTutorPolicy();
   const hideProKlaseOrgTutorCancel = orgPolicy.isOrgTutor && isProKlaseOrg(profile?.organization_id);
   const hideProKlaseOrgTutorFreeTime = hideProKlaseOrgTutorCancel;
-  const { hasFeature, loading: orgFeaturesLoading, contactVisibility } = useOrgFeatures();
-  const requiresStatusConfirmation = hasFeature('tutor_lesson_status_confirmation');
+  const { hasFeature, loading: orgFeaturesLoading, contactVisibility, entityType, organizationId } = useOrgFeatures();
+  const pkMonthlyPackages = proKlaseFeatureEnabled(organizationId, entityType, hasFeature, 'monthly_packages', orgFeaturesLoading);
+  const requiresStatusConfirmation =
+    hasFeature('tutor_lesson_status_confirmation') || isProKlaseOrg(profile?.organization_id);
   const stcache = getCached<any>('tutor_students');
   const [students, setStudents] = useState<Student[]>(stcache?.students ?? []);
   const [loading, setLoading] = useState(!stcache);
@@ -1036,12 +1039,6 @@ export default function StudentsPage() {
     setSavingSession(false);
   };
 
-  const notifyProKlaseCancelBlocked = () => {
-    const message = t('cal.proKlaseCancelAdminOnly');
-    setModalActionNotice(message);
-    setToastMessage({ message, type: 'warning' });
-  };
-
   const confirmLessonStatus = async (
     session: Session,
     status: 'completed' | 'no_show' | 'cancelled',
@@ -1100,7 +1097,7 @@ export default function StudentsPage() {
     // Monthly packages (req 6): a package lesson can only be moved within the
     // same calendar month (anchored on its original start). One-off / trial
     // lessons (no package) are unconstrained.
-    if (timeChanged && hasFeature('monthly_packages') && !!(selectedSessionForModal as any).lesson_package_id) {
+    if (timeChanged && pkMonthlyPackages && !!(selectedSessionForModal as any).lesson_package_id) {
       const anchor = rescheduleAnchorDate((selectedSessionForModal as any).original_start_time, oldStart);
       if (!isSameCalendarMonth(newStart, anchor)) {
         setToastMessage({ message: t('cal.rescheduleSameMonthOnly'), type: 'error' });
@@ -3111,40 +3108,19 @@ export default function StudentsPage() {
                       <UserX className="w-4 h-4 mr-1" />
                       {t('cal.statusNoShowOpt')}
                     </Button>
+                    {!hideProKlaseOrgTutorCancel && (
                     <Button
                       size="sm"
                       variant="outline"
                       disabled={confirmingStatusId === selectedSessionForModal.id}
-                      onClick={() => {
-                        if (hideProKlaseOrgTutorCancel) {
-                          notifyProKlaseCancelBlocked();
-                          return;
-                        }
-                        void confirmLessonStatus(selectedSessionForModal, 'cancelled');
-                      }}
+                      onClick={() => void confirmLessonStatus(selectedSessionForModal, 'cancelled')}
                       className="rounded-xl text-gray-700 border-gray-300 hover:bg-gray-100"
                     >
                       <XCircle className="w-4 h-4 mr-1" />
-                      {hideProKlaseOrgTutorCancel ? t('cal.cancelLessonTitle') : t('cal.statusCancelledOpt')}
+                      {t('cal.statusCancelledOpt')}
                     </Button>
+                    )}
                   </div>
-                </div>
-              )}
-              {selectedSessionForModal?.status === 'active' && orgPolicy.isOrgTutor && (
-                <div className="flex flex-wrap gap-2 w-full">
-                  {hideProKlaseOrgTutorCancel && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={notifyProKlaseCancelBlocked}
-                      disabled={savingSession}
-                      size="sm"
-                      className="rounded-xl flex-1 text-gray-700 border-gray-300 hover:bg-gray-100"
-                    >
-                      <XCircle className="w-4 h-4 mr-1" />
-                      {t('cal.cancelLessonTitle')}
-                    </Button>
-                  )}
                 </div>
               )}
               {selectedSessionForModal?.status === 'active' && !orgPolicy.isOrgTutor && (

@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { Check, ArrowRight, AlertCircle, Eye, EyeOff, ChevronLeft, User, Users, Mail, Phone } from 'lucide-react';
 import { cn, formatLocalizedPhone, getLocalizedPhonePlaceholder, validateLocalizedPhone } from '@/lib/utils';
 import { useTranslation } from '@/lib/i18n';
+import { proKlaseLegalHref, usesProKlaseLegalDocs } from '@/lib/proKlaseLegal';
 
 type Step = 'verify' | 'profile' | 'account' | 'done';
 
@@ -126,6 +127,7 @@ export default function StudentOnboarding() {
     const [subjects, setSubjects] = useState<Subject[]>([]);
     /** Org whitelabel branding (logo) for the registration header; null = default Tutlio. */
     const [orgBranding, setOrgBranding] = useState<{ name: string; logo_url: string | null } | null>(null);
+    const [legalOrgId, setLegalOrgId] = useState<string | null>(null);
 
     const [payerType, setPayerType] = useState<'self' | 'parent'>('self');
     const [payerName, setPayerName] = useState('');
@@ -143,6 +145,8 @@ export default function StudentOnboarding() {
     const [showPass, setShowPass] = useState(false);
     const [agreePrivacy, setAgreePrivacy] = useState(false);
     const [agreeTerms, setAgreeTerms] = useState(false);
+    const [agreeProKlasePrivacy, setAgreeProKlasePrivacy] = useState(false);
+    const [agreeProKlaseTerms, setAgreeProKlaseTerms] = useState(false);
 
     const [cancellationHours, setCancellationHours] = useState(24);
     const [cancellationFeePercent, setCancellationFeePercent] = useState(0);
@@ -219,6 +223,7 @@ export default function StudentOnboarding() {
             const brandingOrgId =
                 (data as { resolved_organization_id?: string | null }).resolved_organization_id ||
                 data.organization_id;
+            setLegalOrgId(brandingOrgId ? String(brandingOrgId) : null);
             if (brandingOrgId) {
                 void fetch(`/api/org-branding?id=${encodeURIComponent(String(brandingOrgId))}`)
                     .then(async (resp) => (resp.ok ? resp.json() : null))
@@ -295,6 +300,10 @@ export default function StudentOnboarding() {
         if (password !== passwordConfirm) { showError(t('onboard.passwordMismatch')); return; }
         if (password.length < 6) { showError(t('onboard.passwordTooShort')); return; }
         if (!agreePrivacy || !agreeTerms) {
+            showError(t('onboard.mustAgree'));
+            return;
+        }
+        if (usesProKlaseLegalDocs(legalOrgId) && (!agreeProKlasePrivacy || !agreeProKlaseTerms)) {
             showError(t('onboard.mustAgree'));
             return;
         }
@@ -684,7 +693,9 @@ export default function StudentOnboarding() {
                                         className="mt-1 h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
                                     />
                                     <span className="text-sm text-gray-600">
-                                        {t('auth.agreeWith')} <Link to="/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-violet-600 hover:underline font-medium">{t('auth.privacyPolicy')}</Link>. <span className="text-red-500">*</span>
+                                        {t('auth.agreeWith')}{' '}
+                                        <Link to="/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-violet-600 hover:underline font-medium">{t('auth.privacyPolicy')}</Link>
+                                        . <span className="text-red-500">*</span>
                                     </span>
                                 </label>
                                 <label className="flex items-start gap-3 cursor-pointer">
@@ -695,19 +706,59 @@ export default function StudentOnboarding() {
                                         className="mt-1 h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
                                     />
                                     <span className="text-sm text-gray-600">
-                                        {t('auth.agreeWith')} <Link to="/terms" target="_blank" rel="noopener noreferrer" className="text-violet-600 hover:underline font-medium">{t('auth.termsOfService')}</Link>. <span className="text-red-500">*</span>
+                                        {t('auth.agreeWith')}{' '}
+                                        <Link to="/terms" target="_blank" rel="noopener noreferrer" className="text-violet-600 hover:underline font-medium">{t('auth.termsOfService')}</Link>
+                                        . <span className="text-red-500">*</span>
                                     </span>
                                 </label>
+                                {usesProKlaseLegalDocs(legalOrgId) && (
+                                    <>
+                                        <label className="flex items-start gap-3 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={agreeProKlasePrivacy}
+                                                onChange={(e) => setAgreeProKlasePrivacy(e.target.checked)}
+                                                className="mt-1 h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                                            />
+                                            <span className="text-sm text-gray-600">
+                                                {t('auth.agreeWith')}{' '}
+                                                <a href={proKlaseLegalHref('privacy')} target="_blank" rel="noopener noreferrer" className="text-violet-600 hover:underline font-medium">{t('auth.proklasePrivacyPolicy')}</a>
+                                                . <span className="text-red-500">*</span>
+                                            </span>
+                                        </label>
+                                        <label className="flex items-start gap-3 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={agreeProKlaseTerms}
+                                                onChange={(e) => setAgreeProKlaseTerms(e.target.checked)}
+                                                className="mt-1 h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                                            />
+                                            <span className="text-sm text-gray-600">
+                                                {t('auth.agreeWith')}{' '}
+                                                <a href={proKlaseLegalHref('terms')} target="_blank" rel="noopener noreferrer" className="text-violet-600 hover:underline font-medium">{t('auth.proklaseTermsOfService')}</a>
+                                                . <span className="text-red-500">*</span>
+                                            </span>
+                                        </label>
+                                    </>
+                                )}
                             </div>
                         </div>
 
                         {error && (
-                            <p ref={errorBannerRef} className="text-sm text-red-500 mt-3 bg-red-50 rounded-xl px-3 py-2">{error}</p>
+                            <div className="mt-3 space-y-2">
+                                <p ref={errorBannerRef} className="text-sm text-red-500 bg-red-50 rounded-xl px-3 py-2">{error}</p>
+                                <Link
+                                    to="/login"
+                                    className="inline-flex w-full items-center justify-center rounded-2xl border border-gray-200 bg-white py-3 text-sm font-bold text-gray-800 hover:bg-gray-50"
+                                >
+                                    {t('onboard.backToLogin')}
+                                </Link>
+                            </div>
                         )}
 
                         <button
                             onClick={handleCreateAccount}
-                            disabled={submitting || !password || !passwordConfirm || !agreePrivacy || !agreeTerms}
+                            disabled={submitting || !password || !passwordConfirm || !agreePrivacy || !agreeTerms || (usesProKlaseLegalDocs(legalOrgId) && (!agreeProKlasePrivacy || !agreeProKlaseTerms))}
                             className="mt-5 w-full py-3.5 rounded-2xl bg-violet-600 text-white font-bold text-sm hover:bg-violet-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
                         >
                             {submitting ? t('onboard.creatingAccount') : <><span>{t('onboard.createAccountBtn')}</span><ArrowRight className="w-4 h-4" /></>}

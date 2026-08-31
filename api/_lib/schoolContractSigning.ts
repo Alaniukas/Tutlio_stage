@@ -5,6 +5,7 @@
  *   school (directorė) signs contract.pdf_url  → school.signed_pdf_path
  *   parent_primary signs school.signed_pdf_path → parent_primary.signed_pdf_path
  *   parent_secondary (optional) signs that      → final
+ * Teacher contracts use the same chain with school → teacher → final.
  * The final signed PDF is copied to school_contracts.signed_contract_url and the
  * contract moves to signing_status = 'signed' (which the payment flow gates on).
  */
@@ -34,7 +35,7 @@ export async function renewParentSignatureAccess(
   row: any,
 ): Promise<any> {
   if (!row || row.status === 'signed') return row;
-  if (!String(row.role || '').startsWith('parent')) return row;
+  if (!String(row.role || '').startsWith('parent') && row.role !== 'teacher') return row;
   if (!isSignatureTokenExpired(row)) return row;
 
   const nextExpiry = new Date(Date.now() + SIGNATURE_TOKEN_TTL_MS).toISOString();
@@ -84,11 +85,20 @@ export async function resetDeadGoSignSignature(
 }
 
 export const CONTRACT_SIGN_SELECT =
-  'id, organization_id, student_id, signing_status, pdf_url, signed_contract_url, contract_number, require_second_parent, annual_fee, additional_fee_amount, additional_fee_purpose, ' +
+  'id, organization_id, student_id, party_kind, counterparty_name, counterparty_email, signing_status, pdf_url, signed_contract_url, contract_number, require_second_parent, annual_fee, additional_fee_amount, additional_fee_purpose, ' +
   'organizations(name, email, features), ' +
   'student:students(id, full_name, payer_name, payer_email, payer_personal_code, parent_secondary_name, parent_secondary_email, parent_secondary_personal_code)';
 
-export const ROLE_ORDER: Record<SignerRole, number> = { school: 0, parent_primary: 1, parent_secondary: 2 };
+export const ROLE_ORDER: Record<SignerRole, number> = {
+  school: 0,
+  parent_primary: 1,
+  teacher: 1,
+  parent_secondary: 2,
+};
+
+export function isTeacherContract(contract: any): boolean {
+  return String(contract?.party_kind || '') === 'teacher';
+}
 
 export function randomSignToken(): string {
   return `${crypto.randomUUID().replace(/-/g, '')}${crypto.randomUUID().replace(/-/g, '')}`;
@@ -268,7 +278,7 @@ export function pendingParentRole(contract: any, rows: any[]): SignerRole | null
 /** Resolve the input PDF a signer must sign (the previous signer's output). */
 export function inputPdfPathForRole(contract: any, rows: any[], role: SignerRole): string {
   if (role === 'school') return String(contract.pdf_url || '');
-  if (role === 'parent_primary') {
+  if (role === 'parent_primary' || role === 'teacher') {
     return String(rows.find((r) => r.role === 'school')?.signed_pdf_path || '');
   }
   // parent_secondary signs the primary parent's output.
@@ -400,6 +410,56 @@ function parentSignUrl(appOrigin: string, token: string): string {
   return `${appOrigin.replace(/\/$/, '')}/pasirasymas/sutarties/per/go-sign/${encodeURIComponent(token)}`;
 }
 
+export async function inviteTeacherToSign(
+  supabase: SupabaseClient,
+  contract: any,
+  schoolSignedPath: string,
+  appOrigin: string,
+  signer: { name: string; email: string },
+): Promise<{ emailed: boolean }> {
+  if (!isTeacherContract(contract)) throw new Error('Contract is not a teacher contract');
+  const contractId = String(contract.id || '');
+  if (!contractId || !schoolSignedPath) throw new Error('School-signed contract PDF is missing');
+
+  const existing = await ensureSignatureRow(supabase, {
+    contractId,
+    role: 'teacher',
+    signerName: signer.name,
+    signerEmail: signer.email,
+  });
+  if (existing.status === 'signed') return { emailed: false };
+
+  const { data: row, error } = await supabase
+    .from('school_contract_signatures')
+    .update({
+      signer_name: signer.name,
+      signer_email: signer.email,
+      token_expires_at: new Date(Date.now() + SIGNATURE_TOKEN_TTL_MS).toISOString(),
+      status: existing.status === 'canceled' || existing.status === 'error' ? 'pending' : existing.status,
+      error_message: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', existing.id)
+    .select('*')
+    .single();
+  if (error || !row?.token) throw new Error(`Could not prepare teacher signing link: ${error?.message || 'missing token'}`);
+
+  await supabase
+    .from('school_contracts')
+    .update({ counterparty_name: signer.name, counterparty_email: signer.email, sent_at: new Date().toISOString() })
+    .eq('id', contractId);
+
+  const pdfUrl = await createContractSignedUrl(supabase, schoolSignedPath, contractPdfFileName(contract));
+  const emailed = await sendInternalEmail(appOrigin, 'school_teacher_contract_sign_request', signer.email, {
+    teacherName: signer.name,
+    schoolName: contract.organizations?.name || '',
+    signUrl: parentSignUrl(appOrigin, row.token),
+    pdfUrl: pdfUrl || undefined,
+    organizationId: contract.organization_id,
+  });
+  return { emailed };
+}
+
 export interface InstallmentScheduleItem {
   number: number;
   amount: string;
@@ -507,7 +567,7 @@ export async function pollAndAdvance(
       // Same email link can still work while the contract awaits this parent.
       if (
         String((contract as any).signing_status) === 'signed_by_school'
-        && String(row.role || '').startsWith('parent')
+        && (String(row.role || '').startsWith('parent') || row.role === 'teacher')
       ) {
         await renewParentSignatureAccess(supabase, row);
         return { status: 'pending', role: row.role, contractId, contractStatus: (contract as any).signing_status };
@@ -600,11 +660,19 @@ export async function advanceAfterRoleSigned(
   const st = (contract as any).student || {};
   const settings = contractSigningSettings(contract);
 
+  if (role === 'teacher') {
+    await finalizeTeacherContract(supabase, contract, signedPath, appOrigin);
+    return { contractStatus: 'signed', done: true };
+  }
+
   if (role === 'school') {
     await supabase
       .from('school_contracts')
       .update({ signing_status: 'signed_by_school' })
       .eq('id', contractId);
+    if (isTeacherContract(contract)) {
+      return { contractStatus: 'signed_by_school', done: false };
+    }
     // Invite the primary parent to sign the school-signed PDF.
     const parentRow = await ensureSignatureRow(supabase, {
       contractId,
@@ -672,6 +740,34 @@ export async function advanceAfterRoleSigned(
   return { contractStatus: 'signed', done: true };
 }
 
+async function finalizeTeacherContract(
+  supabase: SupabaseClient,
+  contract: any,
+  finalSignedPath: string,
+  appOrigin: string,
+): Promise<void> {
+  const now = new Date().toISOString();
+  await supabase
+    .from('school_contracts')
+    .update({
+      signing_status: 'signed',
+      signed_contract_url: finalSignedPath,
+      signed_at: now,
+      signed_uploaded_at: now,
+    })
+    .eq('id', contract.id);
+
+  const recipient = stringSetting(contract.counterparty_email);
+  if (!recipient) return;
+  const pdfUrl = await createContractSignedUrl(supabase, finalSignedPath, contractPdfFileName(contract));
+  await sendInternalEmail(appOrigin, 'school_teacher_contract_fully_signed', recipient, {
+    teacherName: contract.counterparty_name || '',
+    schoolName: contract.organizations?.name || '',
+    pdfUrl: pdfUrl || undefined,
+    organizationId: contract.organization_id,
+  });
+}
+
 async function sendFirstPendingInstallmentEmail(
   supabase: SupabaseClient,
   contract: any,
@@ -718,6 +814,10 @@ async function finalizeContract(
   finalSignedPath: string,
   appOrigin: string,
 ): Promise<void> {
+  if (isTeacherContract(contract)) {
+    await finalizeTeacherContract(supabase, contract, finalSignedPath, appOrigin);
+    return;
+  }
   const now = new Date().toISOString();
   await supabase
     .from('school_contracts')

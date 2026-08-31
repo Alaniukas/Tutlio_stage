@@ -31,6 +31,7 @@ import { isCronAuthorized } from './_lib/cronAuth.js';
 import { markdownToEmailHtml } from './_lib/blogMarkdownEmail.js';
 import { canonicalOriginForOrgLocale } from './_lib/public-origin.js';
 import { schoolInstallmentPaymentBreakdown } from './_lib/schoolBookingInvite.js';
+import { studentRegistrationAlreadyActive } from './_lib/registrationInviteGate.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission, type OrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 
@@ -255,11 +256,15 @@ const baseStyles = `
 function wrap(content: string, locale: Locale = 'lt', branding?: EmailBranding | null): string {
   const brandName = branding?.name || 'Tutlio';
   const fallbackColor = branding?.brand_color || '#4f46e5';
-  const logoHtml = branding?.logo_url
+  const logoImg = branding?.logo_url
     ? `<img src="${branding.logo_url}" alt="${escapeHtml(brandName)}" style="max-height:64px;max-width:200px;" />`
     : branding?.name
       ? `<span style="font-size:26px;font-weight:900;color:${fallbackColor};letter-spacing:-0.5px;">${escapeHtml(branding.name)}</span>`
       : `<span style="font-size:26px;font-weight:900;color:#4f46e5;letter-spacing:-0.5px;">Tutlio <span style="font-size:24px;">🎓</span></span>`;
+  const logoHtml =
+    branding?.logoOnDark && branding?.logo_url
+      ? `<div style="display:inline-block;background:#000000;border-radius:16px;padding:10px 14px;">${logoImg}</div>`
+      : logoImg;
   const poweredBy = branding?.name && !branding.hidePoweredBy
     ? `<p style="color:#9ca3af;font-size:11px;margin:8px 0 0;">powered by Tutlio</p>`
     : '';
@@ -312,6 +317,8 @@ function packageItemsBreakdownRows(
   }).join('');
   return `<div class="info-card"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${rows}</table></div>`;
 }
+let suppressTutlioEmailUnsub = false;
+
 const footerFor = (
   locale: Locale,
   unsubscribeEmail?: string | null,
@@ -320,9 +327,14 @@ const footerFor = (
   const email = String(unsubscribeEmail || '').trim().toLowerCase();
   const unsubLine = email
     ? `${t(locale, 'em.unsubscribeLead')} <a href="${getAppUrl()}/unsubscribe?email=${encodeURIComponent(email)}" style="color:#9ca3af; text-decoration:underline;">${t(locale, 'em.unsubscribeHere')}</a>`
-    : t(locale, 'em.unsubscribe');
+    : suppressTutlioEmailUnsub
+      ? ''
+      : t(locale, 'em.unsubscribe');
   const signature = String(teamSignature || '').trim() || t(locale, 'em.teamSignature');
-  return `<div class="footer"><p>${signature}</p><p style="margin:8px 0 0; font-size:11px; color:#9ca3af;">${unsubLine}</p></div>`;
+  const unsubHtml = unsubLine
+    ? `<p style="margin:8px 0 0; font-size:11px; color:#9ca3af;">${unsubLine}</p>`
+    : '';
+  return `<div class="footer"><p>${signature}</p>${unsubHtml}</div>`;
 };
 
 const formatMoney = (value: string | number, currency?: string, loc: Locale = 'lt') => {
@@ -619,6 +631,33 @@ function tutorInvite(d: any, locale: Locale) {
         </div>
         <p style="color:#9ca3af; font-size:12px;">${t(locale, 'em.linkNotWorking')} ${inviteLink}</p>
       </div>${footerFor(locale)}`, locale),
+  };
+}
+
+function moksloVaisiaiStudentArchiveRequest(d: any, locale: Locale) {
+  const studentName = esc(String(d.studentName || 'Mokinys'));
+  const studentEmail = esc(String(d.studentEmail || '—'));
+  const studentPhone = esc(String(d.studentPhone || '—'));
+  const payerEmail = esc(String(d.payerEmail || '—'));
+  return {
+    subject: `Mokinys nori ištrinti paskyrą: ${String(d.studentName || 'Mokinys')}`,
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#124410', '#5C2B02')}">
+        <h1>Paskyros ištrynimo prašymas</h1>
+        <p>Mokinys suarchyvavo paskyrą Tutlio sistemoje</p>
+      </div>
+      <div class="body">
+        <p class="greeting">Sveiki,</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          Mokinys paprašė ištrinti savo paskyrą. Paskyra suarchyvuota; per 14 darbo dienų susisiekite ir ištrinkite ją rankiniu būdu.
+        </p>
+        ${table(
+          td('Mokinys', studentName) +
+            td('El. paštas', studentEmail) +
+            td('Telefonas', studentPhone) +
+            td('Mokėtojo el. paštas', payerEmail, false),
+        )}
+      </div>${footerFor(locale, null, 'Mokslo vaisių komanda')}`, locale),
   };
 }
 
@@ -1331,6 +1370,50 @@ function schoolContractFullySigned(d: any, _locale: Locale) {
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
           Ugdymo sutartis${d.studentName ? ` dėl ${d.studentName}` : ''} pasirašyta abiejų šalių.
           Atskiru laišku gausite apmokėjimo informaciją.
+        </p>
+        ${d.pdfUrl ? `<div style="text-align:center; margin-top:20px;">${outlookEmailButton(d.pdfUrl, 'Atsisiųsti pasirašytą sutartį', '#059669', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}</div>` : ''}
+      </div>${footerFor('lt')}`,
+      'lt',
+    ),
+  };
+}
+
+function schoolTeacherContractSignRequest(d: any, _locale: Locale) {
+  return {
+    subject: `Pasirašykite sutartį su ${String(d.schoolName || 'mokykla')}`,
+    html: wrap(
+      `
+      <div class="header" style="${headerInlineStyle('#6366f1', '#4f46e5')}">
+        <h2 style="color:#ffffff; font-size:24px; margin:0; font-weight:700;">Sutartis paruošta pasirašyti</h2>
+      </div>
+      <div class="body">
+        <p class="greeting">Sveiki${d.teacherName ? `, ${esc(d.teacherName)}` : ''},</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          ${esc(d.schoolName || 'Mokykla')} pasirašė sutartį ir kviečia jus ją pasirašyti elektroniniu parašu.
+        </p>
+        <div style="text-align:center; margin-top:24px;">
+          ${outlookEmailButton(d.signUrl, 'Pasirašyti sutartį', '#4f46e5', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
+        </div>
+        ${d.pdfUrl ? `<div style="text-align:center; margin-top:12px;">${outlookEmailButton(d.pdfUrl, 'Peržiūrėti mokyklos pasirašytą PDF', '#64748b', { fontWeight: '600', fontSize: '13px', padding: '10px 22px' })}</div>` : ''}
+        <p style="color:#9ca3af; font-size:12px; margin-top:16px;">Ši nuoroda asmeninė – neperduokite jos kitiems. Nuoroda galioja 14 dienų.</p>
+      </div>${footerFor('lt')}`,
+      'lt',
+    ),
+  };
+}
+
+function schoolTeacherContractFullySigned(d: any, _locale: Locale) {
+  return {
+    subject: `Sutartis su ${String(d.schoolName || 'mokykla')} pasirašyta`,
+    html: wrap(
+      `
+      <div class="header" style="${headerInlineStyle('#10b981', '#059669')}">
+        <h2 style="color:#ffffff; font-size:24px; margin:0; font-weight:700;">Sutartis pasirašyta</h2>
+      </div>
+      <div class="body">
+        <p class="greeting">Sveiki${d.teacherName ? `, ${esc(d.teacherName)}` : ''},</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          Sutartis su ${esc(d.schoolName || 'mokykla')} pasirašyta abiejų šalių.
         </p>
         ${d.pdfUrl ? `<div style="text-align:center; margin-top:20px;">${outlookEmailButton(d.pdfUrl, 'Atsisiųsti pasirašytą sutartį', '#059669', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}</div>` : ''}
       </div>${footerFor('lt')}`,
@@ -2210,6 +2293,118 @@ function schoolContract(d: any, locale: Locale) {
   };
 }
 
+function extraLessonsOfferRow(label: string, raw: unknown, opts?: { money?: boolean }): string {
+  const value = String(raw ?? '').trim();
+  if (!value || value === '—' || value === '0' || value === '0.00') return '';
+  if (opts?.money) return td(label, `${esc(value)} €`);
+  return td(label, esc(value));
+}
+
+function schoolContractExtraOffer(d: any, locale: Locale) {
+  const acceptUrl = String(d.acceptUrl || '').trim();
+  const period = [String(d.startDate || '').trim(), String(d.endDate || '').trim()].filter(Boolean).join(' – ');
+  const rows = [
+    extraLessonsOfferRow('Sutarties Nr.', d.contractNumber),
+    extraLessonsOfferRow('Mokinys', d.studentName),
+    extraLessonsOfferRow('Paslauga', d.serviceName),
+    extraLessonsOfferRow('Grafikas', d.schedule),
+    extraLessonsOfferRow('Laikotarpis', period || d.period),
+    extraLessonsOfferRow('Pamokos kaina', d.unitPrice, { money: true }),
+    extraLessonsOfferRow('Orientacinė mėnesio kaina', d.monthlyPrice, { money: true }),
+  ].filter(Boolean).join('');
+  const contact = schoolParentContactEmail(d);
+  return {
+    subject: `Papildomų pamokų sutartis${d.contractNumber ? ` Nr. ${d.contractNumber}` : ''} — ${d.studentName || 'Mokinys'}`,
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#059669', '#047857')}">
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Papildomų pamokų sutartis</h1>
+        <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'Mokykla')}</p>
+      </div>
+      <div class="body">
+        <p class="greeting">Sveiki, ${esc(d.parentName || d.studentName || '')},</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          ${esc(d.schoolName || 'Mokykla')} parengė nuotolinių papildomų pamokų sutartį mokiniui
+          <strong>${esc(d.studentName)}</strong>. Atidarykite nuorodą, peržiūrėkite dokumentą ir, jei viskas tinka, patvirtinkite sutartį.
+        </p>
+        ${rows ? `<div class="info-card"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${rows}</table></div>` : ''}
+        ${acceptUrl ? `<div style="text-align:center; margin:24px 0 10px;">${outlookEmailButton(acceptUrl, 'Peržiūrėti ir patvirtinti sutartį', '#059669', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}</div>` : ''}
+        ${contact ? `<p style="color:#6b7280; font-size:13px;">Jei turite klausimų, susisiekite su mokykla: ${esc(contact)}.</p>` : ''}
+      </div>${footerFor(locale)}`, locale),
+  };
+}
+
+function schoolContractExtraAccepted(d: any, locale: Locale) {
+  return {
+    subject: `Sutartis sudaryta${d.contractNumber ? ` Nr. ${d.contractNumber}` : ''} — ${d.studentName || 'Mokinys'}`,
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#059669', '#047857')}">
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Sutartis sudaryta</h1>
+        <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'Mokykla')}</p>
+      </div>
+      <div class="body">
+        <p class="greeting">Sveiki, ${esc(d.parentName || d.studentName || '')},</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          Jūsų sutartis sudaryta. Galutinė PDF kopija pridėta prie šio laiško — tai ta pati redakcija, kurią patvirtinote.
+        </p>
+        <div class="info-card">
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            ${td('Sutarties Nr.', esc(d.contractNumber || '—'))}
+            ${td('Sudarymo data', esc(d.acceptedAt || '—'))}
+            ${td('Dokumento SHA-256', esc(d.sha256 || '—'))}
+          </table>
+        </div>
+      </div>${footerFor(locale)}`, locale),
+  };
+}
+
+function schoolContractExtraWithdrawn(d: any, locale: Locale) {
+  return {
+    subject: `Sutarties atsisakymas${d.contractNumber ? ` Nr. ${d.contractNumber}` : ''} — ${d.studentName || 'Mokinys'}`,
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#b45309', '#92400e')}">
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Sutarties atsisakymas</h1>
+        <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'Mokykla')}</p>
+      </div>
+      <div class="body">
+        <p class="greeting">Sveiki, ${esc(d.parentName || d.studentName || '')},</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          Gavome jūsų atsisakymą nuo papildomų pamokų sutarties per 14 dienų terminą. Pareiškimo kopija pridėta.
+          Mokytojo atskirai informuoti nereikia.
+        </p>
+        <div class="info-card">
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            ${td('Sutarties Nr.', esc(d.contractNumber || '—'))}
+            ${td('Registravimo data', esc(d.at || '—'))}
+          </table>
+        </div>
+      </div>${footerFor(locale)}`, locale),
+  };
+}
+
+function schoolContractExtraTerminated(d: any, locale: Locale) {
+  return {
+    subject: `Sutarties nutraukimas${d.contractNumber ? ` Nr. ${d.contractNumber}` : ''} — ${d.studentName || 'Mokinys'}`,
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#4b5563', '#374151')}">
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Sutarties nutraukimas</h1>
+        <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'Mokykla')}</p>
+      </div>
+      <div class="body">
+        <p class="greeting">Sveiki, ${esc(d.parentName || d.studentName || '')},</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          Gavome prašymą nutraukti papildomų pamokų sutartį. Pareiškimo kopija pridėta.
+          Mokytojo atskirai informuoti nereikia.
+        </p>
+        <div class="info-card">
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            ${td('Sutarties Nr.', esc(d.contractNumber || '—'))}
+            ${td('Registravimo data', esc(d.at || '—'))}
+          </table>
+        </div>
+      </div>${footerFor(locale)}`, locale),
+  };
+}
+
 function schoolContractFeeDue(d: any, locale: Locale) {
   const appUrl = getAppUrl();
   const amountEur = Number(d.amount || 50);
@@ -2703,6 +2898,9 @@ const USER_TRIGGERABLE_EMAIL_TYPES = new Set([
   'school_installment_request',
   'school_contract_sign_request',
   'school_contract_fully_signed',
+  'school_teacher_contract_sign_request',
+  'school_teacher_contract_fully_signed',
+  'school_contract_extra_offer',
 ]);
 
 async function getAuthenticatedUserId(req: VercelRequest): Promise<string | null> {
@@ -2814,6 +3012,7 @@ async function resolveOrganizationIdFromAuthBearer(req: VercelRequest): Promise<
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  suppressTutlioEmailUnsub = false;
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -2872,6 +3071,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       (typeof rawData?.organization_id === 'string' && rawData.organization_id.trim()) ||
       null;
     const orgIdForBrandingLookup = orgIdFromPayload || (await resolveOrganizationIdFromAuthBearer(req));
+
+    if (type === 'invite_email') {
+      const toEmail = Array.isArray(to) ? String(to[0] || '') : String(to || '');
+      const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+      if (supabaseUrl && serviceKey && toEmail) {
+        const inviteSb = createClient(supabaseUrl, serviceKey, supabaseServiceRoleClientOptions() as any);
+        if (await studentRegistrationAlreadyActive(inviteSb, { email: toEmail })) {
+          return res.status(200).json({ success: true, skipped: true, reason: 'already_registered' });
+        }
+      }
+    }
 
     function tutorStudentAssigned(d: any, locale: Locale) {
       const copy = TUTOR_NOTIFICATION_COPY[locale];
@@ -3045,6 +3256,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             if (resolved.isProKlase) (data as any).isProKlase = true;
             if (resolved.emailTeamSignature) (data as any).emailTeamSignature = resolved.emailTeamSignature;
             if (resolved.emailSenderName) (data as any).emailSenderName = resolved.emailSenderName;
+            if (resolved.emailContactPhone) (data as any).emailContactPhone = resolved.emailContactPhone;
+            if (resolved.emailContactEmail) (data as any).emailContactEmail = resolved.emailContactEmail;
+            if (resolved.emailFooterPoweredBy) (data as any).emailFooterPoweredBy = true;
+            if (resolved.emailContactPhone || resolved.emailContactEmail || resolved.emailFooterPoweredBy) {
+              suppressTutlioEmailUnsub = true;
+            }
           }
         }
       } catch {}
@@ -3066,7 +3283,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         branding: orgBranding,
         emailTeamSignature: (data as any).emailTeamSignature,
         locale,
+        emailContactPhone: (data as any).emailContactPhone,
+        emailContactEmail: (data as any).emailContactEmail,
+        emailFooterPoweredBy: (data as any).emailFooterPoweredBy === true,
       });
+      if (suppressTutlioEmailUnsub) {
+        html = html.replace(/<p\b[^>]*>[\s\S]*?info@tutlio\.lt[\s\S]*?<\/p>/gi, '');
+      }
       if (orgBranding) {
         // Legacy templates sometimes use indigo text without the shared helper's full set.
         html = html.replaceAll('color:#6366f1;', `color:${orgBranding.brand_color};`);
@@ -3098,6 +3321,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'invite_email': emailContent = inviteEmail(data, locale); break;
       case 'recurring_booking_confirmation': emailContent = recurringBookingConfirmation(data, locale); break;
       case 'tutor_invite': emailContent = tutorInvite(data, locale); break;
+      case 'mokslo_vaisiai_student_archive': emailContent = moksloVaisiaiStudentArchiveRequest(data, locale); break;
       case 'lesson_rescheduled': emailContent = lessonRescheduled(data, locale); break;
       case 'waitlist_added': emailContent = waitlistAdded(data, locale); break;
       case 'waitlist_matched_student': emailContent = waitlistMatchedStudent(data, locale); break;
@@ -3116,6 +3340,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'lesson_confirmed_tutor': emailContent = lessonConfirmedTutor(data, locale); break;
       case 'school_contract_sign_request': emailContent = schoolContractSignRequest(data, locale); break;
       case 'school_contract_fully_signed': emailContent = schoolContractFullySigned(data, locale); break;
+      case 'school_teacher_contract_sign_request': emailContent = schoolTeacherContractSignRequest(data, locale); break;
+      case 'school_teacher_contract_fully_signed': emailContent = schoolTeacherContractFullySigned(data, locale); break;
       case 'school_contract_completion_admin': emailContent = schoolContractCompletionAdmin(data, locale); break;
       case 'school_contract_parent_signed_admin': emailContent = schoolContractParentSignedAdmin(data, locale); break;
       case 'payment_received_tutor': emailContent = paymentReceivedTutor(data, locale); break;
@@ -3139,6 +3365,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'product_update_whiteboard_parent': emailContent = productUpdateWhiteboardParent(data, locale); break;
       case 'custom_html_announcement': emailContent = customHtmlAnnouncement(data, locale); break;
       case 'school_contract': emailContent = schoolContract(data, locale); break;
+      case 'school_contract_extra_offer': emailContent = schoolContractExtraOffer(data, locale); break;
+      case 'school_contract_extra_accepted': emailContent = schoolContractExtraAccepted(data, locale); break;
+      case 'school_contract_extra_withdrawn': emailContent = schoolContractExtraWithdrawn(data, locale); break;
+      case 'school_contract_extra_terminated': emailContent = schoolContractExtraTerminated(data, locale); break;
       case 'school_contract_fee_due': emailContent = schoolContractFeeDue(data, locale); break;
       case 'school_installment_request': emailContent = schoolInstallmentRequest(data, locale); break;
       case 'tutor_student_assigned': emailContent = tutorStudentAssigned(data, locale); break;

@@ -87,6 +87,9 @@ function tableBuilder(table: string) {
     in: () => builder,
     eq: () => builder,
     order: () => builder,
+    limit: () => builder,
+    gte: () => builder,
+    lt: () => builder,
     maybeSingle: async () => ({ data: null, error: null }),
     then(resolve: (value: any) => unknown, reject: (reason: unknown) => unknown) {
       const result = table === 'sessions' && !updatePayload
@@ -177,6 +180,26 @@ describe('session reminder capacity behavior', () => {
         emailAttempts: SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT,
         emailAttemptLimit: SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT,
       },
+    });
+  });
+
+  it('falls back to a direct session scan when the due-queue RPC is missing', async () => {
+    mocks.rpc.mockImplementation(async () => ({
+      data: null,
+      error: {
+        code: 'PGRST202',
+        message: 'Could not find the function public.get_due_session_reminder_ids(p_limit) in the schema cache',
+      },
+    }));
+    mocks.sessions.push(futureSession());
+    vi.stubGlobal('fetch', vi.fn(async () => emailResponse(true)));
+
+    const response = mockRes();
+    await handler(mockReq(), response);
+
+    expect(response.getResult()).toMatchObject({
+      statusCode: 200,
+      body: { sent: 2, emailAttempts: 2 },
     });
   });
 });

@@ -82,7 +82,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .select('*')
     .eq('token', token)
     .maybeSingle();
-  if (!rowRaw || !String(rowRaw.role).startsWith('parent')) return json(res, 404, { error: 'Invalid link' });
+  const signerRole = String(rowRaw?.role || '');
+  if (!rowRaw || (!signerRole.startsWith('parent') && signerRole !== 'teacher')) {
+    return json(res, 404, { error: 'Invalid link' });
+  }
 
   const { data: contract } = await supabase
     .from('school_contracts')
@@ -105,7 +108,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return json(res, 410, { error: 'Nuoroda nebegalioja. Kreipkitės į mokyklą dėl naujos.' });
   }
   if (!ready) {
-    return json(res, 409, { error: 'Sutartis šiuo metu neparuošta tėvų parašui.' });
+    return json(res, 409, { error: 'Sutartis šiuo metu neparuošta kitam parašui.' });
   }
 
   const rows = await fetchSignatureRows(supabase, String((contract as any).id));

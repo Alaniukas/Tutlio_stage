@@ -5,45 +5,42 @@ import { useTranslation } from '@/lib/i18n';
 import PwaInstallGuide from '@/components/PwaInstallGuide';
 import { getCached } from '@/lib/dataCache';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
-import { isInstructionsHiddenForOrg } from '@/lib/marketMoney';
+import { isInstructionsHiddenForOrg, orgInstructionVideoUrl } from '@/lib/marketMoney';
+import {
+  COMPANY_INSTRUCTION_PAGES,
+  SCHOOL_INSTRUCTION_PAGES,
+} from '@/lib/schoolInstructionsContent';
 
 export default function CompanyInstructions() {
   const { t } = useTranslation();
   const location = useLocation();
   const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
-  const { organizationId, loading } = useOrgFeatures();
+  const { organizationId, loading, entityType } = useOrgFeatures();
   const cachedOrgId =
     getCached<{ organizationId?: string }>('company_dashboard')?.organizationId ?? null;
-  const hideInstructions =
-    loading ||
+  const instructionsHidden =
     isInstructionsHiddenForOrg(organizationId) ||
     isInstructionsHiddenForOrg(cachedOrgId);
 
-  if (hideInstructions) {
+  // Do not redirect while org features are still loading — that unmounts the page
+  // before organizationId resolves and bounces the user back to the dashboard.
+  if (!loading && instructionsHidden) {
     return <Navigate to={orgBasePath} replace />;
   }
 
-  const videoUrl = 'https://www.youtube.com/embed/FSOmO86hiQE';
-
-  const pages = [
-    { key: 'companyNav.overview', bullets: ['companyInstr.pageOverviewB1', 'companyInstr.pageOverviewB2', 'companyInstr.pageOverviewB3'] },
-    { key: 'companyNav.tutors', bullets: ['companyInstr.pageTutorsB1', 'companyInstr.pageTutorsB2', 'companyInstr.pageTutorsB3'] },
-    { key: 'companyNav.students', bullets: ['companyInstr.pageStudentsB1', 'companyInstr.pageStudentsB2', 'companyInstr.pageStudentsB3', 'companyInstr.pageStudentsB4'] },
-    { key: 'companyNav.sessions', bullets: ['companyInstr.pageSessionsB1', 'companyInstr.pageSessionsB2', 'companyInstr.pageSessionsB3', 'companyInstr.pageSessionsB4'] },
-    { key: 'companyNav.schedule', bullets: ['companyInstr.pageScheduleB1', 'companyInstr.pageScheduleB2', 'companyInstr.pageScheduleB3', 'companyInstr.pageScheduleB4'] },
-    { key: 'companyNav.messages', bullets: ['companyInstr.pageMessagesB1', 'companyInstr.pageMessagesB2', 'companyInstr.pageMessagesB3'] },
-    { key: 'companyNav.stats', bullets: ['companyInstr.pageStatsB1', 'companyInstr.pageStatsB2', 'companyInstr.pageStatsB3'] },
-    { key: 'companyNav.lessonSettings', bullets: ['companyInstr.pageSettingsB1', 'companyInstr.pageSettingsB2', 'companyInstr.pageSettingsB3'] },
-    { key: 'companyNav.finance', bullets: ['companyInstr.pageFinanceB1', 'companyInstr.pageFinanceB2', 'companyInstr.pageFinanceB3'] },
-    { key: 'companyNav.invoices', bullets: ['companyInstr.pageInvoicesB1', 'companyInstr.pageInvoicesB2', 'companyInstr.pageInvoicesB3'] },
-  ] as const;
+  const videoUrl = orgInstructionVideoUrl(organizationId ?? cachedOrgId);
+  const isSchoolView = entityType === 'school' || orgBasePath === '/school';
+  const pages = isSchoolView ? SCHOOL_INSTRUCTION_PAGES : COMPANY_INSTRUCTION_PAGES;
+  const titleKey = isSchoolView ? 'schoolInstr.title' : 'companyInstr.title';
+  const subtitleKey = isSchoolView ? 'schoolInstr.subtitle' : 'companyInstr.subtitle';
+  const overviewDescKey = isSchoolView ? 'schoolInstr.overviewDesc' : 'companyInstr.overviewDesc';
 
   return (
     <>
       <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-6">
         <div className="text-center space-y-2">
-          <h1 className="text-3xl font-bold text-gray-900">{t('companyInstr.title')}</h1>
-          <p className="text-gray-600">{t('companyInstr.subtitle')}</p>
+          <h1 className="text-3xl font-bold text-gray-900">{t(titleKey)}</h1>
+          <p className="text-gray-600">{t(subtitleKey)}</p>
         </div>
 
         <Card className="border-2 border-indigo-200 bg-gradient-to-br from-indigo-50/50 to-white">
@@ -52,7 +49,7 @@ export default function CompanyInstructions() {
               <Play className="w-6 h-6 text-indigo-600" />
               {t('companyInstr.overviewTitle')}
             </CardTitle>
-            <p className="text-sm text-gray-600 mt-2">{t('companyInstr.overviewDesc')}</p>
+            <p className="text-sm text-gray-600 mt-2">{t(overviewDescKey)}</p>
           </CardHeader>
           <CardContent>
             <div className="aspect-video w-full rounded-xl overflow-hidden bg-gray-100">

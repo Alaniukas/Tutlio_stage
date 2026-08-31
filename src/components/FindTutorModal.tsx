@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import { format, addDays } from 'date-fns';
 import {
   computeTutorSlots,
+  dedupeMatchSlots,
   groupAndRankTutors,
   subtractBusyFromMatchSlots,
   type AvailabilityRule,
@@ -33,8 +34,8 @@ interface FindTutorModalProps {
   orgId: string | null;
   /** Paspaudus rezultatą – uždaryti paiešką ir atidaryti užsakymą (pvz. org tvarkaraštyje) */
   onPickSlot?: (slot: TutorSlotPick, context?: FindTutorPickContext) => void;
-  /** Student creation flow: select the matching tutor without booking a lesson yet. */
-  onPickTutor?: (tutor: { id: string; name: string }) => void;
+  /** Student creation flow: select the matching tutor and the availability window. */
+  onPickTutor?: (tutor: { id: string; name: string }, slot: TutorSlotPick) => void;
   /** When opened from a student context, this tutor is ranked first. */
   primaryTutorId?: string | null;
   /** Enables the lessons-per-week frequency search + ranked grouping (org feature flag). */
@@ -172,8 +173,13 @@ export default function FindTutorModal({
 
       const tutorIds = tutorList.map((t: any) => t.id);
       if (tutorIds.length === 0) return;
-      const { data: subjectsData } = await supabase.from('subjects').select('id, name, price, duration_minutes, tutor_id').in('tutor_id', tutorIds).order('name');
-      setSubjects((subjectsData as MatchSubject[]) || []);
+      const { data: subjectsData } = await supabase
+        .from('subjects')
+        .select('id, name, price, duration_minutes, tutor_id, is_trial')
+        .in('tutor_id', tutorIds)
+        .order('name');
+      const rows = ((subjectsData as MatchSubject[]) || []).filter((row) => row.is_trial !== true);
+      setSubjects(rows);
     })();
   }, [isOpen, orgId]);
 
@@ -281,7 +287,9 @@ export default function FindTutorModal({
       }
     }
 
-    setResults(Array.from(slotsByKey.values()).sort((a, b) => a.start.getTime() - b.start.getTime()));
+    setResults(
+      dedupeMatchSlots(Array.from(slotsByKey.values())).sort((a, b) => a.start.getTime() - b.start.getTime()),
+    );
     setLoading(false);
   };
 
@@ -302,7 +310,7 @@ export default function FindTutorModal({
         const pickContext: FindTutorPickContext | undefined =
           orgAdminMode && filterStudentId !== '__all__' ? { studentId: filterStudentId } : undefined;
         if (onPickSlot) onPickSlot(slot, pickContext);
-        else if (onPickTutor) onPickTutor({ id: slot.tutorId, name: slot.tutorName });
+        else if (onPickTutor) onPickTutor({ id: slot.tutorId, name: slot.tutorName }, slot);
       }}
       className={cn(
         'w-full flex items-center justify-between p-3 border border-gray-200 rounded-xl text-left transition-colors',

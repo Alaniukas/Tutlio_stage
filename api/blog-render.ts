@@ -20,6 +20,8 @@ import {
   renderAboutTutlioHtml,
   renderRelatedPostsHtml,
 } from './_lib/blogRelatedLinks.js';
+import { extractBlogFaqs, blogFaqJsonLd } from './_lib/blogFaq.js';
+import { BLOG_AUTHOR_NAME, blogAuthorJsonLd } from '../src/lib/blogAuthor.js';
 
 const LOCALES = seoLocalesForPath('/blog');
 
@@ -236,7 +238,7 @@ function shell(opts: BlogShellOpts): string {
     ? [
         `<meta property="article:published_time" content="${esc(publishedTime)}" />`,
         modifiedTime ? `<meta property="article:modified_time" content="${esc(modifiedTime)}" />` : '',
-        `<meta property="article:author" content="Tutlio" />`,
+        `<meta property="article:author" content="${esc(BLOG_AUTHOR_NAME)}" />`,
         tag ? `<meta property="article:section" content="${esc(tag)}" />` : '',
       ].filter(Boolean).join('\n')
     : '';
@@ -369,9 +371,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const image = (post.cover_image as string) || '';
     const tag = localizedTag(post.tag, locale);
 
-    const LANG_MAP = Object.fromEntries(Object.keys(LOCALE_FORMAT_TAGS).map((key) => [key, hreflangCode(key as Locale)]));
-    const articleJsonLd = jsonLd({
-      '@context': 'https://schema.org',
+    const LANG_MAP = Object.fromEntries(
+      Object.keys(LOCALE_FORMAT_TAGS).map((key) => [key, hreflangCode(key as Locale)]),
+    ) as Record<Locale, string>;
+    const articleDoc = {
       '@type': 'BlogPosting',
       headline: title,
       description: excerpt,
@@ -379,14 +382,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       datePublished: post.published_at,
       dateModified: post.updated_at || post.published_at,
       inLanguage: LANG_MAP[locale],
-      author: { '@type': 'Organization', name: 'Tutlio' },
+      author: blogAuthorJsonLd(locale),
       publisher: { '@type': 'Organization', '@id': 'https://www.tutlio.com/#organization', name: 'Tutlio', url: new URL(url).origin, logo: { '@type': 'ImageObject', '@id': 'https://www.tutlio.com/#logo', url: 'https://www.tutlio.com/pwa-512x512.png' } },
       url,
       articleSection: tag || undefined,
       isAccessibleForFree: true,
       wordCount: content.trim() ? content.trim().split(/\s+/).length : undefined,
       mainEntityOfPage: { '@type': 'WebPage', '@id': url },
-    });
+    };
+    const faqDoc = blogFaqJsonLd(extractBlogFaqs(content));
+    const articleJsonLd = jsonLd(
+      faqDoc
+        ? { '@context': 'https://schema.org', '@graph': [articleDoc, { '@type': faqDoc['@type'], mainEntity: faqDoc.mainEntity }] }
+        : { '@context': 'https://schema.org', ...articleDoc },
+    );
 
     const relatedRows = await fetchRelatedBlogPosts(supabase, {
       tag: (post.tag as string) || undefined,
@@ -406,7 +415,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 <div class="hero">
   ${image ? `<img class="cover" src="${esc(safeUrl(image))}" alt="${esc(title)}" />` : ''}
   <h1>${esc(title)}</h1>
-  <div class="meta">${tag ? `<span class="tag">${esc(tag)}</span>` : ''}Tutlio${date ? ` · ${date}` : ''}</div>
+  <div class="meta">${tag ? `<span class="tag">${esc(tag)}</span>` : ''}${esc(BLOG_AUTHOR_NAME)}${date ? ` · ${date}` : ''}</div>
 </div>
 <article class="content">
   ${mdToHtml(content)}

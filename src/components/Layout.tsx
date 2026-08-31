@@ -32,6 +32,7 @@ import { useTotalChatUnread } from '@/hooks/useChat';
 import { usePushSubscription } from '@/hooks/usePushSubscription';
 import { isWaitlistHiddenForOrg, isInstructionsHiddenForOrg } from '@/lib/marketMoney';
 import { useHideWaitlist } from '@/hooks/useHideWaitlist';
+import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -46,6 +47,7 @@ export default function Layout({ children }: LayoutProps) {
   const { hideWaitlist: hideWaitlistFromFeatures } = useHideWaitlist({
     failClosedWhileLoading: isOrgTutor,
   });
+  const { hasFeature } = useOrgFeatures();
   const chatUnreadTotal = useTotalChatUnread();
   usePushSubscription();
   const [tutorName, setTutorName] = useState('');
@@ -67,6 +69,7 @@ export default function Layout({ children }: LayoutProps) {
     const items = [
       { href: '/dashboard', label: t('nav.dashboard'), icon: LayoutDashboard },
       { href: '/calendar', label: t('nav.calendar'), icon: Calendar },
+      { href: '/groups', label: t('companyNav.groups'), icon: Users, feature: 'school_class_groups' as const },
       { href: '/students', label: t('nav.students'), icon: Users },
       { href: '/waitlist', label: t('nav.waitlist'), icon: ListOrdered, highlight: true },
       { href: '/messages', label: t('nav.messages'), icon: MessageSquare },
@@ -83,9 +86,10 @@ export default function Layout({ children }: LayoutProps) {
       if (isOrgTutor && (item.href === '/invoices' || item.href === '/landing-editor')) return false;
       if (hideWaitlist && item.href === '/waitlist') return false;
       if (hideInstructions && item.href === '/instructions') return false;
+      if ('feature' in item && item.feature && !hasFeature(item.feature)) return false;
       return true;
     });
-  }, [isOrgTutor, t, profile?.organization_id, profileOrgId, hideWaitlistFromFeatures]);
+  }, [isOrgTutor, t, profile?.organization_id, profileOrgId, hideWaitlistFromFeatures, hasFeature]);
 
   useEffect(() => {
     void preloadTutorData();

@@ -37,7 +37,7 @@ export default function AdminBlogAutoPanel({ adminSecret }: { adminSecret: strin
   const [success, setSuccess] = useState('');
   const [settings, setSettings] = useState<BlogAutoSettings>({
     enabled: false,
-    interval_days: 1,
+    interval_days: 3,
     last_run_at: null,
     auto_publish: true,
     notify_on_draft: false,
@@ -59,7 +59,7 @@ export default function AdminBlogAutoPanel({ adminSecret }: { adminSecret: strin
       if (data.settings) {
         setSettings({
           enabled: !!data.settings.enabled,
-          interval_days: Number(data.settings.interval_days) || 1,
+          interval_days: Number(data.settings.interval_days) || 3,
           last_run_at: data.settings.last_run_at || null,
           auto_publish: data.settings.auto_publish !== false,
           notify_on_draft: !!data.settings.notify_on_draft,
@@ -92,7 +92,7 @@ export default function AdminBlogAutoPanel({ adminSecret }: { adminSecret: strin
       if (data.settings) {
         setSettings({
           enabled: !!data.settings.enabled,
-          interval_days: Number(data.settings.interval_days) || 1,
+          interval_days: Number(data.settings.interval_days) || 3,
           last_run_at: data.settings.last_run_at || null,
           auto_publish: data.settings.auto_publish !== false,
           notify_on_draft: !!data.settings.notify_on_draft,
@@ -234,6 +234,10 @@ export default function AdminBlogAutoPanel({ adminSecret }: { adminSecret: strin
             />
             <span className="text-sm text-slate-200">Auto-publish (be el. laiško)</span>
           </label>
+          <p className="text-[11px] text-slate-500 max-w-xl">
+            Nauji straipsniai: antradienis ir penktadienis 05:00 UTC (kasdienis cron tęsia nebaigtas kalbas).
+            Intervalas — apsauga, kad per savaitę neprasidėtų trečias.
+          </p>
           <label className="flex items-center gap-2 cursor-pointer" title="Tik kai auto-publish išjungtas">
             <input
               type="checkbox"

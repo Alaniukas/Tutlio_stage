@@ -3,6 +3,7 @@
 // finalized explicitly via /api/confirm-session-status.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { isProKlaseOrg } from './marketMoney.js';
 
 export type SessionForCompletion = {
   id: string;
@@ -24,7 +25,8 @@ export async function orgsRequiringStatusConfirmation(
     .select('id, features')
     .in('id', unique);
   for (const org of (orgs ?? []) as Array<{ id: string; features?: Record<string, unknown> | null }>) {
-    if (org.features && (org.features as Record<string, unknown>).tutor_lesson_status_confirmation === true) {
+    const features = (org.features || {}) as Record<string, unknown>;
+    if (isProKlaseOrg(org.id) || features.tutor_lesson_status_confirmation === true) {
       flagged.add(org.id);
     }
   }
@@ -58,7 +60,7 @@ export async function partitionByStatusConfirmation<T extends SessionForCompleti
   const awaitingConfirmation: T[] = [];
   for (const s of sessions) {
     const orgId = s.tutor_id ? orgByTutor.get(s.tutor_id) : null;
-    if (orgId && flaggedOrgs.has(orgId)) awaitingConfirmation.push(s);
+    if ((orgId && flaggedOrgs.has(orgId)) || isProKlaseOrg(orgId)) awaitingConfirmation.push(s);
     else autoCompletable.push(s);
   }
   return { autoCompletable, awaitingConfirmation };

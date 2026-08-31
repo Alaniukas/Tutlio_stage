@@ -67,12 +67,17 @@ async function main() {
   const features = {
     custom_branding: true,
     hide_powered_by: true,
+    email_footer_powered_by: true,
     pvm_education_invoice: true,
     per_student_payment_override: true,
     org_admin_calendar_view: true,
-    public_name: 'Mano korepetitorius',
+    public_name: 'Mano Korepetitorius',
     contact_email: ADMIN_EMAIL,
-    email_sender_name: 'Mano korepetitorius',
+    contact_phone: '+370 643 32675',
+    email_team_signature: 'Mano Korepetitoriaus komanda',
+    email_sender_name: 'Mano Korepetitorius sistema',
+    login_description:
+      'Kokybiškos individualios pamokos ir dėmesys kiekvienam mokiniui. Patyrę korepetitoriai, aiškus mokymosi planas ir nuolatinis ryšys su tėvais — gyvai Vilniuje ir nuotoliu visoje Lietuvoje.',
   };
 
   const { error: orgErr } = await sb.from('organizations').upsert(
@@ -90,6 +95,8 @@ async function main() {
       enable_monthly_billing: false,
       tutor_limit: 9999,
       tutor_license_count: 5,
+      brand_color: '#5C2D91',
+      brand_color_secondary: '#D21E56',
       features,
     },
     { onConflict: 'id' },
@@ -161,6 +168,7 @@ async function main() {
     vat_code: 'LT100018853316',
     address: 'Žirmūnų g. 100-63, Vilnius',
     contact_email: ADMIN_EMAIL,
+    contact_phone: '+370 643 32675',
     invoice_series: 'MK',
     bank_name: 'Luminor bank AS',
     iban: 'LT574010051005439130',

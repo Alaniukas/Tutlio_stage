@@ -203,6 +203,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let useSchoolOrgAbsorbedFees = false;
         let feeProfile: OrgFeeProfile | null = null;
         let orgFeatures: Record<string, unknown> | null = null;
+        let orgEntityType: string | null = null;
 
         if (tutor.organization_id) {
             const { data: org } = await supabase
@@ -217,6 +218,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             stripeAccountId = org.stripe_account_id;
             ownerName = org.name || ownerName;
             orgFeatures = (org as { features?: Record<string, unknown> | null }).features ?? null;
+            orgEntityType = org.entity_type ?? null;
             feeProfile = orgFeeProfile((org as { slug?: string | null }).slug) ?? orgFeeProfile(tutor.organization_id);
             // A custom org fee profile is always charged on top (payer pays the fee), even for schools.
             useSchoolOrgAbsorbedFees = org.entity_type === 'school' && !feeProfile;
@@ -315,7 +317,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // 5c. Reservation flow (req 3+5): when the org has it on and the admin
         // pre-booked times, hold the slots now (reserved) and move credits
         // available->reserved. Unpaid holds auto-release via the cron.
-        if (isPackageReservationFlowEnabled(orgFeatures) && Array.isArray(body.slots) && body.slots.length > 0) {
+        if (isPackageReservationFlowEnabled(orgFeatures, tutor.organization_id, orgEntityType) && Array.isArray(body.slots) && body.slots.length > 0) {
             const reserveResult = await reservePackageSlots(supabase, {
                 tutorId,
                 studentId,

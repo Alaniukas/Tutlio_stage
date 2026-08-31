@@ -22,9 +22,11 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import { peekCachedAuthUser, rememberAuthUser } from '@/lib/authSession';
 import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
 import { supabase } from '@/lib/supabase';
 import type { SupportWidgetCopyKey } from '@/lib/i18n/supportCopyKeys';
+import { shouldHidePublicSupportWidget } from '@/lib/supportWidgetVisibility';
 import {
   SUPPORT_PAGE_SUGGESTIONS,
   parseSupportPageIds,
@@ -148,9 +150,18 @@ function restoreMessages(): ChatMessage[] {
   }
 }
 
+function initialAuthGate(): { authReady: boolean; isSignedIn: boolean } {
+  const cached = peekCachedAuthUser();
+  if (cached === undefined) return { authReady: false, isSignedIn: false };
+  return { authReady: true, isSignedIn: Boolean(cached) };
+}
+
 export default function SupportWidget() {
   const location = useLocation();
   const { locale, t } = useTranslation();
+  const initialAuth = initialAuthGate();
+  const [authReady, setAuthReady] = useState(initialAuth.authReady);
+  const [isSignedIn, setIsSignedIn] = useState(initialAuth.isSignedIn);
   const [open, setOpen] = useState(false);
   const [contactOpen, setContactOpen] = useState(false);
   const [showNudge, setShowNudge] = useState(false);
@@ -179,7 +190,11 @@ export default function SupportWidget() {
 
   const page = `${location.pathname}${location.search}`;
   const welcomeText = copy('support.widget.welcome');
-  const hideWidget = location.pathname.includes('/embed/') || location.pathname.startsWith('/preview/');
+  const hideWidget = shouldHidePublicSupportWidget({
+    authReady,
+    isSignedIn,
+    pathname: location.pathname,
+  });
   const suggestions = useMemo(() => [
     copy('support.widget.suggestion1'),
     copy('support.widget.suggestion2'),
@@ -197,6 +212,62 @@ export default function SupportWidget() {
   }, [messages]);
 
   useEffect(() => {
+    let cancelled = false;
+    const cached = peekCachedAuthUser();
+    if (cached !== undefined) {
+      setAuthReady(true);
+      setIsSignedIn(Boolean(cached));
+    }
+
+    void supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (cancelled) return;
+        const user = data.session?.user ?? null;
+        rememberAuthUser(user);
+        setIsSignedIn(Boolean(user));
+        setAuthReady(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        if (peekCachedAuthUser() === undefined) {
+          setIsSignedIn(false);
+          setAuthReady(true);
+        }
+      });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        rememberAuthUser(null);
+        setIsSignedIn(false);
+        setAuthReady(true);
+        return;
+      }
+      const user = session?.user ?? null;
+      if (user) {
+        rememberAuthUser(user);
+        setIsSignedIn(true);
+        setAuthReady(true);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isSignedIn) return;
+    abortRef.current?.abort();
+    setOpen(false);
+    setShowNudge(false);
+    setContactOpen(false);
+    setCloseConfirmOpen(false);
+  }, [isSignedIn]);
+
+  useEffect(() => {
+    if (hideWidget) return;
     const timer = window.setTimeout(() => {
       try {
         if (!sessionStorage.getItem(NUDGE_KEY) && !open) setShowNudge(true);
@@ -205,7 +276,7 @@ export default function SupportWidget() {
       }
     }, 7_000);
     return () => window.clearTimeout(timer);
-  }, [open]);
+  }, [open, hideWidget]);
 
   useEffect(() => {
     if (!open) return;

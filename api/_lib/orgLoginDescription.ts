@@ -1,4 +1,4 @@
-import { isProKlaseOrg } from './marketMoney.js';
+import { isManoKorepetitoriusOrg, isMoksloVaisiaiOrg, isProKlaseOrg } from './marketMoney.js';
 
 export function resolveOrgLoginDescription(opts: {
   slug?: string | null;
@@ -12,6 +12,16 @@ export function resolveOrgLoginDescription(opts: {
     return opts.locale === 'en'
       ? 'We learn at your pace. Individual online lessons for grades 1–12 — selected tutors, a clear plan, and measurable progress.'
       : 'Mokomės tavo ritmu. Individualios online pamokos 1–12 klasei — atrinkti korepetitoriai, aiškus planas ir matuojama pažanga.';
+  }
+  if (isManoKorepetitoriusOrg(opts.orgId) || isManoKorepetitoriusOrg(opts.slug)) {
+    return opts.locale === 'en'
+      ? 'Quality individual lessons and attention for every student. Experienced tutors, a clear learning plan, and ongoing communication with parents — in person in Vilnius and online across Lithuania.'
+      : 'Kokybiškos individualios pamokos ir dėmesys kiekvienam mokiniui. Patyrę korepetitoriai, aiškus mokymosi planas ir nuolatinis ryšys su tėvais — gyvai Vilniuje ir nuotoliu visoje Lietuvoje.';
+  }
+  if (isMoksloVaisiaiOrg(opts.orgId) || isMoksloVaisiaiOrg(opts.slug)) {
+    return opts.locale === 'en'
+      ? 'Professional online tutors. Individual attention for every student, experienced teachers, and a clear learning plan.'
+      : 'Profesionalūs korepetitoriai nuotoliu. Individualus dėmesys kiekvienam mokiniui, patyrę mokytojai ir aiškus mokymosi planas.';
   }
   return '';
 }

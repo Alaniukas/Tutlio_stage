@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
+import { BLOG_AUTHOR_NAME, blogAuthorRole } from '@/lib/blogAuthor';
 import { buildLocalizedPath } from '@/lib/i18n';
 import type { BlogTocItem } from '@/lib/blogToc';
 
@@ -103,15 +104,15 @@ export function BlogHeroCover({ src, alt, title }: { src: string; alt: string; t
 }
 
 export function BlogAuthorRow() {
-  const { t } = useTranslation();
+  const { locale } = useTranslation();
   return (
     <div className="flex items-center gap-3 mb-8 pb-8 border-b border-gray-100">
       <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-600 text-white font-bold text-sm">
-        T
+        EN
       </div>
       <div>
-        <p className="text-sm font-semibold text-gray-900">{t('blog.authorName')}</p>
-        <p className="text-xs text-gray-500">{t('blog.authorRole')}</p>
+        <p className="text-sm font-semibold text-gray-900">{BLOG_AUTHOR_NAME}</p>
+        <p className="text-xs text-gray-500">{blogAuthorRole(locale)}</p>
       </div>
     </div>
   );

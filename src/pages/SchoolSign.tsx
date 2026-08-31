@@ -14,6 +14,7 @@ type Info = {
   expired?: boolean;
   ready?: boolean;
   pdfUrl?: string;
+  partyKind?: 'student' | 'teacher';
 };
 
 export default function SchoolSign() {
@@ -29,6 +30,7 @@ export default function SchoolSign() {
   const [uploadErr, setUploadErr] = useState('');
   const [uploadedDone, setUploadedDone] = useState(false);
   const [uploadedWarning, setUploadedWarning] = useState(false);
+  const isTeacherContract = info.partyKind === 'teacher';
 
   useEffect(() => {
     if (!token) {
@@ -175,10 +177,12 @@ export default function SchoolSign() {
 
       {state === 'ready' && (
         <>
-          <h1 className="text-xl font-bold text-gray-900 mb-1">Ugdymo sutarties pasirašymas</h1>
+          <h1 className="text-xl font-bold text-gray-900 mb-1">
+            {isTeacherContract ? 'Mokytojo sutarties pasirašymas' : 'Ugdymo sutarties pasirašymas'}
+          </h1>
           <p className="text-gray-600 mb-4">
-            {info.schoolName || 'Mokykla'} pasirašė ugdymo sutartį
-            {info.studentName ? ` dėl ${info.studentName}` : ''}. Pasirinkite pasirašymo būdą.
+            {info.schoolName || 'Mokykla'} pasirašė {isTeacherContract ? 'sutartį su jumis' : 'ugdymo sutartį'}
+            {!isTeacherContract && info.studentName ? ` dėl ${info.studentName}` : ''}. Pasirinkite pasirašymo būdą.
           </p>
 
           <div className="border border-gray-200 rounded-xl p-4 mb-3">

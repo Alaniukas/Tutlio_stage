@@ -42,6 +42,37 @@ export const PRO_KLASE_ORG_ID = '3422031d-6e21-424d-980b-35a9c6d7b8f1';
 /** QA clone org — same Pro Klasė tutor cancel rules for testing. */
 export const PRO_KLASE_QA_ORG_ID = 'b0a00000-7e57-4000-8000-000000000001';
 
+/** Production MB Mano korepetitorius (slug `mb-mano-korepetitorius`). */
+export const MANO_KOREPETITORIUS_ORG_ID = '2c4e4c2a-4e12-44ca-b327-d605bbb0d50b';
+export const MANO_KOREPETITORIUS_SLUG = 'mb-mano-korepetitorius';
+
+/** Production VšĮ Laisvi vaikai (slug `laisvi-vaikai`). */
+export const LAISVI_VAIKIAI_ORG_ID = '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17';
+export const LAISVI_VAIKIAI_SLUG = 'laisvi-vaikai';
+
+/** QA Demo Mokykla (slug `demo-mokykla`). */
+export const DEMO_MOKYKLA_ORG_ID = 'c3a00000-7e57-4000-8000-000000000001';
+export const DEMO_MOKYKLA_SLUG = 'demo-mokykla';
+
+/** Production IĮ Mokslo vaisiai (slug `mokslovaisiai`). */
+export const MOKSLO_VAISIAI_ORG_ID = 'c1f36796-c281-4650-bed2-1bd6874764f1';
+export const MOKSLO_VAISIAI_SLUG = 'mokslovaisiai';
+export const MOKSLO_VAISIAI_ADMIN_EMAIL = 'info@mokslovaisiai.lt';
+export const MOKSLO_VAISIAI_BRAND_COLOR = '#124410';
+export const MOKSLO_VAISIAI_BRAND_COLOR_SECONDARY = '#5C2B02';
+
+export function isManoKorepetitoriusOrg(orgIdOrSlug?: string | null): boolean {
+  if (!orgIdOrSlug) return false;
+  const key = orgIdOrSlug.trim().toLowerCase();
+  return key === MANO_KOREPETITORIUS_ORG_ID || key === MANO_KOREPETITORIUS_SLUG;
+}
+
+export function isMoksloVaisiaiOrg(orgIdOrSlug?: string | null): boolean {
+  if (!orgIdOrSlug) return false;
+  const key = orgIdOrSlug.trim().toLowerCase();
+  return key === MOKSLO_VAISIAI_ORG_ID || key === MOKSLO_VAISIAI_SLUG;
+}
+
 /**
  * Stable fallback keyed by organization UUID. Org slugs are admin-editable and
  * can be cleared, so the canonical org id guarantees the deal keeps applying.
@@ -71,6 +102,26 @@ export function isWaitlistHiddenForOrg(orgIdOrSlug?: string | null): boolean {
 /** Pro Klasė never shows in-app instructions (admin / tutor / student). */
 export function isInstructionsHiddenForOrg(orgIdOrSlug?: string | null): boolean {
   return isProKlaseOrg(orgIdOrSlug);
+}
+
+const DEFAULT_ORG_INSTRUCTION_VIDEO_URL = 'https://www.youtube.com/embed/FSOmO86hiQE';
+
+/** School admin walkthrough — Google Drive preview embed. */
+export const SCHOOL_ADMIN_INSTRUCTION_VIDEO_URL =
+  'https://drive.google.com/file/d/18eVct4auRM9Xkxa37NDsVI0b7i0Iv9T7/preview';
+
+const ORG_INSTRUCTION_VIDEO_BY_KEY: Record<string, string> = {
+  [LAISVI_VAIKIAI_ORG_ID]: SCHOOL_ADMIN_INSTRUCTION_VIDEO_URL,
+  [LAISVI_VAIKIAI_SLUG]: SCHOOL_ADMIN_INSTRUCTION_VIDEO_URL,
+  [DEMO_MOKYKLA_ORG_ID]: SCHOOL_ADMIN_INSTRUCTION_VIDEO_URL,
+  [DEMO_MOKYKLA_SLUG]: SCHOOL_ADMIN_INSTRUCTION_VIDEO_URL,
+};
+
+/** Org admin instructions overview video (YouTube embed or Drive preview). */
+export function orgInstructionVideoUrl(orgIdOrSlug?: string | null): string {
+  if (!orgIdOrSlug) return DEFAULT_ORG_INSTRUCTION_VIDEO_URL;
+  const key = orgIdOrSlug.trim().toLowerCase();
+  return ORG_INSTRUCTION_VIDEO_BY_KEY[key] ?? DEFAULT_ORG_INSTRUCTION_VIDEO_URL;
 }
 
 /** Resolve a custom fee deal by org slug or org UUID (either may be passed). */

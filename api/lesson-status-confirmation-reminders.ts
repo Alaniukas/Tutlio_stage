@@ -6,6 +6,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { requireCronAuth } from './_lib/cronAuth.js';
+import { PRO_KLASE_ORG_ID, PRO_KLASE_QA_ORG_ID } from './_lib/marketMoney.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -30,11 +31,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const now = Date.now();
 
-    const { data: orgs } = await supabase
-      .from('organizations')
-      .select('id, preferred_locale, features')
-      .filter('features->>tutor_lesson_status_confirmation', 'eq', 'true');
-    const flaggedOrgs = (orgs ?? []) as Array<{ id: string; preferred_locale?: string | null }>;
+    const [{ data: flaggedByFeature }, { data: proKlaseOrgs }] = await Promise.all([
+      supabase
+        .from('organizations')
+        .select('id, preferred_locale, features')
+        .filter('features->>tutor_lesson_status_confirmation', 'eq', 'true'),
+      supabase
+        .from('organizations')
+        .select('id, preferred_locale, features')
+        .in('id', [PRO_KLASE_ORG_ID, PRO_KLASE_QA_ORG_ID]),
+    ]);
+    const byId = new Map<string, { id: string; preferred_locale?: string | null }>();
+    for (const org of [...(flaggedByFeature ?? []), ...(proKlaseOrgs ?? [])] as Array<{
+      id: string;
+      preferred_locale?: string | null;
+    }>) {
+      byId.set(org.id, org);
+    }
+    const flaggedOrgs = [...byId.values()];
     if (flaggedOrgs.length === 0) {
       return res.status(200).json({ success: true, remindersSent: 0 });
     }

@@ -14,6 +14,7 @@ export default function SchoolSignReturn() {
   const token = pathToken || params.get('token') || '';
   const [phase, setPhase] = useState<Phase>('polling');
   const [allSigned, setAllSigned] = useState(false);
+  const [signerRole, setSignerRole] = useState('');
   const active = useRef(true);
 
   useEffect(() => {
@@ -34,6 +35,7 @@ export default function SchoolSignReturn() {
         if (!active.current) return;
         if (j.status === 'signed') {
           setAllSigned(Boolean(j.done));
+          setSignerRole(String(j.role || ''));
           setPhase('signed');
           const event = { type: 'tutlio:school-contract-updated', contractId: j.contractId || null };
           try {
@@ -84,7 +86,9 @@ export default function SchoolSignReturn() {
             <h1 className="text-xl font-bold text-emerald-700 mb-2">Pasirašyta sėkmingai ✓</h1>
             <p className="text-gray-600">
               {allSigned
-                ? 'Sutartis pasirašyta abiejų šalių. Netrukus gausite el. laišką dėl apmokėjimo.'
+                ? signerRole === 'teacher'
+                  ? 'Sutartis pasirašyta abiejų šalių. Pasirašytą kopiją gausite el. paštu.'
+                  : 'Sutartis pasirašyta abiejų šalių. Netrukus gausite el. laišką dėl apmokėjimo.'
                 : 'Jūsų parašas gautas. Kitos šalies pasirašymo kvietimas išsiųstas el. paštu.'}
             </p>
           </>

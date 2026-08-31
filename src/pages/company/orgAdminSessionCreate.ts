@@ -432,6 +432,8 @@ export interface OrgAdminCreateSessionInput {
   /** Reusable multi-create dialogs render their own inline success state. */
   suppressSuccessAlert?: boolean;
   dynamicPricingRules?: OrganizationDynamicPricingRule[];
+  /** School class group: tag sessions and book every selected member even if the subject is individual. */
+  classGroupId?: string | null;
 }
 
 export interface OrgAdminCreateSessionResult {
@@ -465,7 +467,9 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     subjects,
     individualPricing,
     dynamicPricingRules = [],
+    classGroupId = null,
   } = p;
+  const schoolClassGroupId = classGroupId ? String(classGroupId).trim() : '';
   let { createSubjectId, createPrice } = p;
 
   let subj = subjects.find(s => s.id === createSubjectId);
@@ -506,8 +510,8 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
     }
   }
   const isGroupLesson = Boolean(subj.is_group);
-  const requestedStudentIds = isGroupLesson
-    ? createStudentIds
+  const requestedStudentIds = isGroupLesson || schoolClassGroupId
+    ? (createStudentIds.length ? createStudentIds : (createStudentId ? [createStudentId] : []))
     : (createStudentId ? [createStudentId] : []);
   if (requestedStudentIds.length === 0) {
     throw new Error(isGroupLesson ? 'Select at least one student for a group lesson.' : 'Select a student.');
@@ -734,6 +738,9 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
           recurring_session_id: template.id,
           created_by_role: 'org_admin',
           available_spots: subj.is_group ? subj.max_students : null,
+          ...(schoolClassGroupId
+            ? { class_group_id: schoolClassGroupId, school_billing_kind: 'base' }
+            : {}),
         });
         current = advanceRecurringOccurrence(current, freq);
       }
@@ -891,6 +898,9 @@ export async function runOrgAdminCreateSession(p: OrgAdminCreateSessionInput): P
       created_by_role: 'org_admin',
       available_spots: subj.is_group ? subj.max_students : null,
       is_makeup: createIsMakeup,
+      ...(schoolClassGroupId
+        ? { class_group_id: schoolClassGroupId, school_billing_kind: 'base' }
+        : {}),
     });
   }
 

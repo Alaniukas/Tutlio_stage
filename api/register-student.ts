@@ -203,6 +203,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let parentInviteCode: string | null = null;
     let parentInviteError: string | null = null;
     const skipInvite = !!suppressParentInvite;
+    let parentInviteSkipped = skipInvite || payerType !== 'parent';
     if (
       payerType === 'parent' &&
       payerEmail &&
@@ -227,6 +228,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if ('error' in inviteRes) {
         console.warn('[register-student] parent invite create:', inviteRes.error);
         parentInviteError = inviteRes.error;
+      } else if ('skipped' in inviteRes) {
+        parentInviteSkipped = true;
       } else {
         parentInviteCode = inviteRes.code;
         parentInviteSent = inviteRes.emailSent;
@@ -243,7 +246,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       parentInviteSent,
       parentInviteCode,
       parentInviteError,
-      parentInviteSkipped: skipInvite || payerType !== 'parent',
+      parentInviteSkipped,
     });
   } catch (err: any) {
     console.error('[register-student] Error:', err?.message || err);

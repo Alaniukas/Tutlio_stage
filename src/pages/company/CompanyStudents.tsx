@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { extractStoragePath, openContractFileInNewTab } from '@/lib/contractStorage';
 import { getCached, setCache, invalidateCache } from '@/lib/dataCache';
+import { finishGuardedLoad } from '@/lib/authSession';
 import { authHeaders } from '@/lib/apiHelpers';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,16 +25,44 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, Trash2, User, Mail, Phone, GraduationCap, CheckCircle, XCircle, Sparkles, Package, Loader2, FileText, Search, Euro, Clock, MessageSquare, Archive, ArchiveRestore, Download, AlertCircle, Ban } from 'lucide-react';
-import { sendEmail } from '@/lib/email';
+import { Plus, Trash2, User, Mail, Phone, GraduationCap, CheckCircle, XCircle, Sparkles, Package, Loader2, FileText, Search, Euro, Clock, MessageSquare, Archive, ArchiveRestore, Download, AlertCircle, Ban, Pencil } from 'lucide-react';
+import { sendEmail, sendEmailDetailed } from '@/lib/email';
 import Toast from '@/components/Toast';
 import { useTranslation } from '@/lib/i18n';
 import {
+  ALL_SCHOOL_STUDENT_EXPORT_COLUMNS,
   buildSchoolStudentExportRows,
   matchesMediaConsentFilter,
+  schoolStudentExportColumnLabelKey,
   type MediaConsentFilter,
+  type SchoolStudentExportColumnId,
 } from '@/lib/schoolStudentsExport';
 import { downloadSchoolStudentsXlsx } from '@/lib/schoolStudentsXlsxExport';
+import {
+  ENROLLMENT_STATUSES,
+  EXIT_REASONS,
+  GRADE_OPTIONS,
+  SCHOOL_YEAR_OPTIONS,
+  enrollmentStatusLabelKey,
+  exitReasonLabelKey,
+  matchesDebtFilter,
+  matchesEnrollmentStatusFilter,
+  matchesExitDateRange,
+  matchesExitReasonFilter,
+  matchesMunicipalityFilter,
+  matchesSchoolYearFilter,
+  normalizeEnrollmentStatus,
+  studentHasDebt,
+  suggestSchoolYear,
+  type DebtFilter,
+  type EnrollmentStatus,
+  type EnrollmentStatusFilter,
+  type ExitReason,
+  type ExitReasonFilter,
+} from '@/lib/schoolStudentEnrollment';
+import { LT_MUNICIPALITIES, parseMunicipalities, serializeMunicipalities } from '@/lib/ltMunicipalities';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { formatLocalizedPhone, getLocalizedPhonePlaceholder, validateLocalizedPhone, cn } from '@/lib/utils';
 import { ORG_TUTOR_FILTER_SCROLL_CLASS, ORG_TUTOR_SELECT_SCROLL_CLASS } from '@/lib/orgUi';
 import { SessionList } from '@/components/SessionList';
@@ -56,17 +85,29 @@ import StudentAvailabilityEditor from '@/components/company/StudentAvailabilityE
 import StudentScheduleSummary from '@/components/company/StudentScheduleSummary';
 import {
   pickGroupPreferredAvailability,
+  preferredWindowFromDateRange,
   toFindTutorWindows,
   type StudentPreferredWindow,
 } from '@/lib/studentAvailability';
+import PickedAvailabilityTimeEditor from '@/components/company/PickedAvailabilityTimeEditor';
+import { runOrgAdminCreateSession } from '@/pages/company/orgAdminSessionCreate';
+import { defaultLessonRange, lessonFitsAvailabilityWindow } from '@/lib/pickedAvailabilityTime';
 import { orgCanonicalOrigin } from '@/lib/orgPublicOrigin';
 import type { BusyInterval } from '@/lib/tutorMatching';
 import PackageItemsEditor, { type PackageEditorItem, type PackageEditorSubject } from '@/components/PackageItemsEditor';
 import { pickStudentContactsForTutorEmail } from '@/lib/orgContactVisibility';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
+import {
+  groupsContainingStudent,
+  scheduleLabelFromGroupSlots,
+  type SchoolClassGroupRecord,
+} from '@/lib/schoolClassGroups';
 import { findOrgTutorEmailConflict } from '@/lib/orgStudentTutorGuards';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
-import { hasProKlaseIntakeFeatures } from '@/lib/orgIntakeMode';
+import { useUser } from '@/contexts/UserContext';
+import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
+import { proKlaseOrgAdminContext, proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
+import { isProKlaseOrg } from '@/lib/marketMoney';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import {
   parseStudentGrade,
@@ -74,6 +115,8 @@ import {
   type OrganizationDynamicPricingRule,
 } from '@/lib/organizationDynamicPricing';
 import { formatLocalYmd, monthlyPackagePeriodFrom } from '@/lib/monthlyPackagePlan';
+import { canEditPendingPackage } from '@/lib/pendingPackageEdit';
+import { normalizeStudentGrade1to12 } from '@/lib/studentGrade';
 
 interface Student {
   id: string;
@@ -85,6 +128,13 @@ interface Student {
   pricing_lessons_per_week?: number | null;
   pricing_lessons_per_week_is_manual?: boolean | null;
   media_publicity_consent?: string | null;
+  school_year?: string | null;
+  enrollment_status?: string | null;
+  municipality?: string | null;
+  exit_date?: string | null;
+  exit_reason?: string | null;
+  exit_note?: string | null;
+  has_debt_manual?: boolean | null;
   payer_name?: string | null;
   payer_email?: string | null;
   payer_phone?: string | null;
@@ -118,6 +168,12 @@ interface Tutor {
   full_name: string;
   subject_names?: string[];
 }
+
+type AddStudentLessonPick = {
+  pick: FindLessonBookPick;
+  lessonStartIso: string;
+  lessonEndIso: string;
+};
 
 function formatTutorSubjectsLine(names: string[] | undefined, noSubjectsLabel: string): string {
   if (!names?.length) return noSubjectsLabel;
@@ -252,8 +308,12 @@ export default function CompanyStudents() {
   const { t, locale } = useTranslation();
   const { fmt } = useMarketMoney();
   const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
-  const proKlaseIntake =
-    !isSchoolView && !orgFeaturesLoading && hasProKlaseIntakeFeatures(hasFeature);
+  const { user: authUser } = useUser();
+  const { membership } = useOrgAdminAccess();
+  const [orgId, setOrgId] = useState<string | null>(null);
+  const proKlaseAdminUi = proKlaseOrgAdminContext(orgId, orgEntityType, orgFeaturesLoading);
+  const pkFeat = (flagId: string) =>
+    proKlaseFeatureEnabled(orgId, orgEntityType, hasFeature, flagId, orgFeaturesLoading);
   const orgUsesManualPackages = !orgFeaturesLoading && hasFeature('manual_payments');
   /** Full contact editing: schools always; other orgs behind full_student_edit (email only until registered). */
   const canFullEditStudent = isSchoolView || (!orgFeaturesLoading && hasFeature('full_student_edit'));
@@ -266,8 +326,9 @@ export default function CompanyStudents() {
   const [loading, setLoading] = useState(!stc);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [addStudentFindTutorOpen, setAddStudentFindTutorOpen] = useState(false);
+  const [addStudentPickedLessons, setAddStudentPickedLessons] = useState<AddStudentLessonPick[]>([]);
   const [saving, setSaving] = useState(false);
-  const [orgId, setOrgId] = useState<string | null>(null);
+  const [classGroups, setClassGroups] = useState<SchoolClassGroupRecord[]>([]);
   const [baseUrl, setBaseUrl] = useState('');
   /** Org preferred_locale — invite links use the org's canonical domain (.lt for Pro Klasė). */
   const [orgPreferredLocale, setOrgPreferredLocale] = useState<string | null>(null);
@@ -276,6 +337,9 @@ export default function CompanyStudents() {
     email: '',
     phone: '',
     grade: '',
+    school_year: suggestSchoolYear(),
+    enrollment_status: 'active' as EnrollmentStatus,
+    municipality: '',
     payer_name: '',
     payer_email: '',
     payer_phone: '',
@@ -322,6 +386,10 @@ export default function CompanyStudents() {
     full_name: '',
     email: '',
     phone: '',
+    grade: '',
+    school_year: '',
+    enrollment_status: 'active' as EnrollmentStatus,
+    municipality: '',
     payer_name: '',
     payer_email: '',
     payer_phone: '',
@@ -359,6 +427,11 @@ export default function CompanyStudents() {
   const [studentAutoPlans, setStudentAutoPlans] = useState<any[]>([]);
   const [annullingPackageId, setAnnullingPackageId] = useState<string | null>(null);
   const [resendingPackageId, setResendingPackageId] = useState<string | null>(null);
+  const [editingPackage, setEditingPackage] = useState<any | null>(null);
+  const [editPeriodStart, setEditPeriodStart] = useState('');
+  const [editLessons, setEditLessons] = useState(1);
+  const [editLessonsPerWeek, setEditLessonsPerWeek] = useState(1);
+  const [pkgSavingEdit, setPkgSavingEdit] = useState(false);
   const [stoppingPlanId, setStoppingPlanId] = useState<string | null>(null);
   const [packageSubjects, setPackageSubjects] = useState<any[]>([]);
   const [loadingPackages, setLoadingPackages] = useState(false);
@@ -379,11 +452,36 @@ export default function CompanyStudents() {
   const [deactivatingPackageId, setDeactivatingPackageId] = useState<string | null>(null);
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
   const [studentSearch, setStudentSearch] = useState('');
-  // School list filters: by grade and by latest-contract signing state.
+  // School list filters: grade, contract, consent, enrollment metadata.
   const [gradeFilter, setGradeFilter] = useState('all');
   const [contractFilter, setContractFilter] = useState<'all' | 'signed' | 'pending' | 'none'>('all');
   const [mediaConsentFilter, setMediaConsentFilter] = useState<MediaConsentFilter>('all');
+  const [enrollmentStatusFilter, setEnrollmentStatusFilter] = useState<EnrollmentStatusFilter>('active');
+  const [schoolYearFilter, setSchoolYearFilter] = useState('all');
+  const [municipalityFilter, setMunicipalityFilter] = useState<string[]>([]);
+  const [municipalitySearch, setMunicipalitySearch] = useState('');
+  const [municipalityPopoverOpen, setMunicipalityPopoverOpen] = useState(false);
+  const [studentMunicipalityPopoverOpen, setStudentMunicipalityPopoverOpen] = useState(false);
+  const [editMunicipalityPopoverOpen, setEditMunicipalityPopoverOpen] = useState(false);
+  const [debtFilter, setDebtFilter] = useState<DebtFilter>('all');
+  const [exitReasonFilter, setExitReasonFilter] = useState<ExitReasonFilter>('all');
+  const [exitDateFrom, setExitDateFrom] = useState('');
+  const [exitDateTo, setExitDateTo] = useState('');
+  const [studentDebtById, setStudentDebtById] = useState<Record<string, boolean>>({});
   const [exportingStudents, setExportingStudents] = useState(false);
+  const [exportColumnsOpen, setExportColumnsOpen] = useState(false);
+  const [exportColumns, setExportColumns] = useState<SchoolStudentExportColumnId[]>([
+    ...ALL_SCHOOL_STUDENT_EXPORT_COLUMNS,
+  ]);
+  const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
+  const [leaveSaving, setLeaveSaving] = useState(false);
+  const [leaveForm, setLeaveForm] = useState({
+    exit_date: '',
+    exit_reason: '' as '' | ExitReason,
+    exit_note: '',
+    has_debt_manual: false,
+  });
+  const [leavingStudentId, setLeavingStudentId] = useState<string | null>(null);
 
   const [trialSending, setTrialSending] = useState(false);
   const [trialTutorId, setTrialTutorId] = useState<string | null>(null);
@@ -419,11 +517,27 @@ export default function CompanyStudents() {
     enable_prepaid_packages: false,
   });
 
-  const monthlyPackageMode = proKlaseIntake && hasFeature('monthly_packages');
+  const monthlyPackageMode = proKlaseAdminUi && hasFeature('monthly_packages');
   const monthlyPackagePeriod = useMemo(
     () => monthlyPackagePeriodFrom(formatLocalYmd(new Date()), pkgLessonsPerWeek),
     [pkgLessonsPerWeek],
   );
+  const classGroupsEnabled = isSchoolView && !orgFeaturesLoading && hasFeature('school_class_groups');
+
+  useEffect(() => {
+    if (!classGroupsEnabled) {
+      setClassGroups([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const headers = await authHeaders();
+      const res = await fetch('/api/school-class-groups', { headers });
+      const data = await res.json().catch(() => ({}));
+      if (!cancelled && res.ok) setClassGroups((data.groups || []) as SchoolClassGroupRecord[]);
+    })();
+    return () => { cancelled = true; };
+  }, [classGroupsEnabled]);
 
   // Org admin: source of truth is organizations.enable_* (sync to profiles may be delayed after login).
   useEffect(() => {
@@ -528,17 +642,27 @@ export default function CompanyStudents() {
   }, [students]);
 
   const availableGrades = useMemo(() => {
-    const set = new Set<string>();
+    const set = new Set<string>(GRADE_OPTIONS);
     for (const s of students) {
       const grade = String(s.grade || '').trim();
       if (grade) set.add(grade);
     }
     return [...set].sort((a, b) => {
-      const [na, nb] = [Number(a), Number(b)];
-      if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+      const na = Number(String(a).replace(/\D/g, '')) || 0;
+      const nb = Number(String(b).replace(/\D/g, '')) || 0;
+      if (na !== nb) return na - nb;
       return a.localeCompare(b, 'lt');
     });
   }, [students]);
+
+  const filteredMunicipalityOptions = useMemo(() => {
+    const q = municipalitySearch.trim().toLowerCase();
+    if (!q) return LT_MUNICIPALITIES;
+    return LT_MUNICIPALITIES.filter((m) => m.toLowerCase().includes(q));
+  }, [municipalitySearch]);
+
+  const showExitFilters =
+    enrollmentStatusFilter === 'left' || enrollmentStatusFilter === 'all';
 
   const filteredGroups = useMemo(() => {
     let groups = groupedStudents.filter((g) =>
@@ -563,21 +687,73 @@ export default function CompanyStudents() {
         matchesMediaConsentFilter(g.primary.media_publicity_consent, mediaConsentFilter),
       );
     }
+    if (isSchoolView) {
+      groups = groups.filter((g) =>
+        matchesEnrollmentStatusFilter(g.primary.enrollment_status, enrollmentStatusFilter),
+      );
+      groups = groups.filter((g) =>
+        matchesSchoolYearFilter(g.primary.school_year, schoolYearFilter),
+      );
+      groups = groups.filter((g) =>
+        matchesMunicipalityFilter(g.primary.municipality, municipalityFilter),
+      );
+      groups = groups.filter((g) => {
+        const hasDebt = studentDebtById[g.primary.id] ?? studentHasDebt({
+          hasDebtManual: g.primary.has_debt_manual,
+        });
+        return matchesDebtFilter(hasDebt, debtFilter);
+      });
+      if (showExitFilters) {
+        groups = groups.filter((g) =>
+          matchesExitReasonFilter(g.primary.exit_reason, exitReasonFilter),
+        );
+        groups = groups.filter((g) =>
+          matchesExitDateRange(g.primary.exit_date, exitDateFrom, exitDateTo),
+        );
+      }
+    }
     return groups;
-  }, [groupedStudents, normalizedSearch, showTrashBin, gradeFilter, contractFilter, mediaConsentFilter, contractsByStudent]);
+  }, [
+    groupedStudents,
+    normalizedSearch,
+    showTrashBin,
+    gradeFilter,
+    contractFilter,
+    mediaConsentFilter,
+    contractsByStudent,
+    isSchoolView,
+    enrollmentStatusFilter,
+    schoolYearFilter,
+    municipalityFilter,
+    debtFilter,
+    exitReasonFilter,
+    exitDateFrom,
+    exitDateTo,
+    studentDebtById,
+    showExitFilters,
+  ]);
 
   const exportStudentsXlsx = async () => {
+    if (exportColumns.length === 0) {
+      setToastMessage({ message: t('compStu.exportSelectColumns'), type: 'error' });
+      return;
+    }
     setExportingStudents(true);
     try {
       const rows = buildSchoolStudentExportRows(
         filteredGroups.map((g) => ({
           student: g.primary,
           contract: contractsByStudent[g.primary.id],
+          hasDebt: studentDebtById[g.primary.id] ?? studentHasDebt({
+            hasDebtManual: g.primary.has_debt_manual,
+          }),
         })),
         t,
+        exportColumns,
       );
       const date = new Date().toISOString().slice(0, 10);
-      await downloadSchoolStudentsXlsx(rows, t, `mokiniai-${date}.xlsx`);
+      await downloadSchoolStudentsXlsx(rows, t, `mokiniai-${date}.xlsx`, undefined, exportColumns);
+      setExportColumnsOpen(false);
     } catch (e: any) {
       setToastMessage({ message: e?.message || t('school.studentExportFail'), type: 'error' });
     } finally {
@@ -586,6 +762,10 @@ export default function CompanyStudents() {
   };
 
   const shouldShowParentContacts = (student: Student) => hasSchoolParentContacts(student);
+  const showStudentSchedulePane =
+    Boolean(selectedStudent) &&
+    ((proKlaseAdminUi && hasFeature('student_schedule_overview')) ||
+      pkFeat('student_availability_profile'));
 
   const paymentActions = useMemo(() => {
     if (!selectedStudent) return { canSendInvoice: false, canSendPackage: false };
@@ -593,9 +773,13 @@ export default function CompanyStudents() {
   }, [selectedStudent, tutorPaymentFlags, showPaymentModelUi]);
 
   useEffect(() => {
-    void fetchData();
+    let cancelled = false;
+    void fetchData(() => cancelled);
     setBaseUrl(window.location.origin);
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser?.id, membership?.organizationId]); // fetchData closes over these ids
 
   useEffect(() => {
     if (!orgId) return;
@@ -791,6 +975,10 @@ export default function CompanyStudents() {
       full_name: selectedStudent.full_name || '',
       email: selectedStudent.email || '',
       phone: selectedStudent.phone || '',
+      grade: selectedStudent.grade || '',
+      school_year: selectedStudent.school_year || suggestSchoolYear(),
+      enrollment_status: normalizeEnrollmentStatus(selectedStudent.enrollment_status),
+      municipality: selectedStudent.municipality || '',
       payer_name: selectedStudent.payer_name || '',
       payer_email: selectedStudent.payer_email || '',
       payer_phone: selectedStudent.payer_phone || '',
@@ -856,28 +1044,36 @@ export default function CompanyStudents() {
     };
   }, [selectedStudent?.id, isStudentModalOpen, modalSessionsRefreshKey]);
 
-  const fetchData = async () => {
+  const fetchData = async (isCancelled?: () => boolean) => {
+    const cancelled = () => Boolean(isCancelled?.());
     if (!getCached('company_students')) setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setLoading(false); return; }
+    await finishGuardedLoad({
+      isCancelled: cancelled,
+      setLoading,
+      run: async () => {
+    const userId = authUser?.id;
+    if (!userId) return;
 
-    // Get organization ID from organization_admins
-    const { data: adminRow } = await supabase
-      .from('organization_admins')
-      .select('organization_id')
-      .eq('user_id', user.id)
-      .maybeSingle();
+    let organizationId = membership?.organizationId ?? null;
+    if (!organizationId) {
+      const { data: adminRow } = await supabase
+        .from('organization_admins')
+        .select('organization_id')
+        .eq('user_id', userId)
+        .maybeSingle();
 
-    if (!adminRow) {
-      console.log('🔴 User is NOT an org admin!');
-      setLoading(false);
-      return;
+      if (!adminRow) {
+        console.log('🔴 User is NOT an org admin!');
+        return;
+      }
+      organizationId = adminRow.organization_id;
     }
-    setOrgId(adminRow.organization_id);
+    if (cancelled()) return;
+    setOrgId(organizationId);
 
     const tutorsList = await getOrgVisibleTutors(
       supabase as any,
-      adminRow.organization_id,
+      organizationId,
       'id, full_name, email',
     );
 
@@ -904,6 +1100,7 @@ export default function CompanyStudents() {
       }));
     }
 
+    if (cancelled()) return;
     setTutors(tutorsWithSubjects);
     let fetchedStudents: Student[] = [];
     let studentsErr: { message: string } | null = null;
@@ -921,7 +1118,7 @@ export default function CompanyStudents() {
           .from('students')
           .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
           .is('tutor_id', null)
-          .eq('organization_id', adminRow.organization_id)
+          .eq('organization_id', organizationId)
           .order('created_at', { ascending: false }),
       ]);
       studentsErr = byTutorRes.error || unassignedRes.error;
@@ -940,12 +1137,13 @@ export default function CompanyStudents() {
         .from('students')
         .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
         .is('tutor_id', null)
-        .eq('organization_id', adminRow.organization_id)
+        .eq('organization_id', organizationId)
         .order('created_at', { ascending: false });
       studentsErr = error;
       fetchedStudents = (data || []) as Student[];
     }
 
+    if (cancelled()) return;
     if (studentsErr) {
       console.error('Error fetching students:', studentsErr);
       setStudents([]);
@@ -955,15 +1153,19 @@ export default function CompanyStudents() {
 
     // School-only: latest contract per student for the status badge + download link (#5).
     let contractMap: Record<string, StudentContractInfo> = {};
+    const debtMap: Record<string, boolean> = {};
     if (isSchoolView) {
       const { data: contractRows } = await supabase
         .from('school_contracts')
-        .select('student_id, signing_status, pdf_url, signed_contract_url, created_at')
-        .eq('organization_id', adminRow.organization_id)
+        .select('id, student_id, signing_status, pdf_url, signed_contract_url, created_at')
+        .eq('organization_id', organizationId)
         .is('archived_at', null)
         .order('created_at', { ascending: false });
+      const contractIdToStudent = new Map<string, string>();
       for (const row of contractRows || []) {
         const sid = String((row as any).student_id || '');
+        const cid = String((row as any).id || '');
+        if (cid && sid) contractIdToStudent.set(cid, sid);
         if (!sid || contractMap[sid]) continue; // first row per student = latest (desc order)
         contractMap[sid] = {
           signing_status: (row as any).signing_status,
@@ -971,8 +1173,53 @@ export default function CompanyStudents() {
           signed_contract_url: (row as any).signed_contract_url,
         };
       }
+
+      const unpaidInstallmentCounts = new Map<string, number>();
+      const unpaidMonthlyCounts = new Map<string, number>();
+      const contractIds = [...contractIdToStudent.keys()];
+      const studentIds = fetchedStudents.map((s) => s.id);
+
+      const [instRes, monthlyRes] = await Promise.all([
+        contractIds.length > 0
+          ? supabase
+              .from('school_payment_installments')
+              .select('contract_id, payment_status')
+              .in('contract_id', contractIds)
+              .neq('payment_status', 'paid')
+          : Promise.resolve({ data: [] as any[] }),
+        studentIds.length > 0
+          ? supabase
+              .from('school_monthly_invoices')
+              .select('student_id, payment_status')
+              .eq('organization_id', organizationId)
+              .in('student_id', studentIds)
+              .neq('payment_status', 'paid')
+              .neq('payment_status', 'cancelled')
+          : Promise.resolve({ data: [] as any[] }),
+      ]);
+
+      for (const row of instRes.data || []) {
+        const sid = contractIdToStudent.get(String((row as any).contract_id || ''));
+        if (!sid) continue;
+        unpaidInstallmentCounts.set(sid, (unpaidInstallmentCounts.get(sid) || 0) + 1);
+      }
+      for (const row of monthlyRes.data || []) {
+        const sid = String((row as any).student_id || '');
+        if (!sid) continue;
+        unpaidMonthlyCounts.set(sid, (unpaidMonthlyCounts.get(sid) || 0) + 1);
+      }
+
+      for (const s of fetchedStudents) {
+        debtMap[s.id] = studentHasDebt({
+          hasDebtManual: s.has_debt_manual,
+          unpaidInstallments: unpaidInstallmentCounts.get(s.id) || 0,
+          unpaidMonthlyInvoices: unpaidMonthlyCounts.get(s.id) || 0,
+        });
+      }
     }
+    if (cancelled()) return;
     setContractsByStudent(contractMap);
+    setStudentDebtById(debtMap);
 
     // Req 8 (trial_followup_alert, flag-gated): flag students whose trial lesson is
     // completed but no real (non-trial) package has been sent yet. Queried inline off
@@ -982,12 +1229,17 @@ export default function CompanyStudents() {
       const { data: orgRow } = await supabase
         .from('organizations')
         .select('features')
-        .eq('id', adminRow.organization_id)
+        .eq('id', organizationId)
         .maybeSingle();
       const feats = orgRow?.features && typeof orgRow.features === 'object' && !Array.isArray(orgRow.features)
         ? (orgRow.features as Record<string, unknown>)
         : {};
-      if (feats.trial_followup_alert === true && fetchedStudents.length > 0) {
+      if (
+        !isSchoolView &&
+        isProKlaseOrg(organizationId) &&
+        feats.trial_followup_alert === true &&
+        fetchedStudents.length > 0
+      ) {
         const studentIds = fetchedStudents.map((s) => s.id);
         const thirtyAgo = new Date();
         thirtyAgo.setDate(thirtyAgo.getDate() - 30);
@@ -1015,10 +1267,14 @@ export default function CompanyStudents() {
         }
       }
     }
+    if (cancelled()) return;
     setTrialNoPackageStudentIds(trialNoPackageIds);
 
     setCache('company_students', { students: fetchedStudents, tutors: tutorsWithSubjects, contractsByStudent: contractMap });
-    setLoading(false);
+      },
+    }).catch((err) => {
+      console.error('Error fetching students:', err);
+    });
   };
 
   useEffect(() => {
@@ -1096,7 +1352,7 @@ export default function CompanyStudents() {
             }
             : pkgExpiresAt ? { expiresAt: pkgExpiresAt } : {}),
           ...(!orgUsesManualPackages ? { attachSalesInvoice: pkgAttachSalesInvoice } : {}),
-          ...(hasFeature('package_reservation_flow') && pkgReserveSlots.length > 0
+          ...(pkFeat('package_reservation_flow') && pkgReserveSlots.length > 0
             ? { slots: pkgReserveSlots }
             : {}),
         }),
@@ -1241,6 +1497,65 @@ export default function CompanyStudents() {
       setToastMessage({ message: t('common.error'), type: 'error' });
     }
     setResendingPackageId(null);
+  };
+
+  const monthOptionStarts = useMemo(() => {
+    const now = new Date();
+    return [0, 1, 2, 3].map((offset) => formatLocalYmd(new Date(now.getFullYear(), now.getMonth() + offset, 1)));
+  }, []);
+
+  const openEditPackage = (pkg: any) => {
+    const start = String(pkg.billing_period_start || formatLocalYmd(new Date())).slice(0, 10);
+    const firstOfMonth = `${start.slice(0, 7)}-01`;
+    setEditingPackage(pkg);
+    setEditPeriodStart(firstOfMonth);
+    setEditLessons(Math.max(1, Number(pkg.total_lessons) || 1));
+    setEditLessonsPerWeek(Math.max(1, Number(selectedStudent?.pricing_lessons_per_week) || pkgLessonsPerWeek || 1));
+  };
+
+  const handleSaveEditedPackage = async () => {
+    if (!editingPackage) return;
+    const itemsSource = Array.isArray(editingPackage.lesson_package_items) && editingPackage.lesson_package_items.length > 0
+      ? editingPackage.lesson_package_items
+      : [{ subject_id: editingPackage.subject_id, total_lessons: editLessons, price_per_lesson: editingPackage.price_per_lesson }];
+    const primary = itemsSource[0];
+    const subjectId = primary?.subject_id || editingPackage.subject_id;
+    if (!subjectId) {
+      console.error('[CompanyStudents] pending package subject is missing');
+      setToastMessage({ message: t('common.error'), type: 'error' });
+      return;
+    }
+    const period = monthlyPackageMode
+      ? monthlyPackagePeriodFrom(editPeriodStart, editLessonsPerWeek)
+      : null;
+    const totalLessons = monthlyPackageMode ? period!.totalLessons : editLessons;
+    setPkgSavingEdit(true);
+    try {
+      const resp = await fetch('/api/update-pending-package', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({
+          packageId: editingPackage.id,
+          items: [{
+            subjectId,
+            totalLessons,
+            pricePerLesson: Number(primary?.price_per_lesson ?? editingPackage.price_per_lesson) || undefined,
+          }],
+          ...(period
+            ? { billingPeriodStart: period.periodStart, billingPeriodEnd: period.periodEnd, expiresAt: period.periodEnd }
+            : {}),
+        }),
+      });
+      const result = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error((result as any).error || String(resp.status));
+      setEditingPackage(null);
+      await reloadStudentPackages();
+      setToastMessage({ message: t('compStu.pkgEditSaved'), type: 'success' });
+    } catch (e: any) {
+      console.error('[CompanyStudents] pending package update failed:', e);
+      setToastMessage({ message: t('common.error'), type: 'error' });
+    }
+    setPkgSavingEdit(false);
   };
 
   /** Stop the automatic monthly package plan (no further months are generated). */
@@ -1402,10 +1717,20 @@ export default function CompanyStudents() {
       return;
     }
 
+    for (const item of addStudentPickedLessons) {
+      const windowStart = new Date(item.pick.startIso);
+      const windowEnd = new Date(item.pick.endIso);
+      const lessonStart = new Date(item.lessonStartIso);
+      const lessonEnd = new Date(item.lessonEndIso);
+      if (!lessonFitsAvailabilityWindow(windowStart, windowEnd, lessonStart, lessonEnd)) {
+        setToastMessage({ message: t('findLesson.outsideWindow'), type: 'error' });
+        return;
+      }
+    }
+
     let effectiveOrgId: string | null = orgId;
     if (isSchoolView) {
-      const { data: authUserRes } = await supabase.auth.getUser();
-      const uid = authUserRes?.user?.id;
+      const uid = authUser?.id;
       if (!uid) {
         setToastMessage({ message: t('compStu.orgResolveNeedLogin'), type: 'error' });
         return;
@@ -1467,7 +1792,10 @@ export default function CompanyStudents() {
           full_name: newStudent.full_name,
           email: newStudent.email,
           phone: newStudent.phone?.trim() || null,
-          grade: newStudent.grade || null,
+          grade: (normalizeStudentGrade1to12(newStudent.grade) ?? newStudent.grade) || null,
+          school_year: isSchoolView ? (newStudent.school_year || null) : null,
+          enrollment_status: isSchoolView ? newStudent.enrollment_status : 'active',
+          municipality: isSchoolView ? (newStudent.municipality || null) : null,
           payer_name: contactParent.name || null,
           payer_email: contactParent.email || null,
           payer_phone: contactParent.phone || null,
@@ -1482,6 +1810,16 @@ export default function CompanyStudents() {
           student_city: newStudent.student_city?.trim() || null,
           child_birth_date: newStudent.child_birth_date?.trim() || null,
           invite_code: inviteCode,
+          ...(() => {
+            const match =
+              addStudentPickedLessons.find((item) => item.pick.tutorId === tutorId) || addStudentPickedLessons[0];
+            if (!match) return {};
+            return {
+              preferred_availability: [
+                preferredWindowFromDateRange(new Date(match.pick.startIso), new Date(match.pick.endIso)),
+              ],
+            };
+          })(),
           ...(effectiveOrgId ? { organization_id: effectiveOrgId } : {}),
         })
         .select('id, tutor_id, invite_code')
@@ -1493,6 +1831,98 @@ export default function CompanyStudents() {
         return;
       }
       inserted.push(row as any);
+    }
+
+    let lessonCreateFailed = false;
+    if (addStudentPickedLessons.length > 0 && inserted.length > 0) {
+      const { data: orgRow } = effectiveOrgId
+        ? await supabase.from('organizations').select('features').eq('id', effectiveOrgId).maybeSingle()
+        : { data: null };
+      const featObj =
+        orgRow?.features && typeof orgRow.features === 'object' && !Array.isArray(orgRow.features)
+          ? (orgRow.features as Record<string, unknown>)
+          : {};
+      const trialDuration =
+        typeof featObj.trial_lesson_duration_minutes === 'number'
+          ? Math.max(15, Math.round(featObj.trial_lesson_duration_minutes))
+          : 60;
+      const trialPrice =
+        typeof featObj.trial_lesson_price_eur === 'number' ? Math.max(0, featObj.trial_lesson_price_eur) : 0;
+      const trialTopic =
+        typeof featObj.trial_lesson_topic === 'string' && featObj.trial_lesson_topic.trim()
+          ? featObj.trial_lesson_topic.trim()
+          : '';
+      const isTrial = pkFeat('auto_trial_first_lesson');
+      for (const item of addStudentPickedLessons) {
+        const lessonRow = inserted.find((row) => row.tutor_id === item.pick.tutorId) || inserted[0];
+        try {
+          const { data: subj } = await supabase
+            .from('subjects')
+            .select('id, name, price, duration_minutes, is_group, max_students, meeting_link')
+            .eq('id', item.pick.subjectId)
+            .maybeSingle();
+          if (!subj || !lessonRow.id) continue;
+          const price = isTrial ? trialPrice : Number((subj as { price?: number | null }).price ?? 0);
+          const result = await runOrgAdminCreateSession({
+            supabase,
+            createTutorId: item.pick.tutorId,
+            createSubjectId: item.pick.subjectId,
+            createStudentId: lessonRow.id,
+            createStudentIds: [lessonRow.id],
+            createStartTime: item.lessonStartIso,
+            createEndTime: item.lessonEndIso,
+            createTopic: trialTopic || item.pick.subjectName || (subj as { name?: string | null }).name || '',
+            createMeetingLink: String((subj as { meeting_link?: string | null }).meeting_link || ''),
+            createIsRecurring: false,
+            createRecurringEndDate: '',
+            createRecurringFrequency: 'weekly',
+            createRecurringWeekdays: [],
+            createIsPaid: false,
+            createPrice: price,
+            createIsTrial: isTrial,
+            createFirstLessonIsTrial: false,
+            createTutorComment: '',
+            createShowCommentToStudent: false,
+            subjects: [
+              {
+                id: (subj as { id: string }).id,
+                name: (subj as { name?: string | null }).name,
+                price: (subj as { price?: number | null }).price ?? null,
+                duration_minutes: (subj as { duration_minutes?: number | null }).duration_minutes ?? null,
+                is_group: (subj as { is_group?: boolean | null }).is_group ?? null,
+                max_students: (subj as { max_students?: number | null }).max_students ?? null,
+              },
+            ],
+            individualPricing: [],
+            suppressSuccessAlert: true,
+          });
+          if (
+            isTrial &&
+            price > 0 &&
+            pkFeat('trial_creation_payment_email') &&
+            result.createdSessionIds.length > 0
+          ) {
+            const resp = await fetch('/api/create-trial-package', {
+              method: 'POST',
+              headers: await authHeaders(),
+              body: JSON.stringify({
+                studentId: lessonRow.id,
+                tutorId: item.pick.tutorId,
+                sessionId: result.createdSessionIds[0],
+                topic: trialTopic || undefined,
+                durationMinutes: trialDuration,
+                priceEur: price,
+              }),
+            });
+            if (!resp.ok) {
+              console.error('[CompanyStudents] trial payment email failed:', resp.status);
+            }
+          }
+        } catch (lessonErr) {
+          console.error('Error creating lesson for new student:', lessonErr);
+          lessonCreateFailed = true;
+        }
+      }
     }
 
     // Optional: apply individual pricing to the first selected tutor only (as a helper)
@@ -1518,6 +1948,7 @@ export default function CompanyStudents() {
     }
 
     let emailOk = true;
+    let inviteSkippedExisting = false;
 
     const shouldSendInviteOnCreate = !isSchoolView;
     if (shouldSendInviteOnCreate && newStudent.email?.trim()) {
@@ -1525,7 +1956,7 @@ export default function CompanyStudents() {
       for (const row of inserted) {
         const tutor = tutors.find((t) => t.id === row.tutor_id);
         const bookingUrl = `${inviteBaseUrl}/book/${row.invite_code}`;
-        const ok = await sendEmail({
+        const inviteResult = await sendEmailDetailed({
           type: 'invite_email',
           to: newStudent.email.trim(),
           locale: orgPreferredLocale || locale,
@@ -1537,7 +1968,8 @@ export default function CompanyStudents() {
             ...(orgId ? { organizationId: orgId } : {}),
           },
         });
-        if (!ok) emailOk = false;
+        if (!inviteResult.ok) emailOk = false;
+        if (inviteResult.ok && inviteResult.skipped) inviteSkippedExisting = true;
       }
     }
 
@@ -1571,11 +2003,15 @@ export default function CompanyStudents() {
     }
 
     const toastType: 'success' | 'error' =
-      shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk ? 'error' : 'success';
+      (shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk) || lessonCreateFailed ? 'error' : 'success';
     const toastMessage =
       shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk
         ? t('compStu.emailSendFailed')
-        : t('compStu.studentAdded');
+        : lessonCreateFailed
+          ? t('compStu.studentAddedLessonFailed')
+          : inviteSkippedExisting
+            ? t('compStu.inviteSkippedAlreadyRegistered')
+            : t('compStu.studentAdded');
 
     setToastMessage({
       message: toastMessage,
@@ -1587,6 +2023,9 @@ export default function CompanyStudents() {
       email: '',
       phone: '',
       grade: '',
+      school_year: suggestSchoolYear(),
+      enrollment_status: 'active',
+      municipality: '',
       payer_name: '',
       payer_email: '',
       payer_phone: '',
@@ -1609,6 +2048,7 @@ export default function CompanyStudents() {
     setCustomDuration('');
     setCustomCancellationHours(24);
     setCustomCancellationFee(0);
+    setAddStudentPickedLessons([]);
     invalidateCache('company_contracts');
     fetchData();
     setSaving(false);
@@ -1750,6 +2190,14 @@ export default function CompanyStudents() {
       student_address: studentEditDraft.student_address.trim() || null,
       student_city: studentEditDraft.student_city.trim() || null,
       child_birth_date: studentEditDraft.child_birth_date || null,
+      ...(isSchoolView
+        ? {
+            grade: studentEditDraft.grade || null,
+            school_year: studentEditDraft.school_year || null,
+            enrollment_status: studentEditDraft.enrollment_status,
+            municipality: studentEditDraft.municipality || null,
+          }
+        : {}),
     };
 
     // Contact data describes the student identity — keep every duplicate row
@@ -1805,12 +2253,67 @@ export default function CompanyStudents() {
     }
   };
 
+  const openLeaveDialog = (studentId?: string) => {
+    const id = studentId || selectedStudent?.id || null;
+    if (!id) return;
+    const row = students.find((s) => s.id === id) || selectedStudent;
+    setLeavingStudentId(id);
+    setLeaveForm({
+      exit_date: row?.exit_date || new Date().toISOString().slice(0, 10),
+      exit_reason: (row?.exit_reason as ExitReason) || '',
+      exit_note: row?.exit_note || '',
+      has_debt_manual: Boolean(row?.has_debt_manual),
+    });
+    setLeaveDialogOpen(true);
+  };
+
+  const handleMarkStudentLeft = async () => {
+    if (!leavingStudentId) return;
+    if (!leaveForm.exit_date.trim() || !leaveForm.exit_reason || !leaveForm.exit_note.trim()) {
+      setToastMessage({ message: t('compStu.leaveMissingFields'), type: 'error' });
+      return;
+    }
+    setLeaveSaving(true);
+    const group =
+      selectedStudent?.id === leavingStudentId && selectedStudentGroup.length > 0
+        ? selectedStudentGroup
+        : students.filter((s) => s.id === leavingStudentId);
+    const ids = group.length > 0 ? group.map((r) => r.id) : [leavingStudentId];
+    const payload = {
+      enrollment_status: 'left' as const,
+      exit_date: leaveForm.exit_date.trim(),
+      exit_reason: leaveForm.exit_reason,
+      exit_note: leaveForm.exit_note.trim(),
+      has_debt_manual: leaveForm.has_debt_manual,
+    };
+    const { error } = await supabase.from('students').update(payload).in('id', ids);
+    setLeaveSaving(false);
+    if (error) {
+      console.error('[CompanyStudents] enrollment update failed:', error);
+      setToastMessage({ message: t('common.error'), type: 'error' });
+      return;
+    }
+    setStudents((prev) => prev.map((s) => (ids.includes(s.id) ? { ...s, ...payload } : s)));
+    setSelectedStudent((s) => (s && ids.includes(s.id) ? { ...s, ...payload } : s));
+    setSelectedStudentGroup((prev) => prev.map((s) => (ids.includes(s.id) ? { ...s, ...payload } : s)));
+    setStudentDebtById((prev) => {
+      const next = { ...prev };
+      for (const id of ids) {
+        next[id] = Boolean(prev[id]) || payload.has_debt_manual;
+      }
+      return next;
+    });
+    setLeaveDialogOpen(false);
+    setToastMessage({ message: t('compStu.leaveConfirm'), type: 'success' });
+    void fetchData();
+  };
+
   const handleUpdateStudentGrade = async (grade: string) => {
     if (!selectedStudent) return;
     const ids = selectedStudentGroup.length > 0
       ? selectedStudentGroup.map((row) => row.id)
       : [selectedStudent.id];
-    const nextGrade = grade === 'unset' ? null : grade;
+    const nextGrade = grade === 'unset' ? null : (normalizeStudentGrade1to12(grade) ?? grade);
     const { error } = await supabase
       .from('students')
       .update({ grade: nextGrade })
@@ -2042,9 +2545,13 @@ export default function CompanyStudents() {
       setToastMessage({ message: t('compStu.inviteMissingCode'), type: 'error' });
       return;
     }
+    if (student.linked_user_id) {
+      setToastMessage({ message: t('compStu.inviteSkippedAlreadyRegistered'), type: 'error' });
+      return;
+    }
     setSendingInviteNow(true);
     const bookingUrl = `${orgCanonicalOrigin(orgPreferredLocale) ?? baseUrl}/book/${student.invite_code}`;
-    const ok = await sendEmail({
+    const ok = await sendEmailDetailed({
       type: 'invite_email',
       to: recipient,
       locale: orgPreferredLocale || locale,
@@ -2058,8 +2565,12 @@ export default function CompanyStudents() {
     });
     setSendingInviteNow(false);
     setToastMessage({
-      message: ok ? t('compStu.inviteSentNowSuccess') : t('compStu.inviteSentNowFailed'),
-      type: ok ? 'success' : 'error',
+      message: !ok.ok
+        ? t('compStu.inviteSentNowFailed')
+        : ok.skipped
+          ? t('compStu.inviteSkippedAlreadyRegistered')
+          : t('compStu.inviteSentNowSuccess'),
+      type: ok.ok ? (ok.skipped ? 'error' : 'success') : 'error',
     });
   };
 
@@ -2107,7 +2618,15 @@ export default function CompanyStudents() {
                 <Archive className="w-4 h-4" />
                 {showTrashBin ? t('compStu.activeStudents') : t('compStu.trashBin')}
               </Button>
-              <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+              <Dialog
+                open={isDialogOpen}
+                onOpenChange={(open) => {
+                  setIsDialogOpen(open);
+                  if (!open) {
+                    setAddStudentPickedLessons([]);
+                  }
+                }}
+              >
                 <DialogTrigger asChild>
                   <Button className="gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700">
                     <Plus className="w-4 h-4" />
@@ -2126,7 +2645,7 @@ export default function CompanyStudents() {
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-3">
                       <Label>{t('compStu.tutorsRequired')}</Label>
-                      {proKlaseIntake && (
+                      {proKlaseAdminUi && (
                       <Button
                         type="button"
                         size="sm"
@@ -2186,6 +2705,9 @@ export default function CompanyStudents() {
                                           ? [...newStudent.tutor_ids, tu.id]
                                           : newStudent.tutor_ids.filter((id) => id !== tu.id);
                                         setNewStudent({ ...newStudent, tutor_ids: next });
+                                        setAddStudentPickedLessons((current) =>
+                                          current.filter((item) => next.includes(item.pick.tutorId)),
+                                        );
                                       }}
                                       className="w-3.5 h-3.5"
                                     />
@@ -2221,6 +2743,46 @@ export default function CompanyStudents() {
                     <p className="text-[11px] text-gray-500">
                       {t('compStu.tutorPickerHint')}
                     </p>
+                    {addStudentPickedLessons.map((item) => (
+                      <div key={item.pick.tutorId} className="space-y-2">
+                        <PickedAvailabilityTimeEditor
+                          tutorId={item.pick.tutorId}
+                          tutorName={item.pick.tutorName}
+                          subjectId={item.pick.subjectId}
+                          subjectName={item.pick.subjectName}
+                          windowStartIso={item.pick.startIso}
+                          windowEndIso={item.pick.endIso}
+                          startIso={item.lessonStartIso || item.pick.startIso}
+                          endIso={item.lessonEndIso || item.pick.endIso}
+                          onChange={({ startIso, endIso }) => {
+                            setAddStudentPickedLessons((current) =>
+                              current.map((row) =>
+                                row.pick.tutorId === item.pick.tutorId
+                                  ? { ...row, lessonStartIso: startIso, lessonEndIso: endIso }
+                                  : row,
+                              ),
+                            );
+                          }}
+                          onSubjectChange={({ subjectId, subjectName }) => {
+                            setAddStudentPickedLessons((current) =>
+                              current.map((row) =>
+                                row.pick.tutorId === item.pick.tutorId
+                                  ? { ...row, pick: { ...row.pick, subjectId, subjectName } }
+                                  : row,
+                              ),
+                            );
+                          }}
+                          onClear={() => {
+                            setAddStudentPickedLessons((current) =>
+                              current.filter((row) => row.pick.tutorId !== item.pick.tutorId),
+                            );
+                          }}
+                        />
+                      </div>
+                    ))}
+                    {addStudentPickedLessons.length > 0 && (
+                      <p className="text-[11px] text-gray-500">{t('findLesson.willCreateOnSave')}</p>
+                    )}
                   </div>
 
                   <div className="space-y-2">
@@ -2255,7 +2817,7 @@ export default function CompanyStudents() {
                       className="rounded-xl"
                     />
                   </div>
-                  {(isSchoolView || proKlaseIntake) && (
+                  {(isSchoolView || proKlaseAdminUi) && (
                   <div className="space-y-2 sm:col-span-2">
                     <Label>{t('studentSettings.grade')}</Label>
                     <Select
@@ -2267,16 +2829,92 @@ export default function CompanyStudents() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="unset">{t('dynamicPricing.gradeUnset')}</SelectItem>
-                        {Array.from({ length: 12 }, (_, index) => (
-                          <SelectItem key={index + 1} value={`${index + 1} klasė`}>
-                            {t('onboard.gradeN', { n: index + 1 })}
+                        {(isSchoolView ? GRADE_OPTIONS : Array.from({ length: 12 }, (_, index) => `${index + 1} klasė`)).map((g) => (
+                          <SelectItem key={g} value={g}>
+                            {g}
                           </SelectItem>
                         ))}
-                        <SelectItem value="Studentas">{t('lessonSet.gradeUniversity')}</SelectItem>
-                        <SelectItem value="Kita">{t('onboard.gradeOther')}</SelectItem>
+                        {!isSchoolView && (
+                          <>
+                            <SelectItem value="Studentas">{t('lessonSet.gradeUniversity')}</SelectItem>
+                            <SelectItem value="Kita">{t('onboard.gradeOther')}</SelectItem>
+                          </>
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
+                  )}
+                  {isSchoolView && (
+                    <div className="grid sm:grid-cols-3 gap-4 sm:col-span-2">
+                      <div className="space-y-2">
+                        <Label>{t('compStu.schoolYear')}</Label>
+                        <Select
+                          value={newStudent.school_year || suggestSchoolYear()}
+                          onValueChange={(value) => setNewStudent({ ...newStudent, school_year: value })}
+                        >
+                          <SelectTrigger className="rounded-xl">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {SCHOOL_YEAR_OPTIONS.map((y) => (
+                              <SelectItem key={y} value={y}>{y}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>{t('compStu.enrollmentStatus')}</Label>
+                        <Select
+                          value={newStudent.enrollment_status}
+                          onValueChange={(value) => setNewStudent({ ...newStudent, enrollment_status: value as EnrollmentStatus })}
+                        >
+                          <SelectTrigger className="rounded-xl">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {ENROLLMENT_STATUSES.filter((s) => s !== 'left').map((s) => (
+                              <SelectItem key={s} value={s}>{t(enrollmentStatusLabelKey(s))}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {newStudent.enrollment_status === 'future' && (
+                          <p className="text-xs text-gray-500">{t('compStu.enrollmentStatusFutureHint')}</p>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <Label>{t('compStu.municipality')}</Label>
+                        <p className="text-xs text-gray-500">{t('compStu.municipalityMultiHint')}</p>
+                        <Popover open={studentMunicipalityPopoverOpen} onOpenChange={setStudentMunicipalityPopoverOpen}>
+                          <PopoverTrigger asChild>
+                            <Button type="button" variant="outline" className="w-full justify-between rounded-xl font-normal">
+                              <span className="truncate">
+                                {parseMunicipalities(newStudent.municipality).join(', ') || '—'}
+                              </span>
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-[280px] p-2 max-h-64 overflow-y-auto" align="start">
+                            {LT_MUNICIPALITIES.map((m) => {
+                              const selected = parseMunicipalities(newStudent.municipality);
+                              const on = selected.includes(m);
+                              return (
+                                <label key={m} className="flex items-center gap-2 text-sm px-2 py-1.5 rounded-md hover:bg-gray-100 cursor-pointer">
+                                  <Checkbox
+                                    checked={on}
+                                    onChange={(e) => {
+                                      const next = e.target.checked
+                                        ? [...selected, m]
+                                        : selected.filter((x) => x !== m);
+                                      setNewStudent({ ...newStudent, municipality: serializeMunicipalities(next) });
+                                    }}
+                                  />
+                                  {m}
+                                </label>
+                              );
+                            })}
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                    </div>
                   )}
                   </div>
 
@@ -2517,14 +3155,13 @@ export default function CompanyStudents() {
                                 onChange={(e) => setSubjectSearch(e.target.value)}
                                 placeholder={t('common.search')}
                                 className="h-9 rounded-xl"
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onKeyDown={(e) => e.stopPropagation()}
                               />
-                              {!subjectSearch && tutorSubjects.length > 5 && (
-                                <p className="mt-1 text-[11px] text-gray-500">{t('common.searchToSeeMore')}</p>
-                              )}
                             </div>
                             {(subjectSearch
                               ? tutorSubjects.filter((s) => (s.name || '').toLowerCase().includes(subjectSearch.trim().toLowerCase()))
-                              : tutorSubjects.slice(0, 5)
+                              : tutorSubjects
                             ).map((subj) => (
                                 <SelectItem key={subj.id} value={subj.id}>
                                   <div className="flex items-center gap-2">
@@ -2641,7 +3278,34 @@ export default function CompanyStudents() {
           </div>
 
           <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
-            {isSchoolView && availableGrades.length > 0 && (
+            {isSchoolView && (
+              <Select value={enrollmentStatusFilter} onValueChange={(v) => setEnrollmentStatusFilter(v as EnrollmentStatusFilter)}>
+                <SelectTrigger className="w-full sm:w-auto sm:min-w-[150px] rounded-xl border-gray-200 bg-white">
+                  <SelectValue placeholder={t('compStu.filterStatusActive')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t('compStu.filterStatusAll')}</SelectItem>
+                  <SelectItem value="active">{t('compStu.filterStatusActive')}</SelectItem>
+                  <SelectItem value="future">{t('compStu.filterStatusFuture')}</SelectItem>
+                  <SelectItem value="left">{t('compStu.filterStatusLeft')}</SelectItem>
+                  <SelectItem value="graduated">{t('compStu.filterStatusGraduated')}</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+            {isSchoolView && (
+              <Select value={schoolYearFilter} onValueChange={setSchoolYearFilter}>
+                <SelectTrigger className="w-full sm:w-auto sm:min-w-[150px] rounded-xl border-gray-200 bg-white">
+                  <SelectValue placeholder={t('compStu.filterSchoolYearAll')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t('compStu.filterSchoolYearAll')}</SelectItem>
+                  {SCHOOL_YEAR_OPTIONS.map((y) => (
+                    <SelectItem key={y} value={y}>{y}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            {isSchoolView && (
               <Select value={gradeFilter} onValueChange={setGradeFilter}>
                 <SelectTrigger className="w-full sm:w-auto sm:min-w-[140px] rounded-xl border-gray-200 bg-white">
                   <SelectValue placeholder={t('compStu.filterGradeAll')} />
@@ -2680,6 +3344,104 @@ export default function CompanyStudents() {
                 </SelectContent>
               </Select>
             )}
+            {isSchoolView && (
+              <Popover open={municipalityPopoverOpen} onOpenChange={setMunicipalityPopoverOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full sm:w-auto sm:min-w-[180px] justify-between rounded-xl border-gray-200 bg-white font-normal"
+                  >
+                    <span className="truncate">
+                      {municipalityFilter.length === 0
+                        ? t('compStu.filterMunicipalityAll')
+                        : municipalityFilter.join(', ')}
+                    </span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[280px] p-2" align="start">
+                  <Input
+                    value={municipalitySearch}
+                    onChange={(e) => setMunicipalitySearch(e.target.value)}
+                    placeholder={t('compStu.filterMunicipalitySearch')}
+                    className="mb-2 rounded-lg"
+                  />
+                  <div className="max-h-56 overflow-y-auto space-y-0.5">
+                    <button
+                      type="button"
+                      className="w-full text-left text-sm px-2 py-1.5 rounded-md hover:bg-gray-100"
+                      onClick={() => {
+                        setMunicipalityFilter([]);
+                        setMunicipalitySearch('');
+                      }}
+                    >
+                      {t('compStu.filterMunicipalityAll')}
+                    </button>
+                    {filteredMunicipalityOptions.map((m) => {
+                      const on = municipalityFilter.includes(m);
+                      return (
+                        <label key={m} className="flex items-center gap-2 text-sm px-2 py-1.5 rounded-md hover:bg-gray-100 cursor-pointer">
+                          <Checkbox
+                            checked={on}
+                            onChange={(e) => {
+                              setMunicipalityFilter((prev) =>
+                                e.target.checked ? [...prev, m] : prev.filter((x) => x !== m),
+                              );
+                            }}
+                          />
+                          {m}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            )}
+            {isSchoolView && (
+              <Select value={debtFilter} onValueChange={(v) => setDebtFilter(v as DebtFilter)}>
+                <SelectTrigger className="w-full sm:w-auto sm:min-w-[140px] rounded-xl border-gray-200 bg-white">
+                  <SelectValue placeholder={t('compStu.filterDebtAll')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t('compStu.filterDebtAll')}</SelectItem>
+                  <SelectItem value="yes">{t('compStu.filterDebtYes')}</SelectItem>
+                  <SelectItem value="no">{t('compStu.filterDebtNo')}</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+            {isSchoolView && showExitFilters && (
+              <Select value={exitReasonFilter} onValueChange={(v) => setExitReasonFilter(v as ExitReasonFilter)}>
+                <SelectTrigger className="w-full sm:w-auto sm:min-w-[180px] rounded-xl border-gray-200 bg-white">
+                  <SelectValue placeholder={t('compStu.filterExitReasonAll')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t('compStu.filterExitReasonAll')}</SelectItem>
+                  {EXIT_REASONS.map((r) => (
+                    <SelectItem key={r} value={r}>{t(exitReasonLabelKey(r))}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            {isSchoolView && showExitFilters && (
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+                <div className="space-y-1">
+                  <Label className="text-xs text-gray-500">{t('compStu.filterExitDateFrom')}</Label>
+                  <DateInput
+                    value={exitDateFrom}
+                    onChange={(e) => setExitDateFrom(e.target.value)}
+                    className="rounded-xl"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-gray-500">{t('compStu.filterExitDateTo')}</Label>
+                  <DateInput
+                    value={exitDateTo}
+                    onChange={(e) => setExitDateTo(e.target.value)}
+                    className="rounded-xl"
+                  />
+                </div>
+              </div>
+            )}
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
               <Input
@@ -2696,7 +3458,7 @@ export default function CompanyStudents() {
                 size="sm"
                 variant="outline"
                 className="rounded-xl shrink-0 w-full sm:w-auto"
-                onClick={() => void exportStudentsXlsx()}
+                onClick={() => setExportColumnsOpen(true)}
                 disabled={exportingStudents || filteredGroups.length === 0}
               >
                 <Download className="w-4 h-4 mr-1.5" />
@@ -3004,13 +3766,18 @@ export default function CompanyStudents() {
         )}
 
         {/* Student Detail Modal */}
-        <Dialog open={isStudentModalOpen} onOpenChange={(open) => { setIsStudentModalOpen(open); if (!open) { setSendPackageOpen(false); } }}>
-          <DialogContent className="w-[95vw] sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl max-h-[90vh] overflow-y-auto p-5 sm:p-6">
+        <Dialog open={isStudentModalOpen} onOpenChange={(open) => { setIsStudentModalOpen(open); if (!open) { setSendPackageOpen(false); setFindLessonPick(null); } }}>
+          <DialogContent
+            className={cn(
+              'w-[calc(100%-1.5rem)] max-h-[90vh] overflow-y-auto p-5 sm:p-6',
+              showStudentSchedulePane ? 'max-w-5xl' : 'max-w-3xl',
+            )}
+          >
             <DialogHeader>
               <DialogTitle>{t('compStu.studentInfo')}</DialogTitle>
             </DialogHeader>
             {selectedStudent && (
-              <div className="space-y-5">
+              <div className="w-full min-w-0 space-y-5">
                 {selectedStudentGroup.length > 1 && (
                   <div className="p-3 rounded-xl border border-gray-100 bg-gray-50">
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">{t('compStu.thTutor')}</p>
@@ -3040,8 +3807,13 @@ export default function CompanyStudents() {
                   </div>
                 )}
                 {/* Info */}
-                <div className="flex justify-between items-start pb-4 border-b border-gray-100 gap-4">
-                  <div className="space-y-1 flex-1">
+                <div
+                  className={cn(
+                    'grid w-full gap-5 items-start pb-4 border-b border-gray-100',
+                    showStudentSchedulePane && 'lg:grid-cols-2',
+                  )}
+                >
+                  <div className="space-y-3 min-w-0 w-full">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         {isEditingStudentName ? (
@@ -3113,8 +3885,15 @@ export default function CompanyStudents() {
                         </Button>
                       )}
                     </div>
-                    <div className="text-gray-600 text-sm space-y-3">
-                      <div>
+                    <div
+                      className={cn(
+                        'text-gray-600 text-sm w-full',
+                        (isSchoolView || shouldShowParentContacts(selectedStudent))
+                          ? 'grid grid-cols-1 sm:grid-cols-2 gap-4'
+                          : 'space-y-3',
+                      )}
+                    >
+                      <div className="min-w-0 w-full rounded-xl border border-gray-100 bg-gray-50/70 p-3">
                         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">{t('compStu.studentLabel')}</p>
                         <p>
                           {t('compStu.emailInline')} <span className="text-gray-900">{adminShowEmail(selectedStudent.email)}</span>
@@ -3123,8 +3902,8 @@ export default function CompanyStudents() {
                           {t('compStu.phoneInline')} <span className="text-gray-900">{adminShowPhone(selectedStudent.phone, locale)}</span>
                         </p>
                       </div>
-                      {shouldShowParentContacts(selectedStudent) && (
-                        <div className="pt-2 border-t border-gray-100">
+                      {(isSchoolView || shouldShowParentContacts(selectedStudent)) && (
+                        <div className="min-w-0 w-full rounded-xl border border-gray-100 bg-gray-50/70 p-3">
                           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">{t('compStu.payerLabel')}</p>
                           {(selectedStudent.payer_name || '').trim() && (
                             <p>
@@ -3140,45 +3919,79 @@ export default function CompanyStudents() {
                         </div>
                       )}
                     </div>
-                    <p className="text-sm font-semibold">
-                      {t('compStu.tutorInline')}{' '}
-                      {selectedStudent.tutor_id ? (
-                        <span className="text-indigo-600">{selectedStudent.tutor?.full_name || '—'}</span>
-                      ) : (
-                        <span className="text-amber-600">{t('compStu.tutorNotAssigned')}</span>
-                      )}
-                    </p>
-                    <p className="text-gray-600 text-sm">
-                      {t('compStu.codeInline')} <code className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">{selectedStudent.invite_code}</code>
-                    </p>
+                    <div className="text-sm grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <p className="font-semibold">
+                        {t('compStu.tutorInline')}{' '}
+                        {selectedStudent.tutor_id ? (
+                          <span className="text-indigo-600">{selectedStudent.tutor?.full_name || '—'}</span>
+                        ) : (
+                          <span className="text-amber-600">{t('compStu.tutorNotAssigned')}</span>
+                        )}
+                      </p>
+                      <p className="text-gray-600">
+                        {t('compStu.codeInline')} <code className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">{selectedStudent.invite_code}</code>
+                      </p>
+                    </div>
                     {isSchoolView && (
-                    <div className="mt-3 max-w-xs space-y-1.5">
-                      <Label className="text-xs text-gray-500">{t('studentSettings.grade')}</Label>
-                      <Select
-                        value={selectedStudent.grade || 'unset'}
-                        onValueChange={(value) => void handleUpdateStudentGrade(value)}
-                      >
-                        <SelectTrigger className="h-9 rounded-xl bg-white">
-                          <SelectValue placeholder={t('dynamicPricing.gradeUnset')} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="unset">{t('dynamicPricing.gradeUnset')}</SelectItem>
-                          {Array.from({ length: 12 }, (_, index) => (
-                            <SelectItem key={index + 1} value={`${index + 1} klasė`}>
-                              {t('onboard.gradeN', { n: index + 1 })}
-                            </SelectItem>
-                          ))}
-                          <SelectItem value="Studentas">{t('lessonSet.gradeUniversity')}</SelectItem>
-                          <SelectItem value="Kita">{t('onboard.gradeOther')}</SelectItem>
-                        </SelectContent>
-                      </Select>
+                    <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-5">
+                      <div className="w-full min-w-0 space-y-1.5">
+                        <Label className="text-xs text-gray-500">{t('studentSettings.grade')}</Label>
+                        <Select
+                          value={selectedStudent.grade || 'unset'}
+                          onValueChange={(value) => void handleUpdateStudentGrade(value)}
+                        >
+                          <SelectTrigger className="h-9 rounded-xl bg-white">
+                            <SelectValue placeholder={t('dynamicPricing.gradeUnset')} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="unset">{t('dynamicPricing.gradeUnset')}</SelectItem>
+                            {GRADE_OPTIONS.map((g) => (
+                              <SelectItem key={g} value={g}>{g}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {(studentDebtById[selectedStudent.id] || selectedStudent.has_debt_manual) && (
+                          <span className="inline-flex text-[11px] border rounded-md px-2 py-0.5 text-amber-800 bg-amber-50 border-amber-200">
+                            {t('compStu.hasDebtBadge')}
+                          </span>
+                        )}
+                      </div>
+                      {selectedStudent && (
+                        <SchoolStudentContractStatus
+                          student={selectedStudent}
+                          contractInfo={contractsByStudent[selectedStudent.id]}
+                          onDownload={(path) => void openContractFile(path)}
+                          t={t}
+                        />
+                      )}
                     </div>
                     )}
-                    {proKlaseIntake && (
-                    <div className="mt-3 max-w-xs space-y-1.5">
+                    {classGroupsEnabled && selectedStudent && (
+                      <div className="mt-2 rounded-xl border border-gray-100 bg-gray-50/70 p-3 space-y-1">
+                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                          {t('school.groups.studentMembership')}
+                        </p>
+                        {groupsContainingStudent(classGroups, selectedStudent.id).length === 0 ? (
+                          <p className="text-sm text-gray-500">{t('school.groups.membershipNone')}</p>
+                        ) : (
+                          <ul className="text-sm text-gray-900 space-y-1">
+                            {groupsContainingStudent(classGroups, selectedStudent.id).map((group) => (
+                              <li key={group.id}>
+                                <span className="font-medium">{group.name}</span>
+                                {group.slots?.length ? (
+                                  <span className="text-gray-500"> · {scheduleLabelFromGroupSlots(group.slots)}</span>
+                                ) : null}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
+                    {proKlaseAdminUi && (
+                    <div className="mt-3 w-full space-y-1.5">
                       <Label className="text-xs text-gray-500">{t('studentSettings.grade')}</Label>
                       <Select
-                        value={selectedStudent.grade || 'unset'}
+                        value={normalizeStudentGrade1to12(selectedStudent.grade) || selectedStudent.grade || 'unset'}
                         onValueChange={(value) => void handleUpdateStudentGrade(value)}
                       >
                         <SelectTrigger className="h-9 rounded-xl bg-white">
@@ -3228,14 +4041,6 @@ export default function CompanyStudents() {
                       )}
                     </div>
                     )}
-                    {isSchoolView && selectedStudent && (
-                      <SchoolStudentContractStatus
-                        student={selectedStudent}
-                        contractInfo={contractsByStudent[selectedStudent.id]}
-                        onDownload={(path) => void openContractFile(path)}
-                        t={t}
-                      />
-                    )}
                     {canFullEditStudent && (
                       <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-3">
                         <div className="flex items-center justify-between gap-2">
@@ -3261,6 +4066,93 @@ export default function CompanyStudents() {
                             <DateInput value={studentEditDraft.child_birth_date} onChange={(e) => setStudentEditDraft((p) => ({ ...p, child_birth_date: e.target.value }))} />
                             <Input value={studentEditDraft.student_address} onChange={(e) => setStudentEditDraft((p) => ({ ...p, student_address: e.target.value }))} placeholder={t('invoiceSettings.address')} className="rounded-xl bg-white" />
                             <Input value={studentEditDraft.student_city} onChange={(e) => setStudentEditDraft((p) => ({ ...p, student_city: e.target.value }))} placeholder={t('perlasFinance.city')} className="rounded-xl bg-white" />
+                            {isSchoolView && (
+                              <>
+                                <div className="space-y-1 sm:col-span-2">
+                                  <Label className="text-xs text-gray-500">{t('compStu.schoolYear')}</Label>
+                                  <Select
+                                    value={studentEditDraft.school_year || suggestSchoolYear()}
+                                    onValueChange={(value) => setStudentEditDraft((p) => ({ ...p, school_year: value }))}
+                                  >
+                                    <SelectTrigger className="rounded-xl bg-white">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {SCHOOL_YEAR_OPTIONS.map((y) => (
+                                        <SelectItem key={y} value={y}>{y}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-gray-500">{t('compStu.enrollmentStatus')}</Label>
+                                  <Select
+                                    value={studentEditDraft.enrollment_status}
+                                    onValueChange={(value) => {
+                                      const next = value as EnrollmentStatus;
+                                      if (next === 'left') {
+                                        openLeaveDialog(selectedStudent?.id);
+                                        return;
+                                      }
+                                      setStudentEditDraft((p) => ({ ...p, enrollment_status: next }));
+                                    }}
+                                  >
+                                    <SelectTrigger className="rounded-xl bg-white">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {ENROLLMENT_STATUSES.map((s) => (
+                                        <SelectItem key={s} value={s}>{t(enrollmentStatusLabelKey(s))}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="space-y-1 sm:col-span-2">
+                                  <Label className="text-xs text-gray-500">{t('compStu.municipality')}</Label>
+                                  <p className="text-[11px] text-gray-500">{t('compStu.municipalityMultiHint')}</p>
+                                  <Popover open={editMunicipalityPopoverOpen} onOpenChange={setEditMunicipalityPopoverOpen}>
+                                    <PopoverTrigger asChild>
+                                      <Button type="button" variant="outline" className="w-full justify-between rounded-xl bg-white font-normal">
+                                        <span className="truncate">
+                                          {parseMunicipalities(studentEditDraft.municipality).join(', ') || '—'}
+                                        </span>
+                                      </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-[280px] p-2 max-h-64 overflow-y-auto" align="start">
+                                      {LT_MUNICIPALITIES.map((m) => {
+                                        const selected = parseMunicipalities(studentEditDraft.municipality);
+                                        const on = selected.includes(m);
+                                        return (
+                                          <label key={m} className="flex items-center gap-2 text-sm px-2 py-1.5 rounded-md hover:bg-gray-100 cursor-pointer">
+                                            <Checkbox
+                                              checked={on}
+                                              onChange={(e) => {
+                                                const next = e.target.checked
+                                                  ? [...selected, m]
+                                                  : selected.filter((x) => x !== m);
+                                                setStudentEditDraft((p) => ({ ...p, municipality: serializeMunicipalities(next) }));
+                                              }}
+                                            />
+                                            {m}
+                                          </label>
+                                        );
+                                      })}
+                                    </PopoverContent>
+                                  </Popover>
+                                </div>
+                                {normalizeEnrollmentStatus(selectedStudent?.enrollment_status) !== 'left' && (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="rounded-xl sm:col-span-2"
+                                    onClick={() => openLeaveDialog(selectedStudent?.id)}
+                                  >
+                                    {t('compStu.markAsLeft')}
+                                  </Button>
+                                )}
+                              </>
+                            )}
                             {studentEditDraft.child_birth_date && (
                               <p className="text-xs text-gray-500 sm:col-span-2">{t('studentSettings.age')}: {calculateAgeFromDate(studentEditDraft.child_birth_date) ?? '—'}</p>
                             )}
@@ -3400,22 +4292,23 @@ export default function CompanyStudents() {
                     </div>
                   </div>
 
-                  {/* Recurring schedule + move/cancel counters (near the edit button). */}
-                  {selectedStudent && proKlaseIntake && hasFeature('student_schedule_overview') && (
-                    <StudentScheduleSummary
-                      studentRowIds={(selectedStudentGroup.length > 0 ? selectedStudentGroup : [selectedStudent]).map((row) => row.id)}
-                      refreshKey={modalSessionsRefreshKey}
-                    />
-                  )}
-
-                  {/* Weekly availability that suits the student (prefills tutor search). */}
-                  {selectedStudent && !orgFeaturesLoading && hasFeature('student_availability_profile') && (
-                    <StudentAvailabilityEditor
-                      value={pickGroupPreferredAvailability(selectedStudentGroup.length > 0 ? selectedStudentGroup : [selectedStudent])}
-                      saving={savingAvailability}
-                      onSave={handleSaveStudentAvailability}
-                    />
-                  )}
+                  {showStudentSchedulePane ? (
+                    <div className="min-w-0 space-y-4 rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
+                      {selectedStudent && proKlaseAdminUi && hasFeature('student_schedule_overview') && (
+                        <StudentScheduleSummary
+                          studentRowIds={(selectedStudentGroup.length > 0 ? selectedStudentGroup : [selectedStudent]).map((row) => row.id)}
+                          refreshKey={modalSessionsRefreshKey}
+                        />
+                      )}
+                      {selectedStudent && pkFeat('student_availability_profile') && (
+                        <StudentAvailabilityEditor
+                          value={pickGroupPreferredAvailability(selectedStudentGroup.length > 0 ? selectedStudentGroup : [selectedStudent])}
+                          saving={savingAvailability}
+                          onSave={handleSaveStudentAvailability}
+                        />
+                      )}
+                    </div>
+                  ) : null}
                 </div>
 
                 {editTutorsOpen && (
@@ -3953,7 +4846,7 @@ export default function CompanyStudents() {
                 )}
 
                 {/* Trial lesson offer (only for brand new students with 0 sessions) */}
-                {selectedStudent && proKlaseIntake && (selectedStudentSessionCount ?? 0) === 0 && !selectedStudent.trial_offer_disabled &&
+                {selectedStudent && proKlaseAdminUi && (selectedStudentSessionCount ?? 0) === 0 && !selectedStudent.trial_offer_disabled &&
                   !hasFeature('hide_trial_offer_button') &&
                   (hasFeature('trial_reservation_flow') || hasFeature('auto_trial_first_lesson')) && (
                   <div className="space-y-2">
@@ -4098,7 +4991,7 @@ export default function CompanyStudents() {
                           onChange={setPkgItems}
                         />
                       )}
-                      {!orgFeaturesLoading && proKlaseIntake && hasFeature('package_reservation_flow') && (
+                      {!orgFeaturesLoading && proKlaseAdminUi && hasFeature('package_reservation_flow') && (
                         <div className="space-y-2 border-t border-violet-200 pt-3">
                           <p className="text-xs font-semibold text-violet-800">{t('package.reserveTimesTitle')}</p>
                           <p className="text-[11px] text-violet-600">{t('package.reserveTimesHint')}</p>
@@ -4272,8 +5165,8 @@ export default function CompanyStudents() {
                         const isMulti = items.length > 1;
                         return (
                         <div key={pkg.id} className="flex flex-col gap-2 p-3 bg-gray-50 rounded-xl text-sm">
-                          <div className="flex items-center justify-between gap-2 flex-wrap">
-                            <div className="flex items-center gap-2 flex-wrap">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <div className="flex items-center gap-2 flex-wrap min-w-0">
                               {!isMulti && pkg.subject?.color && <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: pkg.subject.color }} />}
                               <span className="font-medium text-gray-800">
                                 {isMulti
@@ -4281,8 +5174,11 @@ export default function CompanyStudents() {
                                   : (pkg.subject?.name || '—')}
                               </span>
                               <span className="text-gray-500">{t('compStu.lessonsCount', { count: String(pkg.total_lessons) })}</span>
+                              {pkg.total_price != null && Number.isFinite(Number(pkg.total_price)) && (
+                                <span className="font-semibold text-gray-800">{fmt(Number(pkg.total_price))}</span>
+                              )}
                             </div>
-                            <div className="flex items-center gap-2 flex-wrap justify-end">
+                            <div className="flex items-center gap-2 flex-wrap ml-auto">
                               <span className="text-xs text-gray-500">{t('compStu.remaining', { count: String(pkg.available_lessons) })}</span>
                             {pkg.expires_at && (
                               <span className={`text-xs px-2 py-0.5 rounded-full ${new Date(pkg.expires_at) < new Date() ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
@@ -4296,6 +5192,22 @@ export default function CompanyStudents() {
                             </span>
                             {pkg.payment_status === 'pending' && !pkg.paid && (
                               <>
+                                {canEditPendingPackage(pkg) && (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 px-2 text-xs rounded-lg text-gray-500 hover:text-indigo-700 hover:bg-indigo-50"
+                                    disabled={pkgSavingEdit}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openEditPackage(pkg);
+                                    }}
+                                    title={t('compStu.pkgEdit')}
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </Button>
+                                )}
                                 <Button
                                   type="button"
                                   size="sm"
@@ -4368,7 +5280,7 @@ export default function CompanyStudents() {
                 </div>
 
                 {/* Book a lesson from the student card (req 4) */}
-                {!orgFeaturesLoading && hasFeature('student_card_booking') && (
+                {pkFeat('student_card_booking') && (
                   <div className="border-t border-gray-100 pt-4">
                     <h4 className="font-semibold mb-1 text-gray-900">{t('compStu.bookLessonTitle')}</h4>
                     <p className="text-xs text-gray-500 mb-3">{t('compStu.bookLessonDesc')}</p>
@@ -4383,6 +5295,24 @@ export default function CompanyStudents() {
                       <Search className="w-4 h-4 mr-2" />
                       {t('compStu.bookLessonFindTutor')}
                     </Button>
+                    <FindLessonBookDialog
+                      variant="inline"
+                      pick={findLessonPick}
+                      studentId={selectedStudent?.id ?? ''}
+                      onClose={() => setFindLessonPick(null)}
+                      onBooked={(booking) => {
+                        setFindLessonBookedIntervals((current) => [
+                          ...current,
+                          {
+                            tutor_id: booking.tutorId,
+                            start: new Date(booking.startIso),
+                            end: new Date(booking.endIso),
+                          },
+                        ]);
+                        setModalSessionsRefreshKey((k) => k + 1);
+                        fetchData();
+                      }}
+                    />
                   </div>
                 )}
 
@@ -4420,33 +5350,54 @@ export default function CompanyStudents() {
           }}
         />
 
-        {proKlaseIntake && (
+        {proKlaseAdminUi && (
         <FindTutorModal
           isOpen={addStudentFindTutorOpen}
           onClose={() => setAddStudentFindTutorOpen(false)}
           orgId={orgId}
           frequencyEnabled
-          onPickTutor={(tutor) => {
+          onPickTutor={(tutor, slot) => {
             setNewStudent((current) => ({
               ...current,
               tutor_ids: current.tutor_ids.includes(tutor.id)
                 ? current.tutor_ids
                 : [...current.tutor_ids, tutor.id],
             }));
-            setAddStudentFindTutorOpen(false);
+            const range = defaultLessonRange(slot.start, slot.end, slot.durationMinutes || 60);
+            const nextItem: AddStudentLessonPick = {
+              pick: {
+                tutorId: slot.tutorId,
+                tutorName: slot.tutorName,
+                subjectId: slot.subjectId,
+                subjectName: slot.subjectName,
+                startIso: slot.start.toISOString(),
+                endIso: slot.end.toISOString(),
+              },
+              lessonStartIso: range.start.toISOString(),
+              lessonEndIso: range.end.toISOString(),
+            };
+            setAddStudentPickedLessons((current) => {
+              const withoutTutor = current.filter((item) => item.pick.tutorId !== tutor.id);
+              return [...withoutTutor, nextItem];
+            });
           }}
+          busyIntervals={addStudentPickedLessons.map((item) => ({
+            tutor_id: item.pick.tutorId,
+            start: new Date(item.lessonStartIso),
+            end: new Date(item.lessonEndIso),
+          }))}
         />
         )}
 
-        {!orgFeaturesLoading && hasFeature('student_card_booking') && (
+        {pkFeat('student_card_booking') && (
           <>
             <FindTutorModal
               isOpen={findLessonOpen}
               onClose={() => setFindLessonOpen(false)}
               orgId={orgId}
               primaryTutorId={selectedStudent?.tutor_id ?? null}
-              frequencyEnabled={hasFeature('tutor_frequency_search')}
-              hidePrices={hasFeature('hide_admin_lesson_prices')}
+              frequencyEnabled={pkFeat('tutor_frequency_search')}
+              hidePrices={pkFeat('hide_admin_lesson_prices')}
               initialPreferredWindows={toFindTutorWindows(
                 pickGroupPreferredAvailability(
                   selectedStudentGroup.length > 0 ? selectedStudentGroup : (selectedStudent ? [selectedStudent] : []),
@@ -4462,23 +5413,7 @@ export default function CompanyStudents() {
                   startIso: slot.start.toISOString(),
                   endIso: slot.end.toISOString(),
                 });
-              }}
-            />
-            <FindLessonBookDialog
-              pick={findLessonPick}
-              studentId={selectedStudent?.id ?? ''}
-              onClose={() => setFindLessonPick(null)}
-              onBooked={(booking) => {
-                setFindLessonBookedIntervals((current) => [
-                  ...current,
-                  {
-                    tutor_id: booking.tutorId,
-                    start: new Date(booking.startIso),
-                    end: new Date(booking.endIso),
-                  },
-                ]);
-                setModalSessionsRefreshKey((k) => k + 1);
-                fetchData();
+                setFindLessonOpen(false);
               }}
             />
           </>
@@ -4577,6 +5512,181 @@ export default function CompanyStudents() {
               >
                 {trialSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                 {t('compStu.confirmAndSendWithoutDate')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={!!editingPackage} onOpenChange={(open) => { if (!open) setEditingPackage(null); }}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>{t('compStu.pkgEditTitle')}</DialogTitle>
+              <DialogDescription>{t('compStu.pkgEditDesc')}</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-1">
+              <div className="space-y-1">
+                <Label>{t('compStu.pkgEditMonth')}</Label>
+                <Select value={editPeriodStart} onValueChange={setEditPeriodStart}>
+                  <SelectTrigger className="h-9 rounded-lg"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {monthOptionStarts.map((start) => (
+                      <SelectItem key={start} value={start}>
+                        {start.slice(0, 7)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {monthlyPackageMode ? (
+                <div className="space-y-1">
+                  <Label>{t('package.weeklyFrequency')}</Label>
+                  <Select value={String(editLessonsPerWeek)} onValueChange={(v) => setEditLessonsPerWeek(Number(v))}>
+                    <SelectTrigger className="h-9 rounded-lg"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {[1, 2, 3, 4, 5].map((count) => (
+                        <SelectItem key={count} value={String(count)}>{t('findLesson.lessonsPerWeek', { count })}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-gray-500">
+                    {t('package.monthlyCalculation', {
+                      from: monthlyPackagePeriodFrom(editPeriodStart || formatLocalYmd(new Date()), editLessonsPerWeek).periodStart,
+                      to: monthlyPackagePeriodFrom(editPeriodStart || formatLocalYmd(new Date()), editLessonsPerWeek).periodEnd,
+                      lessons: monthlyPackagePeriodFrom(editPeriodStart || formatLocalYmd(new Date()), editLessonsPerWeek).totalLessons,
+                    })}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <Label>{t('compStu.pkgEditLessons')}</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={editLessons}
+                    onChange={(e) => setEditLessons(Math.max(1, Number(e.target.value) || 1))}
+                  />
+                </div>
+              )}
+              {editingPackage && (() => {
+                const unit = Number(
+                  (Array.isArray(editingPackage.lesson_package_items) && editingPackage.lesson_package_items[0]?.price_per_lesson)
+                  ?? editingPackage.price_per_lesson
+                  ?? 0,
+                ) || 0;
+                const lessons = monthlyPackageMode
+                  ? monthlyPackagePeriodFrom(editPeriodStart || formatLocalYmd(new Date()), editLessonsPerWeek).totalLessons
+                  : editLessons;
+                return (
+                  <p className="text-sm font-semibold text-gray-900 pt-1">
+                    {t('compStu.pkgEditTotal', { amount: fmt(unit * lessons) })}
+                  </p>
+                );
+              })()}
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setEditingPackage(null)}>{t('common.cancel')}</Button>
+              <Button type="button" onClick={() => void handleSaveEditedPackage()} disabled={pkgSavingEdit}>
+                {pkgSavingEdit ? <Loader2 className="w-4 h-4 animate-spin" /> : t('compStu.pkgEditSave')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={leaveDialogOpen} onOpenChange={setLeaveDialogOpen}>
+          <DialogContent className="sm:max-w-md rounded-2xl">
+            <DialogHeader>
+              <DialogTitle>{t('compStu.leaveStudentTitle')}</DialogTitle>
+              <DialogDescription>{t('compStu.leaveStudentDesc')}</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-2">
+              <div className="space-y-1.5">
+                <Label>{t('compStu.leaveExitDate')}</Label>
+                <DateInput
+                  value={leaveForm.exit_date}
+                  onChange={(e) => setLeaveForm((p) => ({ ...p, exit_date: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>{t('compStu.leaveExitReason')}</Label>
+                <Select
+                  value={leaveForm.exit_reason || undefined}
+                  onValueChange={(v) => setLeaveForm((p) => ({ ...p, exit_reason: v as ExitReason }))}
+                >
+                  <SelectTrigger className="rounded-xl">
+                    <SelectValue placeholder={t('compStu.leaveExitReason')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {EXIT_REASONS.map((r) => (
+                      <SelectItem key={r} value={r}>{t(exitReasonLabelKey(r))}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>{t('compStu.leaveExitNote')}</Label>
+                <Input
+                  value={leaveForm.exit_note}
+                  onChange={(e) => setLeaveForm((p) => ({ ...p, exit_note: e.target.value }))}
+                  className="rounded-xl"
+                />
+              </div>
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <Checkbox
+                  checked={leaveForm.has_debt_manual}
+                  onChange={(e) => setLeaveForm((p) => ({ ...p, has_debt_manual: e.target.checked }))}
+                />
+                {t('compStu.leaveHasDebt')}
+              </label>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" className="rounded-xl" onClick={() => setLeaveDialogOpen(false)}>
+                {t('compStu.cancelBtn')}
+              </Button>
+              <Button type="button" className="rounded-xl" disabled={leaveSaving} onClick={() => void handleMarkStudentLeft()}>
+                {leaveSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : t('compStu.leaveConfirm')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={exportColumnsOpen} onOpenChange={setExportColumnsOpen}>
+          <DialogContent className="sm:max-w-md rounded-2xl">
+            <DialogHeader>
+              <DialogTitle>{t('compStu.exportColumnsTitle')}</DialogTitle>
+              <DialogDescription>{t('compStu.exportColumnsDesc')}</DialogDescription>
+            </DialogHeader>
+            <div className="max-h-72 overflow-y-auto space-y-2 py-2">
+              {ALL_SCHOOL_STUDENT_EXPORT_COLUMNS.map((id) => {
+                const checked = exportColumns.includes(id);
+                return (
+                  <label key={id} className="flex items-center gap-2 text-sm text-gray-800">
+                    <Checkbox
+                      checked={checked}
+                      onChange={(e) => {
+                        setExportColumns((prev) =>
+                          e.target.checked
+                            ? ALL_SCHOOL_STUDENT_EXPORT_COLUMNS.filter((c) => prev.includes(c) || c === id)
+                            : prev.filter((c) => c !== id),
+                        );
+                      }}
+                    />
+                    {t(schoolStudentExportColumnLabelKey(id))}
+                  </label>
+                );
+              })}
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" className="rounded-xl" onClick={() => setExportColumnsOpen(false)}>
+                {t('compStu.cancelBtn')}
+              </Button>
+              <Button
+                type="button"
+                className="rounded-xl"
+                disabled={exportingStudents || exportColumns.length === 0}
+                onClick={() => void exportStudentsXlsx()}
+              >
+                {exportingStudents ? <Loader2 className="w-4 h-4 animate-spin" /> : t('compStu.exportDownload')}
               </Button>
             </DialogFooter>
           </DialogContent>

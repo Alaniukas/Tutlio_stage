@@ -2,7 +2,7 @@
  * Shared org white-label branding for emails (logo, colors, Pro Klasė from/signature).
  * Used by /api/send-email and in-process invite senders that cannot call send-email over HTTP.
  */
-import { isProKlaseOrg } from './marketMoney.js';
+import { isMoksloVaisiaiOrg, isProKlaseOrg } from './marketMoney.js';
 import { t, type Locale } from './i18n.js';
 import { headerInlineStyle as outlookHeaderInlineStyle } from './outlookEmail.js';
 
@@ -13,6 +13,8 @@ export type EmailBranding = {
   brand_color_secondary?: string;
   /** Hide the "powered by Tutlio" line under the logo (full white-label). */
   hidePoweredBy?: boolean;
+  /** Logo art sits on a black square — pad it so headers stay readable. */
+  logoOnDark?: boolean;
 };
 
 export type OrgRowForEmailBranding = {
@@ -29,6 +31,10 @@ export type EmailOrgBrandingResolved = {
   emailTeamSignature?: string;
   emailSenderName?: string;
   publicName?: string;
+  emailContactPhone?: string;
+  emailContactEmail?: string;
+  /** Show “powered by Tutlio” in the email footer (logo header can stay white-label). */
+  emailFooterPoweredBy?: boolean;
 };
 
 /** Default Tutlio wordmark variants that appear in wrap() / invite HTML. */
@@ -111,16 +117,24 @@ export function resolveEmailOrgBranding(
       : {};
   const publicName = String((features.public_name as string) || '').trim() || undefined;
   const proKlase = isProKlaseOrg(orgId);
-  const useBranding = features.custom_branding === true || proKlase;
-  const hidePoweredBy = proKlase || features.hide_powered_by === true;
+  const moksloVaisiai = isMoksloVaisiaiOrg(orgId);
+  const useBranding = features.custom_branding === true || proKlase || moksloVaisiai;
+  const hidePoweredBy = proKlase || moksloVaisiai || features.hide_powered_by === true;
   const customTeamSignature = String((features.email_team_signature as string) || '').trim();
   const customSenderName = String((features.email_sender_name as string) || '').trim();
+  const contactPhone = String((features.contact_phone as string) || '').trim();
+  const contactEmail = String((features.contact_email as string) || '').trim();
 
   const out: EmailOrgBrandingResolved = {
     branding: null,
     isProKlase: proKlase,
     publicName,
   };
+  if (contactPhone) out.emailContactPhone = contactPhone;
+  if (contactEmail) out.emailContactEmail = contactEmail;
+  if (!proKlase && !moksloVaisiai && features.email_footer_powered_by === true) {
+    out.emailFooterPoweredBy = true;
+  }
 
   if (useBranding) {
     out.branding = {
@@ -132,18 +146,72 @@ export function resolveEmailOrgBranding(
           ? org.brand_color_secondary.trim()
           : undefined,
       hidePoweredBy,
+      logoOnDark: moksloVaisiai,
     };
   }
 
   if (proKlase) {
     out.emailTeamSignature = 'Pro Klasės komanda';
     out.emailSenderName = 'ProKlasė Sistema';
+  } else if (moksloVaisiai) {
+    out.emailTeamSignature = customTeamSignature || 'Mokslo vaisių komanda';
+    out.emailSenderName = customSenderName || 'Mokslo vaisiai sistema';
   } else {
     if (customTeamSignature) out.emailTeamSignature = customTeamSignature;
     if (customSenderName) out.emailSenderName = customSenderName;
   }
 
   return out;
+}
+
+export type EmailFooterExtras = {
+  contactPhone?: string | null;
+  contactEmail?: string | null;
+  poweredByTutlio?: boolean;
+};
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Org contact last; drop Tutlio opt-out so it is not mixed into the org footer. */
+export function injectOrgEmailFooter(html: string, extras: EmailFooterExtras): string {
+  const phone = String(extras.contactPhone || '').trim();
+  const email = String(extras.contactEmail || '').trim();
+  const powered = extras.poweredByTutlio === true;
+  const brandedFooter = !!(phone || email || powered);
+  if (!brandedFooter) return html;
+
+  return html.replace(/<div class="footer">([\s\S]*?)<\/div>/g, (_full, inner: string) => {
+    let body = String(inner);
+    body = body.replace(/<p\b[^>]*>[\s\S]*?info@tutlio\.lt[\s\S]*?<\/p>/gi, '');
+    body = body.replace(/<p\b[^>]*>[\s\S]*?(?:iš Tutlio|from Tutlio)[\s\S]*?<\/p>/gi, '');
+    body = body.replace(/<p\b[^>]*>\s*powered by Tutlio\s*<\/p>/gi, '');
+    if (phone) {
+      body = body.replace(new RegExp(`<p\\b[^>]*>\\s*${escapeRegExp(escapeHtml(phone))}\\s*</p>`, 'gi'), '');
+    }
+    if (email) {
+      const safe = escapeRegExp(escapeHtml(email));
+      body = body.replace(new RegExp(`<p\\b[^>]*>[\\s\\S]*?${safe}[\\s\\S]*?</p>`, 'gi'), '');
+    }
+
+    const tail: string[] = [];
+    if (powered) {
+      tail.push(`<p style="margin:10px 0 0;font-size:11px;color:#9ca3af;">powered by Tutlio</p>`);
+    }
+    if (phone) {
+      tail.push(
+        `<p style="margin:12px 0 0;font-size:12px;color:#6b7280;">${escapeHtml(phone)}</p>`,
+      );
+    }
+    if (email) {
+      const safe = escapeHtml(email);
+      tail.push(
+        `<p style="margin:4px 0 0;font-size:12px;color:#6b7280;"><a href="mailto:${safe}" style="color:#6b7280;text-decoration:none;">${safe}</a></p>`,
+      );
+    }
+    return `<div class="footer">${body}${tail.join('')}</div>`;
+  });
 }
 
 /** Patch generated HTML: logo header, gradient accents, team signature. */
@@ -153,6 +221,9 @@ export function applyOrgBrandingToHtml(
     branding?: EmailBranding | null;
     emailTeamSignature?: string | null;
     locale?: Locale | string;
+    emailContactPhone?: string | null;
+    emailContactEmail?: string | null;
+    emailFooterPoweredBy?: boolean;
   },
 ): string {
   let out = html;
@@ -163,11 +234,21 @@ export function applyOrgBrandingToHtml(
   }
 
   const branding = opts.branding;
-  if (!branding) return out;
+  const withFooter = (html: string) =>
+    injectOrgEmailFooter(html, {
+      contactPhone: opts.emailContactPhone,
+      contactEmail: opts.emailContactEmail,
+      poweredByTutlio: opts.emailFooterPoweredBy === true,
+    });
+  if (!branding) return withFooter(out);
 
-  const logoHtml = branding.logo_url
+  const logoImg = branding.logo_url
     ? `<img src="${branding.logo_url}" alt="${escapeHtml(branding.name)}" style="max-height:64px;max-width:200px;" />`
     : `<span style="font-size:26px;font-weight:900;color:${branding.brand_color};letter-spacing:-0.5px;">${escapeHtml(branding.name)}</span>`;
+  const logoHtml =
+    branding.logoOnDark && branding.logo_url
+      ? `<div style="display:inline-block;background:#000000;border-radius:16px;padding:10px 14px;">${logoImg}</div>`
+      : logoImg;
   const poweredBy = branding.hidePoweredBy
     ? ''
     : `<p style="color:#9ca3af;font-size:11px;margin:8px 0 0;">powered by Tutlio</p>`;
@@ -202,5 +283,5 @@ export function applyOrgBrandingToHtml(
   out = out.replaceAll('#fde68a', a);
   out = out.replaceAll('#fed7aa', a);
   out = out.replaceAll('#fcd34d', a);
-  return out;
+  return withFooter(out);
 }

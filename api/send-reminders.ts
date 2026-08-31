@@ -10,6 +10,7 @@ import { isOrgTutor } from './_lib/isOrgTutor.js';
 import { requireCronAuth } from './_lib/cronAuth.js';
 import { dedupeReminderRecipients, type ReminderRecipient } from './_lib/reminderRecipients.js';
 import { loadReminderOptOuts } from './_lib/reminderOptOut.js';
+import { isMissingPostgrestRpc } from './_lib/postgrestRpc.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -48,6 +49,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const now = new Date();
+    const sessionSelect = `
+          id, start_time, end_time, topic, price, meeting_link,
+          reminder_student_sent, reminder_tutor_sent, reminder_payer_sent,
+          student:students(id, full_name, email, payment_payer, payer_email, payer_name, parent_secondary_email, parent_secondary_name),
+          tutor:profiles(id, full_name, email, phone, reminder_student_hours, reminder_tutor_hours, organization_id)
+        `;
     const { data: dueSessionRows, error: dueSessionError } = await supabase.rpc(
       'get_due_session_reminder_ids',
       { p_limit: SESSION_REMINDER_BATCH_SIZE },
@@ -55,19 +62,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const dueSessionIds = (dueSessionRows || [])
       .map((row: { id?: string }) => row.id)
       .filter((id: string | undefined): id is string => Boolean(id));
-    const sessionResult = dueSessionError || dueSessionIds.length === 0
-      ? { data: [], error: dueSessionError }
-      : await supabase
-        .from('sessions')
-        .select(`
-          id, start_time, end_time, topic, price, meeting_link,
-          reminder_student_sent, reminder_tutor_sent, reminder_payer_sent,
-          student:students(id, full_name, email, payment_payer, payer_email, payer_name, parent_secondary_email, parent_secondary_name),
-          tutor:profiles(id, full_name, email, phone, reminder_student_hours, reminder_tutor_hours, organization_id)
-        `)
-        .in('id', dueSessionIds)
-        .order('start_time', { ascending: true })
-        .order('id', { ascending: true });
+    const sessionResult = isMissingPostgrestRpc(dueSessionError)
+      ? await (async () => {
+          console.warn('[send-reminders] get_due_session_reminder_ids missing; scanning sessions directly');
+          const maxFuture = new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString();
+          return supabase
+            .from('sessions')
+            .select(sessionSelect)
+            .eq('status', 'active')
+            .gte('start_time', now.toISOString())
+            .lt('start_time', maxFuture)
+            .order('start_time', { ascending: true })
+            .order('id', { ascending: true })
+            .limit(SESSION_REMINDER_BATCH_SIZE);
+        })()
+      : dueSessionError || dueSessionIds.length === 0
+        ? { data: [], error: dueSessionError }
+        : await supabase
+          .from('sessions')
+          .select(sessionSelect)
+          .in('id', dueSessionIds)
+          .order('start_time', { ascending: true })
+          .order('id', { ascending: true });
     const { data: sessions, error } = sessionResult;
 
     if (error) {

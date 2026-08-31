@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import FaqSection from '../../src/components/landing/v2/FaqSection';
 import { format, parse } from 'date-fns';
 import { en } from '../../src/lib/i18n/en';
+import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
 import { th, thOverrides } from '../../src/lib/i18n/th';
 import { loadLocaleDict, t, tHtml } from '../../src/lib/i18n/core';
 import { I18nContext, getDateFnsLocale, buildLocalizedPath, getLocaleFromPathname } from '../../src/lib/i18n';
@@ -17,7 +18,7 @@ import { supportGeneralFollowUp } from '../../api/_lib/supportRequest';
 import { formatLocalizedPhone, validateLocalizedPhone, getLocalizedPhonePlaceholder } from '../../src/lib/utils';
 
 const deferred = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
-const expectedKeys = Object.keys(en).filter((key) => !deferred.has(key.split('.')[0]));
+const expectedKeys = Object.keys(en).filter((key) => !deferred.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 // Existing international validation accepts +66. Correct these LT-only source examples.
 const phoneCorrections = new Set(['onboard.parentPhoneFormat', 'onboard.phoneFormatError', 'register.phoneError', 'register.phoneHint', 'settings.phoneFormat', 'stu.phoneFormat']);
 // Abbreviated source messages omit arguments already supplied by their callers.

@@ -33,7 +33,6 @@ import { orgFeeProfile } from '@/lib/marketMoney';
 import { format, isAfter } from 'date-fns';
 import { cn, normalizeUrl } from '@/lib/utils';
 import { recordJoinClick } from '@/lib/joinTracking';
-
 type ChildTutorPolicy = ParentTutorContactPolicy;
 
 interface ChildSession {

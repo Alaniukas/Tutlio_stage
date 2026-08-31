@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { rgb, type RGB } from 'pdf-lib';
 import type { InvoicePdfBranding } from './invoicePdf.js';
+import { isMoksloVaisiaiOrg, isProKlaseOrg } from './marketMoney.js';
 
 function parseHexColor(hex: string | null | undefined, fallback: string): RGB {
   const raw = (hex || fallback).trim().replace('#', '');
@@ -49,7 +50,9 @@ export async function resolveInvoiceBranding(
 
   if (!org) return null;
   const features = (org.features as Record<string, unknown> | null) ?? {};
-  if (features.custom_branding !== true) return null;
+  if (features.custom_branding !== true && !isProKlaseOrg(organizationId) && !isMoksloVaisiaiOrg(organizationId)) {
+    return null;
+  }
 
   const primaryColor = parseHexColor(org.brand_color as string, '#4f46e5');
   const secondaryColor = parseHexColor(

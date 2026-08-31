@@ -1,5 +1,11 @@
 import { describe, expect, it, afterEach } from 'vitest';
-import { parseBlogAiResponse, BLOG_AUTO_LOCALES, resolveBlogAiProvider, coerceJsonObject } from '../../api/_lib/blogAiProvider.js';
+import { parseBlogAiResponse, BLOG_AUTO_LOCALES, resolveBlogAiProvider, coerceJsonObject, parseEditorialBrief } from '../../api/_lib/blogAiProvider.js';
+
+function allLocaleBlocks() {
+  return Object.fromEntries(
+    BLOG_AUTO_LOCALES.map((l) => [l, { title: `${l} title`, excerpt: `${l} ex`, content: `# ${l}` }]),
+  );
+}
 
 const prev = {
   BLOG_AI_PROVIDER: process.env.BLOG_AI_PROVIDER,
@@ -41,14 +47,13 @@ describe('parseBlogAiResponse', () => {
     const raw = {
       tag: 'Tips',
       cover_image_url: 'https://example.com/cover.jpg',
-      lt: { title: 'LT title', excerpt: 'LT ex', content: '# Hello' },
-      en: { title: 'EN title', excerpt: 'EN ex', content: '# Hello EN' },
-      pl: { title: 'PL title', excerpt: 'PL ex', content: '# Hello PL' },
+      ...allLocaleBlocks(),
     };
     const result = parseBlogAiResponse(raw);
     expect(result.tag).toBe('Tips');
     expect(result.coverImageUrl).toBe('https://example.com/cover.jpg');
-    expect(result.locales.lt.title).toBe('LT title');
+    expect(result.locales.lt.title).toBe('lt title');
+    expect(BLOG_AUTO_LOCALES).toHaveLength(13);
     expect(BLOG_AUTO_LOCALES.every((l) => result.locales[l].content)).toBe(true);
   });
 
@@ -56,9 +61,7 @@ describe('parseBlogAiResponse', () => {
     const raw = {
       cover_image_base64: 'abc123',
       cover_image_content_type: 'image/png',
-      lt: { title: 'A', content: 'body' },
-      en: { title: 'B', content: 'body' },
-      pl: { title: 'C', content: 'body' },
+      ...allLocaleBlocks(),
     };
     const result = parseBlogAiResponse(raw);
     expect(result.coverImageBase64).toBe('abc123');
@@ -76,13 +79,20 @@ describe('parseBlogAiResponse', () => {
   });
 
   it('throws without cover', () => {
-    expect(() =>
-      parseBlogAiResponse({
-        lt: { title: 'A', content: 'x' },
-        en: { title: 'B', content: 'x' },
-        pl: { title: 'C', content: 'x' },
-      }),
-    ).toThrow(/cover/);
+    expect(() => parseBlogAiResponse(allLocaleBlocks())).toThrow(/cover/);
+  });
+});
+
+describe('parseEditorialBrief', () => {
+  it('requires a topic and keeps locale angles', () => {
+    const brief = parseEditorialBrief({
+      tag: 'Parents',
+      topic: 'When tutoring helps',
+      angles: { lt: 'Brandos', de: 'Abitur' },
+    });
+    expect(brief.topic).toBe('When tutoring helps');
+    expect(brief.angles.lt).toBe('Brandos');
+    expect(brief.angles.de).toBe('Abitur');
   });
 });
 

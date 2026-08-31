@@ -35,10 +35,9 @@ import { LOCALE_NAMES, type Locale } from '@/lib/i18n/core';
 import { selectableLocales } from '@/lib/i18n/localeRelease';
 import { cn } from '@/lib/utils';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
-import { isSchoolOrg, hasProKlaseIntakeFeatures } from '@/lib/orgIntakeMode';
+import { isSchoolOrg } from '@/lib/orgIntakeMode';
 import { ORG_TUTOR_FILTER_SCROLL_CLASS } from '@/lib/orgUi';
 import { isProKlaseOrg } from '@/lib/marketMoney';
-import { OrgLoginLinksCard } from '@/components/company/OrgLoginLinksCard';
 
 type TrialCommentMode = 'student_and_parent' | 'internal_only';
 
@@ -120,13 +119,8 @@ export default function CompanySettings() {
   );
   const showTrialSettings = useMemo(() => {
     if (isSchoolOrgView) return false;
-    return (
-      hasProKlaseIntakeFeatures((id) => orgFeaturesSnapshot[id] === true) ||
-      orgFeaturesSnapshot['trial_reservation_flow'] === true ||
-      orgFeaturesSnapshot['auto_trial_first_lesson'] === true ||
-      orgFeaturesSnapshot['trial_creation_payment_email'] === true
-    );
-  }, [isSchoolOrgView, orgFeaturesSnapshot]);
+    return isProKlaseOrg(orgId);
+  }, [isSchoolOrgView, orgId]);
   /** Dynamic pricing orgs don't need per-subject list prices. */
   const hideSubjectPrice = isProKlaseOrg(orgId);
   const [contactTutorStudentEmail, setContactTutorStudentEmail] = useState<TutorSeesContactMode>(
@@ -156,10 +150,7 @@ export default function CompanySettings() {
   // Optional address shown to parents (e.g. contract emails) for questions; empty falls back to the org email.
   const [contactEmail, setContactEmail] = useState<string>(sc?.contactEmail ?? '');
   const [publicName, setPublicName] = useState<string>(sc?.publicName ?? '');
-  const [loginDescription, setLoginDescription] = useState<string>(sc?.loginDescription ?? '');
-  const [orgSlug, setOrgSlug] = useState<string>(sc?.orgSlug ?? '');
   const [orgLocale, setOrgLocale] = useState<string>(sc?.orgLocale ?? '');
-  const showOrgLoginLinks = orgFeaturesSnapshot.custom_branding === true || isProKlaseOrg(orgId);
 
   useEffect(() => { if (!getCached('company_settings')) fetchSettings(); }, []);
 
@@ -187,7 +178,7 @@ export default function CompanySettings() {
 
     const { data: orgData } = await supabase
       .from('organizations')
-      .select('default_cancellation_hours, default_cancellation_fee_percent, default_reminder_student_hours, default_reminder_tutor_hours, default_break_between_lessons, default_min_booking_hours, default_company_commission_percent, org_tutors_can_edit_lesson_settings, org_tutor_lesson_edit, org_subject_templates, features, tutor_license_count, preferred_locale, slug')
+      .select('default_cancellation_hours, default_cancellation_fee_percent, default_reminder_student_hours, default_reminder_tutor_hours, default_break_between_lessons, default_min_booking_hours, default_company_commission_percent, org_tutors_can_edit_lesson_settings, org_tutor_lesson_edit, org_subject_templates, features, tutor_license_count, preferred_locale')
       .eq('id', adminRow.organization_id)
       .single();
 
@@ -207,8 +198,6 @@ export default function CompanySettings() {
     let nextPackagePaymentDeadlineHours = 24;
     let nextContactEmail = '';
     let nextPublicName = '';
-    let nextLoginDescription = '';
-    let nextOrgSlug = '';
 
     if (orgData) {
       const rawFeat = (orgData as { features?: unknown }).features;
@@ -237,9 +226,6 @@ export default function CompanySettings() {
       if (typeof fce === 'string') nextContactEmail = fce.trim();
       const fpn = featObj['public_name'];
       if (typeof fpn === 'string') nextPublicName = fpn.trim();
-      const fld = featObj['login_description'];
-      if (typeof fld === 'string') nextLoginDescription = fld;
-      nextOrgSlug = typeof (orgData as { slug?: string }).slug === 'string' ? (orgData as { slug: string }).slug : '';
       setEnableManualStudentPayments(
         featObj['manual_payments'] === true || featObj['enable_manual_student_payments'] === true,
       );
@@ -271,8 +257,6 @@ export default function CompanySettings() {
       setNotifyTutorsOnAssign(featObj['notify_tutors_on_student_assign'] === true);
       setContactEmail(nextContactEmail);
       setPublicName(nextPublicName);
-      setLoginDescription(nextLoginDescription);
-      setOrgSlug(nextOrgSlug);
       setOrgLocale(typeof (orgData as any)?.preferred_locale === 'string' ? (orgData as any).preferred_locale : '');
       setSettings(nextSettings);
       setLessonEditScope(nextLessonEditScope);
@@ -370,8 +354,6 @@ export default function CompanySettings() {
         packagePaymentDeadlineHours: nextPackagePaymentDeadlineHours,
         contactEmail: nextContactEmail,
         publicName: nextPublicName,
-        loginDescription: nextLoginDescription,
-        orgSlug: nextOrgSlug,
         orgLocale: typeof (orgData as any)?.preferred_locale === 'string' ? (orgData as any).preferred_locale : '',
         orgTutors: tutorList,
         subjects: merged,
@@ -765,7 +747,6 @@ export default function CompanySettings() {
       enable_manual_student_payments: enableManualStudentPayments,
       contact_email: contactEmail.trim(),
       public_name: publicName.trim(),
-      login_description: loginDescription.trim(),
     };
 
     const { error } = await supabase
@@ -862,8 +843,6 @@ export default function CompanySettings() {
       enableManualStudentPayments,
       contactEmail,
       publicName,
-      loginDescription,
-      orgSlug,
       orgLocale,
       orgTutors,
       subjects,
@@ -948,14 +927,6 @@ export default function CompanySettings() {
               className="rounded-xl"
             />
           </div>
-
-          {showOrgLoginLinks && (
-            <OrgLoginLinksCard
-              slug={orgSlug}
-              loginDescription={loginDescription}
-              onLoginDescriptionChange={setLoginDescription}
-            />
-          )}
 
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
             <div className="flex items-start gap-3">

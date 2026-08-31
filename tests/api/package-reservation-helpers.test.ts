@@ -5,10 +5,17 @@ import {
   packagePaymentDeadlineIso,
   PACKAGE_PAYMENT_DEFAULT_DEADLINE_HOURS,
 } from '../../api/_lib/trialReservation';
+import { PRO_KLASE_QA_ORG_ID } from '../../api/_lib/marketMoney';
 
 describe('isPackageReservationFlowEnabled', () => {
-  it('is true only when the flag is exactly true', () => {
-    expect(isPackageReservationFlowEnabled({ package_reservation_flow: true })).toBe(true);
+  it('is true only for a Pro Klasė company when the flag is exactly true', () => {
+    expect(isPackageReservationFlowEnabled(
+      { package_reservation_flow: true },
+      PRO_KLASE_QA_ORG_ID,
+      'company',
+    )).toBe(true);
+    expect(isPackageReservationFlowEnabled({ package_reservation_flow: true }, 'other-org', 'company')).toBe(false);
+    expect(isPackageReservationFlowEnabled({ package_reservation_flow: true }, PRO_KLASE_QA_ORG_ID, 'school')).toBe(false);
   });
 
   it('is false for missing/falsy/non-object features', () => {

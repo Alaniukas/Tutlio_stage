@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { en } from '../../src/lib/i18n/en';
+import { DRAFT_LOCALE_ALANO_FALLBACK_KEYS } from '../../src/lib/i18n/draftLocaleFallbacks';
 import { he, heOverrides } from '../../src/lib/i18n/he';
 import { loadLocaleDict, t, tHtml } from '../../src/lib/i18n/core';
 import { getDateFnsLocale } from '../../src/lib/i18n';
@@ -13,7 +14,7 @@ import { generateHreflangLinks } from '../../api/_lib/seo-routing';
 import { formatLocalizedPhone, getLocalizedPhonePlaceholder, validateLocalizedPhone } from '../../src/lib/utils';
 
 const deferred = new Set(['admin', 'school', 'schoolsLanding', 'perlasFinance', 'tos', 'priv', 'dpa']);
-const expectedKeys = Object.keys(en).filter((key) => !deferred.has(key.split('.')[0]));
+const expectedKeys = Object.keys(en).filter((key) => !deferred.has(key.split('.')[0]) && !DRAFT_LOCALE_ALANO_FALLBACK_KEYS.has(key));
 const tokens = (value: string, pattern: RegExp) => (value.match(pattern) ?? []).sort();
 
 beforeAll(() => loadLocaleDict('he'));

@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AlertCircle, CheckCircle2, Building2, Lock, Plus, Eye, EyeOff, ArrowLeft, List, Pencil, FileText, Users, BarChart3, Landmark, Mail, Calculator, UserCheck } from 'lucide-react';
-import { FEATURE_REGISTRY, FEATURE_CATEGORIES, getFeaturesByCategory } from '@/lib/featureRegistry';
+import { FEATURE_REGISTRY, FEATURE_CATEGORIES } from '@/lib/featureRegistry';
+import { getFeaturesByCategoryForOrg, stripProKlaseOnlyFeatures } from '@/lib/orgIntakeMode';
 import { useTranslation } from '@/lib/i18n';
 import AdminBlogPanel from '@/components/admin/AdminBlogPanel';
 import AdminStatisticsPanel from '@/components/admin/AdminStatisticsPanel';
@@ -383,11 +384,11 @@ export default function AdminPanel() {
     setSaveLoading(true);
     setResult(null);
     try {
-      const merged: Record<string, unknown> = {
+      const merged: Record<string, unknown> = stripProKlaseOnlyFeatures(detailId, {
         ...detailFeaturesBase,
         ...editFeatures,
         login_description: editLoginDescription.trim(),
-      };
+      });
       const trimmedUrl = editManualPaymentUrl.trim();
       if (trimmedUrl) merged.manual_payment_url = trimmedUrl;
       else delete merged.manual_payment_url;
@@ -1095,7 +1096,7 @@ export default function AdminPanel() {
                         <Label className="text-slate-300 text-base font-semibold">{t('admin.features')}</Label>
                         <p className="text-xs text-slate-400 mt-1">{t('admin.featuresDesc')}</p>
                       </div>
-                      {Object.entries(getFeaturesByCategory()).map(([category, features]) => (
+                      {Object.entries(getFeaturesByCategoryForOrg(detailId)).map(([category, features]) => (
                         <div key={category} className="space-y-2">
                           <div className="flex items-center gap-2">
                             <span className="text-lg">{FEATURE_CATEGORIES[category as keyof typeof FEATURE_CATEGORIES].icon}</span>

@@ -47,6 +47,17 @@ export type SchoolContractFilterOptions = {
   eSignEnabled?: boolean;
 };
 
+export type SchoolContractKindFilter = 'all' | 'annual' | 'extra_lessons';
+
+export function matchesContractKindFilter(
+  filter: SchoolContractKindFilter,
+  kind?: string | null,
+): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'extra_lessons') return kind === 'extra_lessons';
+  return kind !== 'extra_lessons';
+}
+
 export const CONTRACT_MISSING_FIELD_LABELS = {
   address: 'Gyvenamoji vieta',
   birthDate: 'Vaiko gimimo data',

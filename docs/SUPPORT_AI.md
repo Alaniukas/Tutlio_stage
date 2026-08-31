@@ -1,6 +1,8 @@
 # Tutlio AI support widget
 
-The global bottom-right support widget streams answers from `gpt-5.6-luna` and includes a Contact us sheet that emails the Tutlio team.
+The bottom-right support widget is for **anonymous visitors** on public pages (landing, blog, pricing, login, quiz). It stays hidden for signed-in tutors, students, parents, and org admins — including when they open a marketing URL in the same session. Embed and `/preview/` routes stay hidden for everyone.
+
+It streams answers from `gpt-5.6-luna` and includes a Contact us sheet that emails the Tutlio team.
 
 ## Architecture
 

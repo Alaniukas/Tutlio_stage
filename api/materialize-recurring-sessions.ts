@@ -9,6 +9,13 @@ import {
 } from './_lib/recurringOccurrences.js';
 import { findActivePackageForBooking } from '../src/lib/lessonPackageBooking.js';
 import { defaultSessionPaymentStatusForStudent } from '../src/lib/studentPaymentModel.js';
+import {
+  EXTRA_LESSONS_CONTRACT_KIND,
+  extraLessonsServiceStartYmd,
+  type ExtraLessonsOrderSnapshot,
+  type StartWithin14Status,
+} from '../src/lib/extraLessonsContract.js';
+import { snapshotFromRow } from './_lib/extraLessonsContractShared.js';
 
 const HORIZON_DAYS = 60;
 export const MATERIALIZER_BATCH_SIZE = 100;
@@ -68,8 +75,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (error) return res.status(500).json({ error: error.message });
   const templates = (data || []) as RecurringTemplate[];
-  if (templates.length === 0) return res.status(200).json({ success: true, created: 0, skipped: 0 });
+  let created = 0;
+  let skipped = 0;
 
+  if (templates.length > 0) {
   const studentIds = [...new Set(templates.map((template) => template.student_id))];
   const subjectIds = [...new Set(templates.map((template) => template.subject_id).filter(Boolean))] as string[];
   const [{ data: studentRows }, { data: subjectRows }] = await Promise.all([
@@ -90,9 +99,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const groupSubjectIds = new Set(
     (subjectRows || []).filter((subject: any) => subject.is_group === true).map((subject: any) => subject.id as string),
   );
-
-  let created = 0;
-  let skipped = 0;
 
   for (const template of templates) {
     // Archived (detached) students no longer get new lessons — for anyone.
@@ -230,13 +236,106 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (cursorError) {
     console.error('[materialize-recurring-sessions] cursor update failed', cursorError.message);
   }
+  } // end templates.length > 0
+
+  // School class groups: materialize base sessions for enrolled members.
+  let groupCreated = 0;
+  const { data: orgsWithGroups } = await supabase
+    .from('organizations')
+    .select('id, features')
+    .contains('features', { school_class_groups: true });
+  const extraStartByStudent = new Map<string, string>();
+  const { data: extraContracts } = await supabase
+    .from('school_contracts')
+    .select('student_id, class_group_id, accepted_at, start_within_14_status, start_within_14_days, order_snapshot, withdrawal_requested_at')
+    .eq('kind', EXTRA_LESSONS_CONTRACT_KIND)
+    .eq('signing_status', 'signed')
+    .not('accepted_at', 'is', null);
+  for (const row of extraContracts || []) {
+    if (row.withdrawal_requested_at) continue;
+    const order = snapshotFromRow(row) as ExtraLessonsOrderSnapshot | null;
+    if (!order || !row.accepted_at || !row.student_id) continue;
+    const ymd = extraLessonsServiceStartYmd({
+      status: (row.start_within_14_status || (row.start_within_14_days ? 'yes' : 'no')) as StartWithin14Status,
+      acceptedAtIso: row.accepted_at,
+      order,
+    });
+    const key = `${row.student_id}:${row.class_group_id || order.group_id || ''}`;
+    extraStartByStudent.set(key, ymd);
+  }
+
+  for (const org of orgsWithGroups || []) {
+    const { data: groups } = await supabase
+      .from('school_class_groups')
+      .select('id, tutor_id, subject_id, meeting_link, duration_minutes, school_year_start, school_year_end, slots:school_class_group_slots(*), members:school_class_group_members(student_id)')
+      .eq('organization_id', org.id)
+      .lte('school_year_start', windowEndYmd)
+      .gte('school_year_end', windowStartYmd);
+    for (const group of groups || []) {
+      const slots = group.slots || [];
+      const members = group.members || [];
+      if (!slots.length || !members.length) continue;
+      for (const slot of slots) {
+        // Align template start to the first matching weekday on/after school_year_start.
+        const anchor = new Date(`${group.school_year_start}T12:00:00Z`);
+        const want = Number(slot.weekday);
+        while (anchor.getUTCDay() !== want) {
+          anchor.setUTCDate(anchor.getUTCDate() + 1);
+        }
+        const alignedStart = anchor.toISOString().slice(0, 10);
+        const dates = buildRollingOccurrenceDates(
+          {
+            start_date: alignedStart,
+            end_date: group.school_year_end,
+            start_time: String(slot.start_time).slice(0, 5),
+            end_time: String(slot.end_time).slice(0, 5),
+            frequency: 'weekly',
+          },
+          windowStartYmd,
+          windowEndYmd,
+        );
+        for (const ymd of dates.slice(0, 8)) {
+          for (const member of members) {
+            const startUtc = wallClockToUtc(ymd, String(slot.start_time).slice(0, 5));
+            const endUtc = wallClockToUtc(ymd, String(slot.end_time).slice(0, 5));
+            if (!startUtc || !endUtc) continue;
+            const { data: existing } = await supabase
+              .from('sessions')
+              .select('id')
+              .eq('tutor_id', group.tutor_id)
+              .eq('student_id', member.student_id)
+              .eq('start_time', startUtc.toISOString())
+              .maybeSingle();
+            if (existing) continue;
+            const startYmd = ymd;
+            const extraGate = extraStartByStudent.get(`${member.student_id}:${group.id}`);
+            if (extraGate && startYmd < extraGate) continue;
+            const { error: insErr } = await supabase.from('sessions').insert({
+              tutor_id: group.tutor_id,
+              student_id: member.student_id,
+              subject_id: group.subject_id,
+              start_time: startUtc.toISOString(),
+              end_time: endUtc.toISOString(),
+              status: 'active',
+              meeting_link: group.meeting_link,
+              price: 0,
+              school_billing_kind: 'base',
+              class_group_id: group.id,
+            });
+            if (!insErr) groupCreated += 1;
+          }
+        }
+      }
+    }
+  }
 
   return res.status(200).json({
     success: true,
     created,
+    groupCreated,
     skipped,
     templates: templates.length,
     batchSize: MATERIALIZER_BATCH_SIZE,
-    cursorUpdated: !cursorError,
+    cursorUpdated: templates.length > 0,
   });
 }

@@ -106,7 +106,7 @@ export default function StudentScheduleSummary({ studentRowIds, refreshKey }: St
   if (templates.length === 0 && !counters) return null;
 
   return (
-    <div className="mt-4 pt-4 border-t border-gray-100">
+    <div>
       <h4 className="font-semibold text-gray-900 flex items-center gap-2 mb-2">
         <CalendarRange className="w-4 h-4 text-indigo-500" />
         {t('compStu.scheduleTitle')}

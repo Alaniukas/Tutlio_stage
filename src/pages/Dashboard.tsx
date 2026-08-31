@@ -57,6 +57,7 @@ import {
 } from '@/lib/preload';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { isProKlaseOrg } from '@/lib/marketMoney';
+import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { formatContactForTutorView } from '@/lib/orgContactVisibility';
 import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
@@ -165,9 +166,11 @@ export default function DashboardPage() {
         restoreAll: restoreAllRecentPaymentRows,
         ready: recentPaymentRowsDismissReady,
     } = useDismissibleDashboardItemIds(recentPaymentRowsKey);
-    const { contactVisibility, hasFeature: hasOrgFeature } = useOrgFeatures();
+    const { contactVisibility, hasFeature: hasOrgFeature, entityType, organizationId, loading: orgFeaturesLoading } = useOrgFeatures();
+    const pkMonthlyPackages = proKlaseFeatureEnabled(organizationId, entityType, hasOrgFeature, 'monthly_packages', orgFeaturesLoading);
     // Org feature: ended lessons are not auto-completed — the tutor must confirm each outcome.
-    const requiresStatusConfirmation = hasOrgFeature('tutor_lesson_status_confirmation');
+    const requiresStatusConfirmation =
+      hasOrgFeature('tutor_lesson_status_confirmation') || isProKlaseOrg(ctxProfile?.organization_id);
     const [confirmingStatusId, setConfirmingStatusId] = useState<string | null>(null);
     const [searchParams, setSearchParams] = useSearchParams();
     const dc = getCached<any>('tutor_dashboard');
@@ -175,7 +178,6 @@ export default function DashboardPage() {
     const [studentCount, setStudentCount] = useState(dc?.studentCount ?? 0);
     const [loading, setLoading] = useState(!dc);
     const [tutorName, setTutorName] = useState(dc?.tutorName ?? '');
-    const [showAllOverdue, setShowAllOverdue] = useState(false);
     const [showAllUpcoming, setShowAllUpcoming] = useState(false);
     const [showAllCancelled, setShowAllCancelled] = useState(false);
 
@@ -200,12 +202,6 @@ export default function DashboardPage() {
     const [editNewStartTime, setEditNewStartTime] = useState('');
     const [rescheduleReason, setRescheduleReason] = useState('');
     const [modalActionNotice, setModalActionNotice] = useState<string | null>(null);
-
-    const notifyProKlaseCancelBlocked = () => {
-        const message = t('cal.proKlaseCancelAdminOnly');
-        setModalActionNotice(message);
-        setToastMessage({ message, type: 'warning' });
-    };
 
     // View comment (same as Calendar – add/edit without full edit)
     const [viewCommentText, setViewCommentText] = useState('');
@@ -720,7 +716,7 @@ export default function DashboardPage() {
             // Monthly packages (req 6): a package lesson can only be moved within
             // the same calendar month (anchored on its original start). One-off /
             // trial lessons (no package) are unconstrained.
-            if (oldStart.getTime() !== newStart.getTime() && hasOrgFeature('monthly_packages') && !!(selectedSession as any).lesson_package_id) {
+            if (oldStart.getTime() !== newStart.getTime() && pkMonthlyPackages && !!(selectedSession as any).lesson_package_id) {
                 const anchor = rescheduleAnchorDate((selectedSession as any).original_start_time, oldStart);
                 if (!isSameCalendarMonth(newStart, anchor)) {
                     alert(t('cal.rescheduleSameMonthOnly'));
@@ -1096,14 +1092,14 @@ export default function DashboardPage() {
             return isRecent && (isOverdue || isSoon || pendingConfirm);
         })
         .sort((a, b) => {
-            // Always show on top those with payment_status === 'paid_by_student'
             if (a.payment_status === 'paid_by_student' && b.payment_status !== 'paid_by_student') return -1;
             if (b.payment_status === 'paid_by_student' && a.payment_status !== 'paid_by_student') return 1;
-            return new Date(a.start_time).getTime() - new Date(b.start_time).getTime();
+            return new Date(b.start_time).getTime() - new Date(a.start_time).getTime();
         });
 
-    const visibleOverduePayments = overduePayments.filter((s) => !dismissedAttentionRowIds.has(s.id));
-    const displayedOverdue = showAllOverdue ? visibleOverduePayments : visibleOverduePayments.slice(0, 5);
+    const attentionFeed = overduePayments.slice(0, 5);
+    const visibleOverduePayments = attentionFeed.filter((s) => !dismissedAttentionRowIds.has(s.id));
+    const displayedOverdue = visibleOverduePayments;
     const visibleRecentPayments = recentPayments.filter((p) => !dismissedRecentPaymentIds.has(p.id));
     const displayedRecentPayments = showAllRecentPayments ? visibleRecentPayments : visibleRecentPayments.slice(0, 5);
     const visibleTutorUpdates = tutorUpdates.filter((u) => !dismissedUpdateRowIds.has(u.id));
@@ -1297,22 +1293,18 @@ export default function DashboardPage() {
                                             <UserX className="w-3.5 h-3.5 mr-1" />
                                             {t('dash.statusNoShow')}
                                         </Button>
+                                        {!hideProKlaseOrgTutorCancel && (
                                         <Button
                                             size="sm"
                                             variant="outline"
                                             disabled={confirmingStatusId === s.id}
-                                            onClick={() => {
-                                                if (hideProKlaseOrgTutorCancel) {
-                                                    setToastMessage({ message: t('cal.proKlaseCancelAdminOnly'), type: 'error' });
-                                                    return;
-                                                }
-                                                void confirmLessonStatus(s, 'cancelled');
-                                            }}
+                                            onClick={() => void confirmLessonStatus(s, 'cancelled')}
                                             className="rounded-lg h-8 px-2.5 text-xs text-gray-700 border-gray-300 hover:bg-gray-100"
                                         >
                                             <XCircle className="w-3.5 h-3.5 mr-1" />
                                             {t('dash.statusCancelled')}
                                         </Button>
+                                        )}
                                     </div>
                                 </div>
                             ))}
@@ -1598,7 +1590,7 @@ export default function DashboardPage() {
                                                             <div className="scale-90 origin-left flex items-center gap-1 flex-wrap"><StatusBadge status={s.status} paymentStatus={s.payment_status} paid={s.paid} endTime={s.end_time} /><AttendanceBadge session={s} /></div>
                                                         </div>
                                                     </div>
-                                                    {s.price && <span className="text-sm font-semibold text-gray-700 flex-shrink-0">{fmt(s.price)}</span>}
+                                                    {s.price ? <span className="text-sm font-semibold text-gray-700 flex-shrink-0">{fmt(s.price)}</span> : null}
                                                 </div>
                                             );
                                         })}
@@ -1674,7 +1666,7 @@ export default function DashboardPage() {
                             {(() => {
                                 const setupIncomplete = isOrgTutor === false && (!isStripeConnected || !hasSubjects);
                                 const setupCount = setupIncomplete ? (!isStripeConnected ? 1 : 0) + (!hasSubjects ? 1 : 0) : 0;
-                                const listCount = attentionRowsDismissReady ? visibleOverduePayments.length : overduePayments.length;
+                                const listCount = attentionRowsDismissReady ? visibleOverduePayments.length : attentionFeed.length;
                                 const attentionCount = listCount + setupCount;
                                 return (
                                     <span className="text-xs font-medium bg-amber-100 text-amber-700 px-2 py-1 rounded-md">
@@ -1838,22 +1830,6 @@ export default function DashboardPage() {
                                         </div>
                                     );
                                 })}
-                                {!showAllOverdue && visibleOverduePayments.length > 5 && (
-                                    <button
-                                        onClick={() => setShowAllOverdue(true)}
-                                        className="w-full text-center text-sm text-indigo-600 font-medium py-2 hover:bg-gray-50 rounded-xl transition-colors"
-                                    >
-                                        {t('dash.showMore', { count: String(visibleOverduePayments.length) })}
-                                    </button>
-                                )}
-                                {showAllOverdue && visibleOverduePayments.length > 5 && (
-                                    <button
-                                        onClick={() => setShowAllOverdue(false)}
-                                        className="w-full text-center text-sm text-gray-500 font-medium py-2 hover:bg-gray-50 rounded-xl transition-colors"
-                                    >
-                                        {t('dash.hide')}
-                                    </button>
-                                )}
                                 {attentionRowsDismissReady && attentionRowsKey && dismissedAttentionRowIds.size > 0 && visibleOverduePayments.length > 0 && (
                                     <button
                                         type="button"
@@ -2403,22 +2379,18 @@ export default function DashboardPage() {
                                         <UserX className="w-4 h-4 mr-1" />
                                         {t('cal.statusNoShowOpt')}
                                     </Button>
+                                    {!hideProKlaseOrgTutorCancel && (
                                     <Button
                                         size="sm"
                                         variant="outline"
                                         disabled={confirmingStatusId === selectedSession.id}
-                                        onClick={() => {
-                                            if (hideProKlaseOrgTutorCancel) {
-                                                notifyProKlaseCancelBlocked();
-                                                return;
-                                            }
-                                            void confirmLessonStatus(selectedSession, 'cancelled');
-                                        }}
+                                        onClick={() => void confirmLessonStatus(selectedSession, 'cancelled')}
                                         className="rounded-xl text-gray-700 border-gray-300 hover:bg-gray-100"
                                     >
                                         <XCircle className="w-4 h-4 mr-1" />
-                                        {hideProKlaseOrgTutorCancel ? t('cal.cancelLessonTitle') : t('cal.statusCancelledOpt')}
+                                        {t('cal.statusCancelledOpt')}
                                     </Button>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -2435,18 +2407,6 @@ export default function DashboardPage() {
                                     <CalendarDays className="w-4 h-4 mr-1" />
                                     {t('cal.moveLesson')}
                                 </Button>
-                                {hideProKlaseOrgTutorCancel && (
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        onClick={notifyProKlaseCancelBlocked}
-                                        size="sm"
-                                        className="rounded-xl flex-1 text-gray-700 border-gray-300 hover:bg-gray-100"
-                                    >
-                                        <XCircle className="w-4 h-4 mr-1" />
-                                        {t('cal.cancelLessonTitle')}
-                                    </Button>
-                                )}
                             </div>
                         )}
                         {selectedSession?.status === 'active' && isOrgTutor !== true && (

@@ -1,4 +1,4 @@
-import { PUBLIC_PRODUCT_FEATURE_HUB_IDS } from './productFeatureCatalog';
+import { PUBLIC_PRODUCT_FEATURE_HUB_IDS } from './productFeatureCatalog.js';
 
 /**
  * Single source of truth for the public marketing feature pages

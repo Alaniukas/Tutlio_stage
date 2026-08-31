@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import PizZip from 'pizzip';
+import Docxtemplater from 'docxtemplater';
 import { formatDocxTemplateError, validateDocxTemplateBytes } from '../../src/lib/docxTemplateValidation';
 
 function minimalDocx(text: string): Uint8Array {
@@ -47,5 +50,18 @@ describe('DOCX template validation', () => {
     });
     expect(message).toContain('DOCX šablono');
     expect(message).not.toContain('Multi error');
+  });
+
+  it('accepts and renders the bundled extra-lessons Laisvi vaikai DOCX', () => {
+    const bytes = readFileSync(join(process.cwd(), 'docs/legal/extra-lessons-laisvi-vaikai.docx'));
+    expect(validateDocxTemplateBytes(bytes)).toBeNull();
+    const zip = new PizZip(bytes);
+    const doc = new Docxtemplater(zip, {
+      delimiters: { start: '{{', end: '}}' },
+      paragraphLoop: true,
+      linebreaks: true,
+      nullGetter: () => '',
+    });
+    expect(() => doc.render({ sutarties_nr: 'PP-TEST' })).not.toThrow();
   });
 });

@@ -3,7 +3,7 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClientOptions.js';
-import { isProKlaseOrg } from './_lib/marketMoney.js';
+import { isMoksloVaisiaiOrg, isProKlaseOrg } from './_lib/marketMoney.js';
 import { resolveOrgLoginDescription } from './_lib/orgLoginDescription.js';
 
 function setCors(res: VercelResponse) {
@@ -48,7 +48,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const features = (org.features && typeof org.features === 'object' ? org.features : {}) as Record<string, unknown>;
   const proKlase = isProKlaseOrg(org.id) || isProKlaseOrg(org.slug);
-  if (!features.custom_branding && !proKlase) {
+  const moksloVaisiai = isMoksloVaisiaiOrg(org.id) || isMoksloVaisiaiOrg(org.slug);
+  if (!features.custom_branding && !proKlase && !moksloVaisiai) {
     return res.status(404).json({ error: 'Branding not enabled' });
   }
 
@@ -57,7 +58,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
   return res.status(200).json({
     id: org.id,
-    name: org.name,
+    name: String((features.public_name as string) || '').trim() || org.name,
     slug: org.slug,
     logo_url: org.logo_url,
     brand_color: org.brand_color || '#6366f1',
@@ -69,6 +70,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       custom: customDesc,
       locale,
     }),
-    hide_powered_by: proKlase || features.hide_powered_by === true,
+    hide_powered_by: proKlase || moksloVaisiai || features.hide_powered_by === true,
+    logo_on_dark: moksloVaisiai,
   });
 }

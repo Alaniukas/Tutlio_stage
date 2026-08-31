@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+﻿import { useState, useEffect, useMemo } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -10,12 +10,19 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CheckCircle2, Loader2, Sparkles } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { format } from 'date-fns';
+import PickedAvailabilityTimeEditor from '@/components/company/PickedAvailabilityTimeEditor';
+import {
+  defaultLessonRange,
+  intervalsOverlap,
+  lessonFitsAvailabilityWindow,
+} from '@/lib/pickedAvailabilityTime';
 import { supabase } from '@/lib/supabase';
 import { useTranslation } from '@/lib/i18n';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { useOrgEntityType } from '@/contexts/OrgEntityContext';
+import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import { authHeaders } from '@/lib/apiHelpers';
 import { runOrgAdminCreateSession } from '@/pages/company/orgAdminSessionCreate';
 import { ASSIGN_STUDENT_FREE_SLOT_DIALOG_CONTENT_CLASS } from '@/components/AssignStudentFreeSlotDialog';
@@ -41,6 +48,8 @@ interface FindLessonBookDialogProps {
   onClose: () => void;
   /** Called after a lesson is successfully created. */
   onBooked: (booking: { tutorId: string; startIso: string; endIso: string }) => void;
+  /** Inline panel inside the student modal instead of a covering dialog. */
+  variant?: 'dialog' | 'inline';
 }
 
 type SubjectRow = {
@@ -63,12 +72,22 @@ type TrialDefaults = { topic: string; durationMinutes: number; priceEur: number 
  * Supports the same recurrence options as the org calendar, and the
  * first-ever-lesson trial recommendation (auto_trial_first_lesson).
  */
-export default function FindLessonBookDialog({ pick, studentId, onClose, onBooked }: FindLessonBookDialogProps) {
+export default function FindLessonBookDialog({
+  pick,
+  studentId,
+  onClose,
+  onBooked,
+  variant = 'dialog',
+}: FindLessonBookDialogProps) {
   const { t } = useTranslation();
   const { loading: orgFeaturesLoading, hasFeature, organizationId } = useOrgFeatures();
+  const orgEntityType = useOrgEntityType();
+  const pkFeat = (flagId: string) =>
+    proKlaseFeatureEnabled(organizationId, orgEntityType, hasFeature, flagId, orgFeaturesLoading);
   const [subject, setSubject] = useState<SubjectRow | null>(null);
   const [overridePrice, setOverridePrice] = useState<number | null>(null);
-  const [selectedSlot, setSelectedSlot] = useState('');
+  const [lessonStartIso, setLessonStartIso] = useState('');
+  const [lessonEndIso, setLessonEndIso] = useState('');
   const [topic, setTopic] = useState('');
   const [meetingLink, setMeetingLink] = useState('');
   const [isPaid, setIsPaid] = useState(false);
@@ -90,35 +109,48 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
       setOverridePrice(null);
       setSessionCount(null);
       setIsTrial(false);
+      setLessonStartIso('');
+      setLessonEndIso('');
       return;
+    }
+    const windowStart = new Date(pick.startIso);
+    const windowEnd = new Date(pick.endIso);
+    if (!Number.isNaN(windowStart.getTime()) && !Number.isNaN(windowEnd.getTime())) {
+      const range = defaultLessonRange(windowStart, windowEnd, 60);
+      setLessonStartIso(range.start.toISOString());
+      setLessonEndIso(range.end.toISOString());
     }
     let cancelled = false;
     (async () => {
-      const [{ data: subj }, { data: pricing }, { count }] = await Promise.all([
+      const [{ data: subj }, { data: pricing }, countResult] = await Promise.all([
         supabase
           .from('subjects')
           .select('id, name, price, duration_minutes, is_group, max_students, meeting_link')
           .eq('id', pick.subjectId)
           .maybeSingle(),
-        supabase
-          .from('student_individual_pricing')
-          .select('price')
-          .eq('student_id', studentId)
-          .eq('subject_id', pick.subjectId)
-          .maybeSingle(),
-        supabase
-          .from('sessions')
-          .select('id', { count: 'exact', head: true })
-          .eq('student_id', studentId),
+        studentId
+          ? supabase
+              .from('student_individual_pricing')
+              .select('price')
+              .eq('student_id', studentId)
+              .eq('subject_id', pick.subjectId)
+              .maybeSingle()
+          : Promise.resolve({ data: null }),
+        studentId
+          ? supabase
+              .from('sessions')
+              .select('id', { count: 'exact', head: true })
+              .eq('student_id', studentId)
+          : Promise.resolve({ count: 0 }),
       ]);
       if (cancelled) return;
       setSubject((subj as SubjectRow) ?? null);
       setOverridePrice(pricing ? Number((pricing as { price: number }).price) : null);
+      const count = (countResult as { count?: number | null }).count;
       setSessionCount(typeof count === 'number' ? count : 0);
       setTopic(pick.subjectName);
       setMeetingLink(String((subj as { meeting_link?: string | null } | null)?.meeting_link || ''));
       setIsPaid(false);
-      setSelectedSlot('');
       setCreatedIntervals([]);
       setSuccessMessage('');
       setIsTrial(false);
@@ -127,6 +159,12 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
       setRecurringFrequency('weekly');
       setRecurringWeekdays([]);
       setRecurringEndDate('');
+      const durationMin = Number((subj as SubjectRow | null)?.duration_minutes) || 60;
+      if (!Number.isNaN(windowStart.getTime()) && !Number.isNaN(windowEnd.getTime())) {
+        const range = defaultLessonRange(windowStart, windowEnd, durationMin);
+        setLessonStartIso(range.start.toISOString());
+        setLessonEndIso(range.end.toISOString());
+      }
     })();
     return () => {
       cancelled = true;
@@ -166,7 +204,7 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
   // First-ever lesson: recommend a trial (pre-checked, admin can uncheck).
   useEffect(() => {
     if (!pick || orgFeaturesLoading) return;
-    if (sessionCount === 0 && hasFeature('auto_trial_first_lesson') && createdIntervals.length === 0) {
+    if (sessionCount === 0 && pkFeat('auto_trial_first_lesson') && createdIntervals.length === 0) {
       setIsTrial(true);
       setIsRecurring(false);
       setRecurringWeekdays([]);
@@ -175,50 +213,44 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pick, sessionCount, orgFeaturesLoading]);
 
-  const subSlots = useMemo(() => {
-    if (!pick) return [] as Array<{ label: string; startIso: string; endIso: string }>;
-    const durationMin = isTrial ? trialDefaults.durationMinutes : (subject?.duration_minutes || 60);
-    const windowStart = new Date(pick.startIso);
-    const windowEnd = new Date(pick.endIso);
-    if (Number.isNaN(windowStart.getTime()) || Number.isNaN(windowEnd.getTime())) return [];
-    const slots: Array<{ label: string; startIso: string; endIso: string }> = [];
-    const stepMs = 15 * 60 * 1000;
-    const durMs = durationMin * 60 * 1000;
-    for (
-      let cursor = new Date(windowStart);
-      cursor.getTime() + durMs <= windowEnd.getTime();
-      cursor = new Date(cursor.getTime() + stepMs)
-    ) {
-      const slotStart = new Date(cursor);
-      const slotEnd = new Date(cursor.getTime() + durMs);
-      slots.push({
-        label: `${format(slotStart, 'HH:mm')} – ${format(slotEnd, 'HH:mm')}`,
-        startIso: slotStart.toISOString(),
-        endIso: slotEnd.toISOString(),
-      });
-    }
-    return slots.filter((slot) => {
-      const start = new Date(slot.startIso).getTime();
-      const end = new Date(slot.endIso).getTime();
-      return createdIntervals.every((created) => end <= created.start || start >= created.end);
-    });
-  }, [pick, subject, createdIntervals, isTrial, trialDefaults.durationMinutes]);
+  const durationMin = isTrial ? trialDefaults.durationMinutes : (subject?.duration_minutes || 60);
 
   useEffect(() => {
-    if (subSlots.length === 0) {
-      setSelectedSlot('');
-      return;
+    if (!pick || !lessonStartIso) return;
+    const windowEnd = new Date(pick.endIso);
+    const start = new Date(lessonStartIso);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(windowEnd.getTime())) return;
+    const nextEnd = new Date(Math.min(start.getTime() + durationMin * 60 * 1000, windowEnd.getTime()));
+    setLessonEndIso(nextEnd.toISOString());
+    // Snap end only when trial/subject duration changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [durationMin, pick?.startIso, pick?.endIso]);
+
+  const lessonValid = useMemo(() => {
+    if (!pick || !lessonStartIso || !lessonEndIso) return false;
+    const windowStart = new Date(pick.startIso);
+    const windowEnd = new Date(pick.endIso);
+    const start = new Date(lessonStartIso);
+    const end = new Date(lessonEndIso);
+    if (
+      Number.isNaN(windowStart.getTime()) ||
+      Number.isNaN(windowEnd.getTime()) ||
+      Number.isNaN(start.getTime()) ||
+      Number.isNaN(end.getTime())
+    ) {
+      return false;
     }
-    setSelectedSlot((prev) => (prev && subSlots.some((s) => s.startIso === prev) ? prev : subSlots[0].startIso));
-  }, [subSlots]);
+    return (
+      lessonFitsAvailabilityWindow(windowStart, windowEnd, start, end) &&
+      !intervalsOverlap(start.getTime(), end.getTime(), createdIntervals)
+    );
+  }, [pick, lessonStartIso, lessonEndIso, createdIntervals]);
 
   const recurringWeekdaysMissing = isRecurring && recurringFrequency !== 'monthly' && recurringWeekdays.length === 0;
 
   const handleCreate = async () => {
-    if (!pick || !subject) return;
-    const slot = subSlots.find((s) => s.startIso === selectedSlot) || subSlots[0];
-    if (!slot) {
-      alert(t('findLesson.noSubSlots'));
+    if (!pick || !subject || !lessonValid) {
+      if (!lessonValid) alert(t('findLesson.outsideWindow'));
       return;
     }
     setSaving(true);
@@ -232,8 +264,8 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
         createSubjectId: pick.subjectId,
         createStudentId: studentId,
         createStudentIds: [studentId],
-        createStartTime: slot.startIso,
-        createEndTime: slot.endIso,
+        createStartTime: lessonStartIso,
+        createEndTime: lessonEndIso,
         createTopic: topic || (isTrial ? trialDefaults.topic : '') || subject.name || '',
         createMeetingLink: meetingLink.trim(),
         createIsRecurring: isTrial ? false : isRecurring,
@@ -265,7 +297,7 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
         (isTrial || (isRecurring && firstLessonIsTrial)) &&
         !isPaid &&
         price > 0 &&
-        hasFeature('trial_creation_payment_email') &&
+        pkFeat('trial_creation_payment_email') &&
         result.createdSessionIds.length > 0
       ) {
         try {
@@ -299,7 +331,7 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
       } else {
         setCreatedIntervals((current) => [
           ...current,
-          { start: new Date(slot.startIso).getTime(), end: new Date(slot.endIso).getTime() },
+          { start: new Date(lessonStartIso).getTime(), end: new Date(lessonEndIso).getTime() },
         ]);
         setSuccessMessage(t('findLesson.lessonCreatedKeepOpen'));
       }
@@ -307,8 +339,8 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
       setIsTrial(false);
       onBooked({
         tutorId: pick.tutorId,
-        startIso: slot.startIso,
-        endIso: slot.endIso,
+        startIso: lessonStartIso,
+        endIso: lessonEndIso,
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -318,36 +350,7 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
     }
   };
 
-  return (
-    <Dialog
-      open={pick !== null}
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-    >
-      <DialogContent className={ASSIGN_STUDENT_FREE_SLOT_DIALOG_CONTENT_CLASS}>
-        <DialogHeader>
-          <DialogTitle>{t('findLesson.bookDialogTitle')}</DialogTitle>
-          <DialogDescription asChild>
-            <div className="text-left space-y-2 text-sm text-muted-foreground">
-            {pick && (
-              <>
-                <p>
-                  <span className="font-semibold text-gray-900">{pick.tutorName}</span>
-                  {' · '}
-                  <span>{pick.subjectName}</span>
-                </p>
-                <p className="text-sm text-gray-600 tabular-nums">
-                  {t('findLesson.freeWindowSummary')}: {format(parseISO(pick.startIso), 'yyyy-MM-dd HH:mm')} –{' '}
-                  {format(parseISO(pick.endIso), 'HH:mm')}
-                </p>
-                <p className="text-xs text-gray-500">{t('findLesson.bookDialogIntro')}</p>
-              </>
-            )}
-            </div>
-          </DialogDescription>
-        </DialogHeader>
-        {pick && (
+  const formFields = !pick ? null : (
           <div className="space-y-3">
             {successMessage && (
               <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
@@ -355,30 +358,28 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
                 <span>{successMessage}</span>
               </div>
             )}
-            {subSlots.length === 0 ? (
+            {createdIntervals.length > 0 && !lessonValid ? (
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
-                {createdIntervals.length > 0 ? t('findLesson.windowFullyBooked') : t('findLesson.noSubSlots')}
+                {t('findLesson.windowFullyBooked')}
               </div>
             ) : (
-              <div className="space-y-1.5">
-                <Label className="text-xs">{t('compSch.time')}</Label>
-                <Select value={selectedSlot || ''} onValueChange={setSelectedSlot}>
-                  <SelectTrigger className="rounded-xl h-9 text-sm">
-                    <SelectValue placeholder={t('compSch.selectTimePlaceholder')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {subSlots.map((slot) => (
-                      <SelectItem key={slot.startIso} value={slot.startIso}>
-                        {slot.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              <PickedAvailabilityTimeEditor
+                tutorName={pick.tutorName}
+                subjectName={pick.subjectName}
+                windowStartIso={pick.startIso}
+                windowEndIso={pick.endIso}
+                startIso={lessonStartIso || pick.startIso}
+                endIso={lessonEndIso || pick.endIso}
+                onChange={({ startIso, endIso }) => {
+                  setLessonStartIso(startIso);
+                  setLessonEndIso(endIso);
+                }}
+                onClear={variant === 'inline' ? onClose : undefined}
+              />
             )}
 
             {/* First-ever lesson: recommended as a trial (admin can uncheck). */}
-            {(isTrial || (sessionCount === 0 && !orgFeaturesLoading && hasFeature('auto_trial_first_lesson'))) && !isRecurring && (
+            {(isTrial || (sessionCount === 0 && pkFeat('auto_trial_first_lesson'))) && !isRecurring && (
               <div className="border border-amber-200 rounded-xl p-3 bg-amber-50/60">
                 <button
                   type="button"
@@ -451,7 +452,7 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
                 onWeekdaysChange={setRecurringWeekdays}
                 endDate={recurringEndDate}
                 onEndDateChange={setRecurringEndDate}
-                startTime={selectedSlot ? format(new Date(selectedSlot), "yyyy-MM-dd'T'HH:mm") : undefined}
+                startTime={lessonStartIso ? format(new Date(lessonStartIso), "yyyy-MM-dd'T'HH:mm") : undefined}
               />
             )}
 
@@ -497,15 +498,17 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
               </button>
             </div>
           </div>
-        )}
-        <DialogFooter className="!flex !flex-col w-full min-w-0 gap-2 sm:!flex-col sm:space-x-0">
+  );
+
+  const actionButtons = (
+    <>
           <Button variant="outline" className="h-auto min-h-10 w-full rounded-xl py-2" onClick={onClose}>
             {t('compSch.cancel')}
           </Button>
           <Button
             className="h-auto min-h-10 w-full rounded-xl bg-indigo-600 py-2 hover:bg-indigo-700"
             onClick={() => void handleCreate()}
-            disabled={saving || subSlots.length === 0 || recurringWeekdaysMissing}
+            disabled={saving || !lessonValid || recurringWeekdaysMissing}
           >
             {saving ? (
               <>
@@ -518,6 +521,35 @@ export default function FindLessonBookDialog({ pick, studentId, onClose, onBooke
               createdIntervals.length > 0 ? t('findLesson.createAnotherLesson') : t('compSch.createLesson')
             )}
           </Button>
+    </>
+  );
+
+  if (variant === 'inline') {
+    if (!pick) return null;
+    return (
+      <div className="mt-3 space-y-3 rounded-xl border border-gray-200 bg-white p-3">
+        <p className="text-sm font-semibold text-gray-900">{t('findLesson.bookDialogTitle')}</p>
+        {formFields}
+        <div className="flex flex-col w-full min-w-0 gap-2">{actionButtons}</div>
+      </div>
+    );
+  }
+
+  return (
+    <Dialog
+      open={pick !== null}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <DialogContent className={ASSIGN_STUDENT_FREE_SLOT_DIALOG_CONTENT_CLASS}>
+        <DialogHeader>
+          <DialogTitle>{t('findLesson.bookDialogTitle')}</DialogTitle>
+          <DialogDescription>{t('findLesson.bookDialogIntro')}</DialogDescription>
+        </DialogHeader>
+        {formFields}
+        <DialogFooter className="!flex !flex-col w-full min-w-0 gap-2 sm:!flex-col sm:space-x-0">
+          {actionButtons}
         </DialogFooter>
       </DialogContent>
     </Dialog>

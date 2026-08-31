@@ -1,17 +1,17 @@
 import { supabase } from '@/lib/supabase';
+import {
+  SCHOOL_CONTRACTS_BUCKET,
+  extractSchoolContractStoragePath,
+} from '@/lib/schoolContractPdfPath';
 
-const BUCKET = 'school-contracts';
-const PUBLIC_MARKER = `/object/public/${BUCKET}/`;
+const BUCKET = SCHOOL_CONTRACTS_BUCKET;
 
 /**
- * Extracts the storage path from a value that may be either a full public URL
- * (legacy) or already a plain path. Handles backward compatibility for data
- * stored before the bucket was made private.
+ * Extracts the storage path from a value that may be a public URL, signed URL,
+ * or already a plain path.
  */
 export function extractStoragePath(urlOrPath: string): string {
-  const idx = urlOrPath.indexOf(PUBLIC_MARKER);
-  if (idx !== -1) return decodeURIComponent(urlOrPath.slice(idx + PUBLIC_MARKER.length));
-  return urlOrPath;
+  return extractSchoolContractStoragePath(urlOrPath);
 }
 
 /**

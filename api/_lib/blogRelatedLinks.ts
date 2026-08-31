@@ -1,11 +1,13 @@
-import { BLOG_SCHEMA_LOCALES as LOCALES, isSeoPublished } from '../../src/lib/i18n/localeRelease.js';
+import {
+  BLOG_SCHEMA_LOCALES as LOCALES,
+  isSeoPublished,
+  type BlogSchemaLocale,
+} from '../../src/lib/i18n/localeRelease.js';
 import { withEnglishLocaleFallback } from '../../src/lib/i18n/locales.js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { type Locale, buildCanonicalUrl } from './seo-routing.js';
 
-export type BlogAutoLocale = 'lt' | 'en' | 'pl';
-
-const BLOG_LOCALES: BlogAutoLocale[] = ['lt', 'en', 'pl'];
+const BLOG_LOCALES = LOCALES;
 
 export interface RelatedBlogPost {
   id: string;
@@ -70,7 +72,7 @@ export function relatedPostsForLocale(
     .slice(0, limit);
 }
 
-const ABOUT_BLOCK: Record<BlogAutoLocale, string> = {
+const ABOUT_BLOCK: Record<BlogSchemaLocale, string> = {
   lt:
     '\n\n---\n\n## Apie Tutlio\n\n' +
     'Tutlio — korepetitorių ir korepetavimo mokyklų valdymo platforma: pamokų tvarkaraštis, mokinių laukimo eilė, Stripe mokėjimai ir automatizuoti priminimai vienoje vietoje. ' +
@@ -83,15 +85,65 @@ const ABOUT_BLOCK: Record<BlogAutoLocale, string> = {
     '\n\n---\n\n## O Tutlio\n\n' +
     'Tutlio to oprogramowanie do zarządzania korepetycjami dla prywatnych korepetytorów i szkół — harmonogram lekcji, lista oczekujących, płatności Stripe i automatyczne przypomnienia w jednym miejscu. ' +
     '[Zobacz cennik](/pricing) lub [przeglądaj więcej artykułów](/blog).',
+  lv:
+    '\n\n---\n\n## Par Tutlio\n\n' +
+    'Tutlio ir privātskolotāju un mācību centru pārvaldības platforma ar nodarbību grafiku, gaidīšanas sarakstu, Stripe maksājumiem un automātiskiem atgādinājumiem. ' +
+    '[Skatīt cenas](/pricing) vai [lasīt citus rakstus](/blog).',
+  ee:
+    '\n\n---\n\n## Tutlio kohta\n\n' +
+    'Tutlio on eraõpetajate ja õppekeskuste haldusplatvorm, mis ühendab tunniplaani, ootenimekirja, Stripe’i maksed ja automaatsed meeldetuletused. ' +
+    '[Vaata hindu](/pricing) või [loe teisi artikleid](/blog).',
+  fr:
+    '\n\n---\n\n## À propos de Tutlio\n\n' +
+    'Tutlio est une plateforme de gestion pour professeurs particuliers et écoles, avec planning, liste d’attente, paiements Stripe et rappels automatiques. ' +
+    '[Voir les tarifs](/pricing) ou [lire d’autres articles](/blog).',
+  es:
+    '\n\n---\n\n## Sobre Tutlio\n\n' +
+    'Tutlio es una plataforma de gestión para profesores y academias con horarios, lista de espera, pagos con Stripe y recordatorios automáticos. ' +
+    '[Ver precios](/pricing) o [leer más artículos](/blog).',
+  de:
+    '\n\n---\n\n## Über Tutlio\n\n' +
+    'Tutlio ist eine Verwaltungsplattform für Nachhilfelehrer und Lerninstitute mit Terminplanung, Warteliste, Stripe-Zahlungen und automatischen Erinnerungen. ' +
+    '[Preise ansehen](/pricing) oder [weitere Artikel lesen](/blog).',
+  se:
+    '\n\n---\n\n## Om Tutlio\n\n' +
+    'Tutlio är en plattform för privatlärare och läxhjälpsföretag med schema, väntelista, Stripe-betalningar och automatiska påminnelser. ' +
+    '[Se priser](/pricing) eller [läs fler artiklar](/blog).',
+  dk:
+    '\n\n---\n\n## Om Tutlio\n\n' +
+    'Tutlio er en platform til privatundervisere og lektiehjælp med kalender, venteliste, Stripe-betalinger og automatiske påmindelser. ' +
+    '[Se priser](/pricing) eller [læs flere artikler](/blog).',
+  fi:
+    '\n\n---\n\n## Tietoa Tutliosta\n\n' +
+    'Tutlio on yksityisopettajien ja opetuskeskusten hallinta-alusta, jossa aikataulut, jonotuslista, Stripe-maksut ja automaattiset muistutukset ovat yhdessä paikassa. ' +
+    '[Katso hinnat](/pricing) tai [lue lisää artikkeleita](/blog).',
+  no:
+    '\n\n---\n\n## Om Tutlio\n\n' +
+    'Tutlio er en plattform for privatlærere og leksehjelpsbedrifter med kalender, venteliste, Stripe-betalinger og automatiske påminnelser. ' +
+    '[Se priser](/pricing) eller [les flere artikler](/blog).',
+  nl:
+    '\n\n---\n\n## Over Tutlio\n\n' +
+    'Tutlio is beheersoftware voor zelfstandige docenten en bijlesscholen, met lesplanning, wachtlijsten, Stripe-betalingen en automatische herinneringen op één plek. ' +
+    '[Bekijk de prijzen](/pricing) of [bekijk meer artikelen](/blog).',
 };
 
-const RELATED_HEADING: Record<BlogAutoLocale, string> = {
+const RELATED_HEADING: Record<BlogSchemaLocale, string> = {
   lt: '## Skaitykite taip pat',
   en: '## Read also',
   pl: '## Przeczytaj także',
+  lv: '## Lasiet arī',
+  ee: '## Loe ka',
+  fr: '## À lire aussi',
+  es: '## Lee también',
+  de: '## Auch lesenswert',
+  se: '## Läs också',
+  dk: '## Læs også',
+  fi: '## Lue myös',
+  no: '## Les også',
+  nl: '## Lees ook',
 };
 
-function relatedMarkdownSection(related: RelatedBlogPost[], locale: BlogAutoLocale): string {
+function relatedMarkdownSection(related: RelatedBlogPost[], locale: BlogSchemaLocale): string {
   if (!related.length) return '';
   const lines = related.map((p) => `- [${p.title}](/blog/${p.slug})`);
   return `\n\n${RELATED_HEADING[locale]}\n\n${lines.join('\n')}`;
@@ -100,12 +152,14 @@ function relatedMarkdownSection(related: RelatedBlogPost[], locale: BlogAutoLoca
 /** Append about block + related links to generated locale content (idempotent). */
 export function enrichBlogLocaleContent(
   content: string,
-  locale: BlogAutoLocale,
+  locale: BlogSchemaLocale,
   related: RelatedBlogPost[],
 ): string {
   let out = content.trimEnd();
-  if (!out.includes('## Apie Tutlio') && !out.includes('## About Tutlio') && !out.includes('## O Tutlio')) {
-    out += ABOUT_BLOCK[locale];
+  const about = ABOUT_BLOCK[locale];
+  const aboutTitle = about.match(/^[\s\S]*## (.+)\n/)?.[1] || 'About Tutlio';
+  if (!out.includes(`## ${aboutTitle}`) && !out.includes('## Apie Tutlio') && !out.includes('## About Tutlio')) {
+    out += about;
   }
   if (related.length && !out.includes(RELATED_HEADING[locale])) {
     out += relatedMarkdownSection(related, locale);
