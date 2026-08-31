@@ -8,28 +8,31 @@ import {
 } from 'lucide-react';
 import Reveal from './Reveal';
 import type { LandingVariant } from './HeroSection';
+import { PUBLIC_PRODUCT_FEATURE_HUB_IDS } from '@/lib/productFeatureCatalog';
 
 const TUTOR_ICONS = [CalendarDays, Users, CreditCard, BellRing];
 const SCHOOLS_ICONS = [CalendarDays, Users2, CreditCard, LineChart];
 
-const HL_FEATURES: Array<{
-  key: string;
-  icon: typeof CalendarDays;
-  comingSoon?: boolean;
-}> = [
-  { key: 'calendar', icon: CalendarDays },
-  { key: 'reminders', icon: Bell },
-  { key: 'messaging', icon: MessageSquare },
-  { key: 'plans', icon: Package },
-  { key: 'autoPayments', icon: Banknote },
-  { key: 'invoices', icon: FileText },
-  { key: 'parents', icon: Users },
-  { key: 'files', icon: FolderOpen },
-  { key: 'stats', icon: BarChart3 },
-  { key: 'waitlist', icon: Clock },
-  { key: 'whiteLabel', icon: Palette },
-  { key: 'whiteboard', icon: PenTool },
-];
+const HIGHLIGHT_ICONS = {
+  calendar: CalendarDays,
+  reminders: Bell,
+  messaging: MessageSquare,
+  plans: Package,
+  autoPayments: Banknote,
+  invoices: FileText,
+  parents: Users,
+  files: FolderOpen,
+  stats: BarChart3,
+  waitlist: Clock,
+  whiteLabel: Palette,
+  whiteboard: PenTool,
+} as const;
+
+const HL_FEATURES = PUBLIC_PRODUCT_FEATURE_HUB_IDS.map((key) => ({
+  key,
+  icon: HIGHLIGHT_ICONS[key],
+  comingSoon: false,
+}));
 
 const TAB_STYLES = [
   { normal: 'bg-indigo-50 text-[#4f46e5]', active: 'bg-[#4f46e5] text-white shadow-md shadow-indigo-200/50', bar: 'bg-[#4f46e5]' },

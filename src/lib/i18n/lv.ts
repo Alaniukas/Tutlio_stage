@@ -1,7 +1,9 @@
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
+import { supportTranslations } from './supportTranslations.js';
 
 export const lv: Record<string, string> = {
   ...sharedOrganizationWorkflowTranslations,
+  ...supportTranslations.lv,
   'companyNav.team': 'Komanda un piekļuve',
   'companyNav.sectionWork': 'Ikdiena',
   'companyNav.sectionManage': 'Pārvaldība',

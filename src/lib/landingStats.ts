@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { publicLandingLessonCount } from '@/lib/landingLessonEstimate';
 
 const LANDING_STATS_TIMEOUT_MS = 3000;
 
@@ -15,7 +16,8 @@ export function loadPublicLandingLessonCount(onCount: (n: number) => void): () =
     .then(({ data }) => {
       if (cancelled || !data) return;
       const d = data as { completed_lessons?: number; upcoming_lessons?: number };
-      onCount(Number(d.completed_lessons || 0) + Number(d.upcoming_lessons || 0));
+      const liveCount = Number(d.completed_lessons || 0) + Number(d.upcoming_lessons || 0);
+      onCount(publicLandingLessonCount(liveCount));
     })
     .catch(() => {
       /* Landing copy still renders without the live count */
