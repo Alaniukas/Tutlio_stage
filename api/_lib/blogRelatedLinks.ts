@@ -1,5 +1,7 @@
+import { BLOG_SCHEMA_LOCALES as LOCALES, isSeoPublished } from '../../src/lib/i18n/localeRelease.js';
+import { withEnglishLocaleFallback } from '../../src/lib/i18n/locales.js';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { type Locale, LOCALES, buildCanonicalUrl } from './seo-routing.js';
+import { type Locale, buildCanonicalUrl } from './seo-routing.js';
 
 export type BlogAutoLocale = 'lt' | 'en' | 'pl';
 
@@ -48,6 +50,7 @@ export function relatedPostsForLocale(
   locale: Locale,
   limit = 3,
 ): RelatedBlogPost[] {
+  if (!isSeoPublished(locale, '/blog')) return [];
   return posts
     .map((post) => {
       // Related links must be real translations. Linking a French article to
@@ -137,11 +140,11 @@ export async function enrichBlogPostContents(
 
 export function renderRelatedPostsHtml(related: RelatedBlogPost[], locale: Locale): string {
   if (!related.length) return '';
-  const heading: Record<Locale, string> = {
-    lt: 'Skaitykite taip pat', en: 'Read also', pl: 'Przeczytaj także', lv: 'Lasiet arī',
+  const heading: Record<Locale, string> = withEnglishLocaleFallback({
+    tr: 'Bunları da okuyun', lt: 'Skaitykite taip pat', en: 'Read also', pl: 'Przeczytaj także', lv: 'Lasiet arī',
     ee: 'Loe ka', fr: 'À lire aussi', es: 'Lee también', de: 'Auch lesenswert',
     se: 'Läs också', dk: 'Læs også', fi: 'Lue myös', no: 'Les også', nl: 'Lees ook',
-  };
+  });
   const items = related
     .map((p) => `<li><a href="${p.url.replace(/"/g, '&quot;')}">${p.title.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</a></li>`)
     .join('\n');
@@ -153,7 +156,8 @@ export function renderRelatedPostsHtml(related: RelatedBlogPost[], locale: Local
 
 export function renderAboutTutlioHtml(locale: Locale, pricingUrl: string, blogUrl: string): string {
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const blocks: Record<Locale, { title: string; body: string; pricing: string; blog: string }> = {
+  const blocks: Record<Locale, { title: string; body: string; pricing: string; blog: string }> = withEnglishLocaleFallback({
+    tr: { title: 'Tutlio hakkında', body: 'Tutlio, bağımsız özel ders öğretmenleri ve özel ders kurumları için yönetim yazılımıdır. Ders planlama, öğrenci bekleme listesi, Stripe ödemeleri ve otomatik hatırlatmalar tek yerde.', pricing: 'Fiyatları inceleyin', blog: 'diğer yazılara göz atın' },
     lt: {
       title: 'Apie Tutlio',
       body: 'Tutlio — korepetitorių ir korepetavimo mokyklų valdymo platforma: pamokų tvarkaraštis, mokinių laukimo eilė, Stripe mokėjimai ir automatizuoti priminimai vienoje vietoje.',
@@ -232,7 +236,7 @@ export function renderAboutTutlioHtml(locale: Locale, pricingUrl: string, blogUr
       pricing: 'Bekijk de prijzen',
       blog: 'bekijk meer artikelen',
     },
-  };
+  });
   const b = blocks[locale] || blocks.en;
   return `<section class="about-tutlio" style="margin-top:2.5em;padding:1.25em 1.5em;background:#f8f9ff;border-radius:12px;border:1px solid #e0e7ff">
   <h2 style="font-size:1.15rem;font-weight:700;margin-bottom:.5em">${esc(b.title)}</h2>

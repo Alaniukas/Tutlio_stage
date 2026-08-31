@@ -384,7 +384,7 @@ export default function DashboardPage() {
                     id: `missing_comment_${s.id}`,
                     tone: 'warning' as const,
                     message: proKlaseCommentRequired
-                        ? t('dash.lessonCommentMissing', { count: 1 })
+                        ? t('dash.lessonCommentMissing')
                         : t('dash.trialCommentMissing', { count: 1 }),
                     when: s.start_time,
                     sessionId: s.id,

@@ -4,6 +4,7 @@
  * Matches send-email.ts `tutor_invite` (Outlook-safe layout) + org white-label branding.
  */
 import { Resend } from 'resend';
+import { localeDirection } from '../../src/lib/i18n/locales.js';
 import { getResendApiKey, resendNotConfiguredMessage } from './resendConfig.js';
 import { t, isValidLocale, localizedFromEmail, type Locale } from './i18n.js';
 import { buildTutorRegisterInviteUrl } from './public-origin.js';
@@ -30,9 +31,9 @@ const baseStyles = `
 
 function wrap(content: string, locale: Locale): string {
   return `<!DOCTYPE html>
-<html lang="${locale}">
+<html lang="${locale}" dir="${localeDirection(locale)}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">${baseStyles}</head>
-<body style="margin:0;padding:0;background-color:#f3f4f6;">
+<body dir="${localeDirection(locale)}" style="margin:0;padding:0;background-color:#f3f4f6;">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;background-color:#f3f4f6;">
 <tr><td align="center" style="padding:20px 12px;background-color:#f3f4f6;">
 <table role="presentation" width="560" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;max-width:560px;width:100%;background-color:#ffffff;">

@@ -304,6 +304,9 @@ function resolveOrgMeetingLink(
 
 export default function CompanyTvarkarastis() {
   const { t, locale, dateFnsLocale } = useTranslation();
+  const rtlLocalizer = useMemo(() => dateFnsLocalizer({
+    format, parse, startOfWeek, getDay, locales: { [locale]: dateFnsLocale },
+  }), [locale, dateFnsLocale]);
   const { fmt } = useMarketMoney();
   const { loading: featuresLoading, hasFeature, organizationId } = useOrgFeatures();
   const orgEntityType = useOrgEntityType();
@@ -880,8 +883,8 @@ export default function CompanyTvarkarastis() {
       rangeStart = startOfDay(currentDate);
       rangeEnd = endOfDay(currentDate);
     } else {
-      rangeStart = startOfWeek(currentDate, { weekStartsOn: 1 });
-      rangeEnd = endOfWeek(currentDate, { weekStartsOn: 1 });
+      rangeStart = startOfWeek(currentDate, { weekStartsOn: locale === 'he' ? 0 : 1 });
+      rangeEnd = endOfWeek(currentDate, { weekStartsOn: locale === 'he' ? 0 : 1 });
     }
 
     const relevant = calendarEvents.filter(ev => {
@@ -912,19 +915,19 @@ export default function CompanyTvarkarastis() {
     const scrollToTime = new Date(1970, 0, 1, Math.max(floorH, Math.min(minH, 7)), 0, 0);
 
     return { min, max, scrollToTime };
-  }, [calendarEvents, currentDate, currentView]);
+  }, [calendarEvents, currentDate, currentView, locale]);
 
   const calendarToolbarLabel = useMemo(() => {
     if (currentView === Views.DAY) {
       return format(currentDate, 'yyyy MMMM d', { locale: dateFnsLocale });
     }
     if (currentView === Views.WEEK) {
-      const ws = startOfWeek(currentDate, { weekStartsOn: 1 });
-      const we = endOfWeek(currentDate, { weekStartsOn: 1 });
+      const ws = startOfWeek(currentDate, { weekStartsOn: locale === 'he' ? 0 : 1 });
+      const we = endOfWeek(currentDate, { weekStartsOn: locale === 'he' ? 0 : 1 });
       return `${format(ws, 'd MMM', { locale: dateFnsLocale })} – ${format(we, 'd MMM yyyy', { locale: dateFnsLocale })}`;
     }
     return format(currentDate, 'yyyy MMMM', { locale: dateFnsLocale });
-  }, [currentDate, currentView, dateFnsLocale]);
+  }, [currentDate, currentView, dateFnsLocale, locale]);
 
   const createFromAvailSlots = useMemo(() => {
     if (!editingAvailability || !createFromAvailBaseDate) return [] as Array<{ label: string; startIso: string; endIso: string }>;
@@ -2545,8 +2548,9 @@ export default function CompanyTvarkarastis() {
               </div>
               <div style={{ height: '700px' }}>
                 <BigCalendar
+                  rtl={locale === 'ar' || locale === 'he'}
                   key={`${format(currentDate, 'yyyy-MM-dd')}-${currentView}-${timeRangeBounds.min.getTime()}-${timeRangeBounds.max.getTime()}`}
-                  localizer={localizer}
+                  localizer={locale === 'ar' || locale === 'he' ? rtlLocalizer : localizer}
                   events={calendarEvents}
                   startAccessor="start"
                   endAccessor="end"

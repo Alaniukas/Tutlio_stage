@@ -66,7 +66,7 @@ export default function HeroSection({
     <section className="bg-white">
       <div className="mx-auto w-full max-w-[1224px] px-5 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
         <div className="flex flex-col items-center gap-10 lg:flex-row lg:items-center lg:gap-16 xl:gap-20">
-          <div className="flex flex-1 flex-col items-center gap-5 text-center sm:gap-6 lg:items-start lg:text-left">
+          <div className="flex flex-1 flex-col items-center gap-5 text-center sm:gap-6 lg:items-start lg:text-start">
             <div
               role="tablist"
               aria-label={t('landing.v2.audienceLabel')}
@@ -101,7 +101,7 @@ export default function HeroSection({
               </button>
             </div>
 
-            <h1 className="font-display text-[32px] font-bold leading-[1.15] tracking-[-1.5px] text-zinc-900 sm:text-[40px] lg:text-[50px] lg:tracking-[-2px]">
+            <h1 className="font-display text-[32px] font-bold leading-[1.15] tracking-[-1.5px] text-zinc-900 sm:text-[40px] lg:text-[50px] lg:tracking-[-2px] rtl:tracking-normal">
               {t(isSolo ? 'landing.v2.heroTitleSolo' : 'landing.v2.heroTitleBiz')}
               <span className="text-zinc-900">
                 {t(isSolo ? 'landing.v2.heroTitleSoloHighlight' : 'landing.v2.heroTitleBizHighlight')}

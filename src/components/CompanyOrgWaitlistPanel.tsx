@@ -480,7 +480,7 @@ export default function CompanyOrgWaitlistPanel({
                                 {parseNotesPreview(entry.notes, dateFnsLocale) || t('companyWait.generalQueueShort')}
                               </p>
                               <p className="text-[11px] text-gray-400 mt-1">
-                                {t('companyWait.inQueueSince', { date: format(new Date(entry.created_at), 'yyyy-MM-dd HH:mm') })}
+                                {t('companyWait.inQueueSince', { date: format(new Date(entry.created_at), 'Pp', { locale: dateFnsLocale }) })}
                               </p>
                             </>
                           )}

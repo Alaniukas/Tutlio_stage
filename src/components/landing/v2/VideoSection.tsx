@@ -322,7 +322,7 @@ function DemoStage({ audience, tick, reduced }: { audience: LandingAudience; tic
                       </div>
                     </div>
                     <div className="mt-4 space-y-2 text-sm text-zinc-500">
-                      <div className="flex justify-between"><span>{t('landing.v2.demo.subjectMath')} · 45 min</span><span className="text-zinc-900">€20</span></div>
+                      <div className="flex justify-between"><span>{t('landing.v2.demo.subjectMath')} · 45 {t('time.minutes')}</span><span className="text-zinc-900">€20</span></div>
                       <div className="flex justify-between"><span>{t('landing.v2.demo.vat')}</span><span className="text-zinc-900">€0</span></div>
                       <div className="flex justify-between border-t border-zinc-100 pt-3 text-zinc-900"><span className="font-semibold">{t('common.total')}</span><span className="font-display text-xl font-bold">€20,00</span></div>
                     </div>

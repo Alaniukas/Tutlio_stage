@@ -28,7 +28,7 @@ const runtimePlaceholderCases: Array<[string, Record<string, string | number>]> 
   ['cal.cancelledCount', { count: 3 }],
   ['cal.groupFull', { max: 5 }],
   ['cal.notEnoughSpots', { needed: 2, available: 1 }],
-  ['cal.studentGrade', { grade: 8 }],
+  ['cal.studentGrade', { name: 'Anna', grade: 8 }],
   ['cal.syncSendFailed', { error: 'fel' }],
   ['cal.syncSessionError', { error: 'fel' }],
   ['cal.syncSuccess', { sessions: 4, avail: 2 }],

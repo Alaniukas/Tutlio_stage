@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { stripeCheckoutLocale } from './_lib/stripeLocale.js';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { buildPublicPath, publicOriginFromRequest, type CheckoutAudience } from './_lib/public-origin.js';
@@ -306,7 +307,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           : { success_url: successUrl, cancel_url: cancelUrl }),
         metadata: { plan: 'yearly' },
         allow_promotion_codes: true,
-        locale: 'lt',
+        locale: stripeCheckoutLocale(localeCode),
         ...(existingCustomerId ? { customer: existingCustomerId } : customerEmail ? { customer_email: customerEmail } : {}),
       };
       if (couponCode) {
@@ -349,11 +350,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    const checkoutLocale =
-      localeCode === 'en' ? 'en'
-        : localeCode === 'pl' ? 'pl'
-          : localeCode === 'nl' ? 'nl'
-            : 'lt';
+    const checkoutLocale = stripeCheckoutLocale(localeCode);
 
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
       mode: 'subscription',

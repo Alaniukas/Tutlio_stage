@@ -1,3 +1,4 @@
+import { TRANSLATED_LOCALES, type TranslatedLocale } from '../../src/lib/i18n/locales';
 import { describe, expect, it } from 'vitest';
 import {
   SUPPORT_LOCALES,
@@ -21,7 +22,7 @@ import { fi } from '../../src/lib/i18n/fi';
 import { no } from '../../src/lib/i18n/no';
 import { nl } from '../../src/lib/i18n/nl';
 
-const dictionaries: Record<Locale, Record<string, string>> = {
+const dictionaries: Record<TranslatedLocale, Record<string, string>> = {
   lt,
   en,
   pl,
@@ -37,7 +38,7 @@ const dictionaries: Record<Locale, Record<string, string>> = {
   nl,
 };
 
-const expectedContactCopy: Record<Locale, {
+const expectedContactCopy: Record<TranslatedLocale, {
   contact: string;
   contactHint: string;
   whatsappAlternative: string;
@@ -109,7 +110,7 @@ const expectedContactCopy: Record<Locale, {
   },
 };
 
-const expectedGeneralFollowUp: Record<Locale, string> = {
+const expectedGeneralFollowUp: Record<TranslatedLocale, string> = {
   lt: 'Kuo dar galiu jums padėti?',
   en: 'What else can I help you with?',
   pl: 'W czym jeszcze mogę pomóc?',
@@ -133,7 +134,7 @@ describe('support widget locale coverage', () => {
     }
   });
 
-  it.each(SUPPORTED_LOCALES)('provides every widget string in %s', (locale) => {
+  it.each(TRANSLATED_LOCALES)('provides every widget string in %s', (locale) => {
     const dictionary = dictionaries[locale];
     for (const key of SUPPORT_WIDGET_COPY_KEYS) {
       expect(dictionary[key], `${locale} is missing ${key}`).toBeTruthy();
@@ -141,7 +142,7 @@ describe('support widget locale coverage', () => {
     }
   });
 
-  it.each(SUPPORTED_LOCALES)('keeps contact and WhatsApp copy semantically aligned in %s', (locale) => {
+  it.each(TRANSLATED_LOCALES)('keeps contact and WhatsApp copy semantically aligned in %s', (locale) => {
     const dictionary = dictionaries[locale];
     const expected = expectedContactCopy[locale];
 
@@ -150,11 +151,11 @@ describe('support widget locale coverage', () => {
     expect(dictionary['support.widget.whatsappAlternative']).toBe(expected.whatsappAlternative);
   });
 
-  it.each(SUPPORTED_LOCALES)('provides the localized general follow-up in %s', (locale) => {
+  it.each(TRANSLATED_LOCALES)('provides the localized general follow-up in %s', (locale) => {
     expect(supportGeneralFollowUp(locale)).toBe(expectedGeneralFollowUp[locale]);
   });
 
-  it.each(SUPPORTED_LOCALES)('provides every recommended-page label in %s', (locale) => {
+  it.each(TRANSLATED_LOCALES)('provides every recommended-page label in %s', (locale) => {
     const dictionary = dictionaries[locale];
     for (const suggestion of Object.values(SUPPORT_PAGE_SUGGESTIONS)) {
       expect(dictionary[suggestion.labelKey], `${locale} is missing ${suggestion.labelKey}`).toBeTruthy();

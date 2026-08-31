@@ -1,3 +1,4 @@
+import { hasLocalizedAssets } from '../src/lib/i18n/localeRelease.js';
 import type { VercelRequest, VercelResponse } from './types';
 import { isSsrMethod, rejectSsrMethod, sendSsrHtml } from './_lib/ssr-http.js';
 import { createClient } from '@supabase/supabase-js';
@@ -33,7 +34,7 @@ function getSupabase() {
 function renderFeature(featureId: FeatureId, locale: Locale, domain: DomainKey, relatedHtml = ''): string {
   const cfg = FEATURES[featureId];
   const pricingPath = buildPath('/pricing', locale, domain);
-  const assetLocaleSuffix = locale === 'lt' ? '' : `-${locale}`;
+  const assetLocaleSuffix = locale === 'lt' ? '' : `-${hasLocalizedAssets(locale) ? locale : 'en'}`;
   const mobileBusinessCardPreview = `/landing/digital-business-card-mobile${assetLocaleSuffix}.png`;
   const desktopBusinessCardPreview = `/landing/digital-business-card-desktop${assetLocaleSuffix}.png`;
 

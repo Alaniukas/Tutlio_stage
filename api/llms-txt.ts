@@ -182,7 +182,7 @@ ${pricingBlock(isPl)}
 - Hosted on Vercel, database on Supabase
 - Stripe for payments; Google Calendar sync; GoSign for school contracts (LT)
 - GDPR compliant, data stored in EU
-- 13 languages: Lithuanian, English, Polish, Latvian, Estonian, French, Spanish, German, Swedish, Danish, Finnish, Norwegian, Dutch
+- 36 interface languages are available from the website language selector; search publication, legal coverage, payments, taxes, support, and country eligibility remain separate capabilities
 `;
 }
 

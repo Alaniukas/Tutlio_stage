@@ -46,6 +46,20 @@ describe('landing lead quiz payload', () => {
     expect(result.payload?.consent_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
+  it.each(['fil', 'fil-PH', 'lt', 'pt-br', 'es-mx'])('accepts the %s locale in a consented tutor lead', (locale) => {
+    const result = parseLandingLeadPayload({
+      email: 'buyer@example.com', source: 'quiz_solo', audience: 'solo', consent: true, locale,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.payload?.locale).toBe(locale);
+  });
+
+  it.each(['f', 'filipino', 'fil_PH', 'fil/PH', 'fil-Philippines'])('rejects a malformed locale: %s', (locale) => {
+    expect(parseLandingLeadPayload({
+      email: 'buyer@example.com', source: 'quiz_company', audience: 'company', consent: true, locale,
+    }).error).toBe('Invalid locale');
+  });
+
   it('requires explicit consent and a matching audience for quiz sources', () => {
     expect(parseLandingLeadPayload({
       email: 'buyer@example.com',

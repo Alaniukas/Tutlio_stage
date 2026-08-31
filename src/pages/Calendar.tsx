@@ -277,6 +277,9 @@ function uniqueSubjectIds(ids: string[] | null | undefined): string[] {
 
 export default function CalendarPage() {
   const { t, locale, dateFnsLocale } = useTranslation();
+  const rtlLocalizer = useMemo(() => dateFnsLocalizer({
+    format, parse, startOfWeek, getDay, locales: { [locale]: dateFnsLocale },
+  }), [locale, dateFnsLocale]);
   const { fmt } = useMarketMoney();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -765,7 +768,7 @@ export default function CalendarPage() {
 
     // Entire visible calendar grid (month = full weeks including adjacent months' days),
     // not a narrow window from currentDate — otherwise free time disappears for half the month's days.
-    const weekOpts = { weekStartsOn: 1 as const };
+    const weekOpts = { weekStartsOn: locale === 'he' ? 0 as const : 1 as const };
     let rangeStart: Date;
     let rangeEndExclusive: Date;
     if (currentView === Views.MONTH) {
@@ -856,7 +859,7 @@ export default function CalendarPage() {
       });
     }
     return generated;
-  }, [availability, currentDate, currentView, sessions]);
+  }, [availability, currentDate, currentView, sessions, locale]);
 
   // Helper function to merge group lesson sessions
   const mergeGroupSessions = useCallback((sessions: Session[]) => {
@@ -935,8 +938,8 @@ export default function CalendarPage() {
       rangeStart = startOfDay(currentDate);
       rangeEnd = endOfDay(currentDate);
     } else {
-      rangeStart = startOfWeek(currentDate, { weekStartsOn: 1 });
-      rangeEnd = endOfWeek(currentDate, { weekStartsOn: 1 });
+      rangeStart = startOfWeek(currentDate, { weekStartsOn: locale === 'he' ? 0 : 1 });
+      rangeEnd = endOfWeek(currentDate, { weekStartsOn: locale === 'he' ? 0 : 1 });
     }
 
     const relevant = allEvents.filter(ev => {
@@ -966,7 +969,7 @@ export default function CalendarPage() {
     const scrollToTime = new Date(1970, 0, 1, Math.max(floorH, Math.min(minH, 7)), 0, 0);
 
     return { min, max, scrollToTime };
-  }, [allEvents, currentDate, currentView]);
+  }, [allEvents, currentDate, currentView, locale]);
 
   // Google Calendar handlers
   const handleGoogleCalendarConnect = async () => {
@@ -1027,20 +1030,21 @@ export default function CalendarPage() {
         const availErr = data.availabilityError;
         let msg = t('cal.syncSuccess', { sessions: String(n), avail: String(availCount) });
         if (availErr) {
-          msg += `\n\nLaisvo laiko klaida: ${availErr}`;
+          console.error('Availability sync failed');
+          msg += '\n\n' + t('cal.legendFreeTime') + ': ' + t('cal.failedToSync');
         }
         if (total !== undefined && total > 0 && n < total && data.sessionError) {
-          msg += '\n\n' + t('cal.syncSendFailed', { error: data.sessionError });
+          msg += '\n\n' + t('cal.syncSendFailed');
         } else if (data.sessionError) {
-          msg += '\n\n' + t('cal.syncSessionError', { error: data.sessionError });
+          msg += '\n\n' + t('cal.syncSessionError');
         }
         if ((n > 0 || availCount > 0) && !availErr && !data.sessionError) {
           msg += '\n\n' + t('cal.syncCheckGoogle');
         }
         alert(msg);
       } else {
-        const msg = data?.message || data?.error || t('cal.failedToSync');
-        alert('Google Calendar: ' + msg);
+        console.error('Calendar sync failed');
+        alert(t('cal.failedToSync'));
       }
     } catch (err: any) {
       console.error('Sync error:', err);
@@ -2017,7 +2021,7 @@ export default function CalendarPage() {
             }).catch(err => ({ ok: false, json: async () => ({ error: err?.message }) }));
             const syncData = await (syncRes as Response).json?.().catch(() => ({}));
             if (!(syncRes as Response).ok || syncData?.success === false) {
-              alert(t('cal.syncGoogleFailed', { error: syncData?.error || syncData?.message || 'unknown' }));
+              alert(t('cal.failedToSync'));
             }
           }
         }
@@ -2159,7 +2163,7 @@ export default function CalendarPage() {
 
       if (error) {
         console.error('Error creating session:', error);
-        alert(t('cal.errorCreating', { msg: error.message }));
+        alert(t('cal.errorCreating'));
         setSaving(false);
         return;
       } else {
@@ -3651,7 +3655,7 @@ export default function CalendarPage() {
         setIsEventModalOpen(false);
       } else {
         setToastMessage({
-          message: t('dash.lessonCommentMissing', { count: 1 }),
+          message: t('dash.lessonCommentMissing'),
           type: 'warning',
         });
       }
@@ -3896,7 +3900,7 @@ export default function CalendarPage() {
       try {
         await hardDeleteSession(sessionToRemove.id);
       } catch (e: any) {
-        alert(t('cal.errorRemovingStudent', { msg: e?.message || t('cal.failedToRemove') }));
+        alert(t('cal.failedToRemove'));
         setSaving(false);
         return;
       }
@@ -4325,6 +4329,7 @@ export default function CalendarPage() {
             </div>
           ) : (
             <BigCalendar
+              rtl={locale === 'ar' || locale === 'he'}
               className={cn(
                 // Month view needs explicit height; otherwise rows can collapse and appear "empty".
                 currentView === Views.MONTH
@@ -4339,7 +4344,7 @@ export default function CalendarPage() {
                   ? 700
                   : (calendarExpanded ? 1100 : 700),
               }}
-              localizer={localizer}
+              localizer={locale === 'ar' || locale === 'he' ? rtlLocalizer : localizer}
               events={mergedSessions}
               backgroundEvents={backgroundEvents}
               startAccessor="start_time"

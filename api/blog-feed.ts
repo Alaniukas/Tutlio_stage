@@ -2,7 +2,6 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import {
   type Locale,
-  LOCALES,
   detectDomain,
   getDefaultLocale,
   buildCanonicalUrl,
@@ -10,6 +9,8 @@ import {
   esc,
 } from './_lib/seo-routing.js';
 import { t } from './_lib/i18n.js';
+import { seoLocalesForPath } from '../src/lib/i18n/localeRelease.js';
+import { SUPPORTED_LOCALES } from '../src/lib/i18n/locales.js';
 
 function getSupabase() {
   const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -48,9 +49,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const domain = detectDomain(req);
   const requested = typeof req.query.locale === 'string' ? req.query.locale : '';
-  const locale: Locale = (LOCALES as readonly string[]).includes(requested)
+  const locale: Locale = (seoLocalesForPath('/blog') as readonly string[]).includes(requested)
     ? (requested as Locale)
-    : getDefaultLocale(domain);
+    : (SUPPORTED_LOCALES as readonly string[]).includes(requested) ? 'en' : getDefaultLocale(domain);
 
   let posts: Record<string, unknown>[] = [];
   const supabase = getSupabase();

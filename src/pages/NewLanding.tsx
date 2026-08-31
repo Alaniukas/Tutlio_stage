@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from '@/lib/i18n';
 import LandingNavbar from '@/components/LandingNavbar';
 import LandingFooter from '@/components/LandingFooter';
 import type { LandingAudience } from '@/components/landing/v2/audience';
@@ -28,6 +29,7 @@ export default function NewLanding({
 }: {
   initialAudience?: LandingAudience;
 }) {
+  const { locale } = useTranslation();
   const [audience, setAudience] = useState<LandingAudience>(() =>
     resolveLandingAudience(initialAudience),
   );
@@ -56,8 +58,8 @@ export default function NewLanding({
         <FeaturesBento audience={audience} />
         <PillarsSummary />
         <VideoSection audience={audience} />
-        <CaseStudySection />
-        <Testimonials />
+        {/* These fictional English fallbacks are not approved Thai customer claims. */}
+        {locale !== 'th' && <><CaseStudySection /><Testimonials /></>}
         <FaqSection />
         <FinalCta audience={audience} />
       </main>

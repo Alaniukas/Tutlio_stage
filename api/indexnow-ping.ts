@@ -1,7 +1,8 @@
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
+import { seoLocalesForPath } from '../src/lib/i18n/localeRelease.js';
 import { requireCronAuth } from './_lib/cronAuth.js';
-import { type Locale, LOCALES, buildCanonicalUrl } from './_lib/seo-routing.js';
+import { type Locale, buildCanonicalUrl } from './_lib/seo-routing.js';
 
 /**
  * IndexNow key — intentionally public (the protocol verifies ownership by
@@ -54,7 +55,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // IndexNow requires one submission per host; canonical URLs span all three domains.
   const urlsByHost = new Map<string, string[]>();
   for (const post of posts) {
-    for (const locale of LOCALES) {
+    for (const locale of seoLocalesForPath('/blog')) {
       if (!post[`title_${locale}`]) continue;
       const url = buildCanonicalUrl(`/blog/${postSlug(post, locale)}`, locale);
       const host = new URL(url).host;

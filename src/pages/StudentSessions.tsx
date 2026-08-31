@@ -1697,7 +1697,7 @@ export default function StudentSessions() {
                                 onClick={() => setShowAllSessions((v) => !v)}
                                 className="w-full text-center text-sm text-indigo-600 font-semibold py-2 hover:bg-gray-50 rounded-xl transition-colors"
                             >
-                                {showAllSessions ? t('stuSess.showLess') : t('stuSess.showMore', { count: String(filtered.length) })}
+                                {showAllSessions ? t('stuSess.showLess') : t('stuSess.showMore')}
                             </button>
                         )}
                     </div>

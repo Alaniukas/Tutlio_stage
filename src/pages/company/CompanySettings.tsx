@@ -31,7 +31,8 @@ import {
   type StudentSeesTutorContactMode,
 } from '@/lib/orgContactVisibility';
 import { getCached, setCache } from '@/lib/dataCache';
-import { SUPPORTED_LOCALES, LOCALE_NAMES, type Locale } from '@/lib/i18n/core';
+import { LOCALE_NAMES, type Locale } from '@/lib/i18n/core';
+import { selectableLocales } from '@/lib/i18n/localeRelease';
 import { cn } from '@/lib/utils';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { isSchoolOrg, hasProKlaseIntakeFeatures } from '@/lib/orgIntakeMode';
@@ -438,7 +439,7 @@ export default function CompanySettings() {
     if (!confirm(t('compSet.subjectRemoveTutorConfirm', { tutor: row.tutor_name || '' }))) return;
     const { error } = await supabase.from('subjects').delete().eq('id', row.id);
     if (error) {
-      alert(t('compSet.errorDeleting', { msg: error.message }));
+      alert(t('compSet.errorDeleting'));
       return;
     }
     fetchSettings();
@@ -450,7 +451,7 @@ export default function CompanySettings() {
     if (!confirm(t('compSet.confirmDelete'))) return;
     const { error } = await supabase.from('subjects').delete().in('id', rows.map((row) => row.id));
     if (error) {
-      alert(t('compSet.errorDeleting', { msg: error.message }));
+      alert(t('compSet.errorDeleting'));
       return;
     }
     fetchSettings();
@@ -539,7 +540,7 @@ export default function CompanySettings() {
             .from('subjects')
             .insert(toInsertTutorIds.map((tutorId) => ({ ...subjectData, tutor_id: tutorId })));
           if (insErr) {
-            alert(t('compSet.errorPrefix', { msg: insErr.message }));
+            alert(t('common.saveFailed'));
             setSavingSubject(false);
             return;
           }
@@ -596,7 +597,7 @@ export default function CompanySettings() {
           .update(subjectData)
           .in('id', keptRows.map((row) => row.id));
         if (updErr) {
-          alert(t('compSet.errorPrefix', { msg: updErr.message }));
+          alert(t('common.saveFailed'));
           setSavingSubject(false);
           return;
         }
@@ -606,7 +607,7 @@ export default function CompanySettings() {
           .from('subjects')
           .insert(addedTutorIds.map((tutorId) => ({ ...subjectData, tutor_id: tutorId })));
         if (insErr) {
-          alert(t('compSet.errorPrefix', { msg: insErr.message }));
+          alert(t('common.saveFailed'));
           setSavingSubject(false);
           return;
         }
@@ -617,7 +618,7 @@ export default function CompanySettings() {
           .delete()
           .in('id', removedRows.map((row) => row.id));
         if (delErr) {
-          alert(t('compSet.errorDeleting', { msg: delErr.message }));
+          alert(t('compSet.errorDeleting'));
           setSavingSubject(false);
           return;
         }
@@ -654,7 +655,7 @@ export default function CompanySettings() {
         .eq('id', editingSubject.id);
 
       if (updErr) {
-        alert(t('compSet.errorPrefix', { msg: updErr.message }));
+        alert(t('common.saveFailed'));
         setSavingSubject(false);
         return;
       }
@@ -676,7 +677,7 @@ export default function CompanySettings() {
         .update({ org_subject_templates: [...templates, newTpl] })
         .eq('id', orgId);
       if (error) {
-        alert(t('compSet.errorPrefix', { msg: error.message }));
+        alert(t('common.saveFailed'));
       } else {
         setIsSubjectDialogOpen(false);
         fetchSettings();
@@ -701,7 +702,7 @@ export default function CompanySettings() {
       setIsSubjectDialogOpen(false);
       fetchSettings();
     } else {
-      alert(t('compSet.errorPrefix', { msg: error.message }));
+      alert(t('common.saveFailed'));
     }
     setSavingSubject(false);
   };
@@ -719,7 +720,7 @@ export default function CompanySettings() {
     }
     const { error } = await supabase.from('subjects').delete().eq('id', subject.id);
     if (error) {
-      alert(t('compSet.errorDeleting', { msg: error.message }));
+      alert(t('compSet.errorDeleting'));
       return;
     }
     fetchSettings();
@@ -827,7 +828,7 @@ export default function CompanySettings() {
     }
 
     setToastMessage({
-      message: t('compSet.savedAndApplied', { count: String(tutorIds.length) }),
+      message: t('compSet.savedAndApplied'),
       type: 'success',
     });
 
@@ -989,7 +990,7 @@ export default function CompanySettings() {
               <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="_none">{t('compSet.orgLocaleAuto')}</SelectItem>
-                {SUPPORTED_LOCALES.map((loc) => (
+                {selectableLocales(import.meta.env.DEV).map((loc) => (
                   <SelectItem key={loc} value={loc}>{LOCALE_NAMES[loc]}</SelectItem>
                 ))}
               </SelectContent>

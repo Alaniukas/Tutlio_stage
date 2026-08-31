@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
-import { useTranslation } from '@/lib/i18n';
+import { useTranslation, storeLocale, isValidLocale } from '@/lib/i18n';
+import { authDestinationWithLocale, safeInternalNextPath } from '@/lib/auth-redirects';
+import { resolveAuthEmailLocale } from '@/lib/auth-locale';
 
 export default function AuthCallback() {
   const { t } = useTranslation();
@@ -11,15 +13,14 @@ export default function AuthCallback() {
   useEffect(() => {
     let done = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const lang = new URLSearchParams(window.location.search).get('lang');
+    const callbackLocale = lang && isValidLocale(lang) ? resolveAuthEmailLocale(lang) : undefined;
+    if (callbackLocale) storeLocale(callbackLocale);
 
     const nextFromSearch = (() => {
       try {
         const next = new URLSearchParams(window.location.search).get('next') || '';
-        if (!next) return '';
-        // Only allow same-origin app paths.
-        if (!next.startsWith('/')) return '';
-        if (next.startsWith('//')) return '';
-        return next;
+        return safeInternalNextPath(next) || '';
       } catch {
         return '';
       }
@@ -30,7 +31,17 @@ export default function AuthCallback() {
       done = true;
       if (timeoutId !== undefined) clearTimeout(timeoutId);
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
-      navigate(path, { replace: true });
+      navigate(authDestinationWithLocale(path, callbackLocale), { replace: true });
+    };
+
+    const navigateAuthenticated = (user: { user_metadata?: Record<string, unknown> } | null) => {
+      if (user?.user_metadata?.org_token) {
+        navigateSafe('/dashboard');
+      } else if (nextFromSearch) {
+        navigateSafe(nextFromSearch);
+      } else {
+        navigateSafe('/login');
+      }
     };
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
@@ -59,13 +70,7 @@ export default function AuthCallback() {
           navigateSafe('/reset-password');
         } else if (!error) {
           const { data: { user } } = await supabase.auth.getUser();
-          if (user?.user_metadata?.org_token) {
-            navigateSafe('/dashboard');
-          } else if (nextFromSearch) {
-            navigateSafe(nextFromSearch);
-          } else {
-            navigateSafe('/login');
-          }
+          navigateAuthenticated(user);
         } else {
           navigateSafe('/login');
         }
@@ -82,6 +87,16 @@ export default function AuthCallback() {
           }
         }
         if (!done) navigateSafe('/login');
+        return;
+      }
+
+      // The global Supabase client initializes before this lazy route. It can
+      // consume the signup hash and persist the session before this component
+      // mounts, so the absence of a hash does not mean confirmation failed.
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (!done && !error && session?.user) {
+        setStatus(t('auth.redirecting'));
+        navigateAuthenticated(session.user);
         return;
       }
 

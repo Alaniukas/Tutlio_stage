@@ -1,6 +1,13 @@
 import { createContext, useCallback, useContext } from 'react';
-import { lt as dateFnsLt, pl as dateFnsPl, lv as dateFnsLv, et as dateFnsEe, fr as dateFnsFr, es as dateFnsEs, de as dateFnsDe, sv as dateFnsSe, da as dateFnsDk, fi as dateFnsFi, nb as dateFnsNo, nl as dateFnsNl } from 'date-fns/locale';
+import { lt as dateFnsLt, pl as dateFnsPl, lv as dateFnsLv, et as dateFnsEe, fr as dateFnsFr, es as dateFnsEs, de as dateFnsDe, sv as dateFnsSe, da as dateFnsDk, fi as dateFnsFi, nb as dateFnsNo, nl as dateFnsNl, it as dateFnsIt, pt as dateFnsPt, ro as dateFnsRo, cs as dateFnsCs, el as dateFnsEl, hu as dateFnsHu, bg as dateFnsBg, hr as dateFnsHr, sl as dateFnsSl, hi as dateFnsHi, ko as dateFnsKo, ja as dateFnsJa, id as dateFnsId, arSA as dateFnsAr, ptBR as dateFnsPtBr, es as dateFnsEsMx } from 'date-fns/locale';
 import type { Locale as DateFnsLocale } from 'date-fns';
+import { filDateFns } from './filDateFns';
+import { skDateFns as dateFnsSk } from './skDateFns';
+import { th as dateFnsTh } from 'date-fns/locale';
+import { tr as dateFnsTr } from 'date-fns/locale';
+import { zhHK as dateFnsZhHk } from 'date-fns/locale';
+import { he as dateFnsHe } from 'date-fns/locale';
+import { uk as dateFnsUk } from 'date-fns/locale';
 
 export { t, tHtml, detectLocaleFromHost, isValidLocale, SUPPORTED_LOCALES, LOCALE_LABELS, LOCALE_NAMES, loadLocaleDict, isLocaleLoaded } from './core';
 export type { Locale } from './core';
@@ -28,14 +35,22 @@ export function defaultLocaleForHost(host: string): Locale {
 
 export function getStoredLocale(): Locale | null {
   if (typeof window === 'undefined') return null;
-  const stored = localStorage.getItem(getDomainStorageKey());
-  if (stored && isValidLocale(stored)) return stored;
+  try {
+    const stored = localStorage.getItem(getDomainStorageKey());
+    if (stored && isValidLocale(stored)) return stored;
+  } catch {
+    // Storage may be disabled in embedded or private browsing contexts.
+  }
   return null;
 }
 
 export function storeLocale(locale: Locale): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem(getDomainStorageKey(), locale);
+  try {
+    localStorage.setItem(getDomainStorageKey(), locale);
+  } catch {
+    // Keep the current in-memory/URL choice usable without browser persistence.
+  }
 }
 
 export function detectLocale(): Locale {
@@ -103,6 +118,8 @@ export function buildLocalizedPath(pathname: string, locale: Locale, host?: stri
 }
 
 const dateFnsLocales: Record<Locale, DateFnsLocale | undefined> = {
+  th: dateFnsTh,
+  'zh-hk': dateFnsZhHk,
   lt: dateFnsLt,
   en: undefined,
   pl: dateFnsPl,
@@ -116,6 +133,27 @@ const dateFnsLocales: Record<Locale, DateFnsLocale | undefined> = {
   fi: dateFnsFi,
   no: dateFnsNo,
   nl: dateFnsNl,
+  'it': dateFnsIt,
+  'pt': dateFnsPt,
+  'ro': dateFnsRo,
+  'cs': dateFnsCs,
+  'el': dateFnsEl,
+  'hu': dateFnsHu,
+  'bg': dateFnsBg,
+  'hr': dateFnsHr,
+  'sk': dateFnsSk,
+  'sl': dateFnsSl,
+  'hi': dateFnsHi,
+  'ko': dateFnsKo,
+  'ja': dateFnsJa,
+  'id': dateFnsId,
+  'ar': dateFnsAr,
+  'pt-br': dateFnsPtBr,
+  'es-mx': dateFnsEsMx,
+  fil: filDateFns,
+  tr: dateFnsTr,
+  he: dateFnsHe,
+  uk: dateFnsUk,
 };
 
 export function getDateFnsLocale(locale: Locale): DateFnsLocale | undefined {
@@ -124,6 +162,8 @@ export function getDateFnsLocale(locale: Locale): DateFnsLocale | undefined {
 
 interface I18nContextValue {
   locale: Locale;
+  /** Pending choice, while locale remains the last successfully loaded UI. */
+  requestedLocale?: Locale;
   setLocale: (locale: Locale) => void;
   t: (key: string, params?: Record<string, string | number>) => string;
   /** HTML-escaped interpolation — use for `dangerouslySetInnerHTML` sinks. */

@@ -11,6 +11,7 @@ import { User, Mail, Phone, Save, Lock, Building2, Eye, EyeOff, CreditCard, Cale
 import { formatLocalizedPhone, getLocalizedPhonePlaceholder, validateLocalizedPhone } from '@/lib/utils';
 import { hasActiveSubscription } from '@/lib/subscription';
 import { useTranslation } from '@/lib/i18n';
+import { LOCALE_FORMAT_TAGS } from '@/lib/i18n/locales';
 import { TUTOR_PLANS, eur } from '@/lib/pricing';
 import { isPlMarket } from '@/lib/market';
 import { formatPln } from '@/lib/formatPln';
@@ -298,7 +299,7 @@ export default function SettingsPage() {
     if (typeof amount !== 'number') return null;
     if (isPlMarket()) return formatPln(amount);
     try {
-      return new Intl.NumberFormat('lt-LT', {
+      return new Intl.NumberFormat(LOCALE_FORMAT_TAGS[locale], {
         style: 'currency',
         currency: (currency || 'EUR').toUpperCase(),
         minimumFractionDigits: 2,
@@ -471,7 +472,7 @@ export default function SettingsPage() {
                   <p className="text-sm text-amber-700">
                     {t('settings.trialRemaining', {
                       days: Math.max(0, Math.ceil((new Date(profile.subscription_current_period_end).getTime() - Date.now()) / (1000 * 60 * 60 * 24))),
-                      date: new Date(profile.subscription_current_period_end).toLocaleDateString('lt-LT', { month: 'long', day: 'numeric' }),
+                      date: new Date(profile.subscription_current_period_end).toLocaleDateString(LOCALE_FORMAT_TAGS[locale], { month: 'long', day: 'numeric' }),
                       amount: getTrialChargeText(),
                     })}
                   </p>
@@ -488,7 +489,7 @@ export default function SettingsPage() {
                   <p className="text-sm font-semibold text-slate-900 mb-1">{t('settings.subCancelled')}</p>
                   <p className="text-sm text-slate-600">
                     {profile.subscription_current_period_end ? (
-                      t('settings.subValidUntil', { date: new Date(profile.subscription_current_period_end).toLocaleDateString('lt-LT', { year: 'numeric', month: 'long', day: 'numeric' }) })
+                      t('settings.subValidUntil', { date: new Date(profile.subscription_current_period_end).toLocaleDateString(LOCALE_FORMAT_TAGS[locale], { year: 'numeric', month: 'long', day: 'numeric' }) })
                     ) : (
                       t('settings.canResubscribe')
                     )}
@@ -543,7 +544,7 @@ export default function SettingsPage() {
                   <div className="flex items-center gap-2">
                     <Calendar className="w-4 h-4 text-gray-400" />
                     <span className="text-sm font-medium text-gray-900">
-                      {new Date(profile.subscription_current_period_end).toLocaleDateString('lt-LT', {
+                      {new Date(profile.subscription_current_period_end).toLocaleDateString(LOCALE_FORMAT_TAGS[locale], {
                         year: 'numeric',
                         month: 'long',
                         day: 'numeric',

@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Minus, Plus } from 'lucide-react';
 import { buildLocalizedPath, localizedPagePath, useTranslation } from '@/lib/i18n';
+import { LOCALE_FORMAT_TAGS } from '@/lib/i18n/locales';
+import { localeAvailabilityParams } from '@/lib/i18n/localeAvailability';
 import Reveal from '../Reveal';
 
 /**
@@ -11,13 +13,14 @@ import Reveal from '../Reveal';
 const FAQ_KEYS = ['whatIs', 'whoFor', 'waitlist', 'freeTrial', 'languages'] as const;
 
 /** Bump whenever an answer above changes — shown as the freshness signal. */
-const FAQ_LAST_UPDATED = '2026-08-01';
+const FAQ_LAST_UPDATED = '2026-09-01';
 
 export default function FaqSection() {
   const { t, locale } = useTranslation();
   const [open, setOpen] = useState<string | null>(FAQ_KEYS[0]);
+  const languageParams = localeAvailabilityParams(locale);
 
-  const lastUpdated = new Date(FAQ_LAST_UPDATED).toLocaleDateString(locale, {
+  const lastUpdated = new Date(`${FAQ_LAST_UPDATED}T12:00:00`).toLocaleDateString(LOCALE_FORMAT_TAGS[locale], {
     year: 'numeric',
     month: 'long',
   });
@@ -67,7 +70,7 @@ export default function FaqSection() {
                       className="border-t border-zinc-100 px-4 pb-4 pt-3 sm:px-5 sm:pb-5 sm:pt-4 lg:px-6 lg:pb-6"
                     >
                       <p className="text-sm leading-relaxed text-zinc-600 sm:text-base">
-                        {t(`landing.faq.${key}A`)}
+                        {t(`landing.faq.${key}A`, key === 'languages' ? languageParams : undefined)}
                       </p>
                     </div>
                   )}

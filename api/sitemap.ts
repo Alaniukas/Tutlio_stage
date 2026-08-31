@@ -2,7 +2,6 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import {
   type Locale,
-  LOCALES,
   detectDomain,
   buildCanonicalUrl,
   buildPublicPageCanonicalUrl,
@@ -12,6 +11,7 @@ import {
   hreflangCode,
 } from './_lib/seo-routing.js';
 import { evaluatePublicPageSeo } from '../src/lib/publicPage.js';
+import { BLOG_SCHEMA_LOCALES, isSeoPublished, seoLocalesForPath } from '../src/lib/i18n/localeRelease.js';
 
 function getSupabase() {
   const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -53,8 +53,8 @@ export const STATIC_PAGES: SitemapPage[] = [
   plainPage('/dpa', 'yearly', '0.2'),
 ];
 
-const TITLE_COLUMNS = LOCALES.map((l) => `title_${l}`).join(', ');
-const SLUG_COLUMNS = LOCALES.map((l) => `slug_${l}`).join(', ');
+const TITLE_COLUMNS = BLOG_SCHEMA_LOCALES.map((l) => `title_${l}`).join(', ');
+const SLUG_COLUMNS = BLOG_SCHEMA_LOCALES.map((l) => `slug_${l}`).join(', ');
 
 function postHasTranslation(post: Record<string, unknown>, locale: Locale): boolean {
   return !!post[`title_${locale}`];
@@ -100,13 +100,13 @@ export function publicPageBelongsInSitemap(
  */
 export function alternatesXmlFor(
   urlFor: (locale: Locale) => string,
-  locales: Locale[] = LOCALES,
+  locales: readonly Locale[] = seoLocalesForPath(new URL(urlFor('en')).pathname),
   includeXDefault = true,
 ): string {
   const links = locales.map(
     (locale) => `    <xhtml:link rel="alternate" hreflang="${hreflangCode(locale)}" href="${urlFor(locale)}" />`,
   );
-  if (includeXDefault) {
+  if (includeXDefault && locales.includes('en')) {
     links.push(`    <xhtml:link rel="alternate" hreflang="x-default" href="${urlFor('en')}" />`);
   }
   return links.join('\n');
@@ -169,9 +169,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const entries: string[] = [];
-  const myLocales = LOCALES.filter((l) => canonicalDomain(l) === domain);
+  const blogLocales = seoLocalesForPath('/blog');
+  const myBlogDomainLocales = blogLocales.filter((l) => canonicalDomain(l) === domain);
 
   for (const page of STATIC_PAGES) {
+    const myLocales = seoLocalesForPath(new URL(page.urlFor('en')).pathname).filter((l) => canonicalDomain(l) === domain);
     for (const locale of myLocales) {
       entries.push(
         urlEntry(page.urlFor(locale), page.changefreq, page.priority, alternatesXmlFor(page.urlFor), STATIC_LASTMOD),
@@ -184,7 +186,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   for (const page of publicPages) {
     if (!publicPageBelongsInSitemap(page, tutorIdsWithOfferings)) continue;
     const slug = typeof page.slug === 'string' ? page.slug : '';
-    const locale = typeof page.locale === 'string' && LOCALES.includes(page.locale as Locale)
+    const locale = typeof page.locale === 'string' && isSeoPublished(page.locale as Locale, '/tutor')
       ? page.locale as Locale
       : null;
     if (!slug || !locale || canonicalDomain(locale) !== domain) continue;
@@ -195,8 +197,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Blog listing: <loc> for this domain's translated locales, alternates
   // across every translated locale on any domain.
   const blogUrlFor = (l: Locale) => buildCanonicalUrl('/blog', l);
-  const myBlogLocales = myLocales.filter((l) => blogPosts.some((p) => postHasTranslation(p, l)));
-  const allBlogLocales = LOCALES.filter((l) => blogPosts.some((p) => postHasTranslation(p, l)));
+  const myBlogLocales = myBlogDomainLocales.filter((l) => blogPosts.some((p) => postHasTranslation(p, l)));
+  const allBlogLocales = blogLocales.filter((l) => blogPosts.some((p) => postHasTranslation(p, l)));
   const latestPostLastmod = blogPosts.map(postLastmod).filter(Boolean).sort().pop();
 
   for (const locale of myBlogLocales) {
@@ -213,8 +215,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   for (const post of blogPosts) {
     const postUrlFor = (l: Locale) => buildCanonicalUrl(`/blog/${postSlug(post, l)}`, l);
-    const myPostLocales = myLocales.filter((l) => postHasTranslation(post, l));
-    const allPostLocales = LOCALES.filter((l) => postHasTranslation(post, l));
+    const myPostLocales = myBlogDomainLocales.filter((l) => postHasTranslation(post, l));
+    const allPostLocales = blogLocales.filter((l) => postHasTranslation(post, l));
     const lastmod = postLastmod(post);
 
     for (const locale of myPostLocales) {

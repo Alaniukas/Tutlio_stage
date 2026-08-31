@@ -8,6 +8,14 @@ import {
 } from '../../src/lib/utils';
 
 describe('localized phone helpers', () => {
+  it('accepts Mexican numbers without restricting Mexican Spanish to one country', () => {
+    expect(formatLocalizedPhone('+52 55 1234 5678', 'es-mx')).toBe('+525512345678');
+    expect(validateLocalizedPhone('+52 55 1234 5678', 'es-mx')).toBe(true);
+    expect(validateLocalizedPhone('+34600123456', 'es-mx')).toBe(true);
+    expect(validateLocalizedPhone('5512345678', 'es-mx')).toBe(false);
+    expect(getLocalizedPhonePlaceholder('es-mx')).toBe('+52 55 1234 5678');
+  });
+
   it('accepts Spanish numbers with an international prefix', () => {
     expect(formatInternationalPhone('+34 600 123 456')).toBe('+34600123456');
     expect(validateInternationalPhone('+34 600 123 456')).toBe(true);

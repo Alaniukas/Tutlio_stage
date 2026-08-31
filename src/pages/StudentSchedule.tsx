@@ -157,7 +157,10 @@ interface SlotEvent {
 }
 
 export default function StudentSchedule() {
-    const { t, tHtml, dateFnsLocale } = useTranslation();
+    const { t, tHtml, locale, dateFnsLocale } = useTranslation();
+    const rtlLocalizer = useMemo(() => dateFnsLocalizer({
+        format, parse, startOfWeek, getDay, locales: { [locale]: dateFnsLocale },
+    }), [locale, dateFnsLocale]);
     const market = currentMarket();
     const isPl = market === 'pl';
     const fmt = (amount: number | null | undefined) => formatMarketAmount(amount, market);
@@ -1000,7 +1003,7 @@ export default function StudentSchedule() {
             endDate = endOfMonth(newDate);
         } else if (actualView === Views.WEEK) {
             // Load week range
-            startDate = startOfWeek(newDate, { weekStartsOn: 1 });
+            startDate = startOfWeek(newDate, { weekStartsOn: locale === 'he' ? 0 : 1 });
             endDate = addDays(startDate, 6);
         } else {
             // Day view - just load that day
@@ -1010,7 +1013,7 @@ export default function StudentSchedule() {
 
         // Fetch data for this range if not already loaded
         await fetchDateRange(startDate, endDate);
-    }, [currentView, tutorId]);
+    }, [currentView, tutorId, locale]);
 
 
     const handleSelectEvent = async (event: SlotEvent) => {
@@ -1560,7 +1563,7 @@ export default function StudentSchedule() {
                 alert(t('stuSched.mustPayFirst'));
                 void refetchBookingBlock();
             } else {
-                alert(t('stuSched.reservationFailed', { msg: msg || t('stuSess.unknownError') }));
+                alert(t('stuSched.reservationFailed'));
             }
             setIsDialogOpen(false);
             setSaving(false);
@@ -1850,7 +1853,8 @@ export default function StudentSchedule() {
                                 </div>
                             ) : (
                                 <BigCalendar
-                                    localizer={localizer}
+                                    rtl={locale === 'ar' || locale === 'he'}
+                                    localizer={locale === 'ar' || locale === 'he' ? rtlLocalizer : localizer}
                                     events={events}
                                     backgroundEvents={bgEvents}
                                     view={currentView}
@@ -1864,7 +1868,7 @@ export default function StudentSchedule() {
                                     // …and auto-scroll the time grid to the earliest available hour
                                     // so we don't open the calendar at midnight by default.
                                     scrollToTime={scrollToTime}
-                                    culture="lt"
+                                    culture={locale === 'ar' || locale === 'he' ? locale : 'lt'}
                                     style={{ height: '100%' }}
                                     eventPropGetter={eventStyleGetter}
                                     onSelectEvent={handleSelectEvent}
@@ -1872,7 +1876,7 @@ export default function StudentSchedule() {
                                     onSelectSlot={handleSelectSlot}
                                     components={{ toolbar: () => null }}
                                     messages={{
-                                        showMore: (count) => `+${count} daugiau`
+                                        showMore: (count) => locale === 'ar' || locale === 'he' ? `+${count} ${t('stuSess.showMore')}` : `+${count} daugiau`
                                     }}
                                     popup
                                     step={15}
@@ -2066,7 +2070,7 @@ export default function StudentSchedule() {
                                         return (
                                             <div className="bg-red-50 rounded-2xl p-4 mb-4 border border-red-100 text-sm text-red-700">
                                                 <p className="font-bold mb-1">{t('stuSched.queueClosed')}</p>
-                                                <p className="text-xs">{t('stuSched.queueClosedDesc', { deadline: format(deadline, 'yyyy-MM-dd HH:mm') })}</p>
+                                                <p className="text-xs">{t('stuSched.queueClosedDesc', { deadline: format(deadline, 'Pp', { locale: dateFnsLocale }) })}</p>
                                             </div>
                                         );
                                     })()}
@@ -2130,7 +2134,7 @@ export default function StudentSchedule() {
                                                 </div>
                                                 <div className="flex justify-between">
                                                     <span>{t('lessonSet.bookingDeadline')}:</span>
-                                                    <span className="font-bold text-amber-800">{format(deadline, 'yyyy-MM-dd HH:mm')}</span>
+                                                    <span className="font-bold text-amber-800">{format(deadline, 'Pp', { locale: dateFnsLocale })}</span>
                                                 </div>
                                             </div>
                                         </div>
@@ -2465,8 +2469,8 @@ export default function StudentSchedule() {
                                 })()}
                                 <p className="text-amber-700 font-medium pt-1">
                                     {paymentTiming === 'after_lesson'
-                                        ? <>{t('stuSched.payAfterLesson', { deadline: format(pendingPaymentSession.deadline, 'yyyy-MM-dd HH:mm', { locale: dateFnsLocale }) })}</>
-                                        : <>{t('stuSched.payBefore', { deadline: format(pendingPaymentSession.deadline, 'yyyy-MM-dd HH:mm', { locale: dateFnsLocale }) })}</>
+                                        ? <>{t('stuSched.payAfterLesson', { deadline: format(pendingPaymentSession.deadline, 'Pp', { locale: dateFnsLocale }) })}</>
+                                        : <>{t('stuSched.payBefore', { deadline: format(pendingPaymentSession.deadline, 'Pp', { locale: dateFnsLocale }) })}</>
                                     }
                                 </p>
                             </div>

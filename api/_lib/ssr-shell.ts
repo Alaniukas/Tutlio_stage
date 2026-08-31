@@ -1,3 +1,5 @@
+import { LOCALE_FORMAT_TAGS, LOCALE_NAMES, localeDirection, withEnglishLocaleFallback } from '../../src/lib/i18n/locales.js';
+import { isSeoPublished, seoLocalesForPath } from '../../src/lib/i18n/localeRelease.js';
 export {
   type Locale,
   LOCALES,
@@ -29,7 +31,6 @@ export { preloadSsrLocales, t } from './ssr-i18n.js';
 import {
   type Locale,
   type DomainKey,
-  LOCALES,
   esc,
   buildPath,
   buildPlatformPath,
@@ -43,38 +44,8 @@ import { t } from './ssr-i18n.js';
 import { TUTOR_PLANS } from '../../src/lib/pricing.js';
 import { SUBSCRIPTION_PLN } from '../../src/lib/subscriptionPricing.js';
 
-const OG_LOCALE_MAP: Record<Locale, string> = {
-  lt: 'lt_LT',
-  en: 'en_US',
-  pl: 'pl_PL',
-  lv: 'lv_LV',
-  ee: 'et_EE',
-  fr: 'fr_FR',
-  es: 'es_ES',
-  de: 'de_DE',
-  se: 'sv_SE',
-  dk: 'da_DK',
-  fi: 'fi_FI',
-  no: 'nb_NO',
-  nl: 'nl_NL',
-};
-
-/** Native language names for the crawlable locale-links footer block. */
-const LOCALE_NATIVE_NAMES: Record<Locale, string> = {
-  lt: 'Lietuvių',
-  en: 'English',
-  pl: 'Polski',
-  lv: 'Latviešu',
-  ee: 'Eesti',
-  fr: 'Français',
-  es: 'Español',
-  de: 'Deutsch',
-  se: 'Svenska',
-  dk: 'Dansk',
-  fi: 'Suomi',
-  no: 'Norsk',
-  nl: 'Nederlands',
-};
+const OG_LOCALE_MAP = Object.fromEntries(Object.entries(LOCALE_FORMAT_TAGS).map(([locale, tag]) => [locale, tag.split('-u-')[0].replace('-', '_')]));
+const LOCALE_NATIVE_NAMES = LOCALE_NAMES;
 
 function jsonLdStringify(value: unknown): string {
   return JSON.stringify(value)
@@ -116,7 +87,7 @@ export interface ShellOptions {
 
 function localeLinksHtml(urlFor: (locale: Locale) => string, current: Locale, domain: DomainKey): string {
   if (domain === 'pl') return '';
-  const links = LOCALES.map((l) =>
+  const links = seoLocalesForPath(new URL(urlFor('en')).pathname).map((l) =>
     l === current
       ? `<span lang="${hreflangCode(l)}">${LOCALE_NATIVE_NAMES[l]}</span>`
       : `<a href="${esc(urlFor(l))}" hreflang="${hreflangCode(l)}" lang="${hreflangCode(l)}">${LOCALE_NATIVE_NAMES[l]}</a>`,
@@ -132,8 +103,9 @@ export function renderShell(opts: ShellOptions): string {
     : '<meta property="og:image:width" content="1200" />\n<meta property="og:image:height" content="800" />';
   const urlFor = opts.urlFor || ((l: Locale) => buildCanonicalUrl(path, l));
   const canonicalUrl = urlFor(locale);
+  const seoPath = new URL(canonicalUrl).pathname;
 
-  const ogLocaleAlternates = (opts.ogAlternateLocales ?? LOCALES)
+  const ogLocaleAlternates = (opts.ogAlternateLocales ?? seoLocalesForPath(seoPath))
     .filter((l) => l !== locale)
     .map((l) => `<meta property="og:locale:alternate" content="${OG_LOCALE_MAP[l]}" />`)
     .join('\n');
@@ -161,13 +133,13 @@ export function renderShell(opts: ShellOptions): string {
     : '';
 
   return `<!DOCTYPE html>
-<html lang="${hreflangCode(locale)}">
+<html lang="${hreflangCode(locale)}" dir="${localeDirection(locale)}">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>${esc(title)}</title>
 <meta name="description" content="${esc(description)}" />
-<meta name="robots" content="${esc(opts.robots || 'index, follow, max-image-preview:large')}" />
+<meta name="robots" content="${esc(!isSeoPublished(locale, seoPath) ? 'noindex, follow' : opts.robots || 'index, follow, max-image-preview:large')}" />
 <link rel="canonical" href="${esc(canonicalUrl)}" />
 <link rel="alternate" type="application/rss+xml" title="Tutlio Blog" href="${esc(buildCanonicalUrl('/blog/rss.xml', locale))}" />
 ${opts.hreflangHtml ?? hreflangTagsFor(urlFor)}
@@ -242,7 +214,7 @@ a:hover{text-decoration:underline}
     <a href="${buildPath('/features', locale, domain)}">${t(locale, 'nav.features')}</a>
     <a href="${buildPath('/pricing', locale, domain)}">${t(locale, 'common.prices')}</a>
     <a href="${buildPath(localizedPagePath('about', locale), locale, domain)}">${t(locale, 'nav.aboutUs')}</a>
-    <a href="${buildPath('/blog', locale, domain)}">${({ lt: 'Tinklaraštis', en: 'Blog', pl: 'Blog', lv: 'Emuārs', ee: 'Blogi', fr: 'Blog', es: 'Blog', de: 'Blog', se: 'Blogg', dk: 'Blog', fi: 'Blogi', no: 'Blogg', nl: 'Blog' })[locale]}</a>
+    <a href="${buildPath('/blog', locale, domain)}">${withEnglishLocaleFallback({el: 'Ιστολόγιο', uk: 'Блог', bg: 'Блог', th: 'บล็อก', he: 'בלוג', 'zh-hk': '網誌', ja: 'ブログ', ko: '블로그', ar: 'المدونة', lt: 'Tinklaraštis', en: 'Blog', pl: 'Blog', lv: 'Emuārs', ee: 'Blogi', fr: 'Blog', es: 'Blog', de: 'Blog', se: 'Blogg', dk: 'Blog', fi: 'Blogi', no: 'Blogg', nl: 'Blog' })[locale]}</a>
   </div>
 </nav>
 ${breadcrumbHtml}
@@ -254,7 +226,7 @@ ${body}
     <a href="${buildPath('/terms', locale, domain)}">${t(locale, 'footer.terms')}</a>
     <a href="${buildPath('/dpa', locale, domain)}">${t(locale, 'footer.dpa')}</a>
     <a href="${buildPath(localizedPagePath('contacts', locale), locale, domain)}">${t(locale, 'contact.title')}</a>
-    <a href="${buildPlatformPath('/schools', '/', locale, domain)}">${({ lt: 'Mokykloms', en: 'For Schools', pl: 'Dla szkół', lv: 'Skolām', ee: 'Koolidele', fr: 'Pour les écoles', es: 'Para escuelas', de: 'Für Schulen', se: 'För skolor', dk: 'Til skoler', fi: 'Kouluille', no: 'For skoler', nl: 'Voor scholen' })[locale]}</a>
+    <a href="${buildPlatformPath('/schools', '/', locale, domain)}">${withEnglishLocaleFallback({cs: 'Pro školy', sl: 'Za šole', el: 'Για σχολές', uk: 'Для шкіл', sk: 'Pre školy', bg: 'За училища', th: 'สำหรับโรงเรียน', he: 'לבתי ספר', 'zh-hk': '學校專用', ja: '学校向け', hi: 'स्कूलों के लिए', ko: '학교용', id: 'Untuk sekolah', ar: 'للمدارس', lt: 'Mokykloms', hr: 'Za škole', hu: 'Iskoláknak', en: 'For Schools', tr: 'Okullar için', fil: 'Para sa mga paaralan', pt: 'Para escolas', 'pt-br': 'Para escolas', ro: 'Pentru școli', it: 'Per le scuole', 'es-mx': 'Para escuelas', pl: 'Dla szkół', lv: 'Skolām', ee: 'Koolidele', fr: 'Pour les écoles', es: 'Para escuelas', de: 'Für Schulen', se: 'För skolor', dk: 'Til skoler', fi: 'Kouluille', no: 'For skoler', nl: 'Voor scholen' })[locale]}</a>
   </div>
   ${opts.showLocaleLinks === false ? '' : localeLinksHtml(urlFor, locale, domain)}
   ${t(locale, 'common.allRightsReserved', { year: new Date().getFullYear() })}

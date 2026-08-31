@@ -1,3 +1,27 @@
+import { interpolateTranslation } from '../../src/lib/i18n/interpolate.js';
+import { it } from '../../src/lib/i18n/it.js';
+import { fil } from '../../src/lib/i18n/fil.js';
+import { th } from '../../src/lib/i18n/th.js';
+import { tr } from '../../src/lib/i18n/tr.js';
+import { zhHk } from '../../src/lib/i18n/zh-hk.js';
+import { pt } from '../../src/lib/i18n/pt.js';
+import { ro } from '../../src/lib/i18n/ro.js';
+import { cs } from '../../src/lib/i18n/cs.js';
+import { el } from '../../src/lib/i18n/el.js';
+import { hu } from '../../src/lib/i18n/hu.js';
+import { bg } from '../../src/lib/i18n/bg.js';
+import { hr } from '../../src/lib/i18n/hr.js';
+import { sk } from '../../src/lib/i18n/sk.js';
+import { sl } from '../../src/lib/i18n/sl.js';
+import { hi } from '../../src/lib/i18n/hi.js';
+import { ko } from '../../src/lib/i18n/ko.js';
+import { ja } from '../../src/lib/i18n/ja.js';
+import { id } from '../../src/lib/i18n/id.js';
+import { ar } from '../../src/lib/i18n/ar.js';
+import { he } from '../../src/lib/i18n/he.js';
+import { uk } from '../../src/lib/i18n/uk.js';
+import { ptBr } from '../../src/lib/i18n/pt-br.js';
+import { esMx } from '../../src/lib/i18n/es-mx.js';
 import type { Locale as FullLocale } from './seo-routing.js';
 import { LOCALES } from './seo-routing.js';
 import { lt } from '../../src/lib/i18n/lt.js';
@@ -21,7 +45,30 @@ export function isValidLocale(v: unknown): v is Locale {
 }
 
 const translations: Record<Locale, Record<string, string>> = {
+  th,
+  'zh-hk': zhHk,
   lt, en, pl, lv, ee, fr, es, de, se, dk, fi, no, nl,
+  'it': it,
+  fil,
+  tr,
+  'pt': pt,
+  'ro': ro,
+  'cs': cs,
+  'el': el,
+  'hu': hu,
+  'bg': bg,
+  'hr': hr,
+  'sk': sk,
+  'sl': sl,
+  'hi': hi,
+  'ko': ko,
+  'ja': ja,
+  'id': id,
+  'ar': ar,
+  he,
+  uk,
+  'pt-br': ptBr,
+  'es-mx': esMx,
 };
 
 /** Server funkcijose kai kur bundle neįtraukia naujausių raktų – būtiniausi el. pašto fragmentai čia visada. */
@@ -82,7 +129,7 @@ export function t(
   params?: Record<string, string | number>,
 ): string {
   const lc: Locale = isValidLocale(locale) ? locale : 'lt';
-  let text =
+  const text =
     translations[lc]?.[key] ??
     EMAIL_SERVER_FALLBACKS[lc]?.[key] ??
     translations.en[key] ??
@@ -90,10 +137,5 @@ export function t(
     translations.lt[key] ??
     EMAIL_SERVER_FALLBACKS.lt?.[key] ??
     key;
-  if (params) {
-    for (const [k, v] of Object.entries(params)) {
-      text = text.replaceAll(`{${k}}`, String(v));
-    }
-  }
-  return text;
+  return interpolateTranslation(text, params);
 }

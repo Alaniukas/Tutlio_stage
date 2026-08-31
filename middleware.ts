@@ -1,8 +1,8 @@
 import { next, rewrite } from '@vercel/functions';
 
-// Kept dependency-free for the edge runtime; sync with api/_lib/seo-routing.ts
-// and src/lib/featurePages.ts is enforced by tests/lib/seo-visibility.test.ts.
-export const LOCALES = new Set(['en', 'lt', 'pl', 'lv', 'ee', 'fr', 'es', 'de', 'se', 'dk', 'fi', 'no', 'nl']);
+// The shared locale registry has no runtime dependencies and is safe at the edge.
+import { SUPPORTED_LOCALES } from './src/lib/i18n/locales.js';
+export const LOCALES = new Set<string>(SUPPORTED_LOCALES);
 export const FEATURES = new Set([
   'digital-business-card',
   'calendar',

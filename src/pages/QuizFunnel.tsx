@@ -22,6 +22,7 @@ import {
   useTranslation,
 } from '@/lib/i18n';
 import EnterpriseContactModal from '@/components/EnterpriseContactModal';
+import LocaleLoadStatus from '@/components/LocaleLoadStatus';
 import EnterprisePlanCard from '@/components/pricing/EnterprisePlanCard';
 import TutorPlanCards from '@/components/pricing/TutorPlanCards';
 import HeroAnimation from '@/components/landing/v2/HeroAnimation';
@@ -394,7 +395,9 @@ export default function QuizFunnel() {
     ? parsedStep
     : null;
   const isRoot = !params.audience && !params.step;
-  const [fallbackReady, setFallbackReady] = useState(locale === 'lt' || locale === 'en');
+  const [fallbackReady, setFallbackReady] = useState(locale === 'lt' || locale === 'en' || locale === 'nl');
+  const [fallbackFailed, setFallbackFailed] = useState(false);
+  const [fallbackAttempt, setFallbackAttempt] = useState(0);
   const [answers, setAnswers] = useState<QuizAnswers>({});
   const [email, setEmail] = useState('');
   const [consent, setConsent] = useState(false);
@@ -412,7 +415,9 @@ export default function QuizFunnel() {
     `/${routeLocale}/quiz/${targetAudience}/${targetStep}`;
 
   useEffect(() => {
-    if (locale === 'lt' || locale === 'en') {
+    setFallbackFailed(false);
+    // Dutch now covers the complete quiz; it does not need the English chunk.
+    if (locale === 'lt' || locale === 'en' || locale === 'nl') {
       setFallbackReady(true);
       return;
     }
@@ -420,9 +425,11 @@ export default function QuizFunnel() {
     let cancelled = false;
     void loadLocaleDict('en').then(() => {
       if (!cancelled) setFallbackReady(true);
+    }).catch(() => {
+      if (!cancelled) setFallbackFailed(true);
     });
     return () => { cancelled = true; };
-  }, [locale]);
+  }, [locale, fallbackAttempt]);
 
   useEffect(() => {
     if (!fallbackReady) return;
@@ -593,6 +600,13 @@ export default function QuizFunnel() {
     setSubmitting(false);
     navigate(stepPath(audience, 'offer'));
     window.scrollTo({ top: 0, behavior: 'auto' });
+  }
+
+  if (fallbackFailed) {
+    return <LocaleLoadStatus locale={locale} failed retry={() => {
+      setFallbackFailed(false);
+      setFallbackAttempt((value) => value + 1);
+    }} />;
   }
 
   if (!fallbackReady || (!isRoot && (!audience || !step))) {

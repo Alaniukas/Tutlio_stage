@@ -17,9 +17,16 @@ import { en } from '../../src/lib/i18n/en.js';
 import { lt } from '../../src/lib/i18n/lt.js';
 import { htmlLanguageCode } from '../../src/lib/i18n/core.js';
 
-// ISO 639-1 language codes valid as hreflang values for our markets.
+// BCP 47 language tags used by our locale registry.
 const VALID_LANGUAGE_CODES = new Set([
+  'uk',
+  'th', 'uk',
+  'zh-HK',
   'lt', 'en', 'pl', 'lv', 'et', 'fr', 'es', 'de', 'sv', 'da', 'fi', 'no', 'nl',
+  'it', 'pt', 'ro', 'cs', 'el', 'hu', 'bg', 'hr', 'sk', 'sl',
+  'hi', 'ko', 'ja', 'id', 'ar', 'pt-BR', 'es-MX',
+  'fil',
+  'tr', 'he',
 ]);
 
 describe('hreflang language codes', () => {

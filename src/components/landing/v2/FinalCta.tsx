@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { Check } from 'lucide-react';
 import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
 import { marketingAudienceFromLanding } from '@/lib/marketingAudience';
+import { UI_RELEASED_LOCALES } from '@/lib/i18n/localeRelease';
 import Reveal from '../Reveal';
 import type { LandingAudience } from './audience';
 
@@ -42,7 +43,7 @@ export default function FinalCta({ audience }: { audience: LandingAudience }) {
               {CHIPS.map((key) => (
                 <div key={key} className="flex items-center gap-1.5 text-sm text-zinc-500">
                   <Check className="h-4 w-4 text-emerald-500" />
-                  <span>{t(key)}</span>
+                  <span>{t(key, key === 'landing.v2.chip3' ? { count: UI_RELEASED_LOCALES.length } : undefined)}</span>
                 </div>
               ))}
             </div>

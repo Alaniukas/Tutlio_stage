@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import AuthCallback from '@/pages/AuthCallback';
-import { getAppOrigin, getPasswordResetRedirectTo } from '@/lib/auth-redirects';
+import { authDestinationWithLocale, getAppOrigin, getPasswordResetRedirectTo, safeInternalNextPath } from '@/lib/auth-redirects';
 
 const authCtx = vi.hoisted(() => ({
   setSession: vi.fn(),
@@ -29,8 +29,8 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 function PathnameProbe() {
-  const { pathname } = useLocation();
-  return <span data-testid="pathname">{pathname}</span>;
+  const { pathname, search } = useLocation();
+  return <><span data-testid="pathname">{pathname}</span><span data-testid="search">{search}</span></>;
 }
 
 /** AuthCallback skaito window.location.hash / search – MemoryRouter jų nepririša prie window. */
@@ -47,6 +47,7 @@ function renderAuthCallback(pathnameOnly: string) {
       <Routes>
         <Route path="/auth/callback" element={<AuthCallback />} />
         <Route path="/login" element={<div data-testid="login-page">login</div>} />
+        <Route path="/dashboard" element={<div data-testid="dashboard-page">dashboard</div>} />
         <Route path="/reset-password" element={<div data-testid="reset-page">reset</div>} />
       </Routes>
     </MemoryRouter>,
@@ -54,6 +55,16 @@ function renderAuthCallback(pathnameOnly: string) {
 }
 
 describe('auth-redirects', () => {
+  it('carries the selected language through the existing callback path', () => {
+    expect(getPasswordResetRedirectTo(undefined, 'https://www.tutlio.com', 'he'))
+      .toBe('https://www.tutlio.com/auth/callback?next=/reset-password&lang=he');
+    expect(authDestinationWithLocale('/dashboard?tab=lessons#today', 'pt-br'))
+      .toBe('/dashboard?tab=lessons&lang=pt-br#today');
+  });
+
+  it.each(['//evil.example', '/\\evil.example', '/%5Cevil.example', '/\nevil.example'])('rejects an unsafe callback next path %s', (path) => {
+    expect(safeInternalNextPath(path)).toBeNull();
+  });
   it('getAppOrigin nuima trailing slash ir naudoja VITE_APP_URL', () => {
     expect(getAppOrigin('https://tutlio.lt/', 'https://wrong')).toBe('https://tutlio.lt');
   });
@@ -79,6 +90,15 @@ describe('AuthCallback', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    localStorage.clear();
+  });
+
+  it('retains Hebrew after opening a recovery link in a fresh browser', async () => {
+    setBrowserUrl('/auth/callback?next=/reset-password&lang=he#access_token=at&refresh_token=rt&type=recovery');
+    renderAuthCallback('/auth/callback');
+    await waitFor(() => expect(screen.getByTestId('pathname').textContent).toBe('/reset-password'));
+    expect(screen.getByTestId('search').textContent).toBe('?lang=he');
+    expect(localStorage.getItem('tutlio_locale')).toBe('he');
   });
 
   it('hash type=recovery → /reset-password po sėkmingos setSession', async () => {
@@ -102,6 +122,24 @@ describe('AuthCallback', () => {
     await waitFor(() => {
       expect(screen.getByTestId('pathname').textContent).toBe('/login');
     });
+  });
+
+  it('uses an initialized signup session when the SDK consumed the hash before the lazy callback mounted', async () => {
+    vi.useFakeTimers();
+    authCtx.getSession.mockResolvedValue({
+      data: { session: { user: { id: 'qa-user', user_metadata: { locale: 'he' } } } },
+      error: null,
+    });
+    setBrowserUrl('/auth/callback?next=/dashboard&lang=he');
+    renderAuthCallback('/auth/callback');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3100);
+    });
+
+    expect(screen.getByTestId('pathname').textContent).toBe('/dashboard');
+    expect(screen.getByTestId('search').textContent).toBe('?lang=he');
+    expect(localStorage.getItem('tutlio_locale')).toBe('he');
   });
 
   it('setSession klaida → /login', async () => {

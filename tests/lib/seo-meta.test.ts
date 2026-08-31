@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SUPPORTED_LOCALES } from '../../src/lib/i18n/core';
+import { TRANSLATED_LOCALES } from '../../src/lib/i18n/locales';
 import { getSeoMeta } from '../../src/lib/seoMeta';
 import { mdToHtml } from '../../api/blog-render';
 
@@ -7,7 +7,7 @@ describe('localized SEO metadata', () => {
   it('has distinct, search-focused landing and pricing copy for every locale', () => {
     const landingTitles = new Set<string>();
 
-    for (const locale of SUPPORTED_LOCALES) {
+    for (const locale of TRANSLATED_LOCALES) {
       const landing = getSeoMeta(locale, 'landing');
       const pricing = getSeoMeta(locale, 'pricing');
 
@@ -25,7 +25,7 @@ describe('localized SEO metadata', () => {
       landingTitles.add(landing.title);
     }
 
-    expect(landingTitles.size).toBe(SUPPORTED_LOCALES.length);
+    expect(landingTitles.size).toBe(TRANSLATED_LOCALES.length);
   });
 });
 

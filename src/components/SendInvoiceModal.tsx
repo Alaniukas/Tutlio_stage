@@ -394,7 +394,7 @@ export default function SendInvoiceModal({
                   {t('common.back')}
                 </Button>
                 <Button onClick={handleSendInvoice} disabled={loading} className="flex-1 rounded-lg bg-indigo-600 hover:bg-indigo-700">
-                  {loading ? (<><Loader2 className="w-4 h-4 animate-spin mr-2" />{t('common.sending')}</>) : t('invoice.sendInvoiceCount', { count: payerCount, word: payerCount === 1 ? t('invoice.invoiceSingular') : t('invoice.invoicePlural') })}
+                  {loading ? (<><Loader2 className="w-4 h-4 animate-spin mr-2" />{t('common.sending')}</>) : t('invoice.sendInvoiceCount', { count: payerCount })}
                 </Button>
               </div>
 

@@ -1,3 +1,4 @@
+import { hasLocalizedAssets } from '@/lib/i18n/localeRelease';
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, Check, Star } from 'lucide-react';
 import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
@@ -34,7 +35,7 @@ function PublicCardMock() {
     <div className="mx-auto w-full max-w-[380px] overflow-hidden rounded-2xl border border-white/10 bg-white shadow-2xl">
       <div className="flex items-center justify-between border-b border-zinc-100 bg-zinc-50 px-3 py-2 text-[10px] text-zinc-400">
         <span>{personas.publicProfileUrl}</span>
-        <span className="rounded-full bg-violet-50 px-1.5 py-0.5 text-[9px] font-semibold text-violet-700">Live</span>
+        <span className="rounded-full bg-violet-50 px-1.5 py-0.5 text-[9px] font-semibold text-violet-700">{t('landing.v2.demo.online')}</span>
       </div>
 
       <div className="space-y-3 p-4">
@@ -272,7 +273,7 @@ export default function FeaturesBento({ audience }: { audience: LandingAudience 
               <div className="relative mt-6 flex justify-end sm:mt-8">
                 <img
                   key={`${calendarAudience}-${locale}`}
-                  src={`/landing/calendar-${calendarAudience}-${locale}.jpg`}
+                  src={`/landing/calendar-${calendarAudience}-${hasLocalizedAssets(locale) ? locale : 'en'}.jpg`}
                   alt={t('landing.calendarAlt')}
                   loading="lazy"
                   onError={(event) => {

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase, setRememberMe } from '@/lib/supabase';
 import { getPasswordResetRedirectTo, safeInternalNextPath } from '@/lib/auth-redirects';
-import { detectAuthLocaleFromHost } from '@/lib/auth-locale';
+import { resolveAuthEmailLocale } from '@/lib/auth-locale';
 import { hasActiveSubscription, tutorHasPlatformSubscriptionAccess } from '@/lib/subscription';
 import { getOrgAdminDashboardPath } from '@/lib/orgAdminDashboardPath';
 import {
@@ -547,13 +547,13 @@ export default function Login() {
     }
     setLoading(true);
     setError(null);
-    const redirectTo = getPasswordResetRedirectTo(import.meta.env.VITE_APP_URL, window.location.origin);
+    const redirectTo = getPasswordResetRedirectTo(import.meta.env.VITE_APP_URL, window.location.origin, resolveAuthEmailLocale(locale));
     const resetRes = await fetch('/api/request-password-reset', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         email: email.trim(),
-        locale: detectAuthLocaleFromHost(),
+        locale: resolveAuthEmailLocale(locale),
         redirectTo,
       }),
     });
@@ -663,7 +663,7 @@ export default function Login() {
         <div className="absolute inset-0 z-0">
           <img
             src="https://images.unsplash.com/photo-1522202176988-66273c2fd55f?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80"
-            alt="Students studying"
+            alt=""
             className="w-full h-full object-cover opacity-50 mix-blend-overlay"
           />
         </div>
@@ -675,7 +675,7 @@ export default function Login() {
         <div className="relative z-20 flex flex-col justify-between p-12 h-full text-white">
           {!loginOnly && (
           <Link to="/" className="flex items-center gap-2 hover:bg-white/20 transition-all w-fit text-sm font-medium bg-white/10 px-5 py-2.5 rounded-full backdrop-blur border border-white/10">
-            <ArrowLeft className="w-4 h-4" />
+            <ArrowLeft className="w-4 h-4 rtl:rotate-180" />
             {t('auth.goBackToMain')}
           </Link>
           )}
@@ -716,7 +716,7 @@ export default function Login() {
         {!loginOnly && (
         <div className="w-full max-w-md mb-4 lg:hidden relative z-10">
           <Link to="/" className="flex items-center gap-2 hover:bg-white/20 transition-all w-fit text-sm font-medium bg-white/10 px-4 py-2 rounded-full backdrop-blur border border-white/10 text-white">
-            <ArrowLeft className="w-4 h-4" />
+            <ArrowLeft className="w-4 h-4 rtl:rotate-180" />
             {t('common.back')}
           </Link>
         </div>
@@ -779,7 +779,7 @@ export default function Login() {
                   }
                   navigate(path);
                 }}
-                className="group w-full bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 hover:border-emerald-400/40 rounded-2xl p-5 text-left transition-all duration-200 flex items-center gap-5"
+                className="group w-full bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 hover:border-emerald-400/40 rounded-2xl p-5 text-start transition-all duration-200 flex items-center gap-5"
               >
                 <div className="w-24 h-18 flex-shrink-0 flex items-center justify-center opacity-95">
                   <div className="w-[88px] h-[72px] rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center">
@@ -801,7 +801,7 @@ export default function Login() {
                   setRole('tutor');
                   if (loginOnly) setTutorMode('login');
                 }}
-                className="group w-full bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 hover:border-white/40 rounded-2xl p-5 text-left transition-all duration-200 flex items-center gap-5"
+                className="group w-full bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 hover:border-white/40 rounded-2xl p-5 text-start transition-all duration-200 flex items-center gap-5"
               >
                 <div className="w-24 h-18 flex-shrink-0 opacity-90">
                   <TutorIllustration />
@@ -820,7 +820,7 @@ export default function Login() {
                   setRole('student');
                   if (loginOnly) setStudentMode('login');
                 }}
-                className="group w-full bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 hover:border-white/40 rounded-2xl p-5 text-left transition-all duration-200 flex items-center gap-5"
+                className="group w-full bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 hover:border-white/40 rounded-2xl p-5 text-start transition-all duration-200 flex items-center gap-5"
               >
                 <div className="w-24 h-18 flex-shrink-0 opacity-90">
                   <StudentIllustration />
@@ -840,7 +840,7 @@ export default function Login() {
                 <button
                   type="button"
                   onClick={() => setRole('parent')}
-                  className="group w-full bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 hover:border-white/40 rounded-2xl p-5 text-left transition-all duration-200 flex items-center gap-5"
+                  className="group w-full bg-white/10 hover:bg-white/20 backdrop-blur border border-white/20 hover:border-white/40 rounded-2xl p-5 text-start transition-all duration-200 flex items-center gap-5"
                 >
                   <div className="w-24 h-18 flex-shrink-0 flex items-center justify-center opacity-95">
                     <Users className="w-12 h-12 text-fuchsia-200" />
@@ -878,7 +878,7 @@ export default function Login() {
                 {/* New Tutor - Subscribe */}
                 <Link
                   to="/register"
-                  className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-indigo-300 hover:bg-indigo-50 transition-all text-left"
+                  className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-indigo-300 hover:bg-indigo-50 transition-all text-start"
                 >
                   <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center flex-shrink-0">
                     <Sparkles className="w-5 h-5 text-indigo-600" />
@@ -893,7 +893,7 @@ export default function Login() {
                 <button
                   type="button"
                   onClick={() => setTutorMode('login')}
-                  className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-indigo-300 hover:bg-indigo-50 transition-all text-left"
+                  className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-indigo-300 hover:bg-indigo-50 transition-all text-start"
                 >
                   <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center flex-shrink-0">
                     <ArrowRight className="w-5 h-5 text-violet-600" />
@@ -911,8 +911,8 @@ export default function Login() {
                     onClick={reset}
                     className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-700 transition-colors"
                   >
-                    <ArrowLeft className="w-3.5 h-3.5" />
-                    Atgal
+                    <ArrowLeft className="w-3.5 h-3.5 rtl:rotate-180" />
+                    {t('common.back')}
                   </button>
                 </div>
               </div>
@@ -1084,7 +1084,7 @@ export default function Login() {
                       onClick={resetTutor}
                       className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-700 transition-colors"
                     >
-                      <ArrowLeft className="w-3.5 h-3.5" />
+                      <ArrowLeft className="w-3.5 h-3.5 rtl:rotate-180" />
                     {t('common.back')}
                     </button>
                     )}
@@ -1227,7 +1227,7 @@ export default function Login() {
                 {!loginPortalParam && (
                 <button type="button" onClick={reset}
                   className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-700 transition-colors mt-2">
-                  <ArrowLeft className="w-3.5 h-3.5" /> {t('common.back')}
+                  <ArrowLeft className="w-3.5 h-3.5 rtl:rotate-180" /> {t('common.back')}
                 </button>
                 )}
 
@@ -1268,7 +1268,7 @@ export default function Login() {
                     <button
                       type="button"
                       onClick={() => setStudentMode('login')}
-                      className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-violet-300 hover:bg-violet-50 transition-all text-left"
+                      className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-violet-300 hover:bg-violet-50 transition-all text-start"
                     >
                       <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center flex-shrink-0">
                         <ArrowRight className="w-5 h-5 text-violet-600" />
@@ -1282,7 +1282,7 @@ export default function Login() {
                     <button
                       type="button"
                       onClick={() => setStudentMode('register')}
-                      className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-violet-300 hover:bg-violet-50 transition-all text-left"
+                      className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-violet-300 hover:bg-violet-50 transition-all text-start"
                     >
                       <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center flex-shrink-0">
                         <BookOpen className="w-5 h-5 text-indigo-600" />
@@ -1298,7 +1298,7 @@ export default function Login() {
                     <button
                       type="button"
                       onClick={() => setRole('parent')}
-                      className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-fuchsia-300 hover:bg-fuchsia-50 transition-all text-left"
+                      className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border-2 border-gray-100 hover:border-fuchsia-300 hover:bg-fuchsia-50 transition-all text-start"
                     >
                       <div className="w-10 h-10 rounded-xl bg-fuchsia-100 flex items-center justify-center flex-shrink-0">
                         <Users className="w-5 h-5 text-fuchsia-600" />
@@ -1460,7 +1460,7 @@ export default function Login() {
                   {!loginPortalParam && (
                   <button type="button" onClick={studentMode ? resetStudent : reset}
                     className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-700 transition-colors">
-                    <ArrowLeft className="w-3.5 h-3.5" /> {t('common.back')}
+                    <ArrowLeft className="w-3.5 h-3.5 rtl:rotate-180" /> {t('common.back')}
                   </button>
                   )}
                   {studentMode === 'register' && (

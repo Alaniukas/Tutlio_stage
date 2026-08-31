@@ -12,6 +12,7 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
 import { getFromEmail, getResendApiKey } from './_lib/resendConfig.js';
+import { publicPageTimeZone } from '../src/lib/publicPageTime.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -66,7 +67,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const { data: page } = await supabase
       .from('public_pages')
-      .select('id, slug, display_name, user_id, organization_id, booking_enabled, locale')
+      .select('id, slug, display_name, user_id, organization_id, booking_enabled, locale, timezone')
       .eq('slug', slug)
       .eq('published', true)
       .maybeSingle();
@@ -123,23 +124,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .maybeSingle();
 
       if (owner?.email) {
-        const lt = (owner.preferred_locale || page.locale) === 'lt';
+        const recipientLocale = owner.preferred_locale || page.locale;
+        const lt = recipientLocale === 'lt';
+        const nl = recipientLocale === 'nl';
+        const timeZone = publicPageTimeZone(page.timezone);
         const when = requestedStart
-          ? new Date(requestedStart).toLocaleString(lt ? 'lt-LT' : 'en-GB', { timeZone: 'Europe/Vilnius' })
+          ? `${new Date(requestedStart).toLocaleString(nl ? 'nl-NL' : lt ? 'lt-LT' : 'en-GB', { timeZone })} (${timeZone})`
           : '—';
 
         const rows: [string, string][] = [
-          [lt ? 'Vardas' : 'Name', escapeHtml(name)],
-          ['El. paštas', `<a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a>`],
-          [lt ? 'Telefonas' : 'Phone', escapeHtml(phone) || '—'],
-          [lt ? 'Pamoka' : 'Lesson', escapeHtml(offeringTitle) || '—'],
-          [lt ? 'Pageidaujamas laikas' : 'Preferred time', escapeHtml(when)],
-          [lt ? 'Žinutė' : 'Message', escapeHtml(message) || '—'],
+          [nl ? 'Naam' : lt ? 'Vardas' : 'Name', escapeHtml(name)],
+          [nl ? 'E-mailadres' : 'El. paštas', `<a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a>`],
+          [nl ? 'Telefoonnummer' : lt ? 'Telefonas' : 'Phone', escapeHtml(phone) || '—'],
+          [nl ? 'Les' : lt ? 'Pamoka' : 'Lesson', escapeHtml(offeringTitle) || '—'],
+          [nl ? 'Gewenst tijdstip' : lt ? 'Pageidaujamas laikas' : 'Preferred time', escapeHtml(when)],
+          [nl ? 'Bericht' : lt ? 'Žinutė' : 'Message', escapeHtml(message) || '—'],
         ];
 
         const html = `
-          <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:600px;margin:0 auto;padding:24px;">
-            <h2 style="color:#1f2937;margin-bottom:4px;">${lt ? 'Nauja užklausa iš jūsų puslapio' : 'New enquiry from your page'}</h2>
+          <div${nl ? ' lang="nl"' : ''} style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:600px;margin:0 auto;padding:24px;">
+            <h2 style="color:#1f2937;margin-bottom:4px;">${nl ? 'Nieuwe aanvraag via je pagina' : lt ? 'Nauja užklausa iš jūsų puslapio' : 'New enquiry from your page'}</h2>
             <p style="color:#6b7280;font-size:13px;margin-top:0;">/${escapeHtml(page.slug)}</p>
             <table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:16px;">
               ${rows.map(([label, value], i) => `
@@ -155,7 +159,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             from: getFromEmail(),
             to: owner.email,
             replyTo: email,
-            subject: lt ? `Nauja užklausa: ${name}` : `New enquiry: ${name}`,
+            subject: nl ? `Nieuwe aanvraag: ${name}` : lt ? `Nauja užklausa: ${name}` : `New enquiry: ${name}`,
             html,
           });
         } catch (mailErr) {

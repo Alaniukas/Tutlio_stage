@@ -1,6 +1,6 @@
 import { loadLocaleDict } from '../src/lib/i18n/core';
 
-// Production waits for the URL locale before rendering. Component tests mount
-// isolated subtrees without main.tsx, so provide the historical LT default in
+// LocaleProvider waits for the URL locale before mounting App. Component tests
+// mount isolated subtrees without that provider, so provide the LT default in
 // the test runtime while keeping production dictionaries code-split.
 await loadLocaleDict('lt');

@@ -1,32 +1,13 @@
 import type { VercelRequest } from '../types';
 
-export type Locale = 'lt' | 'en' | 'pl' | 'lv' | 'ee' | 'fr' | 'es' | 'de' | 'se' | 'dk' | 'fi' | 'no' | 'nl';
-export const LOCALES: Locale[] = ['lt', 'en', 'pl', 'lv', 'ee', 'fr', 'es', 'de', 'se', 'dk', 'fi', 'no', 'nl'];
-
-/**
- * Internal locale slugs are country-flavored (ee/se/dk), but hreflang and the
- * html lang attribute require ISO 639-1 language codes — "ee" means Ewe and
- * "se" means Northern Sami to Google, while "dk" is not a language at all.
- * URL paths keep the internal slugs; only the announced language code maps.
- */
-const HREFLANG_CODES: Record<Locale, string> = {
-  lt: 'lt',
-  en: 'en',
-  pl: 'pl',
-  lv: 'lv',
-  ee: 'et',
-  fr: 'fr',
-  es: 'es',
-  de: 'de',
-  se: 'sv',
-  dk: 'da',
-  fi: 'fi',
-  no: 'no',
-  nl: 'nl',
-};
+import { SUPPORTED_LOCALES, htmlLanguageCode, type Locale } from '../../src/lib/i18n/locales.js';
+import { seoLocalesForPath } from '../../src/lib/i18n/localeRelease.js';
+export { TRANSLATED_LOCALES } from '../../src/lib/i18n/locales.js';
+export type { Locale } from '../../src/lib/i18n/locales.js';
+export const LOCALES: Locale[] = [...SUPPORTED_LOCALES];
 
 export function hreflangCode(locale: Locale): string {
-  return HREFLANG_CODES[locale];
+  return htmlLanguageCode(locale);
 }
 
 const DOMAINS = {
@@ -138,12 +119,12 @@ export function localizedPagePath(page: LocalizedPageId, locale: Locale): string
 
 export function generateHreflangLinksFor(urlFor: (locale: Locale) => string): HreflangLink[] {
   const links: HreflangLink[] = [];
-
-  for (const locale of LOCALES) {
+  const locales = seoLocalesForPath(new URL(urlFor('en')).pathname);
+  for (const locale of locales) {
     links.push({ lang: hreflangCode(locale), href: urlFor(locale) });
   }
 
-  links.push({ lang: 'x-default', href: urlFor('en') });
+  if (locales.includes('en')) links.push({ lang: 'x-default', href: urlFor('en') });
   return links;
 }
 

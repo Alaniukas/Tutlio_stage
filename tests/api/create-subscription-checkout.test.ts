@@ -94,6 +94,17 @@ describe('POST /api/create-subscription-checkout (default 7-day trial)', () => {
     expect((res as any).getResult().statusCode).toBe(400);
   });
 
+  it.each(['monthly', 'yearly'])('localizes %s checkout without changing the selected price', async (plan) => {
+    if (plan === 'yearly') stripePriceRetrieve.mockResolvedValue({ id: 'price_yearly_test', type: 'one_time' });
+    const handler = await loadHandler();
+    const res = mockRes();
+    await handler(mockReq('POST', { plan, locale: 'pt-br' }, { host: 'www.tutlio.com' }) as any, res as any);
+    expect(res.getResult().statusCode).toBe(200);
+    const params = stripeSessionCreate.mock.calls[0][0];
+    expect(params.locale).toBe('pt-BR');
+    expect(params.line_items).toEqual([{ price: plan === 'yearly' ? 'price_yearly_test' : 'price_monthly_test', quantity: 1 }]);
+  });
+
   it('applies the 7-day trial by default for anonymous monthly checkouts', async () => {
     const handler = await loadHandler();
     const res = mockRes();

@@ -1,10 +1,11 @@
+import { BLOG_SCHEMA_LOCALES, hasBlogSchema, isSeoPublished, seoLocalesForPath } from '../src/lib/i18n/localeRelease.js';
+import { LOCALE_NAMES, LOCALE_FORMAT_TAGS, localeDirection, withEnglishLocaleFallback } from '../src/lib/i18n/locales.js';
 import type { VercelRequest, VercelResponse } from './types';
 import { isSsrMethod, rejectSsrMethod, sendSsrHtml } from './_lib/ssr-http.js';
 import { createClient } from '@supabase/supabase-js';
 import {
   type Locale,
   type DomainKey,
-  LOCALES,
   detectDomain,
   detectLocale,
   buildPath,
@@ -19,6 +20,8 @@ import {
   renderAboutTutlioHtml,
   renderRelatedPostsHtml,
 } from './_lib/blogRelatedLinks.js';
+
+const LOCALES = seoLocalesForPath('/blog');
 
 function getSupabase() {
   const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -108,15 +111,12 @@ function inl(t: string): string {
 
 function fmtDate(d: string | null, locale: Locale): string {
   if (!d) return '';
-  const map: Record<Locale, string> = {
-    lt: 'lt-LT', en: 'en-GB', pl: 'pl-PL', lv: 'lv-LV', ee: 'et-EE',
-    fr: 'fr-FR', es: 'es-ES', de: 'de-DE', se: 'sv-SE', dk: 'da-DK', fi: 'fi-FI', no: 'nb-NO', nl: 'nl-NL',
-  };
+  const map = LOCALE_FORMAT_TAGS;
   return new Date(d).toLocaleDateString(map[locale] || 'en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
 function postSlug(post: Record<string, unknown>, locale: Locale): string {
-  return (post[`slug_${locale}`] as string) || (post.slug as string);
+  return (post[`slug_${hasBlogSchema(locale) ? locale : 'en'}`] as string) || (post.slug as string);
 }
 
 function postTranslatedLocales(post: Record<string, unknown>): Locale[] {
@@ -172,10 +172,7 @@ function localizedTag(tag: unknown, locale: Locale): string {
 }
 
 /** Crawlable cross-locale links for the footer (mirrors ssr-shell.ts). */
-const LOCALE_NATIVE_NAMES: Record<Locale, string> = {
-  lt: 'Lietuvių', en: 'English', pl: 'Polski', lv: 'Latviešu', ee: 'Eesti', fr: 'Français',
-  es: 'Español', de: 'Deutsch', se: 'Svenska', dk: 'Dansk', fi: 'Suomi', no: 'Norsk', nl: 'Nederlands',
-};
+const LOCALE_NATIVE_NAMES = LOCALE_NAMES;
 
 function localeLinksHtml(locales: Locale[], urlFor: (l: Locale) => string, current: Locale): string {
   if (locales.length < 2) return '';
@@ -187,7 +184,11 @@ function localeLinksHtml(locales: Locale[], urlFor: (l: Locale) => string, curre
   return `<nav aria-label="Languages" style="display:flex;flex-wrap:wrap;justify-content:center;gap:12px;margin-bottom:12px;font-size:.8rem">${links.join('\n')}</nav>`;
 }
 
-const LABELS: Record<Locale, { blog: string; back: string; home: string; read: string }> = {
+const LABELS: Record<Locale, { blog: string; back: string; home: string; read: string }> = withEnglishLocaleFallback({
+  uk: { blog: 'Блог', back: 'Усі статті', home: 'Головна', read: 'Читати далі' },
+  he: { blog: 'בלוג', back: 'כל המאמרים', home: 'בית', read: 'להמשך קריאה' },
+  tr: { blog: 'Blog', back: 'Tüm yazılar', home: 'Ana sayfa', read: 'Devamını oku' },
+  id: { blog: 'Blog', back: 'Semua artikel', home: 'Beranda', read: 'Baca selengkapnya' },
   lt: { blog: 'Tinklaraštis', back: 'Visi straipsniai', home: 'Pagrindinis', read: 'Skaityti daugiau' },
   en: { blog: 'Blog', back: 'All articles', home: 'Home', read: 'Read more' },
   pl: { blog: 'Blog', back: 'Wszystkie artykuły', home: 'Strona główna', read: 'Czytaj więcej' },
@@ -201,7 +202,7 @@ const LABELS: Record<Locale, { blog: string; back: string; home: string; read: s
   fi: { blog: 'Blogi', back: 'Kaikki artikkelit', home: 'Etusivu', read: 'Lue lisää' },
   no: { blog: 'Blogg', back: 'Alle artikler', home: 'Forside', read: 'Les mer' },
   nl: { blog: 'Blog', back: 'Alle artikelen', home: 'Home', read: 'Lees meer' },
-};
+});
 
 interface BlogShellOpts {
   locale: Locale;
@@ -241,7 +242,7 @@ function shell(opts: BlogShellOpts): string {
     : '';
 
   return `<!DOCTYPE html>
-<html lang="${hreflangCode(locale)}">
+<html lang="${hreflangCode(locale)}" dir="${localeDirection(locale)}">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -336,7 +337,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (slug) {
     // Try locale-specific slug first, then fall back to universal slug
     let { data: post } = await supabase
-      .from('blog_posts').select('*').eq(`slug_${locale}`, slug).eq('status', 'published').single();
+      .from('blog_posts').select('*').eq(`slug_${hasBlogSchema(locale) ? locale : 'en'}`, slug).eq('status', 'published').single();
     let matchedViaFallback = false;
     if (!post) {
       const { data: fbPost } = await supabase
@@ -358,7 +359,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    const hasNativeTitle = !!post[`title_${locale}`];
+    const hasNativeTitle = isSeoPublished(locale, '/blog') && !!post[`title_${locale}`];
     const title = resolve(post, 'title', locale);
     const excerpt = resolve(post, 'excerpt', locale);
     const content = resolve(post, 'content', locale);
@@ -368,10 +369,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const image = (post.cover_image as string) || '';
     const tag = localizedTag(post.tag, locale);
 
-    const LANG_MAP: Record<Locale, string> = {
-      lt: 'lt', en: 'en', pl: 'pl', lv: 'lv', ee: 'et',
-      fr: 'fr', es: 'es', de: 'de', se: 'sv', dk: 'da', fi: 'fi', no: 'nb', nl: 'nl',
-    };
+    const LANG_MAP = Object.fromEntries(Object.keys(LOCALE_FORMAT_TAGS).map((key) => [key, hreflangCode(key as Locale)]));
     const articleJsonLd = jsonLd({
       '@context': 'https://schema.org',
       '@type': 'BlogPosting',
@@ -437,7 +435,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // Blog listing
-  const SLUG_COLS = LOCALES.map(l2 => `slug_${l2}`).join(', ');
+  const SLUG_COLS = BLOG_SCHEMA_LOCALES.map(l2 => `slug_${l2}`).join(', ');
   const { data: posts } = await supabase
     .from('blog_posts')
     .select(`slug, ${SLUG_COLS}, cover_image, tag, published_at, title_lt, title_en, title_pl, title_lv, title_ee, title_fr, title_es, title_de, title_se, title_dk, title_fi, title_no, title_nl, excerpt_lt, excerpt_en, excerpt_pl, excerpt_lv, excerpt_ee, excerpt_fr, excerpt_es, excerpt_de, excerpt_se, excerpt_dk, excerpt_fi, excerpt_no, excerpt_nl`)
@@ -445,10 +443,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .order('published_at', { ascending: false });
 
   const items = posts || [];
-  const nativeItems = items.filter((p: Record<string, unknown>) => !!p[`title_${locale}`]);
+  const contentLocale = hasBlogSchema(locale) ? locale : 'en';
+  const nativeItems = items.filter((p: Record<string, unknown>) => !!p[`title_${contentLocale}`]);
   const blogPath = '/blog';
   const url = buildCanonicalUrl(blogPath, locale);
-  const hasAnyTranslation = nativeItems.length > 0;
+  const hasAnyTranslation = isSeoPublished(locale, '/blog') && nativeItems.length > 0;
 
   const cards = nativeItems.map((p: Record<string, unknown>) => {
     const t = resolve(p, 'title', locale);
@@ -473,10 +472,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   <h1>${l.blog}</h1>
 </div>
 <div class="cards">
-  ${cards || `<p style="padding:24px;color:#888">${({ lt: 'Straipsnių dar nėra.', en: 'No posts yet.', pl: 'Nie ma jeszcze artykułów.', lv: 'Rakstu vēl nav.', ee: 'Artikleid veel pole.', fr: 'Aucun article pour le moment.', es: 'Todavía no hay artículos.', de: 'Noch keine Artikel.', se: 'Inga artiklar ännu.', dk: 'Ingen artikler endnu.', fi: 'Ei vielä artikkeleita.', no: 'Ingen artikler ennå.', nl: 'Nog geen artikelen.' })[locale]}</p>`}
+  ${cards || `<p style="padding:24px;color:#888">${withEnglishLocaleFallback({ lt: 'Straipsnių dar nėra.', en: 'No posts yet.', tr: 'Henüz yazı yok.', pl: 'Nie ma jeszcze artykułów.', lv: 'Rakstu vēl nav.', ee: 'Artikleid veel pole.', fr: 'Aucun article pour le moment.', es: 'Todavía no hay artículos.', de: 'Noch keine Artikel.', se: 'Inga artiklar ännu.', dk: 'Ingen artikler endnu.', fi: 'Ei vielä artikkeleita.', no: 'Ingen artikler ennå.', nl: 'Nog geen artikelen.' })[locale]}</p>`}
 </div>`;
 
-  const BLOG_DESC: Record<Locale, string> = {
+  const BLOG_DESC: Record<Locale, string> = withEnglishLocaleFallback({
+    tr: 'Tutlio blogu: öğretmenler için ipuçları, ders yönetimi stratejileri ve ürün güncellemeleri.',
     lt: 'Tutlio tinklaraštis – patarimai korepetitoriams, pamokų valdymo strategijos ir produkto naujienos.',
     en: 'Tutlio blog – tips for tutors, lesson management strategies, and product updates.',
     pl: 'Blog Tutlio – porady dla korepetytorów, strategie zarządzania lekcjami i aktualności.',
@@ -490,7 +490,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     fi: 'Tutlio blogi – vinkkejä opettajille, tuntien hallinnan strategioita ja tuoteuutisia.',
     no: 'Tutlio blogg – tips for tutorer, strategier for timeadministrasjon og produktnyheter.',
     nl: 'Tutlio-blog – tips voor docenten, strategieën voor lesbeheer en productnieuws.',
-  };
+  });
   const blogDesc = BLOG_DESC[locale];
 
   const blogListJsonLd = jsonLd({

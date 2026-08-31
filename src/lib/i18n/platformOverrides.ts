@@ -1,5 +1,6 @@
 import type { Platform } from '@/lib/platform';
 import type { Locale } from './core';
+import { PLATFORM_COPY_LOCALES } from './localeRelease';
 
 type TermReplacement = [string, string] | [string, string, 'stem'];
 
@@ -256,7 +257,14 @@ export function resolvePlatformTranslation(
   key: string,
   baseText: string,
 ): string {
-  const config = platformConfigs[platform]?.locales[locale];
+  // Hungarian has its own tutor/business copy while publication remains gated.
+  if (locale === 'hu') return baseText;
+  // Ukrainian tutor/business copy remains unpublished without reverting to English labels.
+  if (locale === 'uk') return baseText;
+  // Arabic, Hindi and Hebrew have tutor/business copy but remain unpublished for SEO purposes.
+  // Do not overwrite it with the pending locale's English platform labels.
+  if (locale === 'ar' || locale === 'hi' || locale === 'he' || locale === 'tr') return baseText;
+  const config = platformConfigs[platform]?.locales[PLATFORM_COPY_LOCALES.includes(locale) ? locale : 'en'];
   if (!config) return baseText;
 
   const explicit = config.overrides?.[key];

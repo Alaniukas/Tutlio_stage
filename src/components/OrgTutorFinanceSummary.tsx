@@ -314,7 +314,7 @@ export default function OrgTutorFinanceSummary() {
               )}
             >
               <CalendarRange className="w-4 h-4" />
-              {t('orgFinance.dateRange', { days: MAX_RANGE_DAYS })}
+              {t('orgFinance.dateRange')}
             </button>
           </div>
 

@@ -1,3 +1,4 @@
+import { interpolateTranslation } from './interpolate.js';
 import { resolvePlatformTranslation } from './platformOverrides';
 import { type Platform, DEFAULT_PLATFORM } from '@/lib/platform';
 import { SUPPORTED_LOCALES, type Locale } from './locales';
@@ -5,60 +6,21 @@ import { SUPPORTED_LOCALES, type Locale } from './locales';
 export { SUPPORTED_LOCALES } from './locales';
 export type { Locale } from './locales';
 
-export const LOCALE_LABELS: Record<Locale, string> = {
-  lt: 'LT',
-  en: 'EN',
-  pl: 'PL',
-  lv: 'LV',
-  ee: 'EE',
-  fr: 'FR',
-  es: 'ES',
-  de: 'DE',
-  se: 'SE',
-  dk: 'DK',
-  fi: 'FI',
-  no: 'NO',
-  nl: 'NL',
-};
-
-export const LOCALE_NAMES: Record<Locale, string> = {
-  lt: 'Lietuvių',
-  en: 'English',
-  pl: 'Polski',
-  lv: 'Latviešu',
-  ee: 'Eesti',
-  fr: 'Français',
-  es: 'Español',
-  de: 'Deutsch',
-  se: 'Svenska',
-  dk: 'Dansk',
-  fi: 'Suomi',
-  no: 'Norsk',
-  nl: 'Nederlands',
-};
-
-/** Internal URL slugs retain historical country-like codes, but HTML `lang`
- * and hreflang require real language codes. */
-const HTML_LANGUAGE_CODES: Record<Locale, string> = {
-  lt: 'lt', en: 'en', pl: 'pl', lv: 'lv', ee: 'et', fr: 'fr', es: 'es',
-  de: 'de', se: 'sv', dk: 'da', fi: 'fi', no: 'no', nl: 'nl',
-};
-
-export function htmlLanguageCode(locale: Locale): string {
-  return HTML_LANGUAGE_CODES[locale];
-}
+export { LOCALE_LABELS, LOCALE_NAMES, htmlLanguageCode } from './locales';
 
 type Dict = Record<string, string>;
 
 /**
- * Every dictionary loads on demand, including domain defaults. main.tsx waits
- * for the URL's initial locale before rendering, so this removes roughly 1 MB
+ * Every dictionary loads on demand, including domain defaults. LocaleProvider
+ * waits for the URL's initial locale before mounting App, removing roughly 1 MB
  * of unrelated LT/EN/PL copy from the shared entry without causing a language
  * flash. A visitor downloads one locale instead of all three defaults.
  */
 const translations: Partial<Record<Locale, Dict>> = {};
 
 const DICT_LOADERS: Record<Locale, () => Promise<Dict>> = {
+  th: () => import('./th').then((m) => m.th),
+  'zh-hk': () => import('./zh-hk').then((m) => m.zhHk),
   lt: () => import('./lt').then((m) => m.lt),
   en: () => import('./en').then((m) => m.en),
   pl: () => import('./pl').then((m) => m.pl),
@@ -72,9 +34,34 @@ const DICT_LOADERS: Record<Locale, () => Promise<Dict>> = {
   fi: () => import('./fi').then((m) => m.fi),
   no: () => import('./no').then((m) => m.no),
   nl: () => import('./nl').then((m) => m.nl),
+  'it': () => import('./it').then((m) => m.it),
+  'pt': () => import('./pt').then((m) => m.pt),
+  'ro': () => import('./ro').then((m) => m.ro),
+  'cs': () => import('./cs').then((m) => m.cs),
+  'el': () => import('./el').then((m) => m.el),
+  'hu': () => import('./hu').then((m) => m.hu),
+  'bg': () => import('./bg').then((m) => m.bg),
+  'hr': () => import('./hr').then((m) => m.hr),
+  'sk': () => import('./sk').then((m) => m.sk),
+  'sl': () => import('./sl').then((m) => m.sl),
+  'hi': () => import('./hi').then((m) => m.hi),
+  'ko': () => import('./ko').then((m) => m.ko),
+  'ja': () => import('./ja').then((m) => m.ja),
+  'id': () => import('./id').then((m) => m.id),
+  'ar': () => import('./ar').then((m) => m.ar),
+  'pt-br': () => import('./pt-br').then((m) => m.ptBr),
+  'es-mx': () => import('./es-mx').then((m) => m.esMx),
+  fil: () => import('./fil').then((m) => m.fil),
+  tr: () => import('./tr').then((m) => m.tr),
+  he: () => import('./he').then((m) => m.he),
+  uk: () => import('./uk').then((m) => m.uk),
 };
 
 const pendingLoads = new Map<Locale, Promise<void>>();
+
+export function hasPendingLocaleLoads(): boolean {
+  return pendingLoads.size > 0;
+}
 
 export function isLocaleLoaded(locale: Locale): boolean {
   return !!translations[locale];
@@ -125,12 +112,7 @@ function applyParams(
   params: Record<string, string | number> | undefined,
   escape: (value: string) => string,
 ): string {
-  if (!params) return text;
-  let out = text;
-  for (const [k, v] of Object.entries(params)) {
-    out = out.replaceAll(`{${k}}`, escape(String(v)));
-  }
-  return out;
+  return interpolateTranslation(text, params, escape);
 }
 
 export function t(

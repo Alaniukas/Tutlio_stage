@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ArrowLeft, Plus, Pencil, Trash2, Eye, Globe, Upload, X, Image as ImageIcon } from 'lucide-react';
-import { SUPPORTED_LOCALES, LOCALE_LABELS, type Locale } from '@/lib/i18n/core';
+import { LOCALE_LABELS, type Locale } from '@/lib/i18n/core';
+import { BLOG_SCHEMA_LOCALES } from '@/lib/i18n/localeRelease';
 import { blogPostPath } from '@/lib/blogLocale';
 import AdminBlogAutoPanel from '@/components/admin/AdminBlogAutoPanel';
 
@@ -14,7 +15,7 @@ const LOCALE_FIELD_TYPES = ['title', 'excerpt', 'content'] as const;
 
 function buildEmptyForm(): BlogFormData {
   const f: BlogFormData = { slug: '', cover_image: '', tag: '', status: 'draft' };
-  for (const loc of SUPPORTED_LOCALES) {
+  for (const loc of BLOG_SCHEMA_LOCALES) {
     for (const type of LOCALE_FIELD_TYPES) f[`${type}_${loc}`] = '';
     f[`slug_${loc}`] = '';
   }
@@ -145,7 +146,7 @@ export default function AdminBlogPanel({ adminSecret }: { adminSecret: string })
             <div className="flex items-center gap-2 mb-2">
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Post details</p>
               <div className="ml-auto flex gap-1">
-                {SUPPORTED_LOCALES.map(loc => (
+                {BLOG_SCHEMA_LOCALES.map(loc => (
                   <button key={loc} type="button" onClick={() => setLang(loc)}
                     className={`px-3 py-1 rounded-lg text-xs font-medium ${lang === loc ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}>
                     {LOCALE_LABELS[loc]}

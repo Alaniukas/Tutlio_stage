@@ -1,3 +1,4 @@
+import { hasLocalizedAssets } from '@/lib/i18n/localeRelease';
 import { useEffect } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
@@ -10,7 +11,7 @@ import { FEATURE_PAGES, isFeaturePageId } from '@/lib/featurePages';
 
 function DigitalBusinessCardShowcase({ locale }: { locale: Locale }) {
   const { t } = useTranslation();
-  const assetLocaleSuffix = locale === 'lt' ? '' : `-${locale}`;
+  const assetLocaleSuffix = locale === 'lt' ? '' : `-${hasLocalizedAssets(locale) ? locale : 'en'}`;
   const mobilePreview = `/landing/digital-business-card-mobile${assetLocaleSuffix}.png`;
   const desktopPreview = `/landing/digital-business-card-desktop${assetLocaleSuffix}.png`;
 

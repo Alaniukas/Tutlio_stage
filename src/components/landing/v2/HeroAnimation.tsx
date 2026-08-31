@@ -298,7 +298,7 @@ export default function HeroAnimation({ audience }: { audience: LandingAudience 
                 </div>
                 <div className="mt-4 rounded-2xl border border-zinc-100 p-4">
                   <div className="flex justify-between text-[12px] text-zinc-500"><span>{t('landing.v2.demo.recipient')}</span><span className="font-medium text-zinc-900">{personas.families[0]}</span></div>
-                  <div className="mt-2 flex justify-between text-[12px] text-zinc-500"><span>{t('common.lesson')}</span><span className="font-medium text-zinc-900">{t('landing.v2.demo.subjectMath')} · 45 min</span></div>
+                  <div className="mt-2 flex justify-between text-[12px] text-zinc-500"><span>{t('common.lesson')}</span><span className="font-medium text-zinc-900">{t('landing.v2.demo.subjectMath')} · 45 {t('time.minutes')}</span></div>
                   <div className="mt-3 flex justify-between border-t border-zinc-100 pt-3"><span className="text-sm font-semibold">{t('invoice.amountLabel')}</span><span className="font-display text-xl font-bold">€20,00</span></div>
                 </div>
                 <div className="mt-3 flex gap-2">
@@ -314,7 +314,7 @@ export default function HeroAnimation({ audience }: { audience: LandingAudience 
                     <p className="mt-0.5 text-[11px] text-sky-700">{personas.publicProfileUrl}</p>
                   </div>
                   <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
-                    Live
+                    {t('landing.v2.demo.online')}
                   </span>
                 </div>
                 <div className="mt-3 rounded-xl border border-zinc-100 bg-zinc-50/80 p-3">

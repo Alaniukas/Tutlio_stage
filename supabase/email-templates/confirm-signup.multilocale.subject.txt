@@ -1,1 +1,1 @@
-{{ if eq .Data.locale "pl" }}Potwierdź swój adres e-mail – Tutlio{{ else if eq .Data.locale "en" }}Confirm your email – Tutlio{{ else }}Patvirtinkite registraciją – Tutlio{{ end }}
+{{ if or (not .Data.locale) (eq .Data.locale "lt") }}Tutlio — Patvirtinkite el. pašto adresą{{ else if eq .Data.locale "pl" }}Tutlio — Potwierdź adres e-mail{{ else }}Tutlio — Confirm your email address{{ end }}

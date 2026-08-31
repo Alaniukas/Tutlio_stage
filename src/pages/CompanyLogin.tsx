@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { supabase, setRememberMe } from '@/lib/supabase';
 import { getPasswordResetRedirectTo } from '@/lib/auth-redirects';
-import { detectAuthLocaleFromHost } from '@/lib/auth-locale';
+import { resolveAuthEmailLocale } from '@/lib/auth-locale';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -15,7 +15,7 @@ import { setLastPortal } from '@/lib/pwaPortal';
 import { loadSavedLoginForm, persistLoginForm, readRememberMePreference } from '@/lib/loginCredentials';
 
 export default function CompanyLogin() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const { platform } = usePlatform();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -120,13 +120,13 @@ export default function CompanyLogin() {
     }
     setLoading(true);
     setError(null);
-    const redirectTo = getPasswordResetRedirectTo(import.meta.env.VITE_APP_URL, window.location.origin);
+    const redirectTo = getPasswordResetRedirectTo(import.meta.env.VITE_APP_URL, window.location.origin, resolveAuthEmailLocale(locale));
     const resetRes = await fetch('/api/request-password-reset', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         email: email.trim(),
-        locale: detectAuthLocaleFromHost(),
+        locale: resolveAuthEmailLocale(locale),
         redirectTo,
       }),
     });

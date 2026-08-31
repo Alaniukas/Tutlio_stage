@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useUser } from '@/contexts/UserContext';
 import { useTranslation, getLocaleFromPathname, getStoredLocale } from '@/lib/i18n';
 import { isValidLocale } from '@/lib/i18n/core';
@@ -6,19 +6,17 @@ import { stripPlatformPrefix } from '@/lib/platform';
 import { isPlMarket } from '@/lib/market';
 
 // Explicit URL choices (/:locale/ prefix or ?lang=) always win over the stored preference.
-function hasExplicitUrlLocale(): boolean {
+function explicitUrlLocale() {
   try {
     const stripped = stripPlatformPrefix(window.location.pathname);
-    if (getLocaleFromPathname(stripped)) return true;
+    const pathLocale = getLocaleFromPathname(stripped);
+    if (pathLocale) return pathLocale;
     const lang = new URLSearchParams(window.location.search).get('lang');
-    return Boolean(lang);
+    return lang && isValidLocale(lang) ? lang : null;
   } catch {
-    return false;
+    return null;
   }
 }
-
-// Apply at most once per page load, so a manual switch later in the session is never fought.
-let appliedThisLoad = false;
 
 function isLtHost(): boolean {
   try {
@@ -45,20 +43,29 @@ function isComHost(): boolean {
  */
 export default function ProfileLocaleSync() {
   const { profile } = useUser();
-  const { locale, setLocale } = useTranslation();
+  const { locale, requestedLocale = locale, setLocale } = useTranslation();
+  const appliedProfile = useRef<string | null>(null);
 
   useEffect(() => {
-    if (appliedThisLoad || !profile) return;
-    appliedThisLoad = true;
+    if (!profile) {
+      appliedProfile.current = null;
+      return;
+    }
+    if (appliedProfile.current === profile.id) return;
+    appliedProfile.current = profile.id;
     if (isPlMarket()) return;
-    if (hasExplicitUrlLocale()) return;
-    if (isLtHost()) return;
-    if (isComHost() && getStoredLocale()) return;
     const preferred = (profile.preferred_locale || '').trim();
-    if (preferred && isValidLocale(preferred) && preferred !== locale) {
+    // A choice made before signing in must also reach the newly loaded profile.
+    const explicit = explicitUrlLocale() || (isComHost() ? getStoredLocale() : null);
+    if (explicit) {
+      if (preferred !== explicit) setLocale(explicit);
+      return;
+    }
+    if (isLtHost()) return;
+    if (preferred && isValidLocale(preferred) && preferred !== requestedLocale) {
       setLocale(preferred);
     }
-  }, [profile, locale, setLocale]);
+  }, [profile, requestedLocale, setLocale]);
 
   return null;
 }

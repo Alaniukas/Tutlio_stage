@@ -90,6 +90,17 @@ describe('POST /api/create-enterprise-checkout', () => {
     expect((res as any).getResult().statusCode).toBe(405);
   });
 
+  it('uses the requested checkout language without changing license quantity or price', async () => {
+    const handler = await loadHandler();
+    const res = mockRes();
+    await handler(mockReq('POST', { licenseCount: 5, companyName: 'Example', locale: 'zh-hk' }, { host: 'www.tutlio.com' }) as any, res as any);
+    expect(res.getResult().statusCode).toBe(200);
+    const params = stripeCreate.mock.calls[0][0];
+    expect(params.locale).toBe('zh-HK');
+    expect(params.line_items[0]).toMatchObject({ price: 'price_enterprise_test', quantity: 5 });
+    expect(params.metadata.ui_locale).toBe('zh-hk');
+  });
+
   it('rejects license counts below the minimum', async () => {
     const handler = await loadHandler();
     const res = mockRes();

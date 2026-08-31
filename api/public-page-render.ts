@@ -1,3 +1,4 @@
+import { LOCALE_FORMAT_TAGS, withEnglishLocaleFallback } from '../src/lib/i18n/locales.js';
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from './types';
 import { deriveForTutor, EMPTY_DERIVED } from './_lib/publicPageDerived.js';
@@ -31,11 +32,7 @@ const PUBLIC_COLUMNS =
   'brand_color_tertiary, accent_color, accent_text_color, backdrop_theme, socials, ' +
   'published, booking_enabled, user_id, organization_id, updated_at';
 
-const DATE_LOCALES: Record<Locale, string> = {
-  lt: 'lt-LT', en: 'en-GB', pl: 'pl-PL', lv: 'lv-LV', ee: 'et-EE',
-  fr: 'fr-FR', es: 'es-ES', de: 'de-DE', se: 'sv-SE', dk: 'da-DK',
-  fi: 'fi-FI', no: 'nb-NO', nl: 'nl-NL',
-};
+const DATE_LOCALES = LOCALE_FORMAT_TAGS;
 
 const LABELS: Record<Locale, {
   about: string;
@@ -47,21 +44,34 @@ const LABELS: Record<Locale, {
   free: string;
   demo: string;
   reviews: string;
-}> = {
+}> = withEnglishLocaleFallback({
+  cs: { about: 'O mně', lessons: 'Lekce a ceny', availability: 'Nejbližší volné termíny', languages: 'Jazyky', location: 'Místo', book: 'Rezervovat lekci', free: 'Zdarma', demo: 'Ukázková stránka', reviews: 'Recenze' },
+  el: { about: 'Σχετικά', lessons: 'Μαθήματα και τιμές', availability: 'Επόμενες διαθέσιμες ώρες', languages: 'Γλώσσες', location: 'Τοποθεσία', book: 'Κράτηση μαθήματος', free: 'Δωρεάν', demo: 'Σελίδα επίδειξης', reviews: 'Αξιολογήσεις' },
+  hu: { about: 'Bemutatkozás', lessons: 'Órák és árak', availability: 'Következő szabad időpontok', languages: 'Nyelvek', location: 'Helyszín', book: 'Óra foglalása', free: 'Ingyenes', demo: 'Bemutatóoldal', reviews: 'Értékelések' },
+  sk: { about: 'O mne', lessons: 'Hodiny a ceny', availability: 'Najbližšie voľné termíny', languages: 'Jazyky', location: 'Miesto', book: 'Rezervovať hodinu', free: 'Zadarmo', demo: 'Ukážková stránka', reviews: 'Recenzie' },
+  uk: { about: 'Про мене', lessons: 'Заняття й ціни', availability: 'Найближчий вільний час', languages: 'Мови', location: 'Місце проведення', book: 'Забронювати заняття', free: 'Безкоштовно', demo: 'Демонстраційна сторінка', reviews: 'Відгуки' },
+  hr: { about: 'O meni', lessons: 'Satovi i cijene', availability: 'Sljedeći slobodni termini', languages: 'Jezici', location: 'Lokacija', book: 'Rezerviraj sat', free: 'Besplatno', demo: 'Ogledna stranica', reviews: 'Recenzije' },
+  he: { about: 'אודות', lessons: 'שיעורים ומחירים', availability: 'המועדים הפנויים הבאים', languages: 'שפות', location: 'מיקום', book: 'הזמנת שיעור', free: 'חינם', demo: 'עמוד הדגמה', reviews: 'ביקורות' },
+  tr: {"about": "Hakkında", "lessons": "Dersler ve fiyatlar", "availability": "En yakın müsait saatler", "languages": "Diller", "location": "Konum", "book": "Ders rezervasyonu yap", "free": "Ücretsiz", "demo": "Örnek sayfa", "reviews": "Değerlendirmeler"},
+  ko: { about: '소개', lessons: '수업 및 수업료', availability: '가장 가까운 예약 가능 시간', languages: '언어', location: '위치', book: '수업 예약', free: '무료', demo: '데모 페이지', reviews: '후기' },
   lt: { about: 'Apie', lessons: 'Pamokos ir kainos', availability: 'Artimiausi laisvi laikai', languages: 'Kalbos', location: 'Vieta', book: 'Rezervuoti pamoką', free: 'Nemokama', demo: 'Pavyzdinis puslapis', reviews: 'Atsiliepimai' },
   en: { about: 'About', lessons: 'Lessons and pricing', availability: 'Next available times', languages: 'Languages', location: 'Location', book: 'Book a lesson', free: 'Free', demo: 'Demo page', reviews: 'Reviews' },
+  id: { about: 'Tentang', lessons: 'Sesi les dan harga', availability: 'Waktu tersedia berikutnya', languages: 'Bahasa', location: 'Lokasi', book: 'Pesan sesi les', free: 'Gratis', demo: 'Halaman demo', reviews: 'Ulasan' },
+  pt: { about: 'Sobre', lessons: 'Aulas e preços', availability: 'Próximos horários disponíveis', languages: 'Idiomas', location: 'Localização', book: 'Marcar uma aula', free: 'Grátis', demo: 'Página de demonstração', reviews: 'Avaliações' },
+  'pt-br': { about: 'Sobre', lessons: 'Aulas e preços', availability: 'Próximos horários disponíveis', languages: 'Idiomas', location: 'Localização', book: 'Agendar uma aula', free: 'Grátis', demo: 'Página de demonstração', reviews: 'Avaliações' },
   pl: { about: 'O nas', lessons: 'Lekcje i ceny', availability: 'Najbliższe wolne terminy', languages: 'Języki', location: 'Lokalizacja', book: 'Zarezerwuj lekcję', free: 'Bezpłatnie', demo: 'Strona demonstracyjna', reviews: 'Opinie' },
   lv: { about: 'Par', lessons: 'Nodarbības un cenas', availability: 'Tuvākie brīvie laiki', languages: 'Valodas', location: 'Atrašanās vieta', book: 'Rezervēt nodarbību', free: 'Bezmaksas', demo: 'Demo lapa', reviews: 'Atsauksmes' },
   ee: { about: 'Tutvustus', lessons: 'Tunnid ja hinnad', availability: 'Järgmised vabad ajad', languages: 'Keeled', location: 'Asukoht', book: 'Broneeri tund', free: 'Tasuta', demo: 'Näidisleht', reviews: 'Arvustused' },
   fr: { about: 'À propos', lessons: 'Cours et tarifs', availability: 'Prochaines disponibilités', languages: 'Langues', location: 'Lieu', book: 'Réserver un cours', free: 'Gratuit', demo: 'Page de démonstration', reviews: 'Avis' },
   es: { about: 'Acerca de', lessons: 'Clases y precios', availability: 'Próximos horarios disponibles', languages: 'Idiomas', location: 'Ubicación', book: 'Reservar una clase', free: 'Gratis', demo: 'Página de demostración', reviews: 'Reseñas' },
+  'es-mx': { about: 'Acerca de', lessons: 'Clases y precios', availability: 'Próximos horarios disponibles', languages: 'Idiomas', location: 'Ubicación', book: 'Reservar una clase', free: 'Gratis', demo: 'Página de demostración', reviews: 'Reseñas' },
   de: { about: 'Über mich', lessons: 'Unterricht und Preise', availability: 'Nächste freie Termine', languages: 'Sprachen', location: 'Ort', book: 'Stunde buchen', free: 'Kostenlos', demo: 'Demoseite', reviews: 'Bewertungen' },
   se: { about: 'Om', lessons: 'Lektioner och priser', availability: 'Nästa lediga tider', languages: 'Språk', location: 'Plats', book: 'Boka en lektion', free: 'Gratis', demo: 'Demosida', reviews: 'Omdömen' },
   dk: { about: 'Om', lessons: 'Lektioner og priser', availability: 'Næste ledige tider', languages: 'Sprog', location: 'Sted', book: 'Book en lektion', free: 'Gratis', demo: 'Demoside', reviews: 'Anmeldelser' },
   fi: { about: 'Tietoa', lessons: 'Tunnit ja hinnat', availability: 'Seuraavat vapaat ajat', languages: 'Kielet', location: 'Sijainti', book: 'Varaa tunti', free: 'Maksuton', demo: 'Esittelysivu', reviews: 'Arvostelut' },
   no: { about: 'Om', lessons: 'Timer og priser', availability: 'Neste ledige tider', languages: 'Språk', location: 'Sted', book: 'Bestill en time', free: 'Gratis', demo: 'Demoside', reviews: 'Anmeldelser' },
   nl: { about: 'Over', lessons: 'Lessen en prijzen', availability: 'Eerstvolgende vrije momenten', languages: 'Talen', location: 'Locatie', book: 'Boek een les', free: 'Gratis', demo: 'Demopagina', reviews: 'Beoordelingen' },
-};
+});
 
 function validLocale(value: string): Locale {
   return LOCALES.includes(value as Locale) ? value as Locale : 'en';

@@ -34,7 +34,8 @@ import { Label } from '@/components/ui/label';
 import { Calendar } from '@/components/ui/calendar';
 import { useTranslation } from '@/lib/i18n';
 import { applyCanonicalDocumentMeta, applyPageDocumentMeta } from '@/lib/documentMeta';
-import { fmtMoney } from '@/lib/marketMoney';
+import { chargeCurrency, fmtMoney } from '@/lib/marketMoney';
+import { currentMarket } from '@/lib/market';
 import {
   chromeFor, formatShortDay, getDemoPage, groupSlotsByDay, publicPageCanonicalUrl, resolveBrand, rowToPublicPage,
   safePublicSocialUrl,
@@ -44,6 +45,15 @@ import {
 import { subscribeToPreview } from '@/lib/publicPageStore';
 import { authHeaders } from '@/lib/apiHelpers';
 import type { Locale } from '@/lib/i18n/core';
+import { LOCALE_FORMAT_TAGS } from '@/lib/i18n/locales';
+import { formatPublicPageSlotTime, publicPageSlotDay } from '@/lib/publicPageTime';
+
+function formatPublicPrice(amount: number, locale: Locale): string {
+  if (locale !== 'nl') return fmtMoney(amount);
+  return new Intl.NumberFormat('nl-NL', {
+    style: 'currency', currency: chargeCurrency(currentMarket()).toUpperCase(),
+  }).format(amount);
+}
 
 function dayIsoToDate(dayIso: string): Date {
   const [y, m, d] = dayIso.split('-').map(Number);
@@ -331,7 +341,7 @@ function BookingPanel({
   // Null while the owner has no lessons configured — the enquiry still works.
   offering: PublicPageOffering | null; setOffering: (o: PublicPageOffering) => void;
 }) {
-  const days = useMemo(() => groupSlotsByDay(page.slots), [page.slots]);
+  const days = useMemo(() => groupSlotsByDay(page.slots, page.timezone), [page.slots, page.timezone]);
   const availableDaySet = useMemo(() => new Set(days.map((d) => d.day)), [days]);
 
   const [dayIdx, setDayIdx] = useState(0);
@@ -353,7 +363,7 @@ function BookingPanel({
   const detailsValid = name.trim().length > 1 && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
 
   const fmtTime = (iso: string) =>
-    new Date(iso).toLocaleTimeString(locale === 'lt' ? 'lt-LT' : 'en-GB', { hour: '2-digit', minute: '2-digit' });
+    formatPublicPageSlotTime(iso, LOCALE_FORMAT_TAGS[locale], page.timezone);
 
   /**
    * Sends an enquiry, not a booking: an anonymous visitor has no account and no
@@ -419,7 +429,7 @@ function BookingPanel({
           <div className="flex justify-between px-4 py-2.5">
             <span className="text-gray-500">{chrome.pickTime}</span>
             <span className="font-medium text-gray-900">
-              {slotStart ? `${formatShortDay(slotStart.slice(0, 10), locale)} ${fmtTime(slotStart)}` : chrome.anyTime}
+              {slotStart ? `${formatShortDay(publicPageSlotDay(slotStart, page.timezone), locale)} ${fmtTime(slotStart)}` : chrome.anyTime}
             </span>
           </div>
           <div className="flex justify-between px-4 py-2.5">
@@ -493,7 +503,7 @@ function BookingPanel({
           <span className="min-w-0 flex-1">
             <span className="block text-[15px] font-bold text-gray-900 leading-tight">{offering.title}</span>
             <span className="block text-[13px] text-gray-500 mt-0.5">
-              {offering.durationMinutes} {chrome.minutes} · {offering.publicPrice === 0 ? chrome.free : fmtMoney(offering.publicPrice)}
+              {offering.durationMinutes} {chrome.minutes} · {offering.publicPrice === 0 ? chrome.free : formatPublicPrice(offering.publicPrice, locale)}
             </span>
           </span>
           <span className="inline-flex items-center gap-1 text-[12px] font-semibold shrink-0 mt-1" style={{ color: brand.primary }}>
@@ -533,7 +543,7 @@ function BookingPanel({
                 <span className="min-w-0 flex-1">
                   <span className="block text-[13.5px] font-semibold text-gray-900 truncate">{o.title}</span>
                   <span className="block text-[12.5px] text-gray-500">
-                    {o.durationMinutes} {chrome.minutes} · {o.publicPrice === 0 ? chrome.free : fmtMoney(o.publicPrice)}
+                    {o.durationMinutes} {chrome.minutes} · {o.publicPrice === 0 ? chrome.free : formatPublicPrice(o.publicPrice, locale)}
                   </span>
                 </span>
                 <span
@@ -645,7 +655,7 @@ function BookingPanel({
           <Tag className="w-4 h-4 text-gray-400 shrink-0" strokeWidth={1.8} />
           <span className="text-left">
             <span className="block text-[13px] font-bold text-gray-900">
-              {!offering ? '—' : offering.publicPrice === 0 ? chrome.free : fmtMoney(offering.publicPrice)}
+              {!offering ? '—' : offering.publicPrice === 0 ? chrome.free : formatPublicPrice(offering.publicPrice, locale)}
             </span>
             <span className="block text-[11px] text-gray-500">{chrome.price}</span>
           </span>
@@ -666,7 +676,7 @@ function BookingPanel({
         style={{ backgroundColor: brand.primary }}
       >
         {chrome.continueBooking}
-        {offering && offering.publicPrice > 0 && <span className="opacity-80">· {fmtMoney(offering.publicPrice)}</span>}
+        {offering && offering.publicPrice > 0 && <span className="opacity-80">· {formatPublicPrice(offering.publicPrice, locale)}</span>}
         <ArrowRight className="w-4 h-4" />
       </button>
 
@@ -929,7 +939,7 @@ export default function PublicTutorPage() {
               </div>
               <div className="flex items-center gap-3 shrink-0">
                 <p className="text-[15px] font-bold text-gray-900">
-                  {o.publicPrice === 0 ? chrome.free : fmtMoney(o.publicPrice)}
+                  {o.publicPrice === 0 ? chrome.free : formatPublicPrice(o.publicPrice, locale)}
                 </p>
                 <button
                   type="button"

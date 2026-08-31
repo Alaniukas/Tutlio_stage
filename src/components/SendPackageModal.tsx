@@ -3,11 +3,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { supabase } from '@/lib/supabase';
 import { authHeaders } from '@/lib/apiHelpers';
 import { Checkbox } from '@/components/ui/checkbox';
 import { CircleHelp, Loader2, Package } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
+import { LOCALE_FORMAT_TAGS } from '@/lib/i18n/locales';
 import { tutorUsesManualStudentPayments } from '@/lib/subscription';
 import PackageItemsEditor, { type PackageEditorItem, type PackageEditorSubject } from '@/components/PackageItemsEditor';
 
@@ -30,14 +32,6 @@ function calcTotalWithFees(basePriceEur: number): number {
   return (basePriceEur + platformFee + STRIPE_FEE_FIXED_EUR) / (1 - STRIPE_FEE_PERCENT);
 }
 
-const formatEur = (value: number) =>
-  new Intl.NumberFormat('lt-LT', {
-    style: 'currency',
-    currency: 'EUR',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value);
-
 export default function SendPackageModal({
   isOpen,
   onClose,
@@ -47,7 +41,11 @@ export default function SendPackageModal({
   onSuccess,
   tutorId: propTutorId,
 }: SendPackageModalProps) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
+  const moneyFormatter = useMemo(() => new Intl.NumberFormat(LOCALE_FORMAT_TAGS[locale], {
+    style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2,
+  }), [locale]);
+  const formatEur = (value: number) => moneyFormatter.format(value);
 
   const [subjects, setSubjects] = useState<PackageEditorSubject[]>([]);
   const [individualPricing, setIndividualPricing] = useState<Record<string, number>>({});
@@ -301,14 +299,18 @@ export default function SendPackageModal({
                   <div className="flex justify-between items-center mb-2">
                     <span className="text-sm font-semibold text-violet-900 flex items-center gap-1.5">
                       {t('package.totalToPay')}
-                      <span className="relative inline-flex items-center group">
-                        <CircleHelp className="w-3.5 h-3.5 text-violet-500 cursor-help" />
-                        <span className="hidden group-hover:block pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-64 -translate-x-1/2 rounded-lg border border-violet-200 bg-white p-2.5 text-xs font-medium text-gray-700 opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <button type="button" aria-label={`${t('package.totalToPay')} — ${t('package.includingFeesNote')}`} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-violet-600 focus-visible:outline-2 focus-visible:outline-violet-600">
+                            <CircleHelp className="w-4 h-4" aria-hidden="true" />
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent aria-label={t('package.totalToPay')} className="w-64 max-w-[calc(100vw-2rem)] rounded-lg border-violet-200 bg-white p-2.5 text-start text-xs font-medium text-gray-700">
                           {t('package.tooltipTutor', { amount: formatEur(totals.basePriceEur) })}<br />
                           {t('package.tooltipPlatform', { amount: formatEur(totals.basePriceEur * PLATFORM_FEE_PERCENT) })}<br />
                           {t('package.tooltipStripe', { amount: formatEur(totals.totalWithFees - totals.basePriceEur - (totals.basePriceEur * PLATFORM_FEE_PERCENT)) })}
-                        </span>
-                      </span>
+                        </PopoverContent>
+                      </Popover>
                     </span>
                     <span className="text-2xl font-bold text-violet-700 tracking-tight">{formatEur(totals.totalWithFees)}</span>
                   </div>

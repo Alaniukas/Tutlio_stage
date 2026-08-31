@@ -6,6 +6,7 @@
 //  - Anonymous new company: org + admin account auto-provisioned by the webhook.
 
 import type { VercelRequest, VercelResponse } from './types.js';
+import { stripeCheckoutLocale } from './_lib/stripeLocale.js';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { buildPublicPath, publicOriginFromRequest, type CheckoutAudience } from './_lib/public-origin.js';
@@ -129,7 +130,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         : { company_name: trimmedCompanyName }),
     };
 
-    const checkoutLocale = localeCode === 'en' ? 'en' : localeCode === 'pl' ? 'pl' : localeCode === 'nl' ? 'nl' : 'lt';
+    const checkoutLocale = stripeCheckoutLocale(localeCode);
 
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
       mode: 'subscription',

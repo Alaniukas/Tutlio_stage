@@ -3,6 +3,34 @@ import { t } from '@/lib/i18n/core';
 import type { Platform } from '@/lib/platform';
 import { DEFAULT_PLATFORM } from '@/lib/platform';
 import { getSeoMeta } from '@/lib/seoMeta';
+import { isSeoPublished } from '@/lib/i18n/localeRelease';
+
+/** Temporarily suppress draft surfaces in the SPA too, preserving other robots rules. */
+export function applyLocalePublicationMeta(locale: Locale, pathname: string): () => void {
+  if (isSeoPublished(locale, pathname)) return () => {};
+  let el = document.head.querySelector<HTMLMetaElement>('meta[name="robots"]');
+  const previous = el?.getAttribute('content');
+  const created = !el;
+  const directives = (previous ?? '').split(',').map((part) => part.trim()).filter(Boolean);
+  // These directives already suppress indexing; leave page-owned rules intact.
+  if (directives.some((part) => /^(noindex|none)$/i.test(part))) return () => {};
+  const restrictions = directives.filter((part) => !/^(index|all)$/i.test(part));
+  const content = ['noindex', ...(restrictions.length ? restrictions : ['follow'])].join(', ');
+  if (!el) {
+    el = document.createElement('meta');
+    el.name = 'robots';
+    document.head.appendChild(el);
+  }
+  el.content = content;
+  const meta = el;
+  return () => {
+    // A page may have replaced the tag or changed its policy since this effect.
+    if (!meta.isConnected || meta.content !== content) return;
+    if (created) meta.remove();
+    else if (previous === null) meta.removeAttribute('content');
+    else meta.content = previous ?? '';
+  };
+}
 
 function escapeCssIdent(key: string): string {
   if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {

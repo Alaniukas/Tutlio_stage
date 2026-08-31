@@ -1220,7 +1220,7 @@ export default function CompanyStudents() {
       await reloadStudentPackages();
       setToastMessage({ message: t('compStu.pkgAnnulled'), type: 'success' });
     } catch (e: any) {
-      setToastMessage({ message: t('compStu.errorPrefix', { msg: e?.message || String(e) }), type: 'error' });
+      setToastMessage({ message: t('common.error'), type: 'error' });
     }
     setAnnullingPackageId(null);
   };
@@ -1238,7 +1238,7 @@ export default function CompanyStudents() {
       if (!resp.ok) throw new Error((result as any).error || String(resp.status));
       setToastMessage({ message: t('compStu.pkgResent'), type: 'success' });
     } catch (e: any) {
-      setToastMessage({ message: t('compStu.errorPrefix', { msg: e?.message || String(e) }), type: 'error' });
+      setToastMessage({ message: t('common.error'), type: 'error' });
     }
     setResendingPackageId(null);
   };
@@ -1256,7 +1256,7 @@ export default function CompanyStudents() {
       setStudentAutoPlans((prev) => prev.filter((plan) => plan.id !== planId));
       setToastMessage({ message: t('compStu.autoPlanStopped'), type: 'success' });
     } catch (e: any) {
-      setToastMessage({ message: t('compStu.errorPrefix', { msg: e?.message || String(e) }), type: 'error' });
+      setToastMessage({ message: t('common.error'), type: 'error' });
     }
     setStoppingPlanId(null);
   };
@@ -1488,7 +1488,7 @@ export default function CompanyStudents() {
         .single();
       if (error || !row) {
         console.error('Error adding student:', error);
-        setToastMessage({ message: t('compStu.errorPrefix', { msg: error?.message || t('compStu.unknownError') }), type: 'error' });
+        setToastMessage({ message: t('common.error'), type: 'error' });
         setSaving(false);
         return;
       }
@@ -1511,7 +1511,7 @@ export default function CompanyStudents() {
       if (pricingError) {
         console.error('Individual pricing error:', pricingError);
         setToastMessage({
-          message: t('compStu.pricingSaveFailed', { msg: pricingError.message }),
+          message: t('compStu.pricingSaveFailed'),
           type: 'error',
         });
       }
@@ -1703,7 +1703,7 @@ export default function CompanyStudents() {
       const token = session?.access_token;
       if (!token) {
         setSavingStudentInfo(false);
-        setToastMessage({ message: t('compStu.errorPrefix', { msg: 'Neprisijungta' }), type: 'error' });
+        setToastMessage({ message: t('common.error'), type: 'error' });
         return;
       }
       const emailResp = await fetch('/api/admin-update-student-email', {
@@ -1726,7 +1726,7 @@ export default function CompanyStudents() {
           setToastMessage({ message: t('onboard.emailAlreadyRegistered'), type: 'error' });
         } else {
           setToastMessage({
-            message: t('compStu.errorPrefix', { msg: String(emailJson.error || emailJson.details || emailResp.status) }),
+            message: t('common.error'),
             type: 'error',
           });
         }
@@ -1760,7 +1760,7 @@ export default function CompanyStudents() {
     const { error } = await supabase.from('students').update(payload).in('id', groupIds);
     setSavingStudentInfo(false);
     if (error) {
-      setToastMessage({ message: t('compStu.errorPrefix', { msg: error.message }), type: 'error' });
+      setToastMessage({ message: t('common.error'), type: 'error' });
       return;
     }
     setSelectedStudent((s) => (s ? { ...s, ...payload } : s));
@@ -1799,7 +1799,7 @@ export default function CompanyStudents() {
       setToastMessage({ message: t('compStu.availabilitySaved'), type: 'success' });
     } catch (err: any) {
       console.error('[CompanyStudents] availability save failed:', err);
-      setToastMessage({ message: t('compStu.errorPrefix', { msg: err?.message || String(err) }), type: 'error' });
+      setToastMessage({ message: t('common.error'), type: 'error' });
     } finally {
       setSavingAvailability(false);
     }
@@ -1816,7 +1816,7 @@ export default function CompanyStudents() {
       .update({ grade: nextGrade })
       .in('id', ids);
     if (error) {
-      setToastMessage({ message: t('compStu.errorPrefix', { msg: error.message }), type: 'error' });
+      setToastMessage({ message: t('common.error'), type: 'error' });
       return;
     }
 
@@ -1844,7 +1844,7 @@ export default function CompanyStudents() {
       });
       if (error) {
         if (!options?.silent) {
-          setToastMessage({ message: t('compStu.errorPrefix', { msg: error.message }), type: 'error' });
+          setToastMessage({ message: t('common.error'), type: 'error' });
         }
         return false;
       }
@@ -1880,7 +1880,7 @@ export default function CompanyStudents() {
         p_lessons_per_week: freq,
       });
       if (error) {
-        setToastMessage({ message: t('compStu.errorPrefix', { msg: error.message }), type: 'error' });
+        setToastMessage({ message: t('common.error'), type: 'error' });
         return;
       }
       if (id === selectedStudent.id) effective = (data as number | null) ?? null;
@@ -1929,7 +1929,7 @@ export default function CompanyStudents() {
       setToastMessage({ message: t('compStu.studentDetached'), type: 'success' });
       fetchData();
     } else {
-      setToastMessage({ message: t('compStu.errorPrefix', { msg: error.message }), type: 'error' });
+      setToastMessage({ message: t('common.error'), type: 'error' });
     }
   };
 
@@ -1958,7 +1958,7 @@ export default function CompanyStudents() {
       setToastMessage({ message: t('compStu.studentRestored'), type: 'success' });
       fetchData();
     } else {
-      setToastMessage({ message: t('compStu.errorPrefix', { msg: error.message }), type: 'error' });
+      setToastMessage({ message: t('common.error'), type: 'error' });
     }
   };
 
@@ -1970,7 +1970,7 @@ export default function CompanyStudents() {
       setToastMessage({ message: t('compStu.studentDeleted'), type: 'success' });
       fetchData();
     } else {
-      setToastMessage({ message: t('compStu.errorPrefix', { msg: error.message }), type: 'error' });
+      setToastMessage({ message: t('common.error'), type: 'error' });
     }
   };
 
@@ -2015,7 +2015,7 @@ export default function CompanyStudents() {
       const json = await res.json().catch(() => ({}));
       if (showToast) {
         if (!res.ok) {
-          setToastMessage({ message: (json as { error?: string }).error || t('compStu.errorPrefix', { msg: '' }), type: 'error' });
+          setToastMessage({ message: (json as { error?: string }).error || t('common.error'), type: 'error' });
         } else {
           const n = (json as { sent?: number }).sent ?? 0;
           setToastMessage({

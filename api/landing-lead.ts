@@ -64,7 +64,7 @@ export function parseLandingLeadPayload(body: Record<string, unknown>):
   }
 
   const locale = optionalText(body.locale, 12);
-  if (locale && !/^[a-z]{2}(?:-[A-Za-z]{2})?$/.test(locale)) {
+  if (locale && !/^[a-z]{2,3}(?:-[A-Za-z]{2})?$/.test(locale)) {
     return { error: 'Invalid locale' };
   }
 

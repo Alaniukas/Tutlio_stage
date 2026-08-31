@@ -1,3 +1,4 @@
+import { SUPPORTED_LOCALES } from '../../src/lib/i18n/locales.js';
 import type { VercelRequest } from '../types.js';
 
 export function headerFirst(req: VercelRequest, name: string): string {
@@ -130,7 +131,7 @@ export function buildPublicPath(
   return `${platformPrefix}${localeSeg}${normalized}`;
 }
 
-const VALID_LOCALES = new Set(['lt','en','pl','lv','ee','fr','es','de','se','dk','fi','no','nl']);
+const VALID_LOCALES = new Set<string>(SUPPORTED_LOCALES);
 
 /** Resolve the email copy locale from the UI locale + request origin. */
 export function inviteEmailLocale(uiLocale: string | undefined, origin: string): string {

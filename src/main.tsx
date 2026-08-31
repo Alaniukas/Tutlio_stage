@@ -3,8 +3,8 @@ import { registerSW } from 'virtual:pwa-register';
 import { LocaleProvider } from '@/contexts/LocaleContext';
 import { PlatformProvider } from '@/contexts/PlatformContext';
 import { detectPlatformFromPathname, getPlatformBasename } from '@/lib/platform';
-import { detectLocale, loadLocaleDict, isLocaleLoaded } from '@/lib/i18n';
 import { canonicalHostRedirectUrl } from '@/lib/market';
+import { installStaleBundleRecovery } from '@/lib/staleBundleRecovery';
 import App from './App.tsx';
 import './index.css';
 
@@ -28,23 +28,6 @@ async function clearServiceWorkerAndReload(): Promise<void> {
   window.location.reload();
 }
 
-function installStaleBundleRecovery(): void {
-  window.addEventListener(
-    'error',
-    (event) => {
-      const target = event.target;
-      if (target instanceof HTMLScriptElement && target.src.includes('/assets/')) {
-        void clearServiceWorkerAndReload();
-      }
-    },
-    true,
-  );
-  window.addEventListener('vite:preloadError', (event) => {
-    event.preventDefault();
-    void clearServiceWorkerAndReload();
-  });
-}
-
 // A PWA service worker cached on an apex host (tutlio.pl/.lt/.com) can boot the SPA
 // on the apex origin, whose relative /api calls then 308 cross-origin to www and fail
 // CORS preflight (admin login breaks). Bounce to the canonical www host before booting.
@@ -52,7 +35,7 @@ const canonicalUrl = canonicalHostRedirectUrl(window.location.href);
 if (canonicalUrl && canonicalUrl !== window.location.href) {
   window.location.replace(canonicalUrl);
 } else {
-  installStaleBundleRecovery();
+  installStaleBundleRecovery(clearServiceWorkerAndReload);
   bootApp();
 }
 
@@ -90,13 +73,8 @@ function bootApp() {
     );
   };
 
-  // Every locale is a separate chunk. Wait for the requested dictionary before
-  // first paint so deep links never flash another language and visitors never
-  // download the two unrelated domain-default dictionaries.
-  const initialLocale = detectLocale();
-  if (isLocaleLoaded(initialLocale)) {
-    renderApp();
-  } else {
-    loadLocaleDict(initialLocale).catch(() => {}).finally(renderApp);
-  }
+  // Mount the recovery UI immediately. LocaleProvider waits for the dictionary
+  // before mounting App, so the empty-root watchdog cannot mistake a slow
+  // language download for a stale shell and reload it after six seconds.
+  renderApp();
 }

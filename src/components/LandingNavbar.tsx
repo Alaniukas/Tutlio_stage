@@ -37,7 +37,7 @@ function navigateToPlatform(platform: 'tutors' | 'schools', locale: string) {
 }
 
 /** Horizontal space inside the shrunken pill that isn't nav content. */
-const PILL_BRAND_GAP = 32; // ml-8 between the brand and the links
+const PILL_BRAND_GAP = 32; // ms-8 between the brand and the links
 const PILL_GROUP_GAP = 32; // breathing room between links and actions
 const PILL_PADDING = 40; // 0 20px
 const PILL_INITIAL_WIDTH = 1200;
@@ -195,7 +195,7 @@ export default function LandingNavbar({
             ref={linksRef}
             inert={isCompactNav ? true : undefined}
             aria-hidden={isCompactNav}
-            className={`flex w-max items-center gap-6 ml-8 shrink-0 ${isCompactNav ? 'invisible fixed -left-[10000px] top-0 pointer-events-none' : ''}`}
+            className={`flex w-max items-center gap-6 ms-8 shrink-0 ${isCompactNav ? 'invisible fixed -left-[10000px] top-0 pointer-events-none' : ''}`}
           >
             {navLinks.map((link) => (
               <Link key={link.to} to={link.to} className="text-[13px] text-gray-500 hover:text-gray-900 transition-colors font-medium whitespace-nowrap">
@@ -212,7 +212,7 @@ export default function LandingNavbar({
                 <ChevronDown className={`w-3 h-3 transition-transform ${platformOpen ? 'rotate-180' : ''}`} />
               </button>
               {platformOpen && (
-                <div className="absolute left-0 top-full mt-2 w-44 bg-white rounded-xl shadow-lg border border-gray-100 py-1 z-50">
+                <div className="absolute start-0 top-full mt-2 w-44 bg-white rounded-xl shadow-lg border border-gray-100 py-1 z-50">
                   <button type="button" onClick={() => { setPlatformOpen(false); navigateToPlatform('tutors', locale); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 text-gray-700">
                     {t('nav.forTutors')}
                   </button>
@@ -228,7 +228,7 @@ export default function LandingNavbar({
             ref={actionsRef}
             inert={isCompactNav ? true : undefined}
             aria-hidden={isCompactNav}
-            className={`flex w-max items-center gap-3 ml-auto shrink-0 ${isCompactNav ? 'invisible fixed -left-[10000px] top-0 pointer-events-none' : ''}`}
+            className={`flex w-max items-center gap-3 ms-auto shrink-0 ${isCompactNav ? 'invisible fixed -left-[10000px] top-0 pointer-events-none' : ''}`}
           >
             <div>
               <LanguageSelector />
@@ -244,7 +244,7 @@ export default function LandingNavbar({
           </div>
 
           {isCompactNav && (
-            <div className="ml-auto flex items-center gap-3 shrink-0">
+            <div className="ms-auto flex items-center gap-3 shrink-0">
               <NavbarAudienceCta
                 href={pricingHref}
                 label={primaryCtaLabel}

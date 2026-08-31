@@ -16,7 +16,10 @@ import {
   type EmailBranding,
 } from './_lib/emailOrgBranding.js';
 import { Resend } from 'resend';
+import { htmlLanguageCode, localeDirection, LOCALE_FORMAT_TAGS } from '../src/lib/i18n/locales.js';
 import { createClient } from '@supabase/supabase-js';
+import { notificationLocale } from './_lib/notificationLocale.js';
+import { TUTOR_NOTIFICATION_COPY } from './_lib/tutorNotificationCopy.js';
 import { outlookEmailButton, headerInlineStyle } from './_lib/outlookEmail.js';
 import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClientOptions.js';
 import { SCHOOL_CONTRACTS_BUCKET, extractSchoolContractStoragePath } from './_lib/schoolContractPdfPath.js';
@@ -210,30 +213,6 @@ function applyTrackedMeetingLink(type: string, d: any): void {
   }
 }
 
-/** Nekintantys tekstai rankinio mokėjimo el. paštu – neklauso `src/lib/i18n` pakrovimo į serverio bundle / `t()` grandinės. */
-const MANUAL_OFF_PLATFORM_PAY_COPY = {
-  lt: {
-    lead:
-      'Pamoką apmokėkite pagal žemiau pateiktus korepetitoriaus duomenis iki nurodyto termino (kortele per platformą šio korepetitoriaus mokėjimas negalimas).',
-    portalHint:
-      'Po pavedimo ar kito mokėjimo korepetitorius pažymės pamoką apmokėtą sistemoje — būseną pamatysite „Pamokų“ puslapyje Tutlio aplikacijoje.',
-    btnParent: 'Atidaryti mokinio pamokų peržiūrą',
-    btnStudent: 'Atidaryti pamokų puslapį',
-  },
-  en: {
-    lead:
-      "Pay using your tutor's instructions below before the deadline. This tutor does not accept card checkout on the platform.",
-    portalHint:
-      'After you pay, your tutor marks the lesson in Tutlio — you can track status on your Lessons page.',
-    btnParent: 'Open lesson overview',
-    btnStudent: 'Open my lessons page',
-  },
-} as const;
-
-function manualPayLocale(lc: Locale): 'lt' | 'en' {
-  return lc === 'en' ? 'en' : 'lt';
-}
-
 /** Already HTML-escaped strings from sanitizeEmailData. */
 function manualBankDetailsInnerHtml(d: { bankDetails?: string }, locale: Locale): string {
   const raw = typeof d.bankDetails === 'string' ? d.bankDetails.trim() : '';
@@ -245,17 +224,16 @@ function manualBankDetailsInnerHtml(d: { bankDetails?: string }, locale: Locale)
 }
 
 function manualOffPlatformPaymentHtml(d: { bankDetails?: string; payerIsParent?: boolean }, locale: Locale): string {
-  const appUrl = getAppUrl();
-  const portalHref = d.payerIsParent ? `${appUrl}/parent/lessons` : `${appUrl}/student/sessions`;
-  const m = MANUAL_OFF_PLATFORM_PAY_COPY[manualPayLocale(locale)];
-  const portalLabel = d.payerIsParent ? m.btnParent : m.btnStudent;
+  const portalUrl = new URL(d.payerIsParent ? '/parent/lessons' : '/student/sessions', getAppUrl());
+  portalUrl.searchParams.set('lang', locale);
+  const portalLabel = t(locale, d.payerIsParent ? 'em.btnParentLessonsPay' : 'em.btnStudentSessionsPay');
   return `
     ${manualBankDetailsInnerHtml(d, locale)}
-    <p style="color:#374151; font-size:14px; line-height:1.6; margin:16px 0 8px;">${m.lead}</p>
+    <p style="color:#374151; font-size:14px; line-height:1.6; margin:16px 0 8px;">${t(locale, 'em.manualPayInstructionsLead')}</p>
     <div style="text-align:center; margin-top: 20px;">
-      ${outlookEmailButton(portalHref, portalLabel, '#64748b', { fontSize: '15px', padding: '14px 32px', fontWeight: '600' })}
+      ${outlookEmailButton(portalUrl.toString(), portalLabel, '#64748b', { fontSize: '15px', padding: '14px 32px', fontWeight: '600' })}
     </div>
-    <p style="color:#9ca3af; font-size:12px; text-align:center; margin-top:16px;">${m.portalHint}</p>
+    <p style="color:#9ca3af; font-size:12px; text-align:center; margin-top:16px;">${t(locale, 'em.manualPayPortalHint')}</p>
   `;
 }
 
@@ -286,9 +264,9 @@ function wrap(content: string, locale: Locale = 'lt', branding?: EmailBranding |
     ? `<p style="color:#9ca3af;font-size:11px;margin:8px 0 0;">powered by Tutlio</p>`
     : '';
   return `<!DOCTYPE html>
-<html lang="${locale}">
+<html lang="${htmlLanguageCode(locale)}" dir="${localeDirection(locale)}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">${baseStyles}</head>
-<body style="margin:0;padding:0;background-color:#f3f4f6;">
+<body dir="${localeDirection(locale)}" style="margin:0;padding:0;background-color:#f3f4f6;">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;background-color:#f3f4f6;">
 <tr><td align="center" style="padding:20px 12px;background-color:#f3f4f6;">
 <table role="presentation" width="560" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;max-width:560px;width:100%;background-color:#ffffff;">
@@ -351,8 +329,7 @@ const formatMoney = (value: string | number, currency?: string, loc: Locale = 'l
   const num = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(num)) return String(value);
   const resolvedCurrency = currency ?? (loc === 'pl' ? 'PLN' : 'EUR');
-  const intlLocale = loc === 'en' ? 'en-US' : loc === 'pl' ? 'pl-PL' : loc === 'nl' ? 'nl-NL' : 'lt-LT';
-  return new Intl.NumberFormat(intlLocale, {
+  return new Intl.NumberFormat(LOCALE_FORMAT_TAGS[loc], {
     style: 'currency',
     currency: resolvedCurrency,
     minimumFractionDigits: 2,
@@ -370,7 +347,7 @@ function bankTransferEmailButton(d: any, locale: Locale): string {
   if (!d.perlasEnabled) return '';
   const appUrl = getAppUrl();
   const payerIsParent = d.payerIsParent || d.payment_payer === 'parent';
-  const sessionsUrl = payerIsParent ? `${appUrl}/parent/lessons` : `${appUrl}/student/sessions`;
+  const sessionsUrl = `${appUrl}${payerIsParent ? '/parent/lessons' : '/student/sessions'}?lang=${locale}`;
   return `<p style="color:#6b7280; font-size:13px; text-align:center; margin:20px 0 8px;">${t(locale, 'em.orPayViaBank')}</p>
     <div style="text-align:center;">
       ${outlookEmailButton(sessionsUrl, t(locale, 'em.btnPayViaBank'), '#0d9488', { fontSize: '15px', padding: '14px 32px' })}
@@ -474,7 +451,7 @@ function bookingNotification(d: any, locale: Locale) {
         ${statusParagraph}
         ${table(td(t(locale, 'em.labelStudent'), d.studentName) + td(t(locale, 'em.labelDate'), d.date) + td(t(locale, 'em.labelTime'), d.time, false))}
         <div style="text-align:center; margin-top: 24px;">
-          ${outlookEmailButton(`${appUrl}/dashboard`, t(locale, 'em.btnViewCalendar'), '#4f46e5', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
+          ${outlookEmailButton(`${appUrl}/dashboard?lang=${locale}`, t(locale, 'em.btnViewCalendar'), '#4f46e5', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
         </div>
       </div>${footerFor(locale)}`, locale),
   };
@@ -989,7 +966,7 @@ function waitlistMatchedTutor(d: any, locale: Locale) {
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.waitlistMatchTutorBody', { student: d.studentName })}</p>
         ${table(td(t(locale, 'em.labelStudent'), d.studentName) + td(t(locale, 'em.labelDate'), d.date) + td(t(locale, 'em.labelTime'), d.time, false))}
         <div style="text-align:center; margin-top:30px;">
-          ${outlookEmailButton(`${appUrl}/dashboard`, t(locale, 'em.btnViewReservation'), '#4f46e5', { fontWeight: '600', fontSize: '15px', padding: '12px 28px' })}
+          ${outlookEmailButton(`${appUrl}/dashboard?lang=${locale}`, t(locale, 'em.btnViewReservation'), '#4f46e5', { fontWeight: '600', fontSize: '15px', padding: '12px 28px' })}
         </div>
       </div>${footerFor(locale)}`, locale),
   };
@@ -1059,7 +1036,7 @@ function paymentReviewNeeded(d: any, locale: Locale) {
           </tr></table>
         </div>` : `
         <div style="text-align:center; margin-top:30px;">
-          ${outlookEmailButton(`${appUrl}/dashboard`, t(locale, 'em.btnReviewConfirm'), '#d97706', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}
+          ${outlookEmailButton(`${appUrl}/dashboard?lang=${locale}`, t(locale, 'em.btnReviewConfirm'), '#d97706', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}
         </div>`}
         <div style="text-align:center; margin-top:16px;">
           <a href="${appUrl}/dashboard" style="color:#6366f1; text-decoration:none; font-size:13px; font-weight:600;">
@@ -1259,7 +1236,7 @@ function paymentSuccess(d: any, locale: Locale) {
       </div>
       <div class="body">
         <p class="greeting">${t(locale, 'em.hiPlain')}</p>
-        <p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.paySuccessBody', { student: d.studentName, tutor: d.tutorName })}</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'em.paySuccessBody', { student: d.studentName })}</p>
         ${table(
           td(t(locale, 'em.labelDate'), d.date) + 
           td(t(locale, 'em.labelTime'), d.time) + 
@@ -1538,12 +1515,13 @@ function paymentReminderEmail(d: any, locale: Locale) {
       <div class="body">
         <p class="greeting">${t(locale, 'em.hi')}${d.recipientName ? ', ' + d.recipientName : ''}!</p>
         <p style="color:#374151; font-size:15px;">
-          ${d.studentName !== d.recipientName ? t(locale, 'em.payReminderBodyOther', { student: d.studentName, tutor: d.tutorName }) : t(locale, 'em.payReminderBodySelf', { tutor: d.tutorName })}
+          ${d.studentName !== d.recipientName ? t(locale, 'em.payReminderBodyOther', { student: d.studentName }) : t(locale, 'em.payReminderBodySelf')}
         </p>
         ${table(
       td(t(locale, 'em.thDate'), d.date) +
       td(t(locale, 'em.thTime'), d.time) +
       td(t(locale, 'em.thPrice'), emailMoney(d.price, locale)) +
+      (d.tutorName ? td(t(locale, 'em.labelTutor'), d.tutorName) : '') +
       td(t(locale, 'em.payReminderDeadline'), t(locale, 'em.payReminderTiming', { hours: String(d.deadlineHours), timing: timingLt }), false)
     )}
         <p style="color:#ef4444; font-size:14px; font-weight:600;">
@@ -1569,7 +1547,7 @@ function paymentDeadlineWarningTutor(d: any, locale: Locale) {
       <div class="body">
         <p class="greeting">${t(locale, 'em.hiName', { name: d.tutorName })}</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          ${t(locale, 'em.deadlineWarnBody', { student: d.studentName, detail: d.paymentContext ? '<strong>' + d.paymentContext + '</strong>.' : t(locale, 'em.deadlineWarnDetail', { deadline: d.deadlineTime }) })}
+          ${t(locale, 'em.deadlineWarnBody', { student: d.studentName, detail: d.paymentContext ? '<strong>' + d.paymentContext + '</strong>.' : t(locale, 'em.deadlineWarnDetail') })}
         </p>
         ${table(
       td(t(locale, 'em.labelLessonDate'), d.sessionDate) +
@@ -1577,16 +1555,17 @@ function paymentDeadlineWarningTutor(d: any, locale: Locale) {
       td(t(locale, 'em.labelAmountAlt'), emailMoney(d.price, locale)) +
       (d.paymentContext ? td(t(locale, 'em.labelContext'), d.paymentContext, false) : td(t(locale, 'em.labelPaymentDeadline'), d.deadlineTime, false))
     )}
+        ${d.studentEmail || d.studentPhone ? `
         <p style="color:#374151; font-size:14px; font-weight:600; margin-top:16px;">${t(locale, 'em.studentContacts')}</p>
         <div style="background:#fff7ed; border:1px solid #fed7aa; border-radius:10px; padding:16px; margin:8px 0 20px;">
-          <p style="margin:4px 0; font-size:14px;">📧 <a href="mailto:${d.studentEmail}" style="color:#d97706;">${d.studentEmail}</a></p>
-          ${d.studentPhone ? `<p style="margin:4px 0; font-size:14px;">📱 <a href="tel:${d.studentPhone}" style="color:#d97706;">${d.studentPhone}</a></p>` : ''}
-        </div>
+          ${d.studentEmail ? `<p style="margin:4px 0; font-size:14px;">📧 <a href="mailto:${d.studentEmail}" style="color:#d97706;"><span dir="ltr">${d.studentEmail}</span></a></p>` : ''}
+          ${d.studentPhone ? `<p style="margin:4px 0; font-size:14px;">📱 <a href="tel:${d.studentPhone}" style="color:#d97706;"><span dir="ltr">${d.studentPhone}</span></a></p>` : ''}
+        </div>` : ''}
         <p style="color:#6b7280; font-size:13px; line-height:1.6;">
           ${t(locale, 'em.contactTutorOrCancel')}
         </p>
         <div style="text-align:center; margin-top:24px;">
-          ${outlookEmailButton(`${appUrl}/dashboard`, t(locale, 'em.btnOpenCalendarArrow'), '#d97706', { fontSize: '15px', padding: '14px 32px' })}
+          ${outlookEmailButton(`${appUrl}/dashboard?lang=${locale}`, t(locale, 'em.btnOpenCalendarArrow'), '#d97706', { fontSize: '15px', padding: '14px 32px' })}
         </div>
       </div>
       ${footerFor(locale)}
@@ -1598,7 +1577,7 @@ function paymentDeadlineWarningOrgAdmin(d: any, locale: Locale) {
   const appUrl = getAppUrl();
   const detailHtml = d.paymentContext
     ? '<strong>' + d.paymentContext + '</strong>.'
-    : t(locale, 'em.deadlineWarnDetail', { deadline: d.deadlineTime });
+    : t(locale, 'em.deadlineWarnDetail');
   return {
     subject: t(locale, 'em.deadlineWarnSub', { student: d.studentName }),
     html: wrap(`
@@ -1614,18 +1593,20 @@ function paymentDeadlineWarningOrgAdmin(d: any, locale: Locale) {
         ${table(
       td(t(locale, 'em.labelLessonDate'), d.sessionDate) +
       td(t(locale, 'em.labelLessonTime'), d.sessionTime) +
-      td(t(locale, 'em.labelAmountAlt'), emailMoney(d.price, locale), false)
+      td(t(locale, 'em.labelAmountAlt'), emailMoney(d.price, locale)) +
+      (d.paymentContext ? td(t(locale, 'em.labelContext'), d.paymentContext, false) : td(t(locale, 'em.labelPaymentDeadline'), d.deadlineTime, false))
     )}
+        ${d.studentEmail || d.studentPhone ? `
         <p style="color:#374151; font-size:14px; font-weight:600; margin-top:16px;">${t(locale, 'em.studentContacts')}</p>
         <div style="background:#fff7ed; border:1px solid #fed7aa; border-radius:10px; padding:16px; margin:8px 0 20px;">
-          <p style="margin:4px 0; font-size:14px;">📧 <a href="mailto:${d.studentEmail}" style="color:#d97706;">${d.studentEmail}</a></p>
-          ${d.studentPhone ? `<p style="margin:4px 0; font-size:14px;">📱 <a href="tel:${d.studentPhone}" style="color:#d97706;">${d.studentPhone}</a></p>` : ''}
-        </div>
+          ${d.studentEmail ? `<p style="margin:4px 0; font-size:14px;">📧 <a href="mailto:${d.studentEmail}" style="color:#d97706;"><span dir="ltr">${d.studentEmail}</span></a></p>` : ''}
+          ${d.studentPhone ? `<p style="margin:4px 0; font-size:14px;">📱 <a href="tel:${d.studentPhone}" style="color:#d97706;"><span dir="ltr">${d.studentPhone}</span></a></p>` : ''}
+        </div>` : ''}
         <p style="color:#6b7280; font-size:13px; line-height:1.6;">
           ${t(locale, 'em.deadlineWarnOrgAdminFooter')}
         </p>
         <div style="text-align:center; margin-top:24px;">
-          ${outlookEmailButton(`${appUrl}/company/sessions`, t(locale, 'em.btnOpenOrgSessions'), '#d97706', { fontSize: '15px', padding: '14px 32px' })}
+          ${outlookEmailButton(`${appUrl}/company/sessions?lang=${locale}`, t(locale, 'em.btnOpenOrgSessions'), '#d97706', { fontSize: '15px', padding: '14px 32px' })}
         </div>
       </div>
       ${footerFor(locale)}
@@ -1662,7 +1643,7 @@ function prepaidPackageRequest(d: any, locale: Locale) {
   const payBlock = prefersManualInstructions(d)
     ? manualOffPlatformPaymentHtml(d, locale)
     : `<div style="text-align:center; margin-top: 24px;">
-          ${outlookEmailButton(String(d.paymentLink), t(locale, 'em.packagePayBtn', { price: totalPrice }), '#7c3aed', { fontSize: '16px', padding: '16px 42px' })}
+          ${outlookEmailButton(String(d.paymentLink), t(locale, 'em.packagePayBtn'), '#7c3aed', { fontSize: '16px', padding: '16px 42px' })}
         </div>
         <p style="color:#9ca3af; font-size:12px; text-align:center; margin-top:16px;">
           ${t(locale, 'em.stripeRedirect')}
@@ -1742,7 +1723,7 @@ function prepaidPackageSuccess(d: any, locale: Locale) {
     moneyRows = td(t(locale, 'em.labelTotalPaid'), emailMoney(d.totalPrice, locale), false);
   }
   return {
-    subject: t(locale, 'em.packageSuccessSub', { count: String(total), label: totalLabel, subject: subj }),
+    subject: t(locale, 'em.packageSuccessSub', { count: String(total), label: totalLabel }),
     html: wrap(`
       <div class="header" style="${headerInlineStyle('#10b981', '#059669')}">
         <h1>${t(locale, 'em.packageSuccessHeader')}</h1>
@@ -1919,7 +1900,6 @@ function manualPackageRequest(d: any, locale: Locale) {
   const howBlock = proKlase
     ? `${t(locale, 'em.packageHowTitle')}<br/>${t(locale, 'em.packageHowBodyProKlase')}`
     : `${t(locale, 'em.manualPkgHowTitle')}<br/>
-            ${t(locale, 'em.manualPkgHowBody', { price: totalPrice, org: d.orgName })}
             ${paymentUrl
               ? ` ${t(locale, 'em.manualPkgUseLink')}`
               : ` ${t(locale, 'em.manualPkgContactOrg')}`}
@@ -2461,7 +2441,7 @@ function productUpdateSfAndChat(d: any, locale: Locale) {
         </div>
         <p style="color:#4b5563; font-size:14px; line-height:1.6; margin:14px 0 0;">${closing}</p>
         <div style="text-align:center; margin-top: 22px;">
-          ${outlookEmailButton(`${appUrl}/dashboard`, locale === 'en' ? 'Open Tutlio' : 'Atidaryti Tutlio', '#4f46e5', { fontWeight: '700', fontSize: '15px', padding: '14px 36px' })}
+          ${outlookEmailButton(`${appUrl}/dashboard?lang=${locale}`, locale === 'en' ? 'Open Tutlio' : 'Atidaryti Tutlio', '#4f46e5', { fontWeight: '700', fontSize: '15px', padding: '14px 36px' })}
         </div>
       </div>${footerFor(locale)}`,
       locale,
@@ -2496,7 +2476,7 @@ function productUpdateWhiteboardTutor(d: any, _locale: Locale) {
         <p style="color:#4b5563; font-size:14px; line-height:1.6; margin:14px 0 0;">Taip pat pataisėme keletą smulkių dalykų, kad platforma veiktų sklandžiau ir patikimiau.</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6; margin:14px 0 0;">Jei turite klausimų ar pastabų — visada laukiame jūsų laiškų adresu <a href="mailto:info@tutlio.lt" style="color:#4f46e5; font-weight:700; text-decoration:none;">info@tutlio.lt</a>.</p>
         <div style="text-align:center; margin-top: 22px;">
-          ${outlookEmailButton(`${appUrl}/dashboard`, 'Atidaryti Tutlio', '#4f46e5', { fontWeight: '700', fontSize: '15px', padding: '14px 36px' })}
+          ${outlookEmailButton(`${appUrl}/dashboard?lang=${locale}`, 'Atidaryti Tutlio', '#4f46e5', { fontWeight: '700', fontSize: '15px', padding: '14px 36px' })}
         </div>
       </div>${footerFor(locale)}`,
       locale,
@@ -2894,31 +2874,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const orgIdForBrandingLookup = orgIdFromPayload || (await resolveOrganizationIdFromAuthBearer(req));
 
     function tutorStudentAssigned(d: any, locale: Locale) {
+      const copy = TUTOR_NOTIFICATION_COPY[locale];
       const hasEmail = d.studentEmail && String(d.studentEmail).trim() !== '';
       const hasPhone = d.studentPhone && String(d.studentPhone).trim() !== '';
       const contactRows = [
-        hasEmail ? td(locale === 'lt' ? 'El. paštas' : 'Email', esc(d.studentEmail), hasPhone) : '',
-        hasPhone ? td(locale === 'lt' ? 'Telefonas' : 'Phone', esc(d.studentPhone), false) : '',
+        hasEmail ? td(t(locale, 'common.email'), `<span dir="ltr">${esc(d.studentEmail)}</span>`, hasPhone) : '',
+        hasPhone ? td(t(locale, 'common.phone'), `<span dir="ltr">${esc(d.studentPhone)}</span>`, false) : '',
       ].join('');
       const contactBlock = contactRows
         ? `<div class="info-card"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${contactRows}</table></div>`
-        : `<p style="color:#4b5563; font-size:14px; line-height:1.6;">${
-            locale === 'lt'
-              ? 'Dėl pamokų ir bendravimo su mokiniu naudokitės Tutlio platforma (pvz., mokinių puslapis ar žinutės).'
-              : 'For lessons and communicating with the student, use Tutlio (e.g. Students page or messages).'
-          }</p>`;
+        : `<p style="color:#4b5563; font-size:14px; line-height:1.6;">${copy.assignmentNoContact}</p>`;
       return {
-        subject: locale === 'lt' ? `Naujas mokinys priskirtas jums` : `New student assigned to you`,
+        subject: copy.assignmentSubject,
         html: wrap(`
           <div class="header" style="${headerInlineStyle('#6366f1', '#4f46e5')}">
-            <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">${locale === 'lt' ? 'Naujas mokinys' : 'New Student'}</h1>
+            <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">${copy.assignmentSubject}</h1>
           </div>
           <div class="body">
-            <p class="greeting">${locale === 'lt' ? 'Sveiki' : 'Hello'}, ${esc(d.tutorName || '')},</p>
+            <p class="greeting">${d.tutorName ? t(locale, 'em.hiNameNoEmoji', { name: esc(d.tutorName) }) : t(locale, 'em.hi')}</p>
             <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-              ${locale === 'lt'
-                ? `Jums buvo priskirtas naujas mokinys: <strong>${esc(d.studentName || '')}</strong>.`
-                : `A new student has been assigned to you: <strong>${esc(d.studentName || '')}</strong>.`}
+              ${copy.assignmentBody.replace('{student}', () => esc(d.studentName || ''))}
             </p>
             ${contactBlock}
           </div>${footerFor(locale)}`, locale),
@@ -2958,46 +2933,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Recurring nag to the tutor: ended lessons awaiting an explicit status
     // (org feature tutor_lesson_status_confirmation). Server-triggered only.
     function lessonStatusConfirmationReminder(d: any, locale: Locale) {
-      const lt = locale === 'lt';
-      const count = Number(d.count || 0);
+      const copy = TUTOR_NOTIFICATION_COPY[locale];
       const lessons: Array<{ date?: string; time?: string; student?: string }> = Array.isArray(d.lessons) ? d.lessons : [];
+      const requestedCount = Number(d.count);
+      const count = Number.isFinite(requestedCount) ? Math.max(lessons.length, Math.floor(requestedCount)) : lessons.length;
+      const subject = copy.statusSubject.replace('{count}', () => String(count));
+      const dashboardUrl = new URL('/dashboard', getAppUrl());
+      dashboardUrl.searchParams.set('lang', locale);
       const rows = lessons
         .map((l) => `<tr>
-          <td style="padding:8px 0; border-bottom:1px solid #f0eeff; color:#111827; font-size:14px;">${esc(String(l.date || ''))} ${esc(String(l.time || ''))}</td>
-          <td style="padding:8px 0; border-bottom:1px solid #f0eeff; color:#6b7280; font-size:14px; text-align:right;">${esc(String(l.student || ''))}</td>
+          <td style="padding:8px 0; border-bottom:1px solid #f0eeff; color:#111827; font-size:14px;"><span dir="ltr">${esc(String(l.date || ''))} ${esc(String(l.time || ''))}</span></td>
+          <td style="padding:8px 0; border-bottom:1px solid #f0eeff; color:#6b7280; font-size:14px; text-align:${localeDirection(locale) === 'rtl' ? 'left' : 'right'};">${esc(String(l.student || ''))}</td>
         </tr>`)
         .join('');
       const more = count > lessons.length
-        ? `<p style="color:#6b7280; font-size:13px; margin:8px 0 0;">${lt ? `… ir dar ${count - lessons.length} pamokų.` : `… and ${count - lessons.length} more lessons.`}</p>`
+        ? `<p style="color:#6b7280; font-size:13px; margin:8px 0 0;">${copy.statusMore.replace('{count}', () => String(count - lessons.length))}</p>`
         : '';
+      const statuses = ['cal.statusHappened', 'cal.statusHappenedLate', 'cal.statusNoShowOpt', 'cal.statusCancelledOpt']
+        .map((key) => `<li>${t(locale, key)}</li>`).join('');
       return {
-        subject: lt ? `Pažymėkite pamokų statusus (${count})` : `Confirm your lesson statuses (${count})`,
+        subject,
         html: wrap(`
           <div class="header" style="${headerInlineStyle('#ef4444', '#f97316')}">
-            <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">${lt ? 'Nepažymėtos pamokos' : 'Lessons awaiting status'}</h1>
+            <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">${subject}</h1>
           </div>
           <div class="body">
-            <p class="greeting">${lt ? 'Sveiki' : 'Hello'}${d.tutorName ? ', ' + esc(String(d.tutorName)) : ''}!</p>
-            <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-              ${lt
-                ? `Turite <strong>${count}</strong> pasibaigusių pamokų, kurių statusas dar nepažymėtas. Prašome nurodyti, ar pamoka įvyko (įvyko, įvyko bet vėlavo, mokinys neatvyko, atšaukta).`
-                : `You have <strong>${count}</strong> ended lessons without a confirmed status. Please mark how each lesson went (happened, happened late, student no-show, cancelled).`}
-            </p>
+            <p class="greeting">${d.tutorName ? t(locale, 'em.hiNameNoEmoji', { name: esc(d.tutorName) }) : t(locale, 'em.hi')}</p>
+            <p style="color:#4b5563; font-size:14px; line-height:1.6;">${t(locale, 'cal.confirmStatusDesc')}</p>
+            <ul style="color:#4b5563; font-size:14px; line-height:1.6;">${statuses}</ul>
             <div class="info-card" style="background:#fef2f2; border-color:#fecaca;">
               <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${rows}</table>
               ${more}
             </div>
             <div style="text-align:center; margin-top:20px;">
-              ${outlookEmailButton(`${getAppUrl()}/dashboard`, lt ? 'Pažymėti statusus' : 'Confirm statuses', '#dc2626', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
+              ${outlookEmailButton(dashboardUrl.toString(), t(locale, 'cal.confirmStatusPrompt'), '#dc2626', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}
             </div>
-            <p style="color:#9ca3af; font-size:12px; margin-top:16px; text-align:center;">
-              ${lt ? 'Priminimai bus siunčiami kasdien, kol pažymėsite visų pamokų statusus.' : 'Reminders repeat daily until every lesson status is confirmed.'}
-            </p>
+            <p style="color:#9ca3af; font-size:12px; margin-top:16px; text-align:center;">${copy.statusDaily}</p>
           </div>${footerFor(locale)}`, locale),
       };
     }
 
-    const locale: Locale = isValidLocale(bodyLocale) ? bodyLocale : 'lt';
+    let locale: Locale = isValidLocale(bodyLocale) ? bodyLocale : 'lt';
+    let organizationLocale: unknown;
 
     // Resolve org branding for whitelabel emails
     let orgBranding: EmailBranding | null = null;
@@ -3015,6 +2992,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .eq('id', orgIdForBrandingLookup)
             .maybeSingle();
           if (org) {
+            organizationLocale = org.preferred_locale;
             isSchoolOrg = String((org as { entity_type?: string }).entity_type || '').trim().toLowerCase() === 'school';
             // Invite links must land on the org's canonical market domain
             // (Pro Klasė → tutlio.lt) regardless of which domain the admin used.
@@ -3070,6 +3048,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         }
       } catch {}
+    }
+
+    // Cron/cancellation callers often omit locale. Prefer the recipient's saved
+    // language, then the organization, instead of silently rendering Lithuanian.
+    // Explicit caller locales and dedicated school templates retain their rules.
+    if (isPrivileged && !isValidLocale(bodyLocale) && !String(type).startsWith('school_')) {
+      const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+      const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      const client = url && key ? createClient(url, key, supabaseServiceRoleClientOptions()) : null;
+      locale = await notificationLocale(client, to, bodyLocale, organizationLocale);
     }
 
     // Patch the email HTML post-generation to inject org branding into the wrap() header

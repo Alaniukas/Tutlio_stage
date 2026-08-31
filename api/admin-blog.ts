@@ -1,3 +1,5 @@
+import { SUPPORTED_LOCALES } from '../src/lib/i18n/locales.js';
+import { BLOG_SCHEMA_LOCALES as LOCALES, hasBlogSchema } from '../src/lib/i18n/localeRelease.js';
 import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { timingSafeEqual } from 'crypto';
@@ -34,7 +36,6 @@ function requireAdmin(req: VercelRequest, res: VercelResponse): boolean {
   return true;
 }
 
-const LOCALES = ['lt', 'en', 'pl', 'lv', 'ee', 'fr', 'es', 'de', 'se', 'dk', 'fi', 'no', 'nl'] as const;
 const LOCALE_FIELDS = LOCALES.flatMap(l => [`title_${l}`, `excerpt_${l}`, `content_${l}`]);
 const SLUG_FIELDS = LOCALES.map(l => `slug_${l}`);
 const PUBLIC_LIST_FIELDS = ['id', 'slug', 'cover_image', 'tag', 'published_at',
@@ -53,7 +54,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'GET' && !req.headers['x-admin-secret']) {
     const slug = typeof req.query.slug === 'string' ? req.query.slug : '';
     const localeParam = typeof req.query.locale === 'string' ? req.query.locale : '';
-    const locale = (LOCALES as readonly string[]).includes(localeParam) ? localeParam as (typeof LOCALES)[number] : null;
+    const locale = hasBlogSchema(localeParam)
+      ? localeParam
+      : (SUPPORTED_LOCALES as readonly string[]).includes(localeParam) ? 'en' : null;
 
     if (slug) {
       let post: Record<string, unknown> | null = null;

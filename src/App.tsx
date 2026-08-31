@@ -104,29 +104,7 @@ const WhiteboardPage = lazy(() => import('@/pages/Whiteboard'));
 const SupportWidget = lazy(() => import('@/components/support/SupportWidget'));
 import SupabaseAuthHashErrors from '@/components/SupabaseAuthHashErrors';
 import ThemeColorManager from '@/hooks/useThemeColor';
-import { useTranslation, getLocaleFromPathname } from '@/lib/i18n';
-import { stripPlatformPrefix } from '@/lib/platform';
-import { initAnalytics, trackPageview } from '@/lib/analytics';
-import { isPlMarket } from '@/lib/market';
-
-/** Keep i18n locale aligned with `/:locale/...` URLs when users navigate or land from links. */
-function LocaleFromRouteSync() {
-  const location = useLocation();
-  const { locale, setLocale } = useTranslation();
-
-  useEffect(() => { initAnalytics(); }, []);
-
-  useEffect(() => {
-    if (!isPlMarket()) {
-      const stripped = stripPlatformPrefix(location.pathname);
-      const pathLocale = getLocaleFromPathname(stripped);
-      if (pathLocale && pathLocale !== locale) setLocale(pathLocale);
-    }
-    trackPageview(location.pathname);
-  }, [location.pathname, locale, setLocale]);
-
-  return null;
-}
+import LocaleRouteSync from '@/components/LocaleRouteSync';
 
 /** New routes start at the top; in-page scrolling remains owned by the page. */
 function ScrollToTopOnRouteChange() {
@@ -228,7 +206,7 @@ function RouteLoadingFallback() {
 export default function App({ basename }: { basename: string }) {
   return (
     <Router basename={basename || undefined}>
-      <LocaleFromRouteSync />
+      <LocaleRouteSync />
       <ScrollToTopOnRouteChange />
       <SupabaseAuthHashErrors />
       <ThemeColorManager />

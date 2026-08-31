@@ -24,6 +24,7 @@ import { TUTOR_PLANS, eur } from '../src/lib/pricing.js';
 import { SUBSCRIPTION_PLN } from '../src/lib/subscriptionPricing.js';
 import { formatPln } from '../src/lib/formatPln.js';
 import { getSeoMeta } from '../src/lib/seoMeta.js';
+import { localeAvailabilityParams } from '../src/lib/i18n/localeAvailability.js';
 
 type PageId = 'landing' | 'pricing' | 'about' | 'contacts';
 
@@ -45,6 +46,7 @@ function ssrPlanPrice(locale: Locale, plan: 'monthly' | 'yearly' | 'subscription
 }
 
 function renderLanding(locale: Locale, domain: DomainKey): string {
+  const languageParams = localeAvailabilityParams(locale);
   const features = [
     { key: 'digital-business-card', isNew: true },
     { key: 'calendar' },
@@ -82,7 +84,7 @@ function renderLanding(locale: Locale, domain: DomainKey): string {
     .map(
       (f) => `<details>
     <summary>${esc(t(locale, `landing.faq.${f}Q`))}</summary>
-    <p>${esc(t(locale, `landing.faq.${f}A`))}</p>
+    <p>${esc(t(locale, `landing.faq.${f}A`, f === 'languages' ? languageParams : undefined))}</p>
   </details>`,
     )
     .join('\n');
@@ -293,9 +295,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   let jsonLd: string;
   if (page === 'landing') {
+    const languageParams = localeAvailabilityParams(locale);
     const landingFaq = LANDING_FAQ_KEYS.map((f) => ({
       question: t(locale, `landing.faq.${f}Q`),
-      answer: t(locale, `landing.faq.${f}A`),
+      answer: t(locale, `landing.faq.${f}A`, f === 'languages' ? languageParams : undefined),
     }));
     jsonLd = `${organizationJsonLd(locale)}</script><script type="application/ld+json">${websiteJsonLd(locale)}</script><script type="application/ld+json">${softwareAppJsonLd(locale)}</script><script type="application/ld+json">${faqJsonLd(landingFaq)}`;
   } else if (page === 'pricing') {

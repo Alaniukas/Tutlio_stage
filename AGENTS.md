@@ -458,16 +458,44 @@ Webhook: `api/stripe-webhook.ts` — apdoroja subscriptions, checkout, Connect, 
 
 ## 16. Internacionalizacija (i18n)
 
+**Produkcijos leidimo valdymas:** `src/lib/i18n/localeRelease.ts` atskiria produkcijos UI pasirinkimus, SEO paviršius, blog DB laukus ir lokalizuotus asset'us. Paruoštame kode `UI_RELEASED_LOCALES` turi visus 36 locale, todėl kitas web deploy juos rodys `.lt` ir `.com` kalbos pasirinkimuose bei organizacijos nustatymuose; `.pl` lieka tik lenkų rinkai. 23 naujesni locale vis dar nepublikuojami SEO, sitemap, hreflang ar blog DB ir turi English fallback atskiruose school/admin/legal srautuose. Autentifikuoti profilio ir organizacijos save/reload bandymai praėjo visus 36 kodus, hosted Supabase auth šablonai įdiegti, LT recovery ir HE confirmation laiškai pristatyti. Callback pataisa ir 36 UI leidimas dar nenudeployinti. Aktualus statusas: `docs/LOCALE_PRODUCTION_READINESS.md`. Be aiškaus leidimo necommitinti ir nedeployinti.
+
+**CS juodraštis (Čekija):** `src/lib/i18n/cs.ts` turi 5 051 individualių korepetitorių / įmonių ir susijusių mokinių / tėvų srautų vertimą, įskaitant 493 quiz raktus. Kalbos kodas `cs`, šalies kodas `CZ`, formatavimas `cs-CZ`, telefono pavyzdys `+420`. Pridėti viešo rezervavimo / redaktoriaus tekstai ir vietiniai auth el. laiškų šablonai; Stripe Checkout kalba `cs`. UI įjungtas paruoštame kode, SEO nepublikuojamas. DB, valiutų ir mokėjimų taisyklės nekeistos; QA ir ribos: `docs/CZECH_LOCALIZATION_REVIEW.md`.
+
+**SK juodraštis:** `src/lib/i18n/sk.ts` turi 5 051 individualių korepetitorių / įmonių ir susijusių mokinių / tėvų srautų vertimą, įskaitant 493 quiz raktus ir el. laiškus. Formatavimas `sk-SK`, registracijos kodas `+421`. `skDateFns.ts` lokaliai pataiso šeštadienio atpažinimą datos bibliotekoje. UI įjungtas paruoštame kode, SEO nepublikuojamas; mokėjimų ir DB logika nekeista. QA ir ribos: `docs/SLOVAK_LOCALIZATION_REVIEW.md`.
+
+**TR juodraštis:** `src/lib/i18n/tr.ts` turi 5 051 individualių korepetitorių / įmonių ir susijusių mokinių / tėvų srautų vertimą, įskaitant 493 quiz įrašus ir el. laiškus. Formatavimas `tr-TR`, registracijos kodas `+90`. UI įjungtas paruoštame kode, SEO nepublikuojamas; mokėjimų ir valiutų logika nepakeista. QA ir ribos: `docs/TURKISH_LOCALIZATION_REVIEW.md`.
+
+**UA juodraštis:** Ukrainiečių kalbos kodas `uk`, UI žyma `UA`, formatavimas `uk-UA`. `src/lib/i18n/uk.ts` turi 5 051 individualių korepetitorių / įmonių ir susijusių mokinių / tėvų srautų vertimą. Registracijoje siūlomas `+380`. UI įjungtas paruoštame kode, SEO nepublikuojamas; `20260831234502_add_ukrainian_locale.sql` migracija 2026-08-31 pritaikyta produkcijos DB (`cuhciqwmqfuajeeqjjbm`); bendras autentifikuotas 36 locale save/reload QA praėjo. QA ir ribos: `docs/UKRAINIAN_LOCALIZATION_REVIEW.md`.
+
+**HE juodraštis (Izraelis):** `src/lib/i18n/he.ts` turi 5 051 individualių korepetitorių / įmonių ir susijusių mokinių / tėvų srautų vertimą (493 quiz raktai), el. laiškus ir viešo rezervavimo tekstus. Locale `he`, formatavimas `he-IL-u-ca-gregory`, RTL, savaitė nuo sekmadienio, registracijos telefono kodas `+972`. UI įjungtas paruoštame kode, SEO nepublikuojamas; mokėjimų / valiutų taisyklės nekeistos. QA ir ribos: `docs/HEBREW_LOCALIZATION_REVIEW.md`. `20260831234456_add_hebrew_locale.sql` migracija 2026-08-31 pritaikyta produkcijos DB (`cuhciqwmqfuajeeqjjbm`); bendras autentifikuotas 36 locale save/reload QA ir tikro confirmation laiško pristatymas praėjo, callback pataisa laukia deploy.
+
+**RO juodraštis:** `src/lib/i18n/ro.ts` turi 5 051 individualių korepetitorių / įmonių ir susijusių mokinių / tėvų srautų vertimą, įskaitant el. laiškus ir quiz. Registracija siūlo Rumunijos `+40` kodą; formatavimas `ro-RO`. UI įjungtas paruoštame kode, SEO nepublikuojamas; QA ir ribos: `docs/ROMANIAN_LOCALIZATION_REVIEW.md`.
+
 | Failas | Paskirtis |
 |--------|-----------|
-| `src/lib/i18n/core.ts` | `t()` funkcija, 13 kalbų |
+| `src/lib/i18n/core.ts` | `t()` funkcija ir 36 locale žodynų lazy-loader |
 | `src/lib/i18n/lt.ts`, `en.ts`, `pl.ts`… | Žodynai |
 | `src/lib/i18n/index.ts` | `useTranslation()` hook |
 | `src/contexts/LocaleContext.tsx` | React provider |
 
-**Kalbos:** lt, en, pl, lv, ee, fr, es, de, se, dk, fi, no
+**UI leidžiami locale:** lt, en, pl, lv, ee, fr, es, de, se, dk, fi, no, nl, th, tr, zh-hk, it, pt, ro, cs, el, hu, bg, hr, sk, sl, hi, ko, ja, id, ar, pt-br, es-mx, fil, he, uk
+
+**TH juodraštis:** `src/lib/i18n/th.ts` turi 5 051 individualių korepetitorių / įmonių vertimų įrašą, įskaitant 493 quiz įrašus ir susijusius mokinių / tėvų bei el. laiškų srautus. Locale `th`, formatavimas `th-TH-u-ca-gregory`, registracijos telefono kodas `+66`; metai lieka Grigaliaus kalendoriaus. UI įjungtas paruoštame kode, SEO nepublikuojamas. QA ir ribos: `docs/THAI_LOCALIZATION_REVIEW.md`; `20260831234518_add_thai_locale.sql` migracija 2026-08-31 pritaikyta produkcijos DB (`cuhciqwmqfuajeeqjjbm`); bendras autentifikuotas 36 locale save/reload QA praėjo. Aktualūs locale sąrašai ir skaičiai — `src/lib/i18n/locales.ts`.
+
+**AR juodraštis:** `src/lib/i18n/ar.ts` turi 5 051 individualių korepetitorių / įmonių ir susijusių mokinių / tėvų srautų vertimą. Pridėtas bazinis kalendorių, bendrų valdiklių ir el. laiškų RTL palaikymas; datos lieka Grigaliaus kalendoriaus. UI įjungtas paruoštame kode, SEO nepublikuojamas; ribos ir QA: `docs/ARABIC_LOCALIZATION_REVIEW.md`.
+
+**UI įjungti, bet SEO nepublikuojami locale (vertimų juodraščiai / English fallback atskiruose paviršiuose):** it, pt, ro, cs, el, hu, bg, hr, sk, sl, hi, ko, ja, id, ar, pt-br, es-mx, fil, he, uk, zh-hk, tr, th. Registras: `src/lib/i18n/locales.ts`; vertimo eiga ir ribos: `docs/INTERNATIONAL_LOCALES.md`. Šie locale dar neįtraukiami į sitemap / hreflang / blog DB laukus.
+
+**SL juodraštis:** `src/lib/i18n/sl.ts` turi 5 051 individualių korepetitorių / įmonių ir susijusių mokinių / tėvų srautų vertimą. Slovėnijos šalis `SI`, kalbos locale `sl`, formatavimas `sl-SI`, telefono pavyzdžiai `+386`. UI įjungtas paruoštame kode, SEO nepublikuojamas; QA ir ribos: `docs/SLOVENIAN_LOCALIZATION_REVIEW.md`.
+
+**FIL juodraštis:** `src/lib/i18n/fil.ts` turi 5 051 individualių korepetitorių / įmonių ir susijusių mokinių / tėvų srautų vertimą. Locale `fil`, formatavimas `fil-PH`, Filipinų telefono pavyzdžiai `+63`. UI įjungtas paruoštame kode, SEO nepublikuojamas; QA ir ribos: `docs/FILIPINO_LOCALIZATION_REVIEW.md`. `20260831234451_add_filipino_locale.sql` migracija 2026-08-31 pritaikyta produkcijos DB (`cuhciqwmqfuajeeqjjbm`); bendras autentifikuotas 36 locale save/reload QA praėjo.
 
 **Domenai:** `tutlio.lt` → LT, `tutlio.pl` → PL, `tutlio.com` → EN
+
+**EL juodraštis:** `src/lib/i18n/el.ts` turi 5 051 individualių korepetitorių / įmonių vertimo įrašą, įskaitant 493 quiz įrašus ir susijusius mokinių / tėvų bei el. laiškų srautus. Graikų kalbos kodas `el`, formatavimas `el-GR`, šalies kodas `GR`; registracijos telefono pavyzdžiai ir pradinis kodas `+30`. Išverstas viešo puslapio UI ir bendras korepetitoriaus / įmonės redaktorius. UI įjungtas paruoštame kode, SEO nepublikuojamas; QA ir ribos: `docs/GREEK_LOCALIZATION_REVIEW.md`. Mokesčių, valiutų ir DB pakeitimų ši lokalizacija neįtraukia.
+
+**PT-BR juodraštis:** `src/lib/i18n/pt-br.ts` turi individualių korepetitorių ir įmonių UI, mokinių / tėvų srautų, el. laiškų ir quiz vertimus. Atskirų admin / school modulių ir pilnų teisinių dokumentų fallback lieka anglų kalba. UI įjungtas paruoštame kode, SEO nepublikuojamas; QA ir ribos: `docs/BRAZILIAN_PORTUGUESE_LOCALIZATION_REVIEW.md`.
 
 Nauji UI tekstai — pridėk į `lt.ts` ir `en.ts` (bent jau).
 

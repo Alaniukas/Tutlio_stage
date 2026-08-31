@@ -1,3 +1,4 @@
+import { withEnglishLocaleFallback } from '../../src/lib/i18n/locales.js';
 import type { VercelRequest, VercelResponse } from '../types.js';
 import {
   SUPPORTED_LOCALES,
@@ -55,9 +56,32 @@ export function supportLocaleName(locale: SupportLocale): string {
   return SUPPORT_LOCALE_NAMES[locale];
 }
 
-const SUPPORT_GENERAL_FOLLOW_UP: Record<SupportLocale, string> = {
+const SUPPORT_GENERAL_FOLLOW_UP: Record<SupportLocale, string> = withEnglishLocaleFallback({
+  sl: 'Kako vam lahko še pomagam?',
+  el: 'Σε τι άλλο μπορώ να σας βοηθήσω;',
+  hu: 'Miben segíthetek még?',
+  sk: 'S čím vám ešte môžem pomôcť?',
+  cs: 'S čím vám ještě mohu pomoci?',
+  bg: 'С какво друго мога да помогна?',
+  hr: 'Kako ti još mogu pomoći?',
+  th: 'มีเรื่องอื่นที่ให้ช่วยอีกไหม?',
+  he: 'במה עוד אפשר לעזור?',
+  ja: 'ほかにお手伝いできることはありますか？',
+  hi: 'मैं आपकी और क्या मदद कर सकता हूँ?',
+  ko: '또 무엇을 도와드릴까요?',
+  id: 'Ada hal lain yang bisa saya bantu?',
+  ar: 'كيف يمكنني مساعدتك أيضًا؟',
   lt: 'Kuo dar galiu jums padėti?',
   en: 'What else can I help you with?',
+  pt: 'Em que mais posso ajudar?',
+  'pt-br': 'Em que mais posso ajudar?',
+  'es-mx': '¿En qué más puedo ayudarle?',
+  it: 'In cos’altro posso aiutarti?',
+  ro: 'Cu ce te mai pot ajuta?',
+  fil: 'Ano pa ang maitutulong ko sa iyo?',
+  tr: 'Başka nasıl yardımcı olabilirim?',
+  'zh-hk': '還有甚麼可以幫你？',
+  uk: 'Чим іще можу вам допомогти?',
   pl: 'W czym jeszcze mogę pomóc?',
   lv: 'Ar ko vēl varu jums palīdzēt?',
   ee: 'Millega saan teid veel aidata?',
@@ -69,7 +93,7 @@ const SUPPORT_GENERAL_FOLLOW_UP: Record<SupportLocale, string> = {
   fi: 'Miten voin vielä auttaa?',
   no: 'Hva mer kan jeg hjelpe deg med?',
   nl: 'Waarmee kan ik je nog meer helpen?',
-};
+});
 
 export function supportGeneralFollowUp(locale: SupportLocale): string {
   return SUPPORT_GENERAL_FOLLOW_UP[locale];

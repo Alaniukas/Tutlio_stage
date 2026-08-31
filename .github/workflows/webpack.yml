@@ -39,5 +39,11 @@ jobs:
     - name: Test
       run: npm test
 
+    - name: Verify auth email templates
+      run: npm run locales:auth-templates -- --check
+
+    - name: Verify locale runtime arguments
+      run: npm run locales:audit -- --check
+
     - name: Build
       run: npm run build
