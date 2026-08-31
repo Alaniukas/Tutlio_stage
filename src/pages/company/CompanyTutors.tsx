@@ -124,6 +124,61 @@ function TeachingNotesBadge({ notes }: { notes?: string | null }) {
 
 // ─── SubjectPresetList – shared in both invite types ─────────────────────────
 
+function CatalogSubjectSelect({
+  value,
+  onValueChange,
+  options,
+  hidePrice = false,
+  triggerClassName,
+}: {
+  value: string;
+  onValueChange: (key: string) => void;
+  options: { key: string; preset: SubjectPreset }[];
+  hidePrice?: boolean;
+  triggerClassName?: string;
+}) {
+  const { t } = useTranslation();
+  const [search, setSearch] = useState('');
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? options.filter((o) => (o.preset.name || '').toLowerCase().includes(q))
+    : options;
+
+  return (
+    <Select
+      value={value || '__none__'}
+      onValueChange={onValueChange}
+      onOpenChange={(open) => {
+        if (!open) setSearch('');
+      }}
+    >
+      <SelectTrigger className={cn('rounded-xl text-sm bg-white w-full', triggerClassName)}>
+        <SelectValue placeholder={t('compTut.selectSubject')} />
+      </SelectTrigger>
+      <SelectContent className="max-h-72 overflow-y-auto">
+        <div className="sticky top-0 z-10 bg-white p-2 border-b border-gray-100">
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t('common.search')}
+            className="h-9 rounded-xl"
+            onPointerDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          />
+        </div>
+        <SelectItem value="__none__">{t('compTut.selectDefault')}</SelectItem>
+        {filtered.map((o) => (
+          <SelectItem key={o.key} value={o.key}>
+            {hidePrice
+              ? `${o.preset.name} · ${o.preset.duration_minutes} min`
+              : `${o.preset.name} · ${fmtMoney(o.preset.price)} · ${o.preset.duration_minutes} min`}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 function SubjectPresetList({
   subjects,
   onAdd,
@@ -206,21 +261,13 @@ function SubjectPresetList({
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-gray-600">{t('compTut.fromCatalog')}</Label>
               {catalogAvailable.length > 0 ? (
-                <Select value={catalogPick || '__none__'} onValueChange={pickFromCatalog}>
-                  <SelectTrigger className="rounded-xl h-9 text-sm bg-white">
-                    <SelectValue placeholder={t('compTut.selectSubject')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">{t('compTut.selectDefault')}</SelectItem>
-                    {catalogAvailable.map((o) => (
-                      <SelectItem key={o.key} value={o.key}>
-                        {hidePrice
-                          ? `${o.preset.name} · ${o.preset.duration_minutes} min`
-                          : `${o.preset.name} · ${fmtMoney(o.preset.price)} · ${o.preset.duration_minutes} min`}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <CatalogSubjectSelect
+                  value={catalogPick}
+                  onValueChange={pickFromCatalog}
+                  options={catalogAvailable}
+                  hidePrice={hidePrice}
+                  triggerClassName="h-9"
+                />
               ) : (
                 <p className="text-xs text-gray-500">{t('compTut.allCatalogAdded')}</p>
               )}
@@ -1711,8 +1758,8 @@ export default function CompanyTutors() {
                     {orgSubjectCatalogOptions.length > 0 && catalogForAddSubject.length > 0 && (
                       <div className="space-y-1.5">
                         <Label className="text-xs font-medium text-gray-600">{t('compTut.fromOrgCatalog')}</Label>
-                        <Select
-                          value={addSubjectCatalogPick || '__none__'}
+                        <CatalogSubjectSelect
+                          value={addSubjectCatalogPick}
                           onValueChange={(key) => {
                             if (key === '__none__') {
                               setAddSubjectCatalogPick('');
@@ -1727,21 +1774,10 @@ export default function CompanyTutors() {
                             setNewSubjectColor(p.color);
                             setAddSubjectCatalogPick(key);
                           }}
-                        >
-                          <SelectTrigger className="rounded-xl h-10 text-sm bg-white w-full">
-                            <SelectValue placeholder={t('compTut.selectSubject')} />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">{t('compTut.selectDefault')}</SelectItem>
-                            {catalogForAddSubject.map((o) => (
-                              <SelectItem key={o.key} value={o.key}>
-                                {isProKlaseAdmin
-                                  ? `${o.preset.name} · ${o.preset.duration_minutes} min`
-                                  : `${o.preset.name} · ${fmtMoney(o.preset.price)} · ${o.preset.duration_minutes} min`}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          options={catalogForAddSubject}
+                          hidePrice={isProKlaseAdmin}
+                          triggerClassName="h-10"
+                        />
                       </div>
                     )}
 
