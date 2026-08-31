@@ -5,6 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { insertParentInviteAndSendEmail } from './parentInvite.js';
 import { isOrgTutor } from './isOrgTutor.js';
 import { studentRegistrationAlreadyActive } from './registrationInviteGate.js';
+import { isProKlaseOrg } from './marketMoney.js';
 
 export const TRIAL_RESERVATION_DEFAULT_DEADLINE_HOURS = 24;
 const MAX_DEADLINE_HOURS = 24 * 30; // 30 days
@@ -16,9 +17,24 @@ function asFeatureObject(features: Features): Record<string, unknown> {
   return features as Record<string, unknown>;
 }
 
+function proKlaseScopedFlag(
+  features: Features,
+  orgId: string | null | undefined,
+  entityType: string | null | undefined,
+  flagId: string,
+): boolean {
+  if (entityType === 'school') return false;
+  if (!isProKlaseOrg(orgId)) return false;
+  return asFeatureObject(features)[flagId] === true;
+}
+
 /** Whether the org has the trial reservation (pay-to-confirm) flow enabled. */
-export function isTrialReservationFlowEnabled(features: Features): boolean {
-  return asFeatureObject(features).trial_reservation_flow === true;
+export function isTrialReservationFlowEnabled(
+  features: Features,
+  orgId?: string | null,
+  entityType?: string | null,
+): boolean {
+  return proKlaseScopedFlag(features, orgId ?? null, entityType ?? null, 'trial_reservation_flow');
 }
 
 /** Admin-configurable payment deadline (hours) for a held trial; defaults to 24. */
@@ -43,8 +59,12 @@ export function trialReservationExpiryIso(hours: number, now: Date = new Date())
 export const PACKAGE_PAYMENT_DEFAULT_DEADLINE_HOURS = 24;
 
 /** Whether the org has the package reservation (pre-book + pay-by-deadline) flow enabled. */
-export function isPackageReservationFlowEnabled(features: Features): boolean {
-  return asFeatureObject(features).package_reservation_flow === true;
+export function isPackageReservationFlowEnabled(
+  features: Features,
+  orgId?: string | null,
+  entityType?: string | null,
+): boolean {
+  return proKlaseScopedFlag(features, orgId ?? null, entityType ?? null, 'package_reservation_flow');
 }
 
 /** Admin-configurable package payment deadline (hours before the first lesson); defaults to 24. */

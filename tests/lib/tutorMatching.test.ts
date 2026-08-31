@@ -356,3 +356,38 @@ describe('groupAndRankTutors', () => {
     expect(groupAndRankTutors(slots, { frequencyPerWeek: 0 })[0].coversFrequency).toBe(true);
   });
 });
+
+describe('dedupeMatchSlots / trial subjects', () => {
+  const { dow } = dayInfo('2026-01-05');
+  const params = { dateFrom: '2026-01-05', dateTo: '2026-01-05', ...ALL_DAY };
+  const recurring: AvailabilityRule = {
+    tutor_id: 't1',
+    day_of_week: dow,
+    start_time: '11:00',
+    end_time: '12:00',
+    is_recurring: true,
+  };
+
+  it('skips trial catalogue rows so €0 trial does not duplicate the paid window', () => {
+    const trial: MatchSubject = {
+      id: 'math-trial',
+      name: 'Matematika',
+      price: 0,
+      tutor_id: 't1',
+      is_trial: true,
+    };
+    const paid: MatchSubject = { id: 'math', name: 'Matematika', price: 10, tutor_id: 't1' };
+    const slots = computeTutorSlots([recurring], [], [trial, paid], NAMES, params);
+    expect(slots).toHaveLength(1);
+    expect(slots[0].price).toBe(10);
+    expect(slots[0].subjectId).toBe('math');
+  });
+
+  it('keeps the paid window when two same-name subjects share a slot', () => {
+    const zero: MatchSubject = { id: 'math-0', name: 'Matematika', price: 0, tutor_id: 't1' };
+    const paid: MatchSubject = { id: 'math-10', name: 'Matematika', price: 10, tutor_id: 't1' };
+    const slots = computeTutorSlots([recurring], [], [zero, paid], NAMES, params);
+    expect(slots).toHaveLength(1);
+    expect(slots[0].price).toBe(10);
+  });
+});

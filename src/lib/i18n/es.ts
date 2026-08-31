@@ -1,8 +1,10 @@
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
+import { schoolInstructionsTranslationsEs } from './schoolInstructionsTranslations.js';
 import { supportTranslations } from './supportTranslations.js';
 
 export const es: Record<string, string> = {
   ...sharedOrganizationWorkflowTranslations,
+  ...schoolInstructionsTranslationsEs,
   ...supportTranslations.es,
   'invoiceSettings.bankName': 'Banco',
   'invoiceSettings.iban': 'Número de cuenta (IBAN)',
@@ -1627,6 +1629,13 @@ export const es: Record<string, string> = {
   'studentSettings.manageAccount': 'Gestionar su cuenta',
   'studentSettings.dangerZone': 'Zona de peligro',
   'studentSettings.deleteAccount': 'Eliminar cuenta',
+  'studentSettings.archiveAccount': 'Archivar cuenta',
+  'studentSettings.archiveAccountDesc': 'La cuenta no se eliminará de inmediato. La administración de Mokslo vaisiai se pondrá en contacto y la eliminará en 14 días laborables.',
+  'studentSettings.archiveConfirmMsg': '¿Archivar la cuenta? La administración contactará en 14 días laborables y después la eliminará.',
+  'studentSettings.archiveCta': 'Archivar',
+  'studentSettings.archiveBlockedUnpaid': 'No puedes archivar la cuenta mientras haya clases, paquetes o facturas sin pagar. Paga primero.',
+  'studentSettings.archivePending': 'La eliminación de la cuenta ya está solicitada. La administración de Mokslo vaisiai contactará en 14 días laborables.',
+  'studentSettings.archiveFailed': 'No se pudo archivar la cuenta.',
   'studentSettings.parentInviteSectionTitle': 'Portal de padre / tutor legal',
   'studentSettings.inviteParentCta': 'Enviar invitación por correo',
   'studentWait.title': 'Lista de espera',
@@ -2483,7 +2492,7 @@ export const es: Record<string, string> = {
   'findLesson.endTime': 'Fin',
   'findLesson.outsideWindow': 'La clase debe quedar dentro de la ventana libre seleccionada.',
   'findLesson.clearPickedSlot': 'Quitar hora',
-  'findLesson.willCreateOnSave': 'Al guardar al alumno también se reservará una clase a esta hora.',
+  'findLesson.willCreateOnSave': 'Al guardar al alumno se reservará una clase para cada tutor seleccionado.',
   'compSch.addFreeTimeDesc': 'AÃ±adir tiempo libre',
   'compSch.addStudentInSlot': 'AÃ±adir alumno a este horario',
   'compSch.alreadyPaid': '¿Ya pagado?',

@@ -129,6 +129,7 @@ import { recordJoinClick } from '@/lib/joinTracking';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { isProKlaseOrg } from '@/lib/marketMoney';
+import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import { calendarSessionTitlePrefix, getCalendarSessionEventStyle } from '@/lib/calendarSessionEventStyle';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
@@ -282,21 +283,19 @@ export default function CalendarPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const orgPolicy = useOrgTutorPolicy();
   const licenseFrozen = orgPolicy.isOrgTutor && orgPolicy.orgUsesLicenses && !orgPolicy.hasActiveLicense;
-  const { contactVisibility, hasFeature: hasOrgFeature } = useOrgFeatures();
+  const { contactVisibility, hasFeature: hasOrgFeature, entityType: orgEntityType, organizationId, loading: orgFeaturesLoading } = useOrgFeatures();
+  const pkMonthlyPackages = proKlaseFeatureEnabled(organizationId, orgEntityType, hasOrgFeature, 'monthly_packages', orgFeaturesLoading);
   const { user: ctxUser, profile: ctxProfile } = useUser();
   // Org feature: ended lessons are not auto-completed — the tutor must confirm the outcome.
-  const requiresStatusConfirmation = hasOrgFeature('tutor_lesson_status_confirmation');
+  const requiresStatusConfirmation =
+    hasOrgFeature('tutor_lesson_status_confirmation') || isProKlaseOrg(ctxProfile?.organization_id);
   const hideProKlaseOrgTutorCancel = orgPolicy.isOrgTutor && isProKlaseOrg(ctxProfile?.organization_id);
   const hideProKlaseOrgTutorFreeTime = hideProKlaseOrgTutorCancel;
   const hideProKlaseOrgTutorDelete = hideProKlaseOrgTutorCancel;
+  const showProKlaseCalendarFeatures =
+    orgPolicy.isOrgTutor && isProKlaseOrg(ctxProfile?.organization_id);
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
   const [eventModalNotice, setEventModalNotice] = useState<string | null>(null);
-
-  const notifyProKlaseCancelBlocked = () => {
-    const message = t('cal.proKlaseCancelAdminOnly');
-    setEventModalNotice(message);
-    setToastMessage({ message, type: 'warning' });
-  };
   const [sessions, setSessions] = useState<Session[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -3142,7 +3141,7 @@ export default function CalendarPage() {
       // Monthly packages (req 6): a package lesson can only be moved within the
       // same calendar month (anchored on its original start). One-off / trial
       // lessons (no package) are unconstrained.
-      if (timeChanged && !applyToAllFuture && hasOrgFeature('monthly_packages') && !!(selectedEvent as any).lesson_package_id) {
+      if (timeChanged && !applyToAllFuture && pkMonthlyPackages && !!(selectedEvent as any).lesson_package_id) {
         const anchor = rescheduleAnchorDate((selectedEvent as any).original_start_time, oldStart);
         if (!isSameCalendarMonth(newStart, anchor)) {
           alert(t('cal.rescheduleSameMonthOnly'));
@@ -3981,7 +3980,7 @@ export default function CalendarPage() {
     const isTrial = event.subjects?.is_trial === true;
     const endAt = new Date(event.end ?? event.end_time);
     const isMovedLesson =
-      hasOrgFeature('monthly_packages') && !!event.original_start_time && !!event.lesson_package_id;
+      pkMonthlyPackages && !!event.original_start_time && !!event.lesson_package_id;
 
     const eventStyle = getCalendarSessionEventStyle({
       status: event.status,
@@ -3989,8 +3988,8 @@ export default function CalendarPage() {
       payment_status: event.payment_status,
       endAt,
       isTrial,
-      isMakeup: event.is_makeup === true,
-      cancellationReasonCode: event.cancellation_reason_code,
+      isMakeup: showProKlaseCalendarFeatures && event.is_makeup === true,
+      cancellationReasonCode: showProKlaseCalendarFeatures ? event.cancellation_reason_code : undefined,
       isMovedLesson,
       isOrgTutor: orgPolicy.isOrgTutor,
       defaultColor: subj?.color || '#6366f1',
@@ -4390,8 +4389,8 @@ export default function CalendarPage() {
 
                 const prefix = calendarSessionTitlePrefix({
                   isTrial: event.subjects?.is_trial === true,
-                  isMakeup: event.is_makeup === true,
-                  cancellationReasonCode: event.cancellation_reason_code,
+                  isMakeup: showProKlaseCalendarFeatures && event.is_makeup === true,
+                  cancellationReasonCode: showProKlaseCalendarFeatures ? event.cancellation_reason_code : undefined,
                   status: event.status,
                 });
                 return `${prefix}${name}${topic}${statusText}`;
@@ -4426,9 +4425,13 @@ export default function CalendarPage() {
           { color: '#10b981', label: t('cal.legendCompleted') },
           { color: '#ca8a04', label: t('cal.legendUnpaidOccurred') },
           { color: '#a855f7', label: t('cal.legendTrial'), border: '2px solid #7e22ce' },
-          { color: '#8b5cf6', label: t('cal.legendMakeup'), border: '2px solid #6d28d9' },
+          ...(showProKlaseCalendarFeatures
+            ? [
+                { color: '#8b5cf6', label: t('cal.legendMakeup'), border: '2px solid #6d28d9' },
+                { color: '#ef4444', label: t('cal.legendTutorNoShow'), opacity: true, border: '2px dashed #991b1b' },
+              ]
+            : []),
           { color: '#ef4444', label: t('cal.legendCancelled'), opacity: true },
-          { color: '#ef4444', label: t('cal.legendTutorNoShow'), opacity: true, border: '2px dashed #991b1b' },
         ].map((item) => (
           <div key={item.label} className="flex items-center gap-2">
             <span
@@ -5131,7 +5134,7 @@ export default function CalendarPage() {
                     hidePaymentStatus={orgPolicy.isOrgTutor}
                     endTime={selectedEvent?.end_time}
                     pendingConfirmation={requiresStatusConfirmation}
-                    moved={hasOrgFeature('monthly_packages') && !!(selectedEvent as any)?.original_start_time && !!(selectedEvent as any)?.lesson_package_id}
+                    moved={pkMonthlyPackages && !!(selectedEvent as any)?.original_start_time && !!(selectedEvent as any)?.lesson_package_id}
                   />
                 </div>
                 {!orgPolicy.hideMoney && !orgPolicy.isOrgTutor && (
@@ -5343,22 +5346,18 @@ export default function CalendarPage() {
                       <UserX className="w-4 h-4 mr-1" />
                       {t('cal.statusNoShowOpt')}
                     </Button>
+                    {!hideProKlaseOrgTutorCancel && (
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => {
-                        if (hideProKlaseOrgTutorCancel) {
-                          notifyProKlaseCancelBlocked();
-                          return;
-                        }
-                        void handleConfirmSessionStatus(selectedEvent, 'cancelled');
-                      }}
+                      onClick={() => void handleConfirmSessionStatus(selectedEvent, 'cancelled')}
                       disabled={noShowSavingId === selectedEvent.id}
                       className="rounded-xl text-gray-700 border-gray-300 hover:bg-gray-100"
                     >
                       <XCircle className="w-4 h-4 mr-1" />
-                      {hideProKlaseOrgTutorCancel ? t('cal.cancelLessonTitle') : t('cal.statusCancelledOpt')}
+                      {t('cal.statusCancelledOpt')}
                     </Button>
+                    )}
                   </div>
                 </div>
               )}
@@ -5374,24 +5373,6 @@ export default function CalendarPage() {
                   <CalendarDays className="w-4 h-4 mr-1" />
                   {t('cal.moveLesson')}
                 </Button>
-                {/* Pro Klasė tutors cannot cancel — show why instead of hiding the option. */}
-                {hideProKlaseOrgTutorCancel &&
-                  !(
-                    requiresStatusConfirmation &&
-                    !isGroupSession &&
-                    isAfter(new Date(), selectedEvent.end_time)
-                  ) && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={notifyProKlaseCancelBlocked}
-                    size="sm"
-                    className="rounded-xl flex-1 text-gray-700 border-gray-300 hover:bg-gray-100"
-                  >
-                    <XCircle className="w-4 h-4 mr-1" />
-                    {t('cal.cancelLessonTitle')}
-                  </Button>
-                )}
               </div>
             )}
             {selectedEvent?.status === 'active' &&

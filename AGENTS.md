@@ -113,6 +113,7 @@ Maršrutai apibrėžti `src/App.tsx`.
 **Vieši marketingo maršrutai:**
 - `/quiz`, `/quiz/:audience/:step` (+ `/:locale/quiz/…`) — tutor quiz funnel (`QuizFunnel.tsx`)
 - Prenumeratos checkout puslapyje `/pricing` — įterptas Stripe Embedded Checkout (`EmbeddedSubscriptionCheckoutDialog.tsx`)
+- Viešas **AI support** widget (apatinis dešinys kampas) — `SupportWidget.tsx`, API `/api/support-chat` + `/api/support-contact`. Rodomas tik **neprisijungusiems** (landing, blog, kainos, login…). Prisijungusiems tutor/mokinys/tėvas/org admin — paslėptas, net jei jie atidaro marketingo puslapį.
 
 ---
 
@@ -134,6 +135,7 @@ Maršrutai apibrėžti `src/App.tsx`.
          ├──► Stripe API / Webhooks
          ├──► Resend (email)
          ├──► GoSign SOAP (e-parašas)
+         ├──► OpenAI (Luna) — viešas AI support widget
          └──► DOCX Converter (Railway)
 ```
 
@@ -182,7 +184,8 @@ Pilnas sąrašas: `.env.example`
 | Supabase | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | Service role **tik** serveryje |
 | Stripe | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, price/product ID | EUR + PLN variantai |
 | App | `APP_URL`, `VITE_APP_URL` | Redirect'ams |
-| Email | `RESEND_API_KEY`, `FROM_EMAIL` | |
+| Email | `RESEND_API_KEY`, `FROM_EMAIL` | Stage: `RESEND_API_KEY_STAGE` kai prod raktas tuščias |
+| AI support | `OPENAI_API_KEY` | **Tik** serveryje (`/api/support-chat`). **Niekada** `VITE_OPENAI_*` |
 | Cron | `CRON_SECRET` | **Privaloma** Vercel prod |
 | Admin | `ADMIN_SECRET` | Platformos admin API. **Ne** `VITE_ADMIN_SECRET` fronte — Vite išleistų į browserį. API paliktas tik senas fallback. |
 | GoSign | `GOSIGN_CLIENT_ID`, `GOSIGN_PRIVATE_KEY`, `GOSIGN_ONESIGN_ENDPOINT`… | E-parašas |
@@ -239,6 +242,7 @@ Migracijos: `supabase/migrations/` (datuotos `202603*`–`202608*`).
 | `school_contract_signatures` | E-parašo įrašai (`role`: school / parent_* / planuojama `teacher`) |
 | `invoices`, `lesson_packages` | Billing (PVM serijos numeris atominiu `allocateInvoiceNumber`) |
 | `chat_conversations`, `chat_messages` | Žinutės |
+| `support_conversations`, `support_messages`, `support_contact_requests` | Viešas AI support (server-only, be RLS vartotojams). Priedai — privatus bucket `support-attachments` |
 
 **RLS:** visos lentelės turi Row Level Security. Org admin mato tik savo `organization_id`.
 
@@ -272,12 +276,13 @@ Kiekvienas `api/foo-bar.ts` → endpoint `/api/foo-bar`.
 | Paketai (Pro Klasė) | `update-pending-package.ts`, `resend-package-email.ts`, `api/_lib/sendPendingPackageEmail.ts` |
 | Stripe | `stripe-webhook.ts`, `stripe-checkout.ts`, `stripe-connect.ts`, `create-subscription-checkout.ts` |
 | Lead / quiz | `landing-lead.ts` |
+| AI support | `support-chat.ts` (stream), `support-contact.ts`, `support-chat-close.ts`, `support-attachment-upload-url.ts` |
 | Sessions/cron | `auto-complete-sessions.ts`, `send-reminders.ts`, `materialize-recurring-sessions.ts`, `mark-session-complimentary.ts` |
 | Admin | `admin-organizations.ts`, `admin-statistics.ts` |
 | Email | `send-email.ts` |
 | SSR/SEO | `page-render.ts`, `blog-render.ts`, `sitemap.ts` |
 
-**Bendri helperiai:** `api/_lib/schoolContractSigning.ts`, `schoolContractPdf.ts`, `extraLessonsContractShared.ts`, `schoolInstallmentStripe.ts`, `gosign.ts`, `docxConverter.ts`, `invoiceNumber.ts`, `pvmEducationInvoice.ts`, `proKlaseInvoice.ts`, `emailOrgBranding.ts`.
+**Bendri helperiai:** `api/_lib/schoolContractSigning.ts`, `schoolContractPdf.ts`, `extraLessonsContractShared.ts`, `schoolInstallmentStripe.ts`, `gosign.ts`, `docxConverter.ts`, `invoiceNumber.ts`, `pvmEducationInvoice.ts`, `proKlaseInvoice.ts`, `emailOrgBranding.ts`, `supportKnowledge.ts`, `supportRequest.ts`, `supportPersistence.ts`, `supportContact.ts`.
 
 ---
 
@@ -285,8 +290,9 @@ Kiekvienas `api/foo-bar.ts` → endpoint `/api/foo-bar`.
 
 1. `src/lib/supabase.ts` — Supabase client (remember-me: localStorage vs sessionStorage)
 2. `src/pages/Login.tsx` — portal picker + `signInWithPassword`
-3. Route guard'ai tikrina sesiją + DB rolę
-4. Tutor'iams papildomai — aktyvi Stripe prenumerata (`src/lib/subscription.ts`)
+3. Org/school admin: `src/pages/CompanyLogin.tsx` (`/company/login` ir `/school/login`). Po SIGNED_IN kelias per `getOrgAdminDashboardPath()` — **ne** embedinti `organizations(...)` po `organization_admins` (RLS hang, UI lieka „Jungiamasi…“). Org eilutė: `fetchOrganizationRow()` (`src/lib/orgLookup.ts`)
+4. Route guard'ai tikrina sesiją + DB rolę
+5. Tutor'iams papildomai — aktyvi Stripe prenumerata (`src/lib/subscription.ts`)
 
 ---
 
@@ -308,6 +314,7 @@ Kiekvienas `api/foo-bar.ts` → endpoint `/api/foo-bar`.
 | `school_teacher_labels` | School portale „mokytojas“ vietoj „korepetitorius“ (`useStaffLabels`) |
 | `extra_lessons_billing` | Mėnesio pabaigos papildomų pamokų sąskaitos (company/Pro Klasė srautas, ne school click-wrap) |
 | `pvm_education_invoice` | PVM S.F. layout, atominė serijos numeracija, išorinių numerių rezervacija |
+| `student_card_booking` | Org admin rezervuoja pamoką iš mokinio kortelės (`FindTutorModal` + `FindLessonBookDialog`) |
 
 Naudojimas:
 ```typescript
@@ -475,6 +482,14 @@ Išėję / baigę (`left`, `graduated`) — archyvas (šiukšlinė), ne pagrindi
 
 **Layout:** 1 eilutė — pavadinimas + Šiukšlinė / Pridėti mokinį; 2 eilutė — filtrai + paieška + Excel.
 
+**Pamokos rezervavimas iš kortelės / naujo mokinio formos** (`student_card_booking`, Pro Klasė intake — „Ieškoti pagal laisvą laiką“):
+1. `FindTutorModal` grąžina visą `MatchSlot` (ne tik tutor id).
+2. Langas rodomas formoje / kortelėje (`PickedAvailabilityTimeEditor`) — data užrakinta, **pradžia/pabaiga redaguojamos minutėmis** rėmuose.
+3. Esamo mokinio kortelėje `FindLessonBookDialog` `variant="inline"` (ne antras overlay). 15 min. select nebėra.
+4. Naujam mokiniui: išsaugant įrašomas `preferred_availability` iš lango ir sukuriama pamoka patikslintu laiku (`runOrgAdminCreateSession`).
+
+**Failai:** `src/lib/pickedAvailabilityTime.ts`, `src/components/company/PickedAvailabilityTimeEditor.tsx`, `FindLessonBookDialog.tsx`, `FindTutorModal.tsx`. Testai: `tests/lib/picked-availability-time.test.ts`.
+
 ### Buhalterijos suvestinė ir eksportas
 
 **UI:** `src/pages/company/CompanySchoolFinanceReport.tsx`  
@@ -538,6 +553,23 @@ Quiz i18n **tik** `lt.ts` + `en.ts` (`tests/lib/i18n-coverage.test.ts` quiz rakt
 
 **Testai:** `tests/lib/quiz-funnel.test.ts`, `tests/pages/quiz-funnel.test.tsx`, `tests/api/landing-lead-quiz.test.ts`, `tests/api/create-subscription-checkout.test.ts`.
 
+### Viešas AI support ir produktų žinios
+
+Viešas widget `src/components/support/SupportWidget.tsx` (lazy `App.tsx`) — tik svečiams, ne sesijos vartotojams. Streamina atsakymus iš `gpt-5.6-luna` per `POST /api/support-chat`. Kontaktų lapas → `POST /api/support-contact` (Resend į `INTERNAL_NOTIFY_EMAILS` `api/_lib/resendConfig.ts`).
+
+**Architektūra (sutrumpinta):** Luna pirma parenka vieną iš 8 product area + 0–3 viešus puslapius iš allowlist `src/lib/supportPageSuggestions.ts`. Antras kvietimas gauna **tik** tą area (ne visą „brain“). Purchase CTA („Noriu Tutlio“) tik kai selector sako aiškų pirkimo intentą — nuoroda visada į lokalizuotą `/pricing`, modelis negali sugalvoti URL. Follow-up klausimas tik jei trūksta detalės atsakymui, ne lead'ams.
+
+**Žinios:**
+- Elgsena / kainos / licencijų rėžiai: `api/_lib/supportKnowledge.ts` (solo kainos iš `pricing.ts` / `subscriptionPricing.ts`; B2B rėžiai iš `enterprise-license.ts` kaip `/pricing`)
+- Viešų feature puslapių facts + alias: `src/lib/productFeatureCatalog.ts` — **tas pats šaltinis** landing feature hub ir AI grounding
+- Landing pamokos kainos skaičiuoklė: `src/lib/landingLessonEstimate.ts`
+
+**I18n:** `support.*` raktai `lt.ts` / `en.ts` / `pl.ts`. Kitos 10 kalbų — `src/lib/i18n/supportTranslations.ts` (spread į locale failus). Locale ID: `src/lib/i18n/locales.ts`. Naujas support string — visos 13 + `supportCopyKeys.ts` jei UI raktas.
+
+**Migracija:** `20260829170658_support_ai_persistence.sql`.  
+**Runbook:** `docs/SUPPORT_AI.md`.  
+**Testai:** `tests/api/support-ai.test.ts`, `tests/lib/support-locales.test.ts`, `tests/lib/landing-lesson-estimate.test.ts`.
+
 **Org admin RLS:** tutor SELECT `students` / `sessions` = `auth.uid() = tutor_id`. `org_admin_permission_*` politikos yra **RESTRICTIVE**; `private.org_admin_permission_gate()` neadminams grąžina `true` tyčia (kad neužblokuotų korep/mokinio/tėvų policy). Tai nėra skylių tarp paskyrų.
 
 ---
@@ -562,8 +594,10 @@ Webhook: `api/stripe-webhook.ts` — apdoroja subscriptions, checkout, Connect, 
 
 | Failas | Paskirtis |
 |--------|-----------|
-| `src/lib/i18n/core.ts` | `t()` funkcija, 13 kalbų |
+| `src/lib/i18n/core.ts` | `t()` funkcija; žodynai kraunami **on-demand** (viena kalba, ne visos 13 bundle) |
+| `src/lib/i18n/locales.ts` | `SUPPORTED_LOCALES` + Luna kalbų pavadinimai |
 | `src/lib/i18n/lt.ts`, `en.ts`, `pl.ts`… | Žodynai |
+| `src/lib/i18n/supportTranslations.ts` | `support.*` 10 kalbų (ne lt/en/pl) |
 | `src/lib/i18n/index.ts` | `useTranslation()` hook |
 | `src/contexts/LocaleContext.tsx` | React provider |
 
@@ -571,7 +605,7 @@ Webhook: `api/stripe-webhook.ts` — apdoroja subscriptions, checkout, Connect, 
 
 **Domenai:** `tutlio.lt` → LT, `tutlio.pl` → PL, `tutlio.com` → EN
 
-Nauji UI tekstai — visos 13 kalbų (`tests/lib/i18n-coverage.test.ts`). Išimtys: `quiz.*` tik `lt` + `en`. Vertimas **negali** būti identiškas EN, jei raktas privalo skirtis (pvz. PL `invoiceSettings.bankName` negali būti `'Bank'`).
+Nauji UI tekstai — visos 13 kalbų (`tests/lib/i18n-coverage.test.ts`). Išimtys: `quiz.*` tik `lt` + `en`. `support.*` — lt/en/pl pagrindiniuose failuose, kitos kalbos per `supportTranslations.ts`. Vertimas **negali** būti identiškas EN, jei raktas privalo skirtis (pvz. PL `invoiceSettings.bankName` negali būti `'Bank'`).
 
 ---
 
@@ -604,6 +638,10 @@ npm run security:pencheck
 - `tests/lib/pvm-education-invoice.test.ts`, `tests/lib/session-complimentary.test.ts`, `tests/lib/quiz-funnel.test.ts`
 - `tests/api/proklase-invoice.test.ts`, `tests/lib/proklase-legal.test.ts`, `tests/lib/pending-package-edit.test.ts`, `tests/api/update-pending-package.test.ts`
 - `tests/lib/i18n-coverage.test.ts` — visos kalbos išskyrus `quiz.*`
+- `tests/api/support-ai.test.ts` — routing, knowledge grounding, pirkimo CTA taisyklė
+- `tests/lib/support-locales.test.ts` — `support.*` visose 13 kalbose
+- `tests/lib/picked-availability-time.test.ts` — pamokos laikas laisvame lange
+- `tests/lib/org-admin-dashboard-path.test.ts`, `tests/lib/org-lookup.test.ts`
 
 **Vitest config:** `vitest.config.ts` — jsdom, `@` → `src/`
 
@@ -662,16 +700,18 @@ npm run security:pencheck
 7. **Per platus diff** — vartotojas nori minimalaus, fokusuoto pakeitimo.
 8. **xlsx paketas** — nenaudojamas; Excel eksportui naudok `exceljs` (`schoolFinanceXlsxExport.ts`).
 9. **Temp failai** — necommitink `scripts/_*.mjs`, `scripts/_last-*.pdf`, `tmp/`, `preview-*.html`.
-10. **i18n** — nauji string'ai (ne `quiz.*`) visose 13 kalbose; `quiz.*` tik lt+en. Identiskas EN vertimas kitoje kalboje krenta coverage.
+10. **i18n** — nauji string'ai (ne `quiz.*`) visose 13 kalbose; `quiz.*` tik lt+en. `support.*` dar `supportTranslations.ts` (10 kalbų). Identiskas EN vertimas kitoje kalboje krenta coverage.
 11. **Lokalūs UI preview** (`/preview/assign-student-modal`, `/preview/complimentary-lesson`) — tik `import.meta.env.DEV`. Produkcijoje maršrutų nėra.
 12. **Vite prod entry** — `vite.config.ts` rollup `input` turi būti **tik** `index.html`. Jei paliksi ištrintus `preview-*.html`, `npm run build` / Vercel failins (`Could not resolve entry module`).
 13. **Vercel `level:error`** dažnai yra Node `[DEP0169] url.parse()` (200 OK). Tikri incidentai: `5xx` arba `[school-contract-sign-reconcile] GoSign ... timed out`.
 14. **Skeno įkėlimas eSign org** — neatspėk folderio iš failo. Dialogas `shouldPromptSchoolSignedOnScan()`: Taip → `signed`, Ne → `awaiting_school_signature`. `signed_contract_url` vis tiek gali būti tėvų kopija; tikras mokyklos parašas = `schoolHasSigned()` / GoSign `school.pdf`.
-15. **Extra-lessons / mokytojų sutartys** — kodas `alano-local` QA. **Nestumk** tų migracijų ir **nedeployink** į prod be atskiro patvirtinimo. Extra-lessons ≠ metinė GoSign sutartis; `kind` filtruok.
+15. **Extra-lessons ≠ metinė GoSign sutartis** — filtruok `school_contracts.kind`. Mokytojų sutartys vis dar WIP — tų migracijų nestumk. Extra-lessons kodas yra `alano-local` (sujungta su `Simo-local`).
 16. **Nėra `lesson_contracts` lentelės** — papildomos pamokos = `school_contracts.kind = 'extra_lessons'`.
 17. **School QA laiškai** — Demo Mokykla mokėtojo el. paštas turi būti `alaniukasa@gmail.com`, ne `*@tutlio.lt` inbox'ai kurių niekas neskaito.
 18. **Auth lock** — lygiagretūs `getUser()` (students + preload + analytics) → `navigatorLock` 5s + `AbortError` steal. Naudok `authSession.ts`.
 19. **Įrašai parked** — negrąžink nav, kol Drive ingest. Restore: `SCHOOL_LESSON_RECORDINGS_NAV_READY = true` ir org flag.
+20. **Org login hang** — po admin login nenaudok PostgREST embed `organizations(...)` iš `organization_admins` / `profiles`. `getOrgAdminDashboardPath` + `fetchOrganizationRow`.
+21. **AI support žinios** — nekurk naujų viešų URL Luna atsakymuose. Puslapiai tik `supportPageSuggestions.ts`. Kainos / licencijos — `supportKnowledge.ts` + `productFeatureCatalog.ts`, ne „iš galvos“. `OPENAI_API_KEY` be `VITE_`.
 
 ---
 
@@ -688,6 +728,7 @@ npm run security:pencheck
 | Mokytojų sutartys (WIP) | `CompanyStaffContracts.tsx`, `schoolContractParty.ts`, `school-contract-teacher-invite.ts` |
 | Klasės grupės | `CompanyClassGroups.tsx`, `ClassGroupFormDialog.tsx`, `schoolClassGroups.ts`, `api/school-class-groups.ts` |
 | School mokiniai + filtrai | `CompanyStudents.tsx`, `schoolStudentEnrollment.ts`, `authSession.ts`, `schoolStudentsExport.ts` |
+| Pamoka iš mokinio kortelės / tikslus laikas | `FindTutorModal.tsx`, `FindLessonBookDialog.tsx`, `PickedAvailabilityTimeEditor.tsx`, `pickedAvailabilityTime.ts` |
 | School mokėjimai | `CompanyPayments.tsx`, `useSchoolPaymentsData.ts` |
 | School finansų eksportas | `schoolFinanceExport.ts`, `schoolFinanceXlsxExport.ts` |
 | Complimentary pamoka | `sessionComplimentary.ts`, `api/mark-session-complimentary.ts` |
@@ -696,6 +737,8 @@ npm run security:pencheck
 | Pro Klasė legal / pending package | `proKlaseLegal.ts`, `pendingPackageEdit.ts`, `api/update-pending-package.ts` |
 | Capacity / chat Broadcast | `docs/CAPACITY_1000_USERS_RUNBOOK.md`, `src/hooks/useChat.ts`, `src/lib/chatMessages.ts` |
 | Tutor quiz / lead | `QuizFunnel.tsx`, `src/lib/quizFunnel.ts`, `api/landing-lead.ts` |
+| AI support widget | `SupportWidget.tsx`, `api/support-chat.ts`, `supportKnowledge.ts`, `productFeatureCatalog.ts`, `docs/SUPPORT_AI.md` |
+| Org admin login kelias | `CompanyLogin.tsx`, `orgAdminDashboardPath.ts`, `orgLookup.ts` |
 | Embedded prenumerata | `EmbeddedSubscriptionCheckoutDialog.tsx`, `create-subscription-checkout.ts` |
 | Tutor kalendorius / laisvas laikas | `Calendar.tsx`, `AvailabilityManager.tsx`, `calendarSessionEventStyle.ts` |
 | Org admin tutor filtrai (scroll) | `orgUi.ts` |
@@ -733,10 +776,11 @@ npm run security:pencheck
 - `test_proklase.md` — pilnas Pro Klasė QA (loginai, laiškai `alaniukasa@gmail.com`, srautai)
 - `docs/SCHOOL_EXTRA_LESSONS_LEGAL_TEST_PLAN.md` — 14 d. click-wrap mini planas
 - `docs/CAPACITY_1000_USERS_RUNBOOK.md` — 1000 vartotojų capacity testas (tik isolated staging)
+- `docs/SUPPORT_AI.md` — viešas AI support (Luna, žinios, kontaktų forma, priedai)
 - `docs/GOOGLE_CALENDAR_SETUP.md` — Google Calendar
 - `darbai.md` — deployment į produkciją
 - `services/docx-converter/README.md` — DOCX converter servisas
 
 ---
 
-*Paskutinis atnaujinimas: 2026-08-27 (`alano-local`: extra-lessons PDF click-wrap, grupių redagavimas + keli slotai, mokinių load/auth, Įrašai parked, Demo QA tik fake org ant prod DB). Jei radai neatitikimų su kodu — prioritetas kodui, atnaujink šį failą.*
+*Paskutinis atnaujinimas: 2026-08-31 (`alano-local` + merge `Simo-local` `a5d73f5`: AI support widget + `productFeatureCatalog`, org login be RLS embed, complimentary / PVM S.F., mokinio kortelėje tikslus pamokos laikas). Jei radai neatitikimų su kodu — prioritetas kodui, atnaujink šį failą.*

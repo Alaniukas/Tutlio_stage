@@ -4,3 +4,6 @@ export const ORG_LOGIN_LOGO_IMG_CLASS =
 
 export const ORG_LOGIN_LOGO_WRAP_CLASS =
   'inline-flex items-center justify-center rounded-2xl overflow-hidden bg-white p-1.5';
+
+export const ORG_LOGIN_LOGO_WRAP_CLASS_DARK =
+  'inline-flex items-center justify-center rounded-2xl overflow-hidden bg-black p-1.5';

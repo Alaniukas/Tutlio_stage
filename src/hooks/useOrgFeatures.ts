@@ -13,6 +13,7 @@ import { parseOrgContactVisibility, type OrgContactVisibility } from '@/lib/orgC
 interface OrgFeaturesState {
   loading: boolean;
   organizationId: string | null;
+  entityType: 'company' | 'school' | null;
   features: Record<string, boolean>;
   hasFeature: (featureId: string) => boolean;
   isOrgUser: boolean;
@@ -30,6 +31,7 @@ export function useOrgFeatures(): OrgFeaturesState {
   const { user: contextUser } = useUser();
   const [loading, setLoading] = useState(true);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
+  const [entityType, setEntityType] = useState<'company' | 'school' | null>(null);
   const [rawFeatures, setRawFeatures] = useState<Record<string, unknown> | null>(null);
   const [features, setFeatures] = useState<Record<string, boolean>>({});
 
@@ -54,6 +56,7 @@ export function useOrgFeatures(): OrgFeaturesState {
         }
         if (!orgId) {
           setRawFeatures(null);
+          setEntityType(null);
           return;
         }
 
@@ -63,9 +66,12 @@ export function useOrgFeatures(): OrgFeaturesState {
 
         if (!org) {
           setRawFeatures(null);
+          setEntityType(null);
           return;
         }
 
+        const et = (org as { entity_type?: string | null }).entity_type;
+        setEntityType(et === 'school' ? 'school' : et === 'company' ? 'company' : null);
         setRawFeatures((org.features as Record<string, unknown>) ?? {});
 
         // Merge organization features with defaults from registry
@@ -110,6 +116,7 @@ export function useOrgFeatures(): OrgFeaturesState {
   return {
     loading,
     organizationId,
+    entityType,
     features,
     hasFeature,
     isOrgUser: organizationId !== null,

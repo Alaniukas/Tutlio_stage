@@ -1,8 +1,10 @@
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
+import { schoolInstructionsTranslationsNo } from './schoolInstructionsTranslations.js';
 import { supportTranslations } from './supportTranslations.js';
 
 export const no: Record<string, string> = {
   ...sharedOrganizationWorkflowTranslations,
+  ...schoolInstructionsTranslationsNo,
   ...supportTranslations.no,
   'invoiceSettings.bankName': 'Banknavn',
   'invoiceSettings.iban': 'Kontonummer (IBAN)',
@@ -1320,7 +1322,7 @@ export const no: Record<string, string> = {
   'findLesson.endTime': 'Sluttid',
   'findLesson.outsideWindow': 'Timen må ligge innenfor det valgte ledige vinduet.',
   'findLesson.clearPickedSlot': 'Fjern tid',
-  'findLesson.willCreateOnSave': 'Når eleven lagres, reserveres det også en time på dette tidspunktet.',
+  'findLesson.willCreateOnSave': 'Når eleven lagres, reserveres det en time for hver valgt lærer.',
   'findLesson.noSubSlots': 'Ingen time passer inn i dette ledige vinduet for den valgte fagvarigheten. Juster tilgjengeligheten eller fagets varighet i timeinnstillinger.',
   'findLesson.meetingLinkHint': 'Automatisk utfylt: elevlenke hvis angitt, ellers privatlærer, ellers fag. Du kan redigere manuelt.',
   'compSch.activeLesson': 'Aktiv time',
@@ -3682,6 +3684,13 @@ export const no: Record<string, string> = {
   'studentSettings.currentPassword': 'Nåværende passord',
   'studentSettings.dangerZone': 'Faresone',
   'studentSettings.deleteAccount': 'Slett konto',
+  'studentSettings.archiveAccount': 'Arkiver konto',
+  'studentSettings.archiveAccountDesc': 'Kontoen slettes ikke med en gang. Mokslo vaisiai-administrasjonen tar kontakt og sletter den innen 14 virkedager.',
+  'studentSettings.archiveConfirmMsg': 'Arkivere kontoen? Administrasjonen tar kontakt innen 14 virkedager og sletter den deretter.',
+  'studentSettings.archiveCta': 'Arkiver',
+  'studentSettings.archiveBlockedUnpaid': 'Du kan ikke arkivere kontoen mens timer, pakker eller fakturaer er ubetalte. Betal først.',
+  'studentSettings.archivePending': 'Sletting av kontoen er allerede bedt om. Mokslo vaisiai-administrasjonen tar kontakt innen 14 virkedager.',
+  'studentSettings.archiveFailed': 'Kunne ikke arkivere kontoen.',
   'studentSettings.failedSave': 'Kunne ikke lagre endringer.',
   'studentSettings.grade': 'Klassetrinn',
   'studentSettings.manageAccount': 'Administrer kontoen din',

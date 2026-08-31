@@ -1,8 +1,10 @@
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
+import { schoolInstructionsTranslationsDe } from './schoolInstructionsTranslations.js';
 import { supportTranslations } from './supportTranslations.js';
 
 export const de: Record<string, string> = {
   ...sharedOrganizationWorkflowTranslations,
+  ...schoolInstructionsTranslationsDe,
   ...supportTranslations.de,
   'invoiceSettings.bankName': 'Bankname',
   'invoiceSettings.iban': 'Kontonummer (IBAN)',
@@ -1554,6 +1556,13 @@ export const de: Record<string, string> = {
   'studentSettings.manageAccount': 'Konto verwalten',
   'studentSettings.dangerZone': 'Gefahrenzone',
   'studentSettings.deleteAccount': 'Konto löschen',
+  'studentSettings.archiveAccount': 'Konto archivieren',
+  'studentSettings.archiveAccountDesc': 'Das Konto wird nicht sofort gelöscht. Die Verwaltung von Mokslo vaisiai nimmt Kontakt auf und löscht es innerhalb von 14 Werktagen.',
+  'studentSettings.archiveConfirmMsg': 'Konto archivieren? Die Verwaltung kontaktiert Sie innerhalb von 14 Werktagen und löscht es anschließend.',
+  'studentSettings.archiveCta': 'Archivieren',
+  'studentSettings.archiveBlockedUnpaid': 'Sie können das Konto nicht archivieren, solange Stunden, Pakete oder Rechnungen unbezahlt sind. Bitte zuerst bezahlen.',
+  'studentSettings.archivePending': 'Die Kontolöschung wurde bereits beantragt. Die Verwaltung von Mokslo vaisiai kontaktiert Sie innerhalb von 14 Werktagen.',
+  'studentSettings.archiveFailed': 'Konto konnte nicht archiviert werden.',
   'studentSettings.parentInviteSectionTitle': 'Eltern-/Erziehungsberechtigtenportal',
   'studentSettings.inviteParentCta': 'Einladung per E-Mail senden',
   'studentWait.title': 'Warteliste',
@@ -2434,7 +2443,7 @@ export const de: Record<string, string> = {
   'findLesson.endTime': 'Ende',
   'findLesson.outsideWindow': 'Die Stunde muss im gewählten freien Zeitfenster bleiben.',
   'findLesson.clearPickedSlot': 'Zeit entfernen',
-  'findLesson.willCreateOnSave': 'Beim Speichern des Schülers wird auch eine Stunde zu dieser Zeit reserviert.',
+  'findLesson.willCreateOnSave': 'Beim Speichern des Schülers wird für jeden gewählten Tutor eine Stunde reserviert.',
   'compSch.addFreeTimeDesc': 'Freie Zeit hinzufügen',
   'compSch.addStudentInSlot': 'Schüler zu diesem Zeitfenster hinzufügen',
   'compSch.alreadyPaid': 'Bereits bezahlt?',

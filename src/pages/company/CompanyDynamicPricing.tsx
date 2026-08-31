@@ -28,9 +28,9 @@ const sortRules = (rules: EditableRule[]) =>
 export default function CompanyDynamicPricing() {
   const { t } = useTranslation();
   const entityType = useOrgEntityType();
-  const { loading: featuresLoading, hasFeature } = useOrgFeatures();
+  const { loading: featuresLoading, organizationId: orgIdFromFeatures } = useOrgFeatures();
   const allowed =
-    !featuresLoading && !isSchoolOrg(entityType) && showDynamicPricingNav(entityType, hasFeature);
+    !featuresLoading && !isSchoolOrg(entityType) && showDynamicPricingNav(orgIdFromFeatures, entityType);
   const [organizationId, setOrganizationId] = useState('');
   const [rules, setRules] = useState<EditableRule[]>([]);
   const [deletedIds, setDeletedIds] = useState<string[]>([]);

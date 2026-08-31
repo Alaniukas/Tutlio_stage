@@ -22,6 +22,8 @@ import { useTranslation } from '@/lib/i18n';
 import { useDismissibleDashboardItemIds } from '@/hooks/useDismissibleDashboardItemIds';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { fetchOrganizationRow } from '@/lib/orgLookup';
+import { useOrgEntityType } from '@/contexts/OrgEntityContext';
+import { isProKlaseOrg } from '@/lib/marketMoney';
 import { authHeaders } from '@/lib/apiHelpers';
 import { deriveAttendance, isAttendanceFlagged } from '@/lib/attendance';
 import { buildNoShowSessionPatch, defaultNoShowWhenForNow } from '@/lib/noShowWhen';
@@ -96,6 +98,7 @@ function attendanceAttentionSummary(
 export default function CompanyDashboard() {
   const { t, dateFnsLocale } = useTranslation();
   const { fmt } = useMarketMoney();
+  const orgEntityType = useOrgEntityType();
   const location = useLocation();
   const navigate = useNavigate();
   const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
@@ -176,7 +179,10 @@ export default function CompanyDashboard() {
       const orgFeatures = org?.features && typeof org.features === 'object' && !Array.isArray(org.features)
         ? (org.features as Record<string, unknown>)
         : {};
-      const trialFollowupAlertEnabled = orgFeatures.trial_followup_alert === true;
+      const trialFollowupAlertEnabled =
+        orgEntityType !== 'school' &&
+        isProKlaseOrg(organizationId) &&
+        orgFeatures.trial_followup_alert === true;
       setOrgIdForDismiss(organizationId);
       setOrgName(org?.name || '');
       const cap = Number(org?.tutor_license_count) || 0;

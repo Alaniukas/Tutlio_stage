@@ -1,8 +1,10 @@
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
+import { schoolInstructionsTranslationsFi } from './schoolInstructionsTranslations.js';
 import { supportTranslations } from './supportTranslations.js';
 
 export const fi: Record<string, string> = {
   ...sharedOrganizationWorkflowTranslations,
+  ...schoolInstructionsTranslationsFi,
   ...supportTranslations.fi,
   'invoiceSettings.bankName': 'Pankin nimi',
   'invoiceSettings.iban': 'Tilinumero (IBAN)',
@@ -1486,7 +1488,7 @@ export const fi: Record<string, string> = {
   'findLesson.endTime': 'Loppu',
   'findLesson.outsideWindow': 'Tunnin on mahduttava valittuun vapaaseen aikaikkunaan.',
   'findLesson.clearPickedSlot': 'Poista aika',
-  'findLesson.willCreateOnSave': 'Oppilaan tallennus varaa myös tunnin tälle ajalle.',
+  'findLesson.willCreateOnSave': 'Oppilaan tallennus varaa tunnin jokaiselle valitulle opettajalle.',
   'findLesson.noSubSlots': 'Tähän vapaaseen aikaikkunaan ei mahdu tuntia valitun oppiaineen kestolla. Säädä saatavuutta tai oppiaineen kestoa tuntiasetuksissa.',
   'findLesson.meetingLinkHint': 'Täytetty automaattisesti: oppilaan linkki jos asetettu, muuten tutorin, muuten oppiaineen. Voit muokata manuaalisesti.',
   'compSch.activeLesson': 'Aktiivinen tunti',
@@ -3735,6 +3737,13 @@ export const fi: Record<string, string> = {
   'studentSettings.currentPassword': 'Nykyinen salasana',
   'studentSettings.dangerZone': 'Vaaravyöhyke',
   'studentSettings.deleteAccount': 'Poista tili',
+  'studentSettings.archiveAccount': 'Arkistoi tili',
+  'studentSettings.archiveAccountDesc': 'Tiliä ei poisteta heti. Mokslo vaisiai -hallinto ottaa yhteyttä ja poistaa sen 14 arkipäivän kuluessa.',
+  'studentSettings.archiveConfirmMsg': 'Arkistoidaanko tili? Hallinto ottaa yhteyttä 14 arkipäivän kuluessa ja poistaa tilin sen jälkeen.',
+  'studentSettings.archiveCta': 'Arkistoi',
+  'studentSettings.archiveBlockedUnpaid': 'Tiliä ei voi arkistoida, jos tunteja, paketteja tai laskuja on maksamatta. Maksa ensin.',
+  'studentSettings.archivePending': 'Tilin poisto on jo pyydetty. Mokslo vaisiai -hallinto ottaa yhteyttä 14 arkipäivän kuluessa.',
+  'studentSettings.archiveFailed': 'Tiliä ei voitu arkistoida.',
   'studentSettings.failedSave': 'Muutosten tallentaminen epäonnistui.',
   'studentSettings.grade': 'Luokka',
   'studentSettings.manageAccount': 'Hallitse tiliäsi',

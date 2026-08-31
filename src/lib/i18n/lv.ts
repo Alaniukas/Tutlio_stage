@@ -1,8 +1,10 @@
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
+import { schoolInstructionsTranslationsLv } from './schoolInstructionsTranslations.js';
 import { supportTranslations } from './supportTranslations.js';
 
 export const lv: Record<string, string> = {
   ...sharedOrganizationWorkflowTranslations,
+  ...schoolInstructionsTranslationsLv,
   ...supportTranslations.lv,
   'companyNav.team': 'Komanda un piekļuve',
   'companyNav.sectionWork': 'Ikdiena',
@@ -2272,6 +2274,13 @@ export const lv: Record<string, string> = {
   'studentSettings.currentPassword': 'Pašreizējā parole',
   'studentSettings.dangerZone': 'Bīstamā zona',
   'studentSettings.deleteAccount': 'Dzēst kontu',
+  'studentSettings.archiveAccount': 'Arhivēt kontu',
+  'studentSettings.archiveAccountDesc': 'Konts netiks dzēsts uzreiz. Mokslo vaisiai administrācija sazināsies un dzēsīs to 14 darba dienu laikā.',
+  'studentSettings.archiveConfirmMsg': 'Vai arhivēt kontu? Administrācija sazināsies 14 darba dienu laikā un pēc tam kontu dzēsīs.',
+  'studentSettings.archiveCta': 'Arhivēt',
+  'studentSettings.archiveBlockedUnpaid': 'Kontu nevar arhivēt, kamēr ir neapmaksātas nodarbības, paketes vai rēķini. Vispirms apmaksājiet.',
+  'studentSettings.archivePending': 'Konta dzēšana jau ir pieprasīta. Mokslo vaisiai administrācija sazināsies 14 darba dienu laikā.',
+  'studentSettings.archiveFailed': 'Neizdevās arhivēt kontu.',
   'studentSettings.emailLabel': 'E-pasts',
   'studentSettings.failedSave': 'Neizdevās saglabāt izmaiņas.',
   'studentSettings.grade': 'Klase',
@@ -4007,7 +4016,7 @@ export const lv: Record<string, string> = {
   'findLesson.endTime': 'Beigas',
   'findLesson.outsideWindow': 'Nodarbībai jāiekļaujas izvēlētajā brīvajā logā.',
   'findLesson.clearPickedSlot': 'Noņemt laiku',
-  'findLesson.willCreateOnSave': 'Saglabājot skolēnu, šajā laikā tiks rezervēta arī nodarbība.',
+  'findLesson.willCreateOnSave': 'Saglabājot skolēnu, katram izvēlētajam pasniedzējam tiks rezervēta nodarbība.',
   'findLesson.noSubSlots': 'Šajā brīvajā logā neiekļaujas neviena nodarbība izvēlētā priekšmeta ilgumam. Pielāgojiet pieejamību vai priekšmeta ilgumu nodarbību iestatījumos.',
   'findLesson.meetingLinkHint': 'Automātiski aizpildīts: skolēna saite, ja iestatīta, pretējā gadījumā pasniedzēja, pretējā gadījumā priekšmeta. Varat rediģēt manuāli.',
 

@@ -43,7 +43,7 @@ export function dedupeAuthGetUser(): Promise<User | null> {
 /** Parallel `OrgSuspendedBanner` / StrictMode bursts → one round-trip per org id. */
 export function orgSuspensionRowDeduped(organizationId: string) {
   return dedupeAsync(`org_sf:${organizationId}`, () =>
-    supabase.from('organizations').select('status, features, perlas_finance_enabled').eq('id', organizationId).maybeSingle(),
+    supabase.from('organizations').select('status, features, perlas_finance_enabled, entity_type').eq('id', organizationId).maybeSingle(),
   );
 }
 

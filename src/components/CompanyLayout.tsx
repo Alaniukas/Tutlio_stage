@@ -128,7 +128,7 @@ export default function CompanyLayout() {
   const isSchool = entityType === 'school';
   const { loading: orgFeaturesLoading, hasFeature, organizationId } = useOrgFeatures();
   const showDynamicPricing =
-    !orgFeaturesLoading && showDynamicPricingNav(entityType, hasFeature);
+    !orgFeaturesLoading && showDynamicPricingNav(organizationId, entityType);
   /** Public "vizitinė kortelė" is solo-tutor only for now. */
   const showPublicPage = false;
   const cachedOrgId = (dashCache?.organizationId as string | undefined) ?? null;

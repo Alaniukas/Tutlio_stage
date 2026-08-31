@@ -183,6 +183,19 @@ function RequireStudentBooking({ children }: { children: React.ReactElement }) {
   return children;
 }
 
+function RequireStudentPayments({ children }: { children: React.ReactElement }) {
+  const policy = useStudentPolicy();
+  if (!policy.resolved) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+      </div>
+    );
+  }
+  if (!policy.paymentsPageEnabled) return <Navigate to="/student" replace />;
+  return children;
+}
+
 function ParentProtectedWithUser() {
   return (
     <UserProvider>
@@ -382,7 +395,7 @@ export default function App({ basename }: { basename: string }) {
           <Route path="/student/sessions" element={<StudentSessions />} />
           <Route path="/student/messages" element={<StudentMessages />} />
           <Route path="/student/waitlist" element={<RequireStudentBooking><StudentWaitlist /></RequireStudentBooking>} />
-          <Route path="/student/payments" element={<StudentPayments />} />
+          <Route path="/student/payments" element={<RequireStudentPayments><StudentPayments /></RequireStudentPayments>} />
           <Route path="/student/instructions" element={<StudentInstructions />} />
           <Route path="/student/settings" element={<StudentSettings />} />
         </Route>

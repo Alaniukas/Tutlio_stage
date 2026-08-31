@@ -1,7 +1,9 @@
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
+import { schoolInstructionsTranslationsPl } from './schoolInstructionsTranslations.js';
 
 export const pl: Record<string, string> = {
   ...sharedOrganizationWorkflowTranslations,
+  ...schoolInstructionsTranslationsPl,
   'invoiceSettings.bankName': 'Nazwa banku',
   'invoiceSettings.iban': 'Numer konta (IBAN)',
   'invoiceSettings.nextInvoiceNumber': 'Następny numer faktury',
@@ -846,7 +848,7 @@ export const pl: Record<string, string> = {
   'findLesson.endTime': 'Koniec',
   'findLesson.outsideWindow': 'Lekcja musi zmieścić się w wybranym wolnym oknie.',
   'findLesson.clearPickedSlot': 'Usuń godzinę',
-  'findLesson.willCreateOnSave': 'Zapis ucznia zarezerwuje też lekcję w tym czasie.',
+  'findLesson.willCreateOnSave': 'Zapis ucznia zarezerwuje lekcję dla każdego wybranego korepetytora.',
   'findLesson.noSubSlots': 'Żadna lekcja nie mieści się w tym wolnym oknie dla wybranego czasu trwania przedmiotu. Dostosuj dostępność lub czas trwania przedmiotu w ustawieniach lekcji.',
   'findLesson.meetingLinkHint': 'Automatycznie wypełnione: link ucznia jeśli ustawiony, w przeciwnym razie korepetytora, w przeciwnym razie przedmiotu. Możesz edytować ręcznie.',
   'common.close': 'Zamknij',
@@ -4073,6 +4075,13 @@ export const pl: Record<string, string> = {
   'studentSettings.currentPassword': 'Aktualne hasło',
   'studentSettings.dangerZone': 'Strefa zagrożenia',
   'studentSettings.deleteAccount': 'Usuń konto',
+  'studentSettings.archiveAccount': 'Zarchiwizuj konto',
+  'studentSettings.archiveAccountDesc': 'Konto nie zostanie usunięte od razu. Administracja Mokslo vaisiai skontaktuje się z Tobą i usunie je w ciągu 14 dni roboczych.',
+  'studentSettings.archiveConfirmMsg': 'Zarchiwizować konto? Administracja skontaktuje się w ciągu 14 dni roboczych, a następnie je usunie.',
+  'studentSettings.archiveCta': 'Archiwizuj',
+  'studentSettings.archiveBlockedUnpaid': 'Nie możesz zarchiwizować konta, dopóki są nieopłacone lekcje, pakiety lub faktury. Najpierw opłać należności.',
+  'studentSettings.archivePending': 'Usunięcie konta jest już zlecone. Administracja Mokslo vaisiai skontaktuje się w ciągu 14 dni roboczych.',
+  'studentSettings.archiveFailed': 'Nie udało się zarchiwizować konta.',
   'studentSettings.emailLabel': 'E-mail',
   'studentSettings.failedSave': 'Nie udało się zapisać zmian.',
   'studentSettings.grade': 'Klasa',

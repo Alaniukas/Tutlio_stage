@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import { format, addDays } from 'date-fns';
 import {
   computeTutorSlots,
+  dedupeMatchSlots,
   groupAndRankTutors,
   subtractBusyFromMatchSlots,
   type AvailabilityRule,
@@ -172,8 +173,13 @@ export default function FindTutorModal({
 
       const tutorIds = tutorList.map((t: any) => t.id);
       if (tutorIds.length === 0) return;
-      const { data: subjectsData } = await supabase.from('subjects').select('id, name, price, duration_minutes, tutor_id').in('tutor_id', tutorIds).order('name');
-      setSubjects((subjectsData as MatchSubject[]) || []);
+      const { data: subjectsData } = await supabase
+        .from('subjects')
+        .select('id, name, price, duration_minutes, tutor_id, is_trial')
+        .in('tutor_id', tutorIds)
+        .order('name');
+      const rows = ((subjectsData as MatchSubject[]) || []).filter((row) => row.is_trial !== true);
+      setSubjects(rows);
     })();
   }, [isOpen, orgId]);
 
@@ -281,7 +287,9 @@ export default function FindTutorModal({
       }
     }
 
-    setResults(Array.from(slotsByKey.values()).sort((a, b) => a.start.getTime() - b.start.getTime()));
+    setResults(
+      dedupeMatchSlots(Array.from(slotsByKey.values())).sort((a, b) => a.start.getTime() - b.start.getTime()),
+    );
     setLoading(false);
   };
 

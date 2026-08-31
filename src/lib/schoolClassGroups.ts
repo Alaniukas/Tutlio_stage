@@ -1,4 +1,4 @@
-import { isArchivedEnrollmentStatus, suggestSchoolYear } from './schoolStudentEnrollment';
+import { isArchivedEnrollmentStatus, suggestSchoolYear } from './schoolStudentEnrollment.js';
 
 export type SchoolClassGroupSlot = {
   weekday: number;

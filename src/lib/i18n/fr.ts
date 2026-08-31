@@ -1,8 +1,10 @@
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
+import { schoolInstructionsTranslationsFr } from './schoolInstructionsTranslations.js';
 import { supportTranslations } from './supportTranslations.js';
 
 export const fr: Record<string, string> = {
   ...sharedOrganizationWorkflowTranslations,
+  ...schoolInstructionsTranslationsFr,
   ...supportTranslations.fr,
   'invoiceSettings.bankName': 'Banque',
   'invoiceSettings.iban': 'Numéro de compte (IBAN)',
@@ -968,7 +970,7 @@ export const fr: Record<string, string> = {
   'findLesson.endTime': 'Fin',
   'findLesson.outsideWindow': 'Le cours doit rester dans le créneau libre sélectionné.',
   'findLesson.clearPickedSlot': 'Retirer l\'horaire',
-  'findLesson.willCreateOnSave': 'Enregistrer l\'élève réservera aussi un cours à cet horaire.',
+  'findLesson.willCreateOnSave': 'Enregistrer l\'élève réservera un cours pour chaque tuteur sélectionné.',
   'findLesson.noSubSlots': 'Aucun cours ne rentre dans ce créneau libre pour la durée de la matière sélectionnée. Ajustez la disponibilité ou la durée de la matière dans les paramètres.',
   'findLesson.meetingLinkHint': 'Remplissage auto : lien élève si défini, sinon tuteur, sinon matière. Modifiable manuellement.',
   'common.close': 'Fermer',
@@ -2489,6 +2491,13 @@ export const fr: Record<string, string> = {
   'studentSettings.manageAccount': 'Gérer votre compte',
   'studentSettings.dangerZone': 'Zone de danger',
   'studentSettings.deleteAccount': 'Supprimer le compte',
+  'studentSettings.archiveAccount': 'Archiver le compte',
+  'studentSettings.archiveAccountDesc': 'Le compte ne sera pas supprimé tout de suite. L’administration de Mokslo vaisiai vous contactera et le supprimera sous 14 jours ouvrables.',
+  'studentSettings.archiveConfirmMsg': 'Archiver ce compte ? L’administration vous contactera sous 14 jours ouvrables, puis le supprimera.',
+  'studentSettings.archiveCta': 'Archiver',
+  'studentSettings.archiveBlockedUnpaid': 'Vous ne pouvez pas archiver le compte tant que des cours, forfaits ou factures restent impayés. Veuillez d’abord payer.',
+  'studentSettings.archivePending': 'La suppression du compte est déjà demandée. L’administration de Mokslo vaisiai vous contactera sous 14 jours ouvrables.',
+  'studentSettings.archiveFailed': 'Impossible d’archiver le compte.',
   'studentSettings.parentInviteSectionTitle': 'Portail parent / tuteur légal',
   'studentSettings.parentInviteSectionDesc': 'Envoyez une invitation par e-mail pour que votre parent puisse s\'inscrire et voir vos cours, messages et factures.',
   'studentSettings.inviteParentCta': 'Envoyer l\'invitation par e-mail',

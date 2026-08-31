@@ -106,7 +106,8 @@ import { findOrgTutorEmailConflict } from '@/lib/orgStudentTutorGuards';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { useUser } from '@/contexts/UserContext';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
-import { hasProKlaseIntakeFeatures } from '@/lib/orgIntakeMode';
+import { proKlaseOrgAdminContext, proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
+import { isProKlaseOrg } from '@/lib/marketMoney';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import {
   parseStudentGrade,
@@ -167,6 +168,12 @@ interface Tutor {
   full_name: string;
   subject_names?: string[];
 }
+
+type AddStudentLessonPick = {
+  pick: FindLessonBookPick;
+  lessonStartIso: string;
+  lessonEndIso: string;
+};
 
 function formatTutorSubjectsLine(names: string[] | undefined, noSubjectsLabel: string): string {
   if (!names?.length) return noSubjectsLabel;
@@ -303,8 +310,9 @@ export default function CompanyStudents() {
   const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
   const { user: authUser } = useUser();
   const { membership } = useOrgAdminAccess();
-  const proKlaseIntake =
-    !isSchoolView && !orgFeaturesLoading && hasProKlaseIntakeFeatures(hasFeature);
+  const proKlaseAdminUi = proKlaseOrgAdminContext(orgId, orgEntityType, orgFeaturesLoading);
+  const pkFeat = (flagId: string) =>
+    proKlaseFeatureEnabled(orgId, orgEntityType, hasFeature, flagId, orgFeaturesLoading);
   const orgUsesManualPackages = !orgFeaturesLoading && hasFeature('manual_payments');
   /** Full contact editing: schools always; other orgs behind full_student_edit (email only until registered). */
   const canFullEditStudent = isSchoolView || (!orgFeaturesLoading && hasFeature('full_student_edit'));
@@ -317,9 +325,7 @@ export default function CompanyStudents() {
   const [loading, setLoading] = useState(!stc);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [addStudentFindTutorOpen, setAddStudentFindTutorOpen] = useState(false);
-  const [addStudentPickedSlot, setAddStudentPickedSlot] = useState<FindLessonBookPick | null>(null);
-  const [addStudentLessonStartIso, setAddStudentLessonStartIso] = useState('');
-  const [addStudentLessonEndIso, setAddStudentLessonEndIso] = useState('');
+  const [addStudentPickedLessons, setAddStudentPickedLessons] = useState<AddStudentLessonPick[]>([]);
   const [saving, setSaving] = useState(false);
   const [orgId, setOrgId] = useState<string | null>(null);
   const [classGroups, setClassGroups] = useState<SchoolClassGroupRecord[]>([]);
@@ -511,7 +517,7 @@ export default function CompanyStudents() {
     enable_prepaid_packages: false,
   });
 
-  const monthlyPackageMode = proKlaseIntake && hasFeature('monthly_packages');
+  const monthlyPackageMode = proKlaseAdminUi && hasFeature('monthly_packages');
   const monthlyPackagePeriod = useMemo(
     () => monthlyPackagePeriodFrom(formatLocalYmd(new Date()), pkgLessonsPerWeek),
     [pkgLessonsPerWeek],
@@ -758,8 +764,8 @@ export default function CompanyStudents() {
   const shouldShowParentContacts = (student: Student) => hasSchoolParentContacts(student);
   const showStudentSchedulePane =
     Boolean(selectedStudent) &&
-    ((proKlaseIntake && hasFeature('student_schedule_overview')) ||
-      (!orgFeaturesLoading && hasFeature('student_availability_profile')));
+    ((proKlaseAdminUi && hasFeature('student_schedule_overview')) ||
+      pkFeat('student_availability_profile'));
 
   const paymentActions = useMemo(() => {
     if (!selectedStudent) return { canSendInvoice: false, canSendPackage: false };
@@ -1228,7 +1234,12 @@ export default function CompanyStudents() {
       const feats = orgRow?.features && typeof orgRow.features === 'object' && !Array.isArray(orgRow.features)
         ? (orgRow.features as Record<string, unknown>)
         : {};
-      if (feats.trial_followup_alert === true && fetchedStudents.length > 0) {
+      if (
+        !isSchoolView &&
+        isProKlaseOrg(organizationId) &&
+        feats.trial_followup_alert === true &&
+        fetchedStudents.length > 0
+      ) {
         const studentIds = fetchedStudents.map((s) => s.id);
         const thirtyAgo = new Date();
         thirtyAgo.setDate(thirtyAgo.getDate() - 30);
@@ -1341,7 +1352,7 @@ export default function CompanyStudents() {
             }
             : pkgExpiresAt ? { expiresAt: pkgExpiresAt } : {}),
           ...(!orgUsesManualPackages ? { attachSalesInvoice: pkgAttachSalesInvoice } : {}),
-          ...(hasFeature('package_reservation_flow') && pkgReserveSlots.length > 0
+          ...(pkFeat('package_reservation_flow') && pkgReserveSlots.length > 0
             ? { slots: pkgReserveSlots }
             : {}),
         }),
@@ -1704,11 +1715,11 @@ export default function CompanyStudents() {
       return;
     }
 
-    if (addStudentPickedSlot) {
-      const windowStart = new Date(addStudentPickedSlot.startIso);
-      const windowEnd = new Date(addStudentPickedSlot.endIso);
-      const lessonStart = new Date(addStudentLessonStartIso);
-      const lessonEnd = new Date(addStudentLessonEndIso);
+    for (const item of addStudentPickedLessons) {
+      const windowStart = new Date(item.pick.startIso);
+      const windowEnd = new Date(item.pick.endIso);
+      const lessonStart = new Date(item.lessonStartIso);
+      const lessonEnd = new Date(item.lessonEndIso);
       if (!lessonFitsAvailabilityWindow(windowStart, windowEnd, lessonStart, lessonEnd)) {
         setToastMessage({ message: t('findLesson.outsideWindow'), type: 'error' });
         return;
@@ -1797,16 +1808,16 @@ export default function CompanyStudents() {
           student_city: newStudent.student_city?.trim() || null,
           child_birth_date: newStudent.child_birth_date?.trim() || null,
           invite_code: inviteCode,
-          ...(addStudentPickedSlot
-            ? {
-                preferred_availability: [
-                  preferredWindowFromDateRange(
-                    new Date(addStudentPickedSlot.startIso),
-                    new Date(addStudentPickedSlot.endIso),
-                  ),
-                ],
-              }
-            : {}),
+          ...(() => {
+            const match =
+              addStudentPickedLessons.find((item) => item.pick.tutorId === tutorId) || addStudentPickedLessons[0];
+            if (!match) return {};
+            return {
+              preferred_availability: [
+                preferredWindowFromDateRange(new Date(match.pick.startIso), new Date(match.pick.endIso)),
+              ],
+            };
+          })(),
           ...(effectiveOrgId ? { organization_id: effectiveOrgId } : {}),
         })
         .select('id, tutor_id, invite_code')
@@ -1821,44 +1832,44 @@ export default function CompanyStudents() {
     }
 
     let lessonCreateFailed = false;
-    if (addStudentPickedSlot && inserted.length > 0) {
-      const lessonRow =
-        inserted.find((row) => row.tutor_id === addStudentPickedSlot.tutorId) || inserted[0];
-      try {
-        const { data: subj } = await supabase
-          .from('subjects')
-          .select('id, name, price, duration_minutes, is_group, max_students, meeting_link')
-          .eq('id', addStudentPickedSlot.subjectId)
-          .maybeSingle();
-        if (subj && lessonRow.id) {
-          const { data: orgRow } = effectiveOrgId
-            ? await supabase.from('organizations').select('features').eq('id', effectiveOrgId).maybeSingle()
-            : { data: null };
-          const featObj =
-            orgRow?.features && typeof orgRow.features === 'object' && !Array.isArray(orgRow.features)
-              ? (orgRow.features as Record<string, unknown>)
-              : {};
-          const trialDuration =
-            typeof featObj.trial_lesson_duration_minutes === 'number'
-              ? Math.max(15, Math.round(featObj.trial_lesson_duration_minutes))
-              : 60;
-          const trialPrice =
-            typeof featObj.trial_lesson_price_eur === 'number' ? Math.max(0, featObj.trial_lesson_price_eur) : 0;
-          const trialTopic =
-            typeof featObj.trial_lesson_topic === 'string' && featObj.trial_lesson_topic.trim()
-              ? featObj.trial_lesson_topic.trim()
-              : '';
-          const isTrial = hasFeature('auto_trial_first_lesson');
+    if (addStudentPickedLessons.length > 0 && inserted.length > 0) {
+      const { data: orgRow } = effectiveOrgId
+        ? await supabase.from('organizations').select('features').eq('id', effectiveOrgId).maybeSingle()
+        : { data: null };
+      const featObj =
+        orgRow?.features && typeof orgRow.features === 'object' && !Array.isArray(orgRow.features)
+          ? (orgRow.features as Record<string, unknown>)
+          : {};
+      const trialDuration =
+        typeof featObj.trial_lesson_duration_minutes === 'number'
+          ? Math.max(15, Math.round(featObj.trial_lesson_duration_minutes))
+          : 60;
+      const trialPrice =
+        typeof featObj.trial_lesson_price_eur === 'number' ? Math.max(0, featObj.trial_lesson_price_eur) : 0;
+      const trialTopic =
+        typeof featObj.trial_lesson_topic === 'string' && featObj.trial_lesson_topic.trim()
+          ? featObj.trial_lesson_topic.trim()
+          : '';
+      const isTrial = pkFeat('auto_trial_first_lesson');
+      for (const item of addStudentPickedLessons) {
+        const lessonRow = inserted.find((row) => row.tutor_id === item.pick.tutorId) || inserted[0];
+        try {
+          const { data: subj } = await supabase
+            .from('subjects')
+            .select('id, name, price, duration_minutes, is_group, max_students, meeting_link')
+            .eq('id', item.pick.subjectId)
+            .maybeSingle();
+          if (!subj || !lessonRow.id) continue;
           const price = isTrial ? trialPrice : Number((subj as { price?: number | null }).price ?? 0);
           const result = await runOrgAdminCreateSession({
             supabase,
-            createTutorId: addStudentPickedSlot.tutorId,
-            createSubjectId: addStudentPickedSlot.subjectId,
+            createTutorId: item.pick.tutorId,
+            createSubjectId: item.pick.subjectId,
             createStudentId: lessonRow.id,
             createStudentIds: [lessonRow.id],
-            createStartTime: addStudentLessonStartIso,
-            createEndTime: addStudentLessonEndIso,
-            createTopic: trialTopic || addStudentPickedSlot.subjectName || (subj as { name?: string | null }).name || '',
+            createStartTime: item.lessonStartIso,
+            createEndTime: item.lessonEndIso,
+            createTopic: trialTopic || item.pick.subjectName || (subj as { name?: string | null }).name || '',
             createMeetingLink: String((subj as { meeting_link?: string | null }).meeting_link || ''),
             createIsRecurring: false,
             createRecurringEndDate: '',
@@ -1886,7 +1897,7 @@ export default function CompanyStudents() {
           if (
             isTrial &&
             price > 0 &&
-            hasFeature('trial_creation_payment_email') &&
+            pkFeat('trial_creation_payment_email') &&
             result.createdSessionIds.length > 0
           ) {
             const resp = await fetch('/api/create-trial-package', {
@@ -1894,7 +1905,7 @@ export default function CompanyStudents() {
               headers: await authHeaders(),
               body: JSON.stringify({
                 studentId: lessonRow.id,
-                tutorId: addStudentPickedSlot.tutorId,
+                tutorId: item.pick.tutorId,
                 sessionId: result.createdSessionIds[0],
                 topic: trialTopic || undefined,
                 durationMinutes: trialDuration,
@@ -1905,10 +1916,10 @@ export default function CompanyStudents() {
               console.error('[CompanyStudents] trial payment email failed:', resp.status);
             }
           }
+        } catch (lessonErr) {
+          console.error('Error creating lesson for new student:', lessonErr);
+          lessonCreateFailed = true;
         }
-      } catch (lessonErr) {
-        console.error('Error creating lesson for new student:', lessonErr);
-        lessonCreateFailed = true;
       }
     }
 
@@ -2035,9 +2046,7 @@ export default function CompanyStudents() {
     setCustomDuration('');
     setCustomCancellationHours(24);
     setCustomCancellationFee(0);
-    setAddStudentPickedSlot(null);
-    setAddStudentLessonStartIso('');
-    setAddStudentLessonEndIso('');
+    setAddStudentPickedLessons([]);
     invalidateCache('company_contracts');
     fetchData();
     setSaving(false);
@@ -2611,9 +2620,7 @@ export default function CompanyStudents() {
                 onOpenChange={(open) => {
                   setIsDialogOpen(open);
                   if (!open) {
-                    setAddStudentPickedSlot(null);
-                    setAddStudentLessonStartIso('');
-                    setAddStudentLessonEndIso('');
+                    setAddStudentPickedLessons([]);
                   }
                 }}
               >
@@ -2635,7 +2642,7 @@ export default function CompanyStudents() {
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-3">
                       <Label>{t('compStu.tutorsRequired')}</Label>
-                      {proKlaseIntake && (
+                      {proKlaseAdminUi && (
                       <Button
                         type="button"
                         size="sm"
@@ -2695,11 +2702,9 @@ export default function CompanyStudents() {
                                           ? [...newStudent.tutor_ids, tu.id]
                                           : newStudent.tutor_ids.filter((id) => id !== tu.id);
                                         setNewStudent({ ...newStudent, tutor_ids: next });
-                                        if (addStudentPickedSlot && !next.includes(addStudentPickedSlot.tutorId)) {
-                                          setAddStudentPickedSlot(null);
-                                          setAddStudentLessonStartIso('');
-                                          setAddStudentLessonEndIso('');
-                                        }
+                                        setAddStudentPickedLessons((current) =>
+                                          current.filter((item) => next.includes(item.pick.tutorId)),
+                                        );
                                       }}
                                       className="w-3.5 h-3.5"
                                     />
@@ -2735,27 +2740,45 @@ export default function CompanyStudents() {
                     <p className="text-[11px] text-gray-500">
                       {t('compStu.tutorPickerHint')}
                     </p>
-                    {addStudentPickedSlot && (
-                      <div className="space-y-2">
+                    {addStudentPickedLessons.map((item) => (
+                      <div key={item.pick.tutorId} className="space-y-2">
                         <PickedAvailabilityTimeEditor
-                          tutorName={addStudentPickedSlot.tutorName}
-                          subjectName={addStudentPickedSlot.subjectName}
-                          windowStartIso={addStudentPickedSlot.startIso}
-                          windowEndIso={addStudentPickedSlot.endIso}
-                          startIso={addStudentLessonStartIso || addStudentPickedSlot.startIso}
-                          endIso={addStudentLessonEndIso || addStudentPickedSlot.endIso}
+                          tutorId={item.pick.tutorId}
+                          tutorName={item.pick.tutorName}
+                          subjectId={item.pick.subjectId}
+                          subjectName={item.pick.subjectName}
+                          windowStartIso={item.pick.startIso}
+                          windowEndIso={item.pick.endIso}
+                          startIso={item.lessonStartIso || item.pick.startIso}
+                          endIso={item.lessonEndIso || item.pick.endIso}
                           onChange={({ startIso, endIso }) => {
-                            setAddStudentLessonStartIso(startIso);
-                            setAddStudentLessonEndIso(endIso);
+                            setAddStudentPickedLessons((current) =>
+                              current.map((row) =>
+                                row.pick.tutorId === item.pick.tutorId
+                                  ? { ...row, lessonStartIso: startIso, lessonEndIso: endIso }
+                                  : row,
+                              ),
+                            );
+                          }}
+                          onSubjectChange={({ subjectId, subjectName }) => {
+                            setAddStudentPickedLessons((current) =>
+                              current.map((row) =>
+                                row.pick.tutorId === item.pick.tutorId
+                                  ? { ...row, pick: { ...row.pick, subjectId, subjectName } }
+                                  : row,
+                              ),
+                            );
                           }}
                           onClear={() => {
-                            setAddStudentPickedSlot(null);
-                            setAddStudentLessonStartIso('');
-                            setAddStudentLessonEndIso('');
+                            setAddStudentPickedLessons((current) =>
+                              current.filter((row) => row.pick.tutorId !== item.pick.tutorId),
+                            );
                           }}
                         />
-                        <p className="text-[11px] text-gray-500">{t('findLesson.willCreateOnSave')}</p>
                       </div>
+                    ))}
+                    {addStudentPickedLessons.length > 0 && (
+                      <p className="text-[11px] text-gray-500">{t('findLesson.willCreateOnSave')}</p>
                     )}
                   </div>
 
@@ -2791,7 +2814,7 @@ export default function CompanyStudents() {
                       className="rounded-xl"
                     />
                   </div>
-                  {(isSchoolView || proKlaseIntake) && (
+                  {(isSchoolView || proKlaseAdminUi) && (
                   <div className="space-y-2 sm:col-span-2">
                     <Label>{t('studentSettings.grade')}</Label>
                     <Select
@@ -3962,7 +3985,7 @@ export default function CompanyStudents() {
                         )}
                       </div>
                     )}
-                    {proKlaseIntake && (
+                    {proKlaseAdminUi && (
                     <div className="mt-3 w-full space-y-1.5">
                       <Label className="text-xs text-gray-500">{t('studentSettings.grade')}</Label>
                       <Select
@@ -4269,13 +4292,13 @@ export default function CompanyStudents() {
 
                   {showStudentSchedulePane ? (
                     <div className="min-w-0 space-y-4 rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
-                      {selectedStudent && proKlaseIntake && hasFeature('student_schedule_overview') && (
+                      {selectedStudent && proKlaseAdminUi && hasFeature('student_schedule_overview') && (
                         <StudentScheduleSummary
                           studentRowIds={(selectedStudentGroup.length > 0 ? selectedStudentGroup : [selectedStudent]).map((row) => row.id)}
                           refreshKey={modalSessionsRefreshKey}
                         />
                       )}
-                      {selectedStudent && !orgFeaturesLoading && hasFeature('student_availability_profile') && (
+                      {selectedStudent && pkFeat('student_availability_profile') && (
                         <StudentAvailabilityEditor
                           value={pickGroupPreferredAvailability(selectedStudentGroup.length > 0 ? selectedStudentGroup : [selectedStudent])}
                           saving={savingAvailability}
@@ -4821,7 +4844,7 @@ export default function CompanyStudents() {
                 )}
 
                 {/* Trial lesson offer (only for brand new students with 0 sessions) */}
-                {selectedStudent && proKlaseIntake && (selectedStudentSessionCount ?? 0) === 0 && !selectedStudent.trial_offer_disabled &&
+                {selectedStudent && proKlaseAdminUi && (selectedStudentSessionCount ?? 0) === 0 && !selectedStudent.trial_offer_disabled &&
                   !hasFeature('hide_trial_offer_button') &&
                   (hasFeature('trial_reservation_flow') || hasFeature('auto_trial_first_lesson')) && (
                   <div className="space-y-2">
@@ -4966,7 +4989,7 @@ export default function CompanyStudents() {
                           onChange={setPkgItems}
                         />
                       )}
-                      {!orgFeaturesLoading && proKlaseIntake && hasFeature('package_reservation_flow') && (
+                      {!orgFeaturesLoading && proKlaseAdminUi && hasFeature('package_reservation_flow') && (
                         <div className="space-y-2 border-t border-violet-200 pt-3">
                           <p className="text-xs font-semibold text-violet-800">{t('package.reserveTimesTitle')}</p>
                           <p className="text-[11px] text-violet-600">{t('package.reserveTimesHint')}</p>
@@ -5255,7 +5278,7 @@ export default function CompanyStudents() {
                 </div>
 
                 {/* Book a lesson from the student card (req 4) */}
-                {!orgFeaturesLoading && hasFeature('student_card_booking') && (
+                {pkFeat('student_card_booking') && (
                   <div className="border-t border-gray-100 pt-4">
                     <h4 className="font-semibold mb-1 text-gray-900">{t('compStu.bookLessonTitle')}</h4>
                     <p className="text-xs text-gray-500 mb-3">{t('compStu.bookLessonDesc')}</p>
@@ -5325,7 +5348,7 @@ export default function CompanyStudents() {
           }}
         />
 
-        {proKlaseIntake && (
+        {proKlaseAdminUi && (
         <FindTutorModal
           isOpen={addStudentFindTutorOpen}
           onClose={() => setAddStudentFindTutorOpen(false)}
@@ -5339,30 +5362,40 @@ export default function CompanyStudents() {
                 : [...current.tutor_ids, tutor.id],
             }));
             const range = defaultLessonRange(slot.start, slot.end, slot.durationMinutes || 60);
-            setAddStudentPickedSlot({
-              tutorId: slot.tutorId,
-              tutorName: slot.tutorName,
-              subjectId: slot.subjectId,
-              subjectName: slot.subjectName,
-              startIso: slot.start.toISOString(),
-              endIso: slot.end.toISOString(),
+            const nextItem: AddStudentLessonPick = {
+              pick: {
+                tutorId: slot.tutorId,
+                tutorName: slot.tutorName,
+                subjectId: slot.subjectId,
+                subjectName: slot.subjectName,
+                startIso: slot.start.toISOString(),
+                endIso: slot.end.toISOString(),
+              },
+              lessonStartIso: range.start.toISOString(),
+              lessonEndIso: range.end.toISOString(),
+            };
+            setAddStudentPickedLessons((current) => {
+              const withoutTutor = current.filter((item) => item.pick.tutorId !== tutor.id);
+              return [...withoutTutor, nextItem];
             });
-            setAddStudentLessonStartIso(range.start.toISOString());
-            setAddStudentLessonEndIso(range.end.toISOString());
-            setAddStudentFindTutorOpen(false);
           }}
+          busyIntervals={addStudentPickedLessons.map((item) => ({
+            tutor_id: item.pick.tutorId,
+            start: new Date(item.lessonStartIso),
+            end: new Date(item.lessonEndIso),
+          }))}
         />
         )}
 
-        {!orgFeaturesLoading && hasFeature('student_card_booking') && (
+        {pkFeat('student_card_booking') && (
           <>
             <FindTutorModal
               isOpen={findLessonOpen}
               onClose={() => setFindLessonOpen(false)}
               orgId={orgId}
               primaryTutorId={selectedStudent?.tutor_id ?? null}
-              frequencyEnabled={hasFeature('tutor_frequency_search')}
-              hidePrices={hasFeature('hide_admin_lesson_prices')}
+              frequencyEnabled={pkFeat('tutor_frequency_search')}
+              hidePrices={pkFeat('hide_admin_lesson_prices')}
               initialPreferredWindows={toFindTutorWindows(
                 pickGroupPreferredAvailability(
                   selectedStudentGroup.length > 0 ? selectedStudentGroup : (selectedStudent ? [selectedStudent] : []),

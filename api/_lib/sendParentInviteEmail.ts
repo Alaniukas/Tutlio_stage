@@ -42,8 +42,11 @@ function wrap(content: string, locale: Locale): string {
 </body></html>`;
 }
 
-function footerFor(locale: Locale): string {
-  return `<div class="footer"><p>${t(locale, 'em.teamSignature')}</p><p style="margin:8px 0 0; font-size:11px; color:#9ca3af;">${t(locale, 'em.unsubscribe')}</p></div>`;
+function footerFor(locale: Locale, branded?: boolean): string {
+  const unsub = branded
+    ? ''
+    : `<p style="margin:8px 0 0; font-size:11px; color:#9ca3af;">${t(locale, 'em.unsubscribe')}</p>`;
+  return `<div class="footer"><p>${t(locale, 'em.teamSignature')}</p>${unsub}</div>`;
 }
 
 export type ParentInviteEmailData = {
@@ -116,13 +119,16 @@ export async function sendParentInviteEmail(
         </p>`
             : ''
         }
-      </div>${footerFor(locale)}`,
+      </div>${footerFor(locale, !!(resolved.emailContactEmail || resolved.emailFooterPoweredBy))}`,
     locale,
   );
   html = applyOrgBrandingToHtml(html, {
     branding: resolved.branding,
     emailTeamSignature: resolved.emailTeamSignature,
     locale,
+    emailContactPhone: resolved.emailContactPhone,
+    emailContactEmail: resolved.emailContactEmail,
+    emailFooterPoweredBy: resolved.emailFooterPoweredBy === true,
   });
 
   const resend = new Resend(apiKey);

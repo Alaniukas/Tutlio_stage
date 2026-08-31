@@ -33,6 +33,37 @@ npm test -- tests/lib/student-grade.test.ts tests/lib/proklase-copy.test.ts test
 
 ---
 
+## 0b. Trys fix'ai (paieška / statusas / keli korep) — 2026-08-31
+
+Seed (vieną kartą, kol serveris `npm run dev`):
+
+```bash
+node scripts/seed-proklase-search-status-qa.mjs
+```
+
+Slaptažodis visiems: **`TutlioQaDemo2026!`**
+
+| Kas | URL | El. paštas |
+|-----|-----|------------|
+| Org admin | http://localhost:3000/company/login | `proklase.qa.admin@tutlio.lt` |
+| Korep Ona (statusas) | http://localhost:3000/login | `proklase.qa.tutor1@tutlio.lt` |
+| Korep Jonas | http://localhost:3000/login | `proklase.qa.tutor2@tutlio.lt` |
+| Korep Greta | http://localhost:3000/login | `proklase.qa.tutor5@tutlio.lt` |
+
+**1. Dubliuotas laikas (€0 ir €10)**  
+Admin → `/company/students` → **Pridėti mokinį** → **Ieškoti pagal laisvą laiką**.  
+Datos nuo `2026-09-05`, diena **Šeš**, laikas **11:00–15:00**, dalykas visiems / Matematika.  
+Ona turi ir mokamą Matematiką (€10), ir bandomąją Matematiką (€0) tame pačiame lange (11:00–12:00 ir 12:45–15:00 po užimto 12:00–12:45). **Turi būti tik €10 eilutės, be €0,00 dublikato.**
+
+**2. Korep pažymi statusą**  
+Ona `/login` → dashboard geltona juosta / kalendorius. Dvi pasibaigusios, vis dar **suplanuotos**: Lukas „QA — pažymėk ĮVYKUSI“, Emilija „QA — pažymėk NEATVYKĘ“.  
+Yra **Įvyko** ir **Neatvyko**. **Nėra Atšaukti.** Kol nepažymi Įvyko — pinigų / paketo nėra.
+
+**3. Keli korepetitoriai**  
+Tas pats **Pridėti mokinį** modalas. Paieška palieka atidarytą — spausk antrą korep (Greta, Rūta, Tomas…). Formoje turi atsirasti **kelios** kortelės (laikas + dalykas). Neišeikink „Pridėti“, jei nenori naujo mokinio — užtenka pamatyti korteles.
+
+---
+
 ## 1. Prisijungimai
 
 Slaptažodis visiems QA: **`TutlioQaDemo2026!`**

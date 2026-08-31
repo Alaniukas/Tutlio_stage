@@ -17,6 +17,7 @@ import { createClient } from '@supabase/supabase-js';
 import { requireCronAuth } from './_lib/cronAuth.js';
 import { resolveOrganizationLessonPrice } from '../src/lib/organizationDynamicPricing.js';
 import { getOrgOwnerUserId } from './_lib/orgAdminAccess.js';
+import { isProKlaseOrg } from './_lib/marketMoney.js';
 
 function ymdInVilnius(value = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -75,10 +76,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Orgs that opted into extras billing.
   const { data: orgs, error: orgErr } = await supabase
     .from('organizations')
-    .select('id, features')
+    .select('id, features, entity_type')
     .contains('features', { extra_lessons_billing: true });
   if (orgErr) return res.status(500).json({ error: orgErr.message });
-  const orgList = orgs || [];
+  const orgList = (orgs || []).filter((o: any) => {
+    if (o.entity_type === 'school') return false;
+    if (!isProKlaseOrg(o.id)) return false;
+    const feat = (o.features && typeof o.features === 'object' && !Array.isArray(o.features) ? o.features : {}) as Record<string, unknown>;
+    return feat.extra_lessons_billing === true;
+  });
   if (orgList.length === 0) return res.status(200).json({ success: true, billed: 0, skipped: 0 });
 
   const orgIds = orgList.map((o: any) => o.id as string);

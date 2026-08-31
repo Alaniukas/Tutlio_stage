@@ -4,7 +4,7 @@
  * Pure — no React / Supabase / DOM.
  */
 
-import { EXTRA_LESSONS_LEGAL_BODY } from './extraLessonsLegalBody';
+import { EXTRA_LESSONS_LEGAL_BODY } from './extraLessonsLegalBody.js';
 
 export { EXTRA_LESSONS_LEGAL_BODY };
 

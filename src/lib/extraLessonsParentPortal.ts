@@ -4,7 +4,7 @@ import {
   extraLessonsEndKind,
   isExtraLessonsContractKind,
   isWithinWithdrawalWindow,
-} from './extraLessonsContract';
+} from './extraLessonsContract.js';
 
 export function uniqueStudentIds(
   rows: Array<{ id?: string | null } | null | undefined>,

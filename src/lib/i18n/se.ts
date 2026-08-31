@@ -1,4 +1,5 @@
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
+import { schoolInstructionsTranslationsSe } from './schoolInstructionsTranslations.js';
 import { supportTranslations } from './supportTranslations.js';
 
 const seLegalTranslations: Record<string, string> = {
@@ -9,6 +10,7 @@ const seLegalTranslations: Record<string, string> = {
 
 export const se: Record<string, string> = {
   ...sharedOrganizationWorkflowTranslations,
+  ...schoolInstructionsTranslationsSe,
   ...supportTranslations.se,
   'invoiceSettings.bankName': 'Banknamn',
   'invoiceSettings.iban': 'Kontonummer (IBAN)',
@@ -1475,7 +1477,7 @@ export const se: Record<string, string> = {
   'findLesson.endTime': 'Sluttid',
   'findLesson.outsideWindow': 'Lektionen måste rymmas i det valda lediga fönstret.',
   'findLesson.clearPickedSlot': 'Ta bort tid',
-  'findLesson.willCreateOnSave': 'När eleven sparas bokas också en lektion vid den här tiden.',
+  'findLesson.willCreateOnSave': 'När eleven sparas bokas en lektion för varje vald handledare.',
   'findLesson.noSubSlots': 'Ingen lektion passar i detta lediga fönster för det valda ämnets längd. Justera tillgänglighet eller ämnets längd i lektionsinställningarna.',
   'findLesson.meetingLinkHint': 'Automatiskt ifyllt: elevlänk om angiven, annars lärare, annars ämne. Du kan redigera manuellt.',
   'compSch.activeLesson': 'Aktiv lektion',
@@ -3830,6 +3832,13 @@ export const se: Record<string, string> = {
   'studentSettings.currentPassword': 'Nuvarande lösenord',
   'studentSettings.dangerZone': 'Riskzon',
   'studentSettings.deleteAccount': 'Ta bort konto',
+  'studentSettings.archiveAccount': 'Arkivera konto',
+  'studentSettings.archiveAccountDesc': 'Kontot raderas inte direkt. Mokslo vaisiai-administrationen kontaktar dig och raderar det inom 14 arbetsdagar.',
+  'studentSettings.archiveConfirmMsg': 'Arkivera kontot? Administrationen kontaktar dig inom 14 arbetsdagar och raderar det därefter.',
+  'studentSettings.archiveCta': 'Arkivera',
+  'studentSettings.archiveBlockedUnpaid': 'Du kan inte arkivera kontot medan lektioner, paket eller fakturor är obetalda. Betala först.',
+  'studentSettings.archivePending': 'Radering av kontot är redan begärd. Mokslo vaisiai-administrationen kontaktar dig inom 14 arbetsdagar.',
+  'studentSettings.archiveFailed': 'Kunde inte arkivera kontot.',
   'studentSettings.failedSave': 'Kunde inte spara ändringar.',
   'studentSettings.grade': 'Klass',
   'studentSettings.manageAccount': 'Hantera ditt konto',

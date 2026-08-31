@@ -22,7 +22,7 @@ import { useOrgBranding } from '@/hooks/useOrgBranding';
 import { setLastPortal } from '@/lib/pwaPortal';
 import { loadSavedLoginForm, persistLoginForm, readRememberMePreference } from '@/lib/loginCredentials';
 import { parseOrgLoginPortal } from '@/lib/orgLoginLinks';
-import { ORG_LOGIN_LOGO_IMG_CLASS, ORG_LOGIN_LOGO_WRAP_CLASS } from '@/lib/orgLoginLogo';
+import { ORG_LOGIN_LOGO_IMG_CLASS, ORG_LOGIN_LOGO_WRAP_CLASS, ORG_LOGIN_LOGO_WRAP_CLASS_DARK } from '@/lib/orgLoginLogo';
 
 // ─── SVG Illustrations ────────────────────────────────────────────────────────
 
@@ -650,6 +650,13 @@ export default function Login() {
 
   const brandColor = orgBranding?.brand_color || null;
   const brandColor2 = orgBranding?.brand_color_secondary || brandColor;
+  const brandedHeaderStyle = brandColor
+    ? { background: `linear-gradient(135deg, ${brandColor} 0%, ${brandColor2 || brandColor} 100%)` }
+    : undefined;
+  const brandedPrimaryBtnClass = brandColor
+    ? 'w-full py-2.5 rounded-xl text-white font-semibold hover:opacity-90 disabled:opacity-50 transition-colors'
+    : 'w-full py-2.5 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors';
+  const brandedPrimaryBtnStyle = brandColor ? { background: brandColor } : undefined;
   const loginBgStyle = brandColor
     ? { background: `linear-gradient(135deg, color-mix(in srgb, ${brandColor} 30%, #0f0f23) 0%, color-mix(in srgb, ${brandColor} 45%, #1a1a2e) 50%, color-mix(in srgb, ${brandColor2} 35%, #16162a) 100%)` }
     : undefined;
@@ -728,7 +735,7 @@ export default function Login() {
           <div className="text-center mb-8">
             {orgBranding?.logo_url ? (
               <div className="inline-flex flex-col items-center">
-                <div className={ORG_LOGIN_LOGO_WRAP_CLASS}>
+                <div className={orgBranding.logo_on_dark ? ORG_LOGIN_LOGO_WRAP_CLASS_DARK : ORG_LOGIN_LOGO_WRAP_CLASS}>
                   <img src={orgBranding.logo_url} alt={orgBranding.name} className={ORG_LOGIN_LOGO_IMG_CLASS} />
                 </div>
                 {!orgBranding.hide_powered_by && (
@@ -863,7 +870,10 @@ export default function Login() {
               className="bg-white rounded-2xl shadow-2xl overflow-hidden"
             >
               {/* Illustration header */}
-              <div className="bg-gradient-to-br from-indigo-500 to-indigo-700 px-6 pt-6 pb-3 flex items-end gap-4">
+              <div
+                className={brandedHeaderStyle ? 'px-6 pt-6 pb-3 flex items-end gap-4' : 'bg-gradient-to-br from-indigo-500 to-indigo-700 px-6 pt-6 pb-3 flex items-end gap-4'}
+                style={brandedHeaderStyle}
+              >
                 <div className="w-28 h-20 flex-shrink-0 drop-shadow-lg">
                   <TutorIllustration />
                 </div>
@@ -927,7 +937,10 @@ export default function Login() {
               className="bg-white rounded-2xl shadow-2xl overflow-hidden"
             >
               {/* Illustration header */}
-              <div className="bg-gradient-to-br from-indigo-500 to-indigo-700 px-6 pt-6 pb-3 flex items-end gap-4">
+              <div
+                className={brandedHeaderStyle ? 'px-6 pt-6 pb-3 flex items-end gap-4' : 'bg-gradient-to-br from-indigo-500 to-indigo-700 px-6 pt-6 pb-3 flex items-end gap-4'}
+                style={brandedHeaderStyle}
+              >
                 <div className="w-28 h-20 flex-shrink-0 drop-shadow-lg">
                   <TutorIllustration />
                 </div>
@@ -1154,7 +1167,7 @@ export default function Login() {
                     )}
                     {!resetSent && (
                       <button type="submit" disabled={loading}
-                        className="w-full py-2.5 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                        className={brandedPrimaryBtnClass} style={brandedPrimaryBtnStyle}>
                         {loading ? t('common.sending') : t('login.sendResetLink')}
                       </button>
                     )}
@@ -1218,7 +1231,7 @@ export default function Login() {
                       </div>
                     )}
                     <button type="submit" disabled={loading}
-                      className="w-full py-2.5 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                      className={brandedPrimaryBtnClass} style={brandedPrimaryBtnStyle}>
                       {loading ? t('common.connecting') : t('common.login')}
                     </button>
                   </form>
@@ -1247,7 +1260,10 @@ export default function Login() {
           {role === 'student' && (
             <div key="student-form" className="bg-white rounded-2xl shadow-2xl overflow-hidden">
               {/* Illustration header */}
-              <div className="bg-gradient-to-br from-violet-500 to-violet-700 px-6 pt-6 pb-3 flex items-end gap-4">
+              <div
+                className={brandedHeaderStyle ? 'px-6 pt-6 pb-3 flex items-end gap-4' : 'bg-gradient-to-br from-violet-500 to-violet-700 px-6 pt-6 pb-3 flex items-end gap-4'}
+                style={brandedHeaderStyle}
+              >
                 <div className="w-28 h-20 flex-shrink-0 drop-shadow-lg">
                   <StudentIllustration />
                 </div>
@@ -1348,7 +1364,7 @@ export default function Login() {
                       )}
                       {!resetSent && (
                         <button type="submit" disabled={loading}
-                          className="w-full py-2.5 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                          className={brandedPrimaryBtnClass} style={brandedPrimaryBtnStyle}>
                           {loading ? t('common.sending') : t('login.sendResetLink')}
                         </button>
                       )}
@@ -1417,7 +1433,7 @@ export default function Login() {
                         </div>
                       )}
                       <button type="submit" disabled={loading}
-                        className="w-full py-2.5 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                        className={brandedPrimaryBtnClass} style={brandedPrimaryBtnStyle}>
                         {loading ? t('common.connecting') : t('common.login')}
                       </button>
                     </form>
@@ -1446,7 +1462,7 @@ export default function Login() {
                       </div>
                     )}
                     <button type="submit" disabled={inviteLoading || !inviteCode.trim()}
-                      className="w-full py-2.5 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
+                      className={`${brandedPrimaryBtnClass} flex items-center justify-center gap-2`} style={brandedPrimaryBtnStyle}>
                       {inviteLoading ? t('login.checking') : (<><BookOpen className="w-4 h-4" /> {t('login.continue')}</>)}
                     </button>
                   </form>

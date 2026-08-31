@@ -278,11 +278,15 @@ const baseStyles = `
 function wrap(content: string, locale: Locale = 'lt', branding?: EmailBranding | null): string {
   const brandName = branding?.name || 'Tutlio';
   const fallbackColor = branding?.brand_color || '#4f46e5';
-  const logoHtml = branding?.logo_url
+  const logoImg = branding?.logo_url
     ? `<img src="${branding.logo_url}" alt="${escapeHtml(brandName)}" style="max-height:64px;max-width:200px;" />`
     : branding?.name
       ? `<span style="font-size:26px;font-weight:900;color:${fallbackColor};letter-spacing:-0.5px;">${escapeHtml(branding.name)}</span>`
       : `<span style="font-size:26px;font-weight:900;color:#4f46e5;letter-spacing:-0.5px;">Tutlio <span style="font-size:24px;">🎓</span></span>`;
+  const logoHtml =
+    branding?.logoOnDark && branding?.logo_url
+      ? `<div style="display:inline-block;background:#000000;border-radius:16px;padding:10px 14px;">${logoImg}</div>`
+      : logoImg;
   const poweredBy = branding?.name && !branding.hidePoweredBy
     ? `<p style="color:#9ca3af;font-size:11px;margin:8px 0 0;">powered by Tutlio</p>`
     : '';
@@ -335,6 +339,8 @@ function packageItemsBreakdownRows(
   }).join('');
   return `<div class="info-card"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${rows}</table></div>`;
 }
+let suppressTutlioEmailUnsub = false;
+
 const footerFor = (
   locale: Locale,
   unsubscribeEmail?: string | null,
@@ -343,9 +349,14 @@ const footerFor = (
   const email = String(unsubscribeEmail || '').trim().toLowerCase();
   const unsubLine = email
     ? `${t(locale, 'em.unsubscribeLead')} <a href="${getAppUrl()}/unsubscribe?email=${encodeURIComponent(email)}" style="color:#9ca3af; text-decoration:underline;">${t(locale, 'em.unsubscribeHere')}</a>`
-    : t(locale, 'em.unsubscribe');
+    : suppressTutlioEmailUnsub
+      ? ''
+      : t(locale, 'em.unsubscribe');
   const signature = String(teamSignature || '').trim() || t(locale, 'em.teamSignature');
-  return `<div class="footer"><p>${signature}</p><p style="margin:8px 0 0; font-size:11px; color:#9ca3af;">${unsubLine}</p></div>`;
+  const unsubHtml = unsubLine
+    ? `<p style="margin:8px 0 0; font-size:11px; color:#9ca3af;">${unsubLine}</p>`
+    : '';
+  return `<div class="footer"><p>${signature}</p>${unsubHtml}</div>`;
 };
 
 const formatMoney = (value: string | number, currency?: string, loc: Locale = 'lt') => {
@@ -643,6 +654,33 @@ function tutorInvite(d: any, locale: Locale) {
         </div>
         <p style="color:#9ca3af; font-size:12px;">${t(locale, 'em.linkNotWorking')} ${inviteLink}</p>
       </div>${footerFor(locale)}`, locale),
+  };
+}
+
+function moksloVaisiaiStudentArchiveRequest(d: any, locale: Locale) {
+  const studentName = esc(String(d.studentName || 'Mokinys'));
+  const studentEmail = esc(String(d.studentEmail || '—'));
+  const studentPhone = esc(String(d.studentPhone || '—'));
+  const payerEmail = esc(String(d.payerEmail || '—'));
+  return {
+    subject: `Mokinys nori ištrinti paskyrą: ${String(d.studentName || 'Mokinys')}`,
+    html: wrap(`
+      <div class="header" style="${headerInlineStyle('#124410', '#5C2B02')}">
+        <h1>Paskyros ištrynimo prašymas</h1>
+        <p>Mokinys suarchyvavo paskyrą Tutlio sistemoje</p>
+      </div>
+      <div class="body">
+        <p class="greeting">Sveiki,</p>
+        <p style="color:#4b5563; font-size:14px; line-height:1.6;">
+          Mokinys paprašė ištrinti savo paskyrą. Paskyra suarchyvuota; per 14 darbo dienų susisiekite ir ištrinkite ją rankiniu būdu.
+        </p>
+        ${table(
+          td('Mokinys', studentName) +
+            td('El. paštas', studentEmail) +
+            td('Telefonas', studentPhone) +
+            td('Mokėtojo el. paštas', payerEmail, false),
+        )}
+      </div>${footerFor(locale, null, 'Mokslo vaisių komanda')}`, locale),
   };
 }
 
@@ -2948,6 +2986,7 @@ async function resolveOrganizationIdFromAuthBearer(req: VercelRequest): Promise<
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  suppressTutlioEmailUnsub = false;
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -3193,6 +3232,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             if (resolved.isProKlase) (data as any).isProKlase = true;
             if (resolved.emailTeamSignature) (data as any).emailTeamSignature = resolved.emailTeamSignature;
             if (resolved.emailSenderName) (data as any).emailSenderName = resolved.emailSenderName;
+            if (resolved.emailContactPhone) (data as any).emailContactPhone = resolved.emailContactPhone;
+            if (resolved.emailContactEmail) (data as any).emailContactEmail = resolved.emailContactEmail;
+            if (resolved.emailFooterPoweredBy) (data as any).emailFooterPoweredBy = true;
+            if (resolved.emailContactPhone || resolved.emailContactEmail || resolved.emailFooterPoweredBy) {
+              suppressTutlioEmailUnsub = true;
+            }
           }
         }
       } catch {}
@@ -3204,7 +3249,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         branding: orgBranding,
         emailTeamSignature: (data as any).emailTeamSignature,
         locale,
+        emailContactPhone: (data as any).emailContactPhone,
+        emailContactEmail: (data as any).emailContactEmail,
+        emailFooterPoweredBy: (data as any).emailFooterPoweredBy === true,
       });
+      if (suppressTutlioEmailUnsub) {
+        html = html.replace(/<p\b[^>]*>[\s\S]*?info@tutlio\.lt[\s\S]*?<\/p>/gi, '');
+      }
       if (orgBranding) {
         // Legacy templates sometimes use indigo text without the shared helper's full set.
         html = html.replaceAll('color:#6366f1;', `color:${orgBranding.brand_color};`);
@@ -3236,6 +3287,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'invite_email': emailContent = inviteEmail(data, locale); break;
       case 'recurring_booking_confirmation': emailContent = recurringBookingConfirmation(data, locale); break;
       case 'tutor_invite': emailContent = tutorInvite(data, locale); break;
+      case 'mokslo_vaisiai_student_archive': emailContent = moksloVaisiaiStudentArchiveRequest(data, locale); break;
       case 'lesson_rescheduled': emailContent = lessonRescheduled(data, locale); break;
       case 'waitlist_added': emailContent = waitlistAdded(data, locale); break;
       case 'waitlist_matched_student': emailContent = waitlistMatchedStudent(data, locale); break;

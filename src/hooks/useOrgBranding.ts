@@ -1,7 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from '@/lib/i18n';
-import { isProKlaseOrg } from '@/lib/marketMoney';
+import {
+  isManoKorepetitoriusOrg,
+  isMoksloVaisiaiOrg,
+  isProKlaseOrg,
+  MOKSLO_VAISIAI_BRAND_COLOR,
+  MOKSLO_VAISIAI_BRAND_COLOR_SECONDARY,
+} from '@/lib/marketMoney';
 
 export interface OrgBranding {
   id: string;
@@ -13,6 +19,7 @@ export interface OrgBranding {
   entity_type: string;
   login_description?: string;
   hide_powered_by?: boolean;
+  logo_on_dark?: boolean;
 }
 
 interface OrgBrandingState {
@@ -59,6 +66,31 @@ function slugFromWindow(): string | null {
 export function optimisticBrandingForSlug(slug: string | null): OrgBranding | null {
   if (!slug) return null;
   const key = slug.trim().toLowerCase();
+  if (isManoKorepetitoriusOrg(key)) {
+    return {
+      id: '',
+      name: 'Mano Korepetitorius',
+      slug: key,
+      logo_url: null,
+      brand_color: '#5C2D91',
+      brand_color_secondary: '#D21E56',
+      entity_type: 'company',
+      hide_powered_by: true,
+    };
+  }
+  if (isMoksloVaisiaiOrg(key)) {
+    return {
+      id: '',
+      name: 'Mokslo vaisiai',
+      slug: key,
+      logo_url: '/demo/mokslo-vaisiai-logo.png',
+      brand_color: MOKSLO_VAISIAI_BRAND_COLOR,
+      brand_color_secondary: MOKSLO_VAISIAI_BRAND_COLOR_SECONDARY,
+      entity_type: 'company',
+      hide_powered_by: true,
+      logo_on_dark: true,
+    };
+  }
   if (!isProKlaseOrg(key)) return null;
   const qa = key === 'proklase-qa' || key.startsWith('proklase-qa');
   return {

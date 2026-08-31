@@ -57,6 +57,7 @@ import {
 } from '@/lib/preload';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { isProKlaseOrg } from '@/lib/marketMoney';
+import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { formatContactForTutorView } from '@/lib/orgContactVisibility';
 import MarkStudentNoShowDialog from '@/components/MarkStudentNoShowDialog';
@@ -165,9 +166,11 @@ export default function DashboardPage() {
         restoreAll: restoreAllRecentPaymentRows,
         ready: recentPaymentRowsDismissReady,
     } = useDismissibleDashboardItemIds(recentPaymentRowsKey);
-    const { contactVisibility, hasFeature: hasOrgFeature } = useOrgFeatures();
+    const { contactVisibility, hasFeature: hasOrgFeature, entityType, organizationId, loading: orgFeaturesLoading } = useOrgFeatures();
+    const pkMonthlyPackages = proKlaseFeatureEnabled(organizationId, entityType, hasOrgFeature, 'monthly_packages', orgFeaturesLoading);
     // Org feature: ended lessons are not auto-completed — the tutor must confirm each outcome.
-    const requiresStatusConfirmation = hasOrgFeature('tutor_lesson_status_confirmation');
+    const requiresStatusConfirmation =
+      hasOrgFeature('tutor_lesson_status_confirmation') || isProKlaseOrg(ctxProfile?.organization_id);
     const [confirmingStatusId, setConfirmingStatusId] = useState<string | null>(null);
     const [searchParams, setSearchParams] = useSearchParams();
     const dc = getCached<any>('tutor_dashboard');
@@ -199,12 +202,6 @@ export default function DashboardPage() {
     const [editNewStartTime, setEditNewStartTime] = useState('');
     const [rescheduleReason, setRescheduleReason] = useState('');
     const [modalActionNotice, setModalActionNotice] = useState<string | null>(null);
-
-    const notifyProKlaseCancelBlocked = () => {
-        const message = t('cal.proKlaseCancelAdminOnly');
-        setModalActionNotice(message);
-        setToastMessage({ message, type: 'warning' });
-    };
 
     // View comment (same as Calendar – add/edit without full edit)
     const [viewCommentText, setViewCommentText] = useState('');
@@ -719,7 +716,7 @@ export default function DashboardPage() {
             // Monthly packages (req 6): a package lesson can only be moved within
             // the same calendar month (anchored on its original start). One-off /
             // trial lessons (no package) are unconstrained.
-            if (oldStart.getTime() !== newStart.getTime() && hasOrgFeature('monthly_packages') && !!(selectedSession as any).lesson_package_id) {
+            if (oldStart.getTime() !== newStart.getTime() && pkMonthlyPackages && !!(selectedSession as any).lesson_package_id) {
                 const anchor = rescheduleAnchorDate((selectedSession as any).original_start_time, oldStart);
                 if (!isSameCalendarMonth(newStart, anchor)) {
                     alert(t('cal.rescheduleSameMonthOnly'));
@@ -1296,22 +1293,18 @@ export default function DashboardPage() {
                                             <UserX className="w-3.5 h-3.5 mr-1" />
                                             {t('dash.statusNoShow')}
                                         </Button>
+                                        {!hideProKlaseOrgTutorCancel && (
                                         <Button
                                             size="sm"
                                             variant="outline"
                                             disabled={confirmingStatusId === s.id}
-                                            onClick={() => {
-                                                if (hideProKlaseOrgTutorCancel) {
-                                                    setToastMessage({ message: t('cal.proKlaseCancelAdminOnly'), type: 'error' });
-                                                    return;
-                                                }
-                                                void confirmLessonStatus(s, 'cancelled');
-                                            }}
+                                            onClick={() => void confirmLessonStatus(s, 'cancelled')}
                                             className="rounded-lg h-8 px-2.5 text-xs text-gray-700 border-gray-300 hover:bg-gray-100"
                                         >
                                             <XCircle className="w-3.5 h-3.5 mr-1" />
                                             {t('dash.statusCancelled')}
                                         </Button>
+                                        )}
                                     </div>
                                 </div>
                             ))}
@@ -2386,22 +2379,18 @@ export default function DashboardPage() {
                                         <UserX className="w-4 h-4 mr-1" />
                                         {t('cal.statusNoShowOpt')}
                                     </Button>
+                                    {!hideProKlaseOrgTutorCancel && (
                                     <Button
                                         size="sm"
                                         variant="outline"
                                         disabled={confirmingStatusId === selectedSession.id}
-                                        onClick={() => {
-                                            if (hideProKlaseOrgTutorCancel) {
-                                                notifyProKlaseCancelBlocked();
-                                                return;
-                                            }
-                                            void confirmLessonStatus(selectedSession, 'cancelled');
-                                        }}
+                                        onClick={() => void confirmLessonStatus(selectedSession, 'cancelled')}
                                         className="rounded-xl text-gray-700 border-gray-300 hover:bg-gray-100"
                                     >
                                         <XCircle className="w-4 h-4 mr-1" />
-                                        {hideProKlaseOrgTutorCancel ? t('cal.cancelLessonTitle') : t('cal.statusCancelledOpt')}
+                                        {t('cal.statusCancelledOpt')}
                                     </Button>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -2418,18 +2407,6 @@ export default function DashboardPage() {
                                     <CalendarDays className="w-4 h-4 mr-1" />
                                     {t('cal.moveLesson')}
                                 </Button>
-                                {hideProKlaseOrgTutorCancel && (
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        onClick={notifyProKlaseCancelBlocked}
-                                        size="sm"
-                                        className="rounded-xl flex-1 text-gray-700 border-gray-300 hover:bg-gray-100"
-                                    >
-                                        <XCircle className="w-4 h-4 mr-1" />
-                                        {t('cal.cancelLessonTitle')}
-                                    </Button>
-                                )}
                             </div>
                         )}
                         {selectedSession?.status === 'active' && isOrgTutor !== true && (

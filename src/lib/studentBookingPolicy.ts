@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { isWaitlistHiddenForOrg } from '@/lib/marketMoney';
+import { proKlaseFeatureEnabledForOrgRecord } from '@/lib/orgIntakeMode';
 
 /**
  * Org feature `disable_student_booking`: self-booking is turned off for the
@@ -81,9 +82,9 @@ export async function fetchStudentPortalPolicyMap(
     if (orgIds.length > 0) {
       const { data: orgs } = await supabase
         .from('organizations')
-        .select('id, features')
+        .select('id, features, entity_type')
         .in('id', orgIds);
-      for (const o of (orgs ?? []) as Array<{ id: string; features: Record<string, unknown> | null }>) {
+      for (const o of (orgs ?? []) as Array<{ id: string; features: Record<string, unknown> | null; entity_type?: string | null }>) {
         const bookingDisabled = o.features?.disable_student_booking === true;
         const waitlistHidden =
           o.features?.disable_waitlist === true ||
@@ -92,7 +93,12 @@ export async function fetchStudentPortalPolicyMap(
         policyByOrg[o.id] = {
           bookingDisabled,
           actionsDisabled: o.features?.disable_student_reschedule_cancel === true,
-          paymentsPageEnabled: o.features?.student_payments_page === true,
+          paymentsPageEnabled: proKlaseFeatureEnabledForOrgRecord(
+            o.id,
+            o.entity_type,
+            o.features,
+            'student_payments_page',
+          ),
           waitlistHidden,
         };
       }

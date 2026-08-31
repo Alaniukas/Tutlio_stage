@@ -21,6 +21,8 @@ import {
 import { supabase } from '@/lib/supabase';
 import { useTranslation } from '@/lib/i18n';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { useOrgEntityType } from '@/contexts/OrgEntityContext';
+import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import { authHeaders } from '@/lib/apiHelpers';
 import { runOrgAdminCreateSession } from '@/pages/company/orgAdminSessionCreate';
 import { ASSIGN_STUDENT_FREE_SLOT_DIALOG_CONTENT_CLASS } from '@/components/AssignStudentFreeSlotDialog';
@@ -79,6 +81,9 @@ export default function FindLessonBookDialog({
 }: FindLessonBookDialogProps) {
   const { t } = useTranslation();
   const { loading: orgFeaturesLoading, hasFeature, organizationId } = useOrgFeatures();
+  const orgEntityType = useOrgEntityType();
+  const pkFeat = (flagId: string) =>
+    proKlaseFeatureEnabled(organizationId, orgEntityType, hasFeature, flagId, orgFeaturesLoading);
   const [subject, setSubject] = useState<SubjectRow | null>(null);
   const [overridePrice, setOverridePrice] = useState<number | null>(null);
   const [lessonStartIso, setLessonStartIso] = useState('');
@@ -199,7 +204,7 @@ export default function FindLessonBookDialog({
   // First-ever lesson: recommend a trial (pre-checked, admin can uncheck).
   useEffect(() => {
     if (!pick || orgFeaturesLoading) return;
-    if (sessionCount === 0 && hasFeature('auto_trial_first_lesson') && createdIntervals.length === 0) {
+    if (sessionCount === 0 && pkFeat('auto_trial_first_lesson') && createdIntervals.length === 0) {
       setIsTrial(true);
       setIsRecurring(false);
       setRecurringWeekdays([]);
@@ -292,7 +297,7 @@ export default function FindLessonBookDialog({
         (isTrial || (isRecurring && firstLessonIsTrial)) &&
         !isPaid &&
         price > 0 &&
-        hasFeature('trial_creation_payment_email') &&
+        pkFeat('trial_creation_payment_email') &&
         result.createdSessionIds.length > 0
       ) {
         try {
@@ -374,7 +379,7 @@ export default function FindLessonBookDialog({
             )}
 
             {/* First-ever lesson: recommended as a trial (admin can uncheck). */}
-            {(isTrial || (sessionCount === 0 && !orgFeaturesLoading && hasFeature('auto_trial_first_lesson'))) && !isRecurring && (
+            {(isTrial || (sessionCount === 0 && pkFeat('auto_trial_first_lesson'))) && !isRecurring && (
               <div className="border border-amber-200 rounded-xl p-3 bg-amber-50/60">
                 <button
                   type="button"

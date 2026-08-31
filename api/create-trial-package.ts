@@ -84,11 +84,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: org } = await supabase
       .from('organizations')
-      .select('id, name, features')
+      .select('id, name, features, entity_type')
       .eq('id', adminRow.organizationId)
       .single();
 
     const features = (org?.features || {}) as Record<string, unknown>;
+    const orgEntityType = (org as { entity_type?: string | null } | null)?.entity_type ?? null;
     const defaultTopic = typeof features.trial_lesson_topic === 'string' && features.trial_lesson_topic.trim()
       ? String(features.trial_lesson_topic).trim()
       : 'Bandomoji pamoka';
@@ -276,7 +277,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Reservation flow: when enabled and a slot is provided, hold the slot now
     // (status='active' so it blocks the calendar; payment_status='reserved' until
     // paid). An unpaid hold auto-releases after the org's deadline via cron.
-    if (!linkedSession && isTrialReservationFlowEnabled(features) && startIso && endIso) {
+    if (!linkedSession && isTrialReservationFlowEnabled(features, org?.id, orgEntityType) && startIso && endIso) {
       const start = new Date(startIso);
       const end = new Date(endIso);
       if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end.getTime() <= start.getTime()) {

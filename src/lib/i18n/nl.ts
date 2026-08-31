@@ -1,8 +1,10 @@
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
+import { schoolInstructionsTranslationsNl } from './schoolInstructionsTranslations.js';
 import { supportTranslations } from './supportTranslations.js';
 
 export const nl: Record<string, string> = {
   ...sharedOrganizationWorkflowTranslations,
+  ...schoolInstructionsTranslationsNl,
   ...supportTranslations.nl,
   'invoiceSettings.bankName': 'Banknaam',
   'invoiceSettings.iban': 'Rekeningnummer (IBAN)',
@@ -874,7 +876,7 @@ export const nl: Record<string, string> = {
   "findLesson.endTime": "Einde",
   "findLesson.outsideWindow": "De les moet binnen het gekozen vrije venster blijven.",
   "findLesson.clearPickedSlot": "Tijd verwijderen",
-  "findLesson.willCreateOnSave": "Als je de leerling opslaat, wordt ook een les op dit tijdstip gereserveerd.",
+  "findLesson.willCreateOnSave": "Als je de leerling opslaat, wordt er voor elke gekozen tutor een les gereserveerd.",
   "findLesson.noSubSlots": "Er past geen les in dit vrije venster voor de geselecteerde vakduur. Pas de beschikbaarheid of de vakduur aan in de lesinstellingen.",
   "findLesson.meetingLinkHint": "Automatisch ingevuld: leerlingenlink indien ingesteld, anders docent, anders vak. Je kunt handmatig bewerken.",
   "findLesson.lessonCreatedKeepOpen": "Les aangemaakt. Het venster blijft open, zodat je meteen nog een les kunt aanmaken.",
@@ -3730,6 +3732,13 @@ export const nl: Record<string, string> = {
   "studentSettings.currentPassword": "Huidig wachtwoord",
   "studentSettings.dangerZone": "Gevarenzone",
   "studentSettings.deleteAccount": "Account verwijderen",
+  "studentSettings.archiveAccount": "Account archiveren",
+  "studentSettings.archiveAccountDesc": "Het account wordt niet meteen verwijderd. De administratie van Mokslo vaisiai neemt contact op en verwijdert het binnen 14 werkdagen.",
+  "studentSettings.archiveConfirmMsg": "Account archiveren? De administratie neemt binnen 14 werkdagen contact op en verwijdert het daarna.",
+  "studentSettings.archiveCta": "Archiveren",
+  "studentSettings.archiveBlockedUnpaid": "Je kunt het account niet archiveren zolang er onbetaalde lessen, pakketten of facturen zijn. Betaal eerst.",
+  "studentSettings.archivePending": "Verwijdering van het account is al aangevraagd. De administratie van Mokslo vaisiai neemt binnen 14 werkdagen contact op.",
+  "studentSettings.archiveFailed": "Account archiveren is mislukt.",
   "studentSettings.emailLabel": "E-mail",
   "studentSettings.failedSave": "Kan wijzigingen niet opslaan.",
   "studentSettings.grade": "Leerjaar",

@@ -2,7 +2,7 @@
  * Auto-mark student no-show when they never clicked "Prisijungti".
  * Pure — used by cron and tests.
  */
-import { ATTENDANCE_GRACE_MS, deriveAttendance, type AttendanceSessionLike } from './attendance';
+import { ATTENDANCE_GRACE_MS, deriveAttendance, type AttendanceSessionLike } from './attendance.js';
 
 export const NO_SHOW_REASON_MISSED_JOIN = 'missed_join';
 

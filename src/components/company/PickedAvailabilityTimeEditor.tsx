@@ -1,6 +1,8 @@
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { TimeInput } from '@/components/ui/time-input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useTranslation } from '@/lib/i18n';
 import {
   combineLocalDateAndTime,
@@ -8,27 +10,34 @@ import {
   toLocalHm,
   toLocalYmd,
 } from '@/lib/pickedAvailabilityTime';
+import { supabase } from '@/lib/supabase';
 import { format, parseISO } from 'date-fns';
 
 export interface PickedAvailabilityTimeEditorProps {
   tutorName?: string;
+  tutorId?: string;
   subjectName?: string;
+  subjectId?: string;
   windowStartIso: string;
   windowEndIso: string;
   startIso: string;
   endIso: string;
   onChange: (next: { startIso: string; endIso: string }) => void;
+  onSubjectChange?: (next: { subjectId: string; subjectName: string }) => void;
   onClear?: () => void;
 }
 
 export default function PickedAvailabilityTimeEditor({
   tutorName,
+  tutorId,
   subjectName,
+  subjectId,
   windowStartIso,
   windowEndIso,
   startIso,
   endIso,
   onChange,
+  onSubjectChange,
   onClear,
 }: PickedAvailabilityTimeEditorProps) {
   const { t } = useTranslation();
@@ -43,6 +52,31 @@ export default function PickedAvailabilityTimeEditor({
     Number.isNaN(end.getTime());
   const fits =
     !invalidDates && lessonFitsAvailabilityWindow(windowStart, windowEnd, start, end);
+  const [subjects, setSubjects] = useState<Array<{ id: string; name: string }>>([]);
+
+  useEffect(() => {
+    if (!tutorId || !onSubjectChange) {
+      setSubjects([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('subjects')
+        .select('id, name')
+        .eq('tutor_id', tutorId)
+        .neq('is_trial', true)
+        .order('name');
+      if (cancelled) return;
+      const rows = ((data || []) as Array<{ id: string; name: string | null }>)
+        .map((row) => ({ id: row.id, name: String(row.name || '').trim() }))
+        .filter((row) => row.name);
+      setSubjects(rows);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tutorId, onSubjectChange]);
 
   const applyStart = (hm: string) => {
     const nextStart = combineLocalDateAndTime(toLocalYmd(start), hm);
@@ -82,6 +116,30 @@ export default function PickedAvailabilityTimeEditor({
           </Button>
         )}
       </div>
+      {onSubjectChange && subjects.length > 0 && (
+        <div className="space-y-1">
+          <Label className="text-xs">{t('findLesson.subject')}</Label>
+          <Select
+            value={subjectId || undefined}
+            onValueChange={(id) => {
+              const found = subjects.find((row) => row.id === id);
+              if (!found) return;
+              onSubjectChange({ subjectId: found.id, subjectName: found.name });
+            }}
+          >
+            <SelectTrigger className="h-10 rounded-md bg-white text-sm">
+              <SelectValue placeholder={t('findLesson.subject')} />
+            </SelectTrigger>
+            <SelectContent>
+              {subjects.map((row) => (
+                <SelectItem key={row.id} value={row.id}>
+                  {row.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="space-y-1">
           <Label className="text-xs">{t('common.date')}</Label>

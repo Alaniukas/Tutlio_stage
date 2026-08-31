@@ -6,7 +6,7 @@ import { runBlogAutoGenerate } from './_lib/blogAutoGenerate.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 
 // Blog generation (text retries + cover image) can take a while; give it headroom.
-export const config = { maxDuration: 120 };
+export const config = { maxDuration: 300 };
 
 function getPlatformAdminSecret(): string {
   const s = process.env.ADMIN_SECRET || process.env.VITE_ADMIN_SECRET;

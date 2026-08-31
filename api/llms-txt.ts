@@ -84,7 +84,7 @@ ${pricingBlock(false)}
 - Tarptautinė: https://www.tutlio.com
 - Lenkija: https://www.tutlio.pl
 - Mokykloms: https://www.tutlio.lt/schools
-- Tinklaraštis: https://www.tutlio.lt/blog
+- Tinklaraštis: https://www.tutlio.lt/blog (originalūs straipsniai tėvams, mokiniams ir korepetitoriams — ne produkto reklama)
 - RSS: https://www.tutlio.lt/blog/rss.xml
 - Kainos: https://www.tutlio.lt/pricing
 - Kontaktai: info@tutlio.lt
@@ -161,7 +161,7 @@ ${pricingBlock(isPl)}
 - Website (Lithuania): https://www.tutlio.lt
 - Website (Poland): https://www.tutlio.pl
 - For Schools: ${base}/schools
-- Blog: ${base}/blog
+- Blog: ${base}/blog (native articles in the site language for parents, students, and tutors — education advice, not a product pitch)
 - Blog RSS feed: ${base}/blog/rss.xml
 - Pricing: ${base}/pricing
 - About: ${base}/about

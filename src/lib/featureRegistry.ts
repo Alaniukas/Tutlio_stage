@@ -117,9 +117,9 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     name: 'Whitelabel / organizacijos stilius',
     nameEn: 'Whitelabel / Custom Branding',
     description:
-      'Mokiniai, tėvai ir korepetitoriai mato organizacijos logo ir spalvas vietoj Tutlio. Galima įdėti prisijungimo nuorodas / widget į savo svetainę (be registracijos).',
+      'Mokiniai, tėvai ir korepetitoriai mato organizacijos logo ir spalvas vietoj Tutlio.',
     descriptionEn:
-      'Students, parents, and tutors see the organization\'s logo and colors instead of Tutlio. Login-only links and an embeddable widget can be placed on the organization website.',
+      'Students, parents, and tutors see the organization\'s logo and colors instead of Tutlio.',
     category: 'appearance',
     defaultValue: false,
     requiresSetup: true,
@@ -274,9 +274,9 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     name: 'Korepetitorius privalo pažymėti pamokos statusą',
     nameEn: 'Tutor must confirm lesson status',
     description:
-      'Pasibaigusios pamokos nebežymimos „įvykusiomis“ automatiškai. Korepetitorius po kiekvienos pamokos privalo nurodyti jos statusą (įvyko, įvyko bet vėlavo, mokinys neatvyko, atšaukta). Kol statusas nepažymėtas, pamoka rodoma kaip privalomas darbas ir korepetitoriui siunčiami priminimai.',
+      'Pasibaigusios pamokos nebežymimos „įvykusiomis“ automatiškai. Korepetitorius po kiekvienos pamokos privalo nurodyti jos statusą (įvyko, mokinys neatvyko). Atšaukti gali tik administracija. Kol statusas nepažymėtas, pinigai ir paketo pamoka neskaičiuojami, pamoka lieka suplanuota ir siunčiami priminimai.',
     descriptionEn:
-      'Ended lessons are no longer auto-marked completed. After each lesson the tutor must set its status (happened, happened late, no-show, cancelled). Until confirmed, the lesson shows as a must-do task and the tutor keeps getting reminders.',
+      'Ended lessons are no longer auto-marked completed. After each lesson the tutor must set its status (happened or student no-show). Only administration can cancel. Until confirmed, tutor pay and package credit are withheld, the lesson stays planned, and reminders keep going.',
     category: 'advanced',
     defaultValue: false,
     pricingTier: 'premium',

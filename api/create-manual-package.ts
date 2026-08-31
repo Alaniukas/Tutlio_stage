@@ -201,14 +201,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let manualPaymentUrl = '';
         let orgDisplayName: string | null = null;
         let orgFeatures: Record<string, unknown> | null = null;
+        let orgEntityType: string | null = null;
         if (tutor.organization_id) {
             const { data: orgRow } = await supabase
                 .from('organizations')
-                .select('name, features')
+                .select('name, features, entity_type')
                 .eq('id', tutor.organization_id)
                 .single();
             const features = (orgRow?.features || {}) as Record<string, unknown>;
             orgFeatures = features;
+            orgEntityType = (orgRow as { entity_type?: string | null } | null)?.entity_type ?? null;
             const rawUrl = features.manual_payment_url;
             if (typeof rawUrl === 'string' && rawUrl.trim()) {
                 const tUrl = rawUrl.trim();
@@ -310,7 +312,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         // Reservation flow (req 3+5): pre-book times held until the manual payment
         // is confirmed; unpaid holds auto-release via the cron at the deadline.
-        if (isPackageReservationFlowEnabled(orgFeatures) && Array.isArray(body.slots) && body.slots.length > 0) {
+        if (isPackageReservationFlowEnabled(orgFeatures, tutor.organization_id, orgEntityType) && Array.isArray(body.slots) && body.slots.length > 0) {
             const reserveResult = await reservePackageSlots(supabase, {
                 tutorId,
                 studentId,

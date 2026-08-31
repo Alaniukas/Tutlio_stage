@@ -1,8 +1,10 @@
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
+import { schoolInstructionsTranslationsEe } from './schoolInstructionsTranslations.js';
 import { supportTranslations } from './supportTranslations.js';
 
 export const ee: Record<string, string> = {
   ...sharedOrganizationWorkflowTranslations,
+  ...schoolInstructionsTranslationsEe,
   ...supportTranslations.ee,
   'invoiceSettings.bankName': 'Pank',
   'invoiceSettings.iban': 'Konto number (IBAN)',
@@ -2137,7 +2139,7 @@ export const ee: Record<string, string> = {
   'findLesson.endTime': 'Lõpp',
   'findLesson.outsideWindow': 'Tund peab mahtuma valitud vabasse aknasse.',
   'findLesson.clearPickedSlot': 'Eemalda aeg',
-  'findLesson.willCreateOnSave': 'Õpilase salvestamine broneerib ka tunni sellel ajal.',
+  'findLesson.willCreateOnSave': 'Õpilase salvestamine broneerib tunni igale valitud õpetajale.',
   'findLesson.noSubSlots': 'Ükski tund ei mahu sellesse vabasse aknasse valitud aine kestuse jaoks. Kohandage saadavust või aine kestust tunni seadetes.',
   'findLesson.meetingLinkHint': 'Automaatselt täidetud: õpilase link, kui seadistatud, muidu õpetaja, muidu aine. Saate käsitsi muuta.',
 
@@ -4311,6 +4313,13 @@ export const ee: Record<string, string> = {
   'studentSettings.currentPassword': 'Praegune parool',
   'studentSettings.dangerZone': 'Ohutsoon',
   'studentSettings.deleteAccount': 'Kustuta konto',
+  'studentSettings.archiveAccount': 'Arhiveeri konto',
+  'studentSettings.archiveAccountDesc': 'Kontot ei kustutata kohe. Mokslo vaisiai administratsioon võtab ühendust ja kustutab selle 14 tööpäeva jooksul.',
+  'studentSettings.archiveConfirmMsg': 'Kas arhiveerida konto? Administratsioon võtab 14 tööpäeva jooksul ühendust ja kustutab seejärel konto.',
+  'studentSettings.archiveCta': 'Arhiveeri',
+  'studentSettings.archiveBlockedUnpaid': 'Kontot ei saa arhiveerida, kuni on tasumata tunde, pakette või arveid. Palun tasu esmalt.',
+  'studentSettings.archivePending': 'Konto kustutamine on juba taotletud. Mokslo vaisiai administratsioon võtab ühendust 14 tööpäeva jooksul.',
+  'studentSettings.archiveFailed': 'Konto arhiveerimine ebaõnnestus.',
   'studentSettings.failedSave': 'Muudatuste salvestamine ebaõnnestus.',
   'studentSettings.grade': 'Klass',
   'studentSettings.gradeLabel': 'Klass',

@@ -42,7 +42,7 @@ import { authHeaders } from '@/lib/apiHelpers';
 import { cancelSessionAndFillWaitlist, releaseSessionSlotViaApi } from '@/lib/lesson-actions';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
-import { isSchoolOrg, hasProKlaseIntakeFeatures } from '@/lib/orgIntakeMode';
+import { isSchoolOrg, proKlaseOrgAdminContext, proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { isProKlaseOrg } from '@/lib/marketMoney';
 import { setSessionComplimentary } from '@/lib/setSessionComplimentary';
@@ -315,8 +315,10 @@ export default function CompanyTvarkarastis() {
   const { loading: featuresLoading, hasFeature, organizationId } = useOrgFeatures();
   const orgEntityType = useOrgEntityType();
   const isSchoolOrgView = isSchoolOrg(orgEntityType);
-  const proKlaseIntake =
-    !isSchoolOrgView && !featuresLoading && hasProKlaseIntakeFeatures(hasFeature);
+  const isProKlase = isProKlaseOrg(organizationId);
+  const proKlaseAdminUi = proKlaseOrgAdminContext(organizationId, isSchoolOrgView ? 'school' : 'company', featuresLoading);
+  const pkFeat = (flagId: string) =>
+    proKlaseFeatureEnabled(organizationId, isSchoolOrgView ? 'school' : 'company', hasFeature, flagId, featuresLoading);
 
   // Feature flags
   const canView = hasFeature('org_admin_calendar_view') || hasFeature('org_admin_calendar_full_control');
@@ -327,10 +329,9 @@ export default function CompanyTvarkarastis() {
   const showTrialToggleInCreate =
     !isSchoolOrgView &&
     !featuresLoading &&
-    (proKlaseIntake
-      ? hasFeature('trial_reservation_flow') || hasFeature('auto_trial_first_lesson')
-      : canView);
-  const hideAdminPrices = hasFeature('hide_admin_lesson_prices');
+    proKlaseAdminUi &&
+    (hasFeature('trial_reservation_flow') || hasFeature('auto_trial_first_lesson'));
+  const hideAdminPrices = pkFeat('hide_admin_lesson_prices');
   const showClassGroupPicker = isSchoolOrgView && !featuresLoading && hasFeature('school_class_groups');
 
   const assertTutorLicensed = async (tutorId: string) => {
@@ -583,7 +584,7 @@ export default function CompanyTvarkarastis() {
   // lesson defaults to a trial with the org trial topic/duration/price — all
   // still editable in the dialog before saving.
   useEffect(() => {
-    if (featuresLoading || !hasFeature('auto_trial_first_lesson')) return;
+    if (featuresLoading || !pkFeat('auto_trial_first_lesson')) return;
     if (!createStudentId) return;
     let cancelled = false;
     (async () => {
@@ -718,7 +719,7 @@ export default function CompanyTvarkarastis() {
           setOrgSubjectTemplates(tpl.filter((t: any) => t?.id && t?.name).map((t: any) => ({ id: t.id, name: String(t.name).trim() })));
         }
 
-        const { data: dynamicRows } = proKlaseIntake
+        const { data: dynamicRows } = proKlaseAdminUi
           ? await supabase
               .from('organization_dynamic_pricing')
               .select('id, organization_id, grade_min, grade_max, lessons_per_week, price')
@@ -854,8 +855,8 @@ export default function CompanyTvarkarastis() {
         id: session.id,
         title: `${calendarSessionTitlePrefix({
           isTrial: !!session.subject_id && trialSubjectIds.has(session.subject_id),
-          isMakeup: session.is_makeup === true,
-          cancellationReasonCode: session.cancellation_reason_code,
+          isMakeup: isProKlase && session.is_makeup === true,
+          cancellationReasonCode: isProKlase ? session.cancellation_reason_code : undefined,
           status: session.status,
         })}${session.student?.full_name || 'Mokinys'} - ${session.tutor?.full_name || 'Tutorius'}`,
         start: session.start_time,
@@ -868,7 +869,7 @@ export default function CompanyTvarkarastis() {
     }
 
     return events;
-  }, [filteredSessions, availabilityBlocks, showOnlySessions, showOnlyAvailability, trialSubjectIds]);
+  }, [filteredSessions, availabilityBlocks, showOnlySessions, showOnlyAvailability, trialSubjectIds, isProKlase]);
 
   const filteredOrgTutorsForList = useMemo(() => {
     const q = tutorSearchQuery.trim().toLowerCase();
@@ -1399,7 +1400,7 @@ export default function CompanyTvarkarastis() {
     const endAt = session.end_time instanceof Date ? session.end_time : new Date(session.end_time);
     const isTrialLesson = !!session.subject_id && trialSubjectIds.has(session.subject_id);
     const isMovedLesson =
-      hasFeature('monthly_packages') && !!session.original_start_time && !!session.lesson_package_id;
+      pkFeat('monthly_packages') && !!session.original_start_time && !!session.lesson_package_id;
 
     const eventStyle = getCalendarSessionEventStyle({
       status: session.status,
@@ -1407,8 +1408,8 @@ export default function CompanyTvarkarastis() {
       payment_status: session.payment_status,
       endAt,
       isTrial: isTrialLesson,
-      isMakeup: session.is_makeup === true,
-      cancellationReasonCode: session.cancellation_reason_code,
+      isMakeup: isProKlase && session.is_makeup === true,
+      cancellationReasonCode: isProKlase ? session.cancellation_reason_code : undefined,
       isMovedLesson,
       isOrgTutor: false,
     });
@@ -1562,7 +1563,7 @@ export default function CompanyTvarkarastis() {
       // Monthly packages (req 6): a package lesson can only be moved within the
       // same calendar month (anchored on its original start). One-off / trial
       // lessons (no package) are unconstrained.
-      if (timeChangedForMove && isSingleEdit && hasFeature('monthly_packages') && !!(selectedEvent as any).lesson_package_id) {
+      if (timeChangedForMove && isSingleEdit && pkFeat('monthly_packages') && !!(selectedEvent as any).lesson_package_id) {
         const anchor = rescheduleAnchorDate((selectedEvent as any).original_start_time, oldStartForMove);
         if (!isSameCalendarMonth(newStart, anchor)) {
           throw new Error(t('cal.rescheduleSameMonthOnly'));
@@ -2277,7 +2278,7 @@ export default function CompanyTvarkarastis() {
         (createIsTrial || (createIsRecurring && createFirstLessonIsTrial)) &&
         !createIsPaid &&
         createPrice > 0 &&
-        hasFeature('trial_creation_payment_email') &&
+        pkFeat('trial_creation_payment_email') &&
         createResult.createdSessionIds.length > 0
       ) {
         const trialDurationMin = createIsTrial
@@ -2715,14 +2716,18 @@ export default function CompanyTvarkarastis() {
             <div className="w-4 h-4 rounded" style={{ backgroundColor: '#a855f7', border: '2px solid #7e22ce' }}></div>
             <span>{t('compSch.trialLegend')}</span>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#8b5cf6', border: '2px solid #6d28d9' }}></div>
-            <span>{t('compSch.makeupLegend')}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded opacity-55" style={{ backgroundColor: '#ef4444', border: '2px dashed #991b1b' }}></div>
-            <span>{t('compSch.tutorNoShowLegend')}</span>
-          </div>
+          {isProKlase && (
+            <>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded" style={{ backgroundColor: '#8b5cf6', border: '2px solid #6d28d9' }}></div>
+                <span>{t('compSch.makeupLegend')}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded opacity-55" style={{ backgroundColor: '#ef4444', border: '2px dashed #991b1b' }}></div>
+                <span>{t('compSch.tutorNoShowLegend')}</span>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -3110,7 +3115,7 @@ export default function CompanyTvarkarastis() {
               </div>
             )}
 
-            {isProKlaseOrg(organizationId) && (
+            {isProKlase && (
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <Checkbox
                   checked={createIsMakeup}
@@ -3356,20 +3361,22 @@ export default function CompanyTvarkarastis() {
                       paid={selectedEvent.paid}
                       isComplimentary={selectedEvent.is_complimentary === true}
                       endTime={selectedEvent.end_time}
-                      pendingConfirmation={hasFeature('tutor_lesson_status_confirmation')}
-                      moved={hasFeature('monthly_packages') && !!(selectedEvent as any).original_start_time && !!(selectedEvent as any).lesson_package_id}
+                      pendingConfirmation={
+                        hasFeature('tutor_lesson_status_confirmation') || isProKlaseOrg(organizationId)
+                      }
+                      moved={pkFeat('monthly_packages') && !!(selectedEvent as any).original_start_time && !!(selectedEvent as any).lesson_package_id}
                     />
                     {!!selectedEvent.subject_id && trialSubjectIds.has(selectedEvent.subject_id) && (
                       <span className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800">
                         ★ {t('compSch.trialLesson')}
                       </span>
                     )}
-                    {selectedEvent.is_makeup && (
+                    {isProKlase && selectedEvent.is_makeup && (
                       <span className="inline-flex items-center rounded-md border border-violet-300 bg-violet-50 px-1.5 py-0.5 text-[11px] font-semibold text-violet-800">
                         {t('compSch.makeupLegend')}
                       </span>
                     )}
-                    {selectedEvent.cancellation_reason_code === 'tutor_no_show' && (
+                    {isProKlase && selectedEvent.cancellation_reason_code === 'tutor_no_show' && (
                       <span className="inline-flex items-center rounded-md border border-red-300 bg-red-50 px-1.5 py-0.5 text-[11px] font-semibold text-red-800">
                         {t('compSch.tutorNoShowLegend')}
                       </span>
@@ -4300,7 +4307,7 @@ export default function CompanyTvarkarastis() {
         onIsPaidChange={setFindLessonBookIsPaid}
         showSuccess={findLessonBookSuccess}
         showCrossTutorHint={findLessonBookCrossTutor}
-        showTrialButton={proKlaseIntake && hasFeature('trial_reservation_flow')}
+        showTrialButton={proKlaseAdminUi && hasFeature('trial_reservation_flow')}
         saving={findLessonBookSaving}
         trialSending={findLessonBookTrialSending}
         createdCount={findLessonBookCreatedIntervals.length}
@@ -4324,9 +4331,9 @@ export default function CompanyTvarkarastis() {
         isOpen={findLessonOpen}
         onClose={() => setFindLessonOpen(false)}
         orgId={organizationId}
-        orgAdminMode={!proKlaseIntake}
-        students={!proKlaseIntake ? students.map((s) => ({ id: s.id, full_name: s.full_name })) : undefined}
-        frequencyEnabled={proKlaseIntake && hasFeature('tutor_frequency_search')}
+        orgAdminMode={!proKlaseAdminUi}
+        students={!proKlaseAdminUi ? students.map((s) => ({ id: s.id, full_name: s.full_name })) : undefined}
+        frequencyEnabled={proKlaseAdminUi && hasFeature('tutor_frequency_search')}
         hidePrices={hideAdminPrices}
         onPickSlot={(slot, context) => {
           setFindLessonOpen(false);

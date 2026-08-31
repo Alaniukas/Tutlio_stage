@@ -3,7 +3,7 @@ import {
   PUBLIC_PRODUCT_FEATURES,
   type ProductSupportPageId,
   type PublicProductFeatureId,
-} from './productFeatureCatalog';
+} from './productFeatureCatalog.js';
 
 export const SUPPORT_PAGE_IDS = PRODUCT_SUPPORT_PAGE_IDS;
 export type SupportPageId = ProductSupportPageId;
