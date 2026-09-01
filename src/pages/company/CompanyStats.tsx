@@ -6,7 +6,7 @@ import { DateRangeFilter } from '@/components/DateRangeFilter';
 import { useTranslation } from '@/lib/i18n';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
-import { isProKlaseOrg } from '@/lib/marketMoney';
+import { isProKlaseOrg, orgFeeProfile } from '@/lib/marketMoney';
 import {
   packageClientPaidEur,
   proKlaseAdminFinanceSplit,
@@ -98,12 +98,13 @@ export default function CompanyStats() {
     const { data: sessions } = await query.limit(3000);
     const allSessions = sessions || [];
     const proKlase = isProKlaseOrg(adminRow.organization_id);
+    const proKlaseFeeProfile = proKlase ? orgFeeProfile(adminRow.organization_id) : null;
 
     let packagesByTutor = new Map<string, number>();
     if (proKlase) {
       let pkgQuery = supabase
         .from('lesson_packages')
-        .select('tutor_id, total_price, paid, payment_status, paid_at')
+        .select('tutor_id, total_price, price_per_lesson, total_lessons, paid, payment_status, paid_at')
         .in('tutor_id', tutorIds)
         .eq('paid', true);
       if (isFilterActive) {
@@ -123,7 +124,7 @@ export default function CompanyStats() {
         const tutorId = String((pkg as { tutor_id?: string }).tutor_id || '');
         packagesByTutor.set(
           tutorId,
-          (packagesByTutor.get(tutorId) || 0) + packageClientPaidEur(pkg as any),
+          (packagesByTutor.get(tutorId) || 0) + packageClientPaidEur(pkg as any, proKlaseFeeProfile),
         );
       }
     }

@@ -115,6 +115,30 @@ export function stripeFixedFee(market: TutlioMarket): number {
   return market === 'pl' ? MARKET_FEES.stripeFixed.pln : MARKET_FEES.stripeFixed.eur;
 }
 
+export function orgBaseFromPayerChargedTotal(
+  payerTotal: number,
+  profile: OrgFeeProfile | null | undefined,
+): number {
+  const total = Math.round(Number(payerTotal) * 100) / 100;
+  if (!Number.isFinite(total) || total <= 0) return 0;
+  if (!profile) return total;
+  let lower = 0;
+  for (const tier of profile.tiers) {
+    const base = Math.round(((total - tier.fixed) / (1 + tier.percent)) * 100) / 100;
+    const upper = tier.maxBase;
+    const cents = Math.round(base * 100);
+    if (cents % 5 !== 0) {
+      if (upper !== Infinity) lower = upper;
+      continue;
+    }
+    const inBand = base > lower && (upper === Infinity || base <= upper);
+    const gross = Math.round((base + base * tier.percent + tier.fixed) * 100) / 100;
+    if (inBand && Math.abs(gross - total) <= 0.01) return base;
+    if (upper !== Infinity) lower = upper;
+  }
+  return total;
+}
+
 export function customerTotal(
   baseAmount: number,
   market: TutlioMarket = 'default',

@@ -103,6 +103,7 @@ import {
   type SchoolClassGroupRecord,
 } from '@/lib/schoolClassGroups';
 import { findOrgTutorEmailConflict } from '@/lib/orgStudentTutorGuards';
+import { reassignOpenLessonsToTutor, removeOrgStudentTutorPairing } from '@/lib/reassignStudentTutorLessons';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { useUser } from '@/contexts/UserContext';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
@@ -4351,27 +4352,21 @@ export default function CompanyStudents() {
                               onClick={async () => {
                                 if (!confirm(t('compStu.confirmRemoveTutor'))) return;
                                 setTutorsSaving(true);
-                                const shouldDetachOnly = selectedStudentGroup.length <= 1;
-                                const { error } = shouldDetachOnly
-                                  ? await supabase
-                                      .from('students')
-                                      .update({ tutor_id: null })
-                                      .eq('id', row.id)
-                                  : await supabase
-                                      .from('students')
-                                      .delete()
-                                      .eq('id', row.id);
-                                if (error) {
-                                  setToastMessage({ message: t('compStu.tutorRemoveFailed'), type: 'error' });
-                                } else {
+                                try {
+                                  const remainingGroup = selectedStudentGroup.filter((r) => r.id !== row.id);
+                                  const { mode } = await removeOrgStudentTutorPairing(supabase, {
+                                    rowId: row.id,
+                                    remainingGroup,
+                                  });
                                   setToastMessage({ message: t('compStu.tutorRemoved'), type: 'success' });
-                                  const nextGroup = shouldDetachOnly
-                                    ? selectedStudentGroup.map((r) =>
-                                        r.id === row.id
-                                          ? { ...r, tutor_id: null, tutor: null }
-                                          : r
-                                      )
-                                    : selectedStudentGroup.filter((r) => r.id !== row.id);
+                                  const nextGroup =
+                                    mode === 'deleted'
+                                      ? remainingGroup
+                                      : selectedStudentGroup.map((r) =>
+                                          r.id === row.id
+                                            ? { ...r, tutor_id: null, tutor: null }
+                                            : r
+                                        );
                                   setSelectedStudentGroup(nextGroup);
                                   if (nextGroup.length === 0) {
                                     setSelectedStudent(null);
@@ -4382,6 +4377,8 @@ export default function CompanyStudents() {
                                     setTrialTutorId(fallback.tutor_id);
                                   }
                                   fetchData();
+                                } catch {
+                                  setToastMessage({ message: t('compStu.tutorRemoveFailed'), type: 'error' });
                                 }
                                 setTutorsSaving(false);
                               }}
@@ -4450,6 +4447,16 @@ export default function CompanyStudents() {
                                 .single();
                               error = res.error;
                               data = res.data;
+                              if (!error && data) {
+                                try {
+                                  await reassignOpenLessonsToTutor(supabase, nullTutorRow.id, {
+                                    studentId: nullTutorRow.id,
+                                    tutorId: addingTutorId,
+                                  });
+                                } catch (reassignErr: any) {
+                                  error = reassignErr;
+                                }
+                              }
                             } else {
                               const inviteCode = generateInviteCode();
                               const res = await supabase

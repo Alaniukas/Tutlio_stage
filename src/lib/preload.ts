@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { resolveAuthUser } from '@/lib/authSession';
 import { getCached, setCache, dedupeAsync } from '@/lib/dataCache';
 import { startOfMonth, endOfMonth, isAfter, isBefore, addDays, subDays, subMonths, addMonths } from 'date-fns';
-import { isProKlaseOrg } from '@/lib/marketMoney';
+import { isProKlaseOrg, orgFeeProfile } from '@/lib/marketMoney';
 import {
   packageClientPaidEur,
   proKlaseAdminFinanceSplit,
@@ -495,19 +495,21 @@ async function preloadStats(tutorProfiles: any[], tutorIds: string[], orgId?: st
       .select('tutor_id, status, payment_status, price, cancelled_by, paid, is_complimentary, lesson_package_id, subjects(is_trial)')
       .in('tutor_id', tutorIds);
 
-    const proKlase = isProKlaseOrg(orgId || tutorProfiles[0]?.organization_id);
+    const proKlaseOrgKey = orgId || tutorProfiles[0]?.organization_id;
+    const proKlase = isProKlaseOrg(proKlaseOrgKey);
+    const proKlaseFeeProfile = proKlase ? orgFeeProfile(proKlaseOrgKey) : null;
     let packagesByTutor = new Map<string, number>();
     if (proKlase) {
       const { data: packages } = await supabase
         .from('lesson_packages')
-        .select('tutor_id, total_price, paid, payment_status')
+        .select('tutor_id, total_price, price_per_lesson, total_lessons, paid, payment_status')
         .in('tutor_id', tutorIds)
         .eq('paid', true);
       for (const pkg of packages || []) {
         const tutorId = String((pkg as { tutor_id?: string }).tutor_id || '');
         packagesByTutor.set(
           tutorId,
-          (packagesByTutor.get(tutorId) || 0) + packageClientPaidEur(pkg as any),
+          (packagesByTutor.get(tutorId) || 0) + packageClientPaidEur(pkg as any, proKlaseFeeProfile),
         );
       }
     }

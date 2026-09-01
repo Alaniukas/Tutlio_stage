@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   orgFeeProfile,
   customerTotal,
+  orgBaseFromPayerChargedTotal,
   lessonCheckoutBreakdownCents,
   formatLessonStripeCharge,
   lessonStripeBreakdown,
@@ -50,6 +51,13 @@ describe('Proklasė tiered fee — customerTotal', () => {
     // (base + 2% + €0.25) / (1 - 1.5%)
     expect(customerTotal(20, 'default')).toBeCloseTo((20 + 0.4 + 0.25) / 0.985, 6);
     expect(customerTotal(20, 'default', null)).toBeCloseTo((20 + 0.4 + 0.25) / 0.985, 6);
+  });
+
+  it('strips Tutlio add-on from Stripe gross so org stats keep the lesson base', () => {
+    expect(orgBaseFromPayerChargedTotal(10.4, p)).toBe(10);
+    expect(orgBaseFromPayerChargedTotal(20.55, p)).toBe(20);
+    expect(orgBaseFromPayerChargedTotal(51.1, p)).toBe(50);
+    expect(orgBaseFromPayerChargedTotal(200, p)).toBe(200);
   });
 });
 

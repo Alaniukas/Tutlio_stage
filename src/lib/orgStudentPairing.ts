@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { reassignOpenLessonsToTutor } from '@/lib/reassignStudentTutorLessons';
 
 export const generateStudentInviteCode = () =>
   Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -65,7 +66,13 @@ export async function ensureStudentPairedWithTutor(
       .from('students')
       .update({ tutor_id: tutorId })
       .eq('id', tutorlessRow.id);
-    if (!claimErr) return tutorlessRow.id;
+    if (!claimErr) {
+      await reassignOpenLessonsToTutor(supabase, tutorlessRow.id, {
+        studentId: tutorlessRow.id,
+        tutorId,
+      });
+      return tutorlessRow.id;
+    }
   }
 
   const { data: created, error: insertErr } = await supabase

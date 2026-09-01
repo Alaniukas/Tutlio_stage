@@ -1,3 +1,4 @@
+import { orgBaseFromPayerChargedTotal, type OrgFeeProfile } from '@/lib/marketMoney';
 import { isComplimentarySession, sessionClientRevenueEur } from '@/lib/sessionComplimentary';
 import {
   PRO_KLASE_STUDENT_NO_SHOW_PAY_EUR,
@@ -18,6 +19,8 @@ export type ProKlaseAdminSession = {
 export type ProKlasePaidPackage = {
   tutor_id: string;
   total_price: number | null;
+  price_per_lesson?: number | null;
+  total_lessons?: number | null;
   paid?: boolean | null;
   payment_status?: string | null;
 };
@@ -48,10 +51,19 @@ export function proKlaseAccruedTutorCostEur(
   return 0;
 }
 
-export function packageClientPaidEur(pkg: ProKlasePaidPackage): number {
+export function packageClientPaidEur(
+  pkg: ProKlasePaidPackage,
+  feeProfile?: OrgFeeProfile | null,
+): number {
   if (pkg.paid === true || pkg.payment_status === 'paid' || pkg.payment_status === 'confirmed') {
+    const lessons = Number(pkg.total_lessons);
+    const perLesson = Number(pkg.price_per_lesson);
+    if (Number.isFinite(lessons) && lessons > 0 && Number.isFinite(perLesson) && perLesson > 0) {
+      return Math.round(lessons * perLesson * 100) / 100;
+    }
     const n = Number(pkg.total_price);
-    return Number.isFinite(n) ? n : 0;
+    if (!Number.isFinite(n)) return 0;
+    return orgBaseFromPayerChargedTotal(n, feeProfile);
   }
   return 0;
 }

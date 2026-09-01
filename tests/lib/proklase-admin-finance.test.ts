@@ -5,6 +5,7 @@ import {
   proKlaseAdminFinanceSplit,
   standaloneSessionClientPaidEur,
 } from '../../src/lib/proKlaseAdminFinance';
+import { orgFeeProfile } from '../../src/lib/marketMoney';
 
 const tutorRate = 15;
 
@@ -54,6 +55,22 @@ describe('proKlaseAdminFinance', () => {
         tutorRate,
       ),
     ).toBe(10);
+  });
+
+  it('does not treat Tutlio add-on (e.g. €0.40 on a €10 trial) as org company share', () => {
+    const p = orgFeeProfile('proklase');
+    expect(packageClientPaidEur({ tutor_id: 't', total_price: 10.4, price_per_lesson: 10, total_lessons: 1, paid: true }, p)).toBe(10);
+    const split = proKlaseAdminFinanceSplit({
+      clientPaidEur: packageClientPaidEur(
+        { tutor_id: 't', total_price: 10.4, price_per_lesson: 10, total_lessons: 1, paid: true },
+        p,
+      ),
+      sessions: [paidLesson({ subjects: { is_trial: true }, price: 10 })],
+      tutorPayRate: tutorRate,
+    });
+    expect(split.clientPaidEur).toBe(10);
+    expect(split.accruedTutorCostEur).toBe(10);
+    expect(split.platformShareEur).toBe(0);
   });
 
   it('counts package cash, not cancelled session prices, as client paid', () => {
