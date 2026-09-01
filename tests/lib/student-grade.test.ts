@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { displayStudentGrade, normalizeStudentGrade1to12, studentGradeSelectValue } from '../../src/lib/studentGrade';
+import { displayStudentGrade, normalizeStudentGrade1to12, proKlaseGradeSelectValue, studentGradeSelectValue } from '../../src/lib/studentGrade';
 
 describe('normalizeStudentGrade1to12', () => {
   it('accepts 1–12 and stores the app grade format', () => {
@@ -7,6 +7,7 @@ describe('normalizeStudentGrade1to12', () => {
     expect(normalizeStudentGrade1to12('12 klasė')).toBe('12 klasė');
     expect(normalizeStudentGrade1to12('1')).toBe('1 klasė');
     expect(normalizeStudentGrade1to12('12 klas??')).toBe('12 klasė');
+    expect(normalizeStudentGrade1to12('12 klas?')).toBe('12 klasė');
     expect(normalizeStudentGrade1to12('12 klase')).toBe('12 klasė');
   });
 
@@ -28,5 +29,13 @@ describe('normalizeStudentGrade1to12', () => {
     expect(displayStudentGrade('12 klas??')).toBe('12 klasė');
     expect(displayStudentGrade('Studentas')).toBe('Studentas');
     expect(displayStudentGrade('')).toBe('');
+  });
+
+  it('keeps Pro Klasė grade Select values inside the item list', () => {
+    expect(proKlaseGradeSelectValue('5 klas?')).toBe('5 klasė');
+    expect(proKlaseGradeSelectValue('12 klas??')).toBe('12 klasė');
+    expect(proKlaseGradeSelectValue(null)).toBe('unset');
+    expect(proKlaseGradeSelectValue('Studentas')).toBe('Studentas');
+    expect(proKlaseGradeSelectValue('something else')).toBe('Kita');
   });
 });

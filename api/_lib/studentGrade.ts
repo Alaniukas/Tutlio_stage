@@ -2,7 +2,7 @@
 export function normalizeStudentGrade1to12(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
-  const match = trimmed.match(/^(\d{1,2})(?:\s*klas(?:ė|e|\?\?)?)?$/i);
+  const match = trimmed.match(/^(\d{1,2})(?:\s*klas(?:ė|e|\?+|\uFFFD+)?)?$/i);
   if (!match) return null;
   const n = Number(match[1]);
   if (!Number.isInteger(n) || n < 1 || n > 12) return null;

@@ -4003,7 +4003,7 @@ export default function CompanyTvarkarastis() {
 
                   <div className="space-y-1.5">
                     <Label className="text-xs">{t('compSch.time')}</Label>
-                    <Select value={createFromAvailSelectedSlot || ''} onValueChange={setCreateFromAvailSelectedSlot}>
+                    <Select value={createFromAvailSelectedSlot || undefined} onValueChange={setCreateFromAvailSelectedSlot}>
                       <SelectTrigger className="rounded-xl h-9 text-sm">
                         <SelectValue placeholder={t('compSch.selectTimePlaceholder')} />
                       </SelectTrigger>

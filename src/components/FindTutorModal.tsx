@@ -184,7 +184,7 @@ export default function FindTutorModal({
   }, [isOpen, orgId]);
 
   const uniqueSubjectNames = useMemo(
-    () => [...new Set(subjects.map(s => s.name))].sort(),
+    () => [...new Set(subjects.map(s => s.name).filter((name) => String(name || '').trim()))].sort(),
     [subjects]
   );
 
@@ -330,6 +330,7 @@ export default function FindTutorModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={open => { if (!open) onClose(); }}>
+      {isOpen ? (
       <DialogContent className="w-[95vw] max-w-xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -722,6 +723,7 @@ export default function FindTutorModal({
           )}
         </div>
       </DialogContent>
+      ) : null}
     </Dialog>
   );
 }

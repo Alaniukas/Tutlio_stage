@@ -116,7 +116,7 @@ import {
 } from '@/lib/organizationDynamicPricing';
 import { formatLocalYmd, monthlyPackagePeriodFrom } from '@/lib/monthlyPackagePlan';
 import { canEditPendingPackage } from '@/lib/pendingPackageEdit';
-import { normalizeStudentGrade1to12 } from '@/lib/studentGrade';
+import { normalizeStudentGrade1to12, proKlaseGradeSelectValue } from '@/lib/studentGrade';
 
 interface Student {
   id: string;
@@ -297,6 +297,18 @@ function calculateAgeFromDate(value: string | null | undefined): number | null {
   return age >= 0 ? age : null;
 }
 
+function studentListInitials(fullName: string | null | undefined): string {
+  const letters = String(fullName || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
+  return letters || '?';
+}
+
 function joinStudentAddressLine(address?: string | null, city?: string | null): string {
   return [address, city].map((x) => String(x || '').trim()).filter(Boolean).join(', ');
 }
@@ -310,7 +322,7 @@ export default function CompanyStudents() {
   const { loading: orgFeaturesLoading, hasFeature } = useOrgFeatures();
   const { user: authUser } = useUser();
   const { membership } = useOrgAdminAccess();
-  const [orgId, setOrgId] = useState<string | null>(null);
+  const [orgId, setOrgId] = useState<string | null>(() => membership?.organizationId ?? null);
   const proKlaseAdminUi = proKlaseOrgAdminContext(orgId, orgEntityType, orgFeaturesLoading);
   const pkFeat = (flagId: string) =>
     proKlaseFeatureEnabled(orgId, orgEntityType, hasFeature, flagId, orgFeaturesLoading);
@@ -669,7 +681,7 @@ export default function CompanyStudents() {
       showTrashBin ? g.primary.detached_at : !g.primary.detached_at
     );
     if (normalizedSearch) {
-      groups = groups.filter((g) => g.primary.full_name.toLowerCase().includes(normalizedSearch));
+      groups = groups.filter((g) => String(g.primary.full_name || '').toLowerCase().includes(normalizedSearch));
     }
     if (gradeFilter !== 'all') {
       groups = groups.filter((g) => g.rows.some((r) => String(r.grade || '').trim() === gradeFilter));
@@ -2821,7 +2833,7 @@ export default function CompanyStudents() {
                   <div className="space-y-2 sm:col-span-2">
                     <Label>{t('studentSettings.grade')}</Label>
                     <Select
-                      value={newStudent.grade || 'unset'}
+                      value={proKlaseGradeSelectValue(newStudent.grade)}
                       onValueChange={(value) => setNewStudent({ ...newStudent, grade: value === 'unset' ? '' : value })}
                     >
                       <SelectTrigger className="rounded-xl">
@@ -3491,7 +3503,7 @@ export default function CompanyStudents() {
             <div className="md:hidden divide-y divide-gray-100">
               {filteredGroups.map((g, groupIdx) => {
                 const student = g.primary;
-                const initials = student.full_name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
+                const initials = studentListInitials(student.full_name);
                 const hasTutor = g.rows.some((r) => r.tutor_id);
                 const needsPackage = g.rows.some((r) => trialNoPackageStudentIds.has(r.id));
                 const tutorNames = hasTutor
@@ -3636,7 +3648,7 @@ export default function CompanyStudents() {
                 <tbody className="divide-y divide-gray-100">
                   {filteredGroups.map((g, groupIdx) => {
                     const student = g.primary;
-                    const initials = student.full_name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
+                    const initials = studentListInitials(student.full_name);
                     const hasTutorDt = g.rows.some((r) => r.tutor_id);
                     const needsPackage = g.rows.some((r) => trialNoPackageStudentIds.has(r.id));
                     const tutorNames = hasTutorDt
@@ -3991,7 +4003,7 @@ export default function CompanyStudents() {
                     <div className="mt-3 w-full space-y-1.5">
                       <Label className="text-xs text-gray-500">{t('studentSettings.grade')}</Label>
                       <Select
-                        value={normalizeStudentGrade1to12(selectedStudent.grade) || selectedStudent.grade || 'unset'}
+                        value={proKlaseGradeSelectValue(selectedStudent.grade)}
                         onValueChange={(value) => void handleUpdateStudentGrade(value)}
                       >
                         <SelectTrigger className="h-9 rounded-xl bg-white">
@@ -4917,7 +4929,7 @@ export default function CompanyStudents() {
                           <div className="space-y-1">
                             <Label className="text-[11px] text-violet-900">{t('package.itemSubject')}</Label>
                             <Select
-                              value={pkgItems[0]?.subjectId || ''}
+                              value={pkgItems[0]?.subjectId || undefined}
                               onValueChange={(subjectId) => {
                                 const subject = packageSubjects.find((row: any) => row.id === subjectId);
                                 const price = resolveOrganizationLessonPrice({

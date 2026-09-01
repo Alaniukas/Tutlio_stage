@@ -624,7 +624,7 @@ export default function CompanyTutors() {
     // Try to load organization default settings (columns may not exist yet)
     const { data: orgData } = await supabase
       .from('organizations')
-      .select('tutor_license_count, default_cancellation_hours, default_cancellation_fee_percent, default_reminder_student_hours, default_reminder_tutor_hours, default_break_between_lessons, default_min_booking_hours, default_company_commission_percent')
+      .select('tutor_license_count, default_cancellation_hours, default_cancellation_fee_percent, default_reminder_student_hours, default_reminder_tutor_hours, default_break_between_lessons, default_min_booking_hours, default_company_commission_percent, org_subject_templates')
       .eq('id', adminRow.organization_id)
       .maybeSingle();
 

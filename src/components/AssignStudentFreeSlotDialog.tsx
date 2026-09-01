@@ -139,7 +139,7 @@ export default function AssignStudentFreeSlotDialog({
           ) : (
             <div className="min-w-0 w-full space-y-1.5">
               <Label className="text-xs">{t('compSch.time')}</Label>
-              <Select value={selectedSlot || ''} onValueChange={onSelectedSlotChange}>
+              <Select value={selectedSlot || undefined} onValueChange={onSelectedSlotChange}>
                 <SelectTrigger className="h-9 w-full min-w-0 max-w-full rounded-xl text-sm">
                   <SelectValue placeholder={t('compSch.selectTimePlaceholder')} />
                 </SelectTrigger>
