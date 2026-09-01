@@ -4,6 +4,11 @@ import { verifyRequestAuth } from './_lib/auth.js';
 import { resolveInvoiceBranding } from './_lib/invoiceBranding.js';
 import { generateInvoicePdf, type InvoicePdfData } from './_lib/invoicePdf.js';
 import { isProKlaseOrg } from './_lib/marketMoney.js';
+import {
+  buildClassicLtTutorPdfMeta,
+  CLASSIC_LT_TUTOR_LAYOUT,
+  isManoKorepetitoriusTutorInvoice,
+} from './_lib/manoKorepetitoriusInvoice.js';
 import { proKlaseSessionPayEur } from './_lib/proKlaseTutorPay.js';
 import { proKlaseVatExemptionNote } from './_lib/proKlaseInvoice.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
@@ -519,9 +524,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const buyer = organizationAsBuyer ?? buildBuyerFromSessions(group.sessions);
 
       const studentRow = group.sessions[0]?.students as { full_name?: string; grade?: string } | undefined;
+      const manoTutorInvoice = isManoKorepetitoriusTutorInvoice(isOrgTutor, profile.organization_id);
       const pdfMeta = pvmEducationInvoice && !isOrgTutor
         ? buildPvmPdfMeta(studentRow?.full_name || '', studentRow?.grade, group.sessions)
-        : null;
+        : manoTutorInvoice
+          ? buildClassicLtTutorPdfMeta({
+              sessions: group.sessions,
+              issuedByName: sellerSnapshot.name,
+              lessonPayEur: (s) =>
+                proKlasePay
+                  ? proKlaseSessionPayEur(
+                      { status: (s as any).status, price: s.price, subjects: (s as any).subjects },
+                      orgTutorRateEur,
+                    )
+                  : orgTutorLessonPayEur(orgTutorRateEur, s.price),
+            })
+          : null;
 
       const invoiceNumber = await allocateInvoiceNumber(supabase, sellerProfile.id);
 
@@ -574,13 +592,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Generate PDF
       try {
         const orgIdForBranding = profile.organization_id ?? null;
-        const branding = orgIdForBranding
-          ? await resolveInvoiceBranding(supabase, orgIdForBranding)
-          : null;
+        const classicTutorMeta = pdfMeta?.layout === CLASSIC_LT_TUTOR_LAYOUT ? pdfMeta : null;
+        const pvmMeta = pdfMeta && pdfMeta.layout === 'pvm_education' ? pdfMeta : null;
+        const branding =
+          !classicTutorMeta && orgIdForBranding
+            ? await resolveInvoiceBranding(supabase, orgIdForBranding)
+            : null;
 
         const pdfData: InvoicePdfData = {
           invoiceNumber,
-          issueDate: new Date().toLocaleDateString('lt-LT'),
+          issueDate: classicTutorMeta
+            ? new Date().toISOString().slice(0, 10)
+            : new Date().toLocaleDateString('lt-LT'),
           periodStart: new Date(periodStart).toLocaleDateString('lt-LT'),
           periodEnd: new Date(periodEnd).toLocaleDateString('lt-LT'),
           seller: sellerSnapshot,
@@ -593,16 +616,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           })),
           totalAmount,
           branding: branding ?? undefined,
-          isVatInvoice: !!sellerSnapshot.vatCode || !!pdfMeta,
+          isVatInvoice: !!sellerSnapshot.vatCode || !!pvmMeta,
           invoiceNumberLabel: pdfMeta
             ? formatInvoiceSeriesHeading(invoiceNumber)
             : `Nr. ${invoiceNumber}`,
-          ...(pdfMeta
+          ...(pvmMeta
             ? {
                 layout: 'pvm_education' as const,
-                notes: pdfMeta.notes,
-                lessonDetails: pdfMeta.lessonDetails,
+                notes: pvmMeta.notes,
+                lessonDetails: pvmMeta.lessonDetails,
                 hidePlatformFooter: true,
+              }
+            : {}),
+          ...(classicTutorMeta
+            ? {
+                layout: CLASSIC_LT_TUTOR_LAYOUT,
+                lessonDetails: classicTutorMeta.lessonDetails,
+                hidePlatformFooter: true,
+                issuedByName: classicTutorMeta.issuedByName,
               }
             : {}),
         };

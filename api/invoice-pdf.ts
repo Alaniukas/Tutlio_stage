@@ -7,6 +7,10 @@ import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import { formatInvoiceSeriesHeading } from './_lib/invoiceNumber.js';
 import { parsePvmPdfMeta } from './_lib/pvmEducationInvoice.js';
+import {
+  CLASSIC_LT_TUTOR_LAYOUT,
+  parseClassicLtTutorPdfMeta,
+} from './_lib/manoKorepetitoriusInvoice.js';
 import { isProKlaseOrg } from './_lib/marketMoney.js';
 import {
   invoicePartyMatches,
@@ -63,9 +67,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ? await resolveInvoiceBranding(supabase, invoice.organization_id)
       : null;
     const pvmMetaEarly = parsePvmPdfMeta(invoice.pdf_meta);
+    const classicTutorMetaEarly = parseClassicLtTutorPdfMeta(invoice.pdf_meta);
 
     const isProKlaseInvoice = isProKlaseOrg(invoice.organization_id);
-    if (!brandingPreview && !pvmMetaEarly && !isProKlaseInvoice && invoice.pdf_storage_path) {
+    if (
+      !brandingPreview
+      && !pvmMetaEarly
+      && !classicTutorMetaEarly
+      && !isProKlaseInvoice
+      && invoice.pdf_storage_path
+    ) {
       const { data: fileData, error: dlErr } = await supabase.storage
         .from('invoices')
         .download(invoice.pdf_storage_path);
@@ -84,8 +95,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq('invoice_id', invoiceId)
       .order('created_at', { ascending: true });
 
-    const branding = brandingPreview;
+    const branding = classicTutorMetaEarly ? null : brandingPreview;
     const pvmMeta = pvmMetaEarly;
+    const classicTutorMeta = classicTutorMetaEarly;
     const sellerSnapshot = {
       ...(invoice.seller_snapshot as InvoicePdfData['seller']),
     };
@@ -130,7 +142,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const pdfData: InvoicePdfData = {
       invoiceNumber: invoice.invoice_number,
-      issueDate: new Date(invoice.issue_date).toLocaleDateString('lt-LT'),
+      issueDate: classicTutorMeta
+        ? String(invoice.issue_date).slice(0, 10)
+        : new Date(invoice.issue_date).toLocaleDateString('lt-LT'),
       periodStart: invoice.period_start
         ? new Date(invoice.period_start).toLocaleDateString('lt-LT')
         : undefined,
@@ -148,7 +162,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       totalAmount: Number(invoice.total_amount),
       branding: branding ?? undefined,
       isVatInvoice: !!seller?.vatCode || !!pvmMeta,
-      invoiceNumberLabel: pvmMeta
+      invoiceNumberLabel: pvmMeta || classicTutorMeta
         ? formatInvoiceSeriesHeading(invoice.invoice_number)
         : `Nr. ${invoice.invoice_number}`,
       ...(pvmMeta
@@ -157,6 +171,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             notes: pvmMeta.notes,
             lessonDetails: pvmMeta.lessonDetails,
             hidePlatformFooter: true,
+          }
+        : {}),
+      ...(classicTutorMeta
+        ? {
+            layout: CLASSIC_LT_TUTOR_LAYOUT,
+            lessonDetails: classicTutorMeta.lessonDetails,
+            hidePlatformFooter: true,
+            issuedByName: classicTutorMeta.issuedByName,
           }
         : {}),
     };
