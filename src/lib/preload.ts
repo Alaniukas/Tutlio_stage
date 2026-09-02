@@ -4,6 +4,7 @@ import { resolveAuthUser } from '@/lib/authSession';
 import { getCached, setCache, dedupeAsync } from '@/lib/dataCache';
 import { startOfMonth, endOfMonth, isAfter, isBefore, addDays, subDays, subMonths, addMonths } from 'date-fns';
 import { isProKlaseOrg, orgFeeProfile } from '@/lib/marketMoney';
+import { sumOrgTutorLessonsPayEur } from '@/lib/orgTutorLessonPay';
 import {
   packageClientPaidEur,
   proKlaseAdminFinanceSplit,
@@ -327,7 +328,7 @@ export async function preloadOrgAdminData() {
     const [{ data: tutorData }, { data: inviteData }] = await Promise.all([
       supabase
         .from('profiles')
-        .select('id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, has_active_license')
+        .select('id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, company_commission_by_subject, has_active_license')
         .eq('organization_id', orgId),
       supabase
         .from('tutor_invites')
@@ -340,7 +341,7 @@ export async function preloadOrgAdminData() {
     const visibleTutors = await getOrgVisibleTutors(
       supabase,
       orgId,
-      'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, personal_meeting_link, teaching_notes, has_active_license',
+      'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, company_commission_by_subject, personal_meeting_link, teaching_notes, has_active_license',
     );
     const tutorIds = visibleTutors.map((t: any) => t.id);
 
@@ -492,7 +493,7 @@ async function preloadStats(tutorProfiles: any[], tutorIds: string[], orgId?: st
   try {
     const { data: sessionsData } = await supabase
       .from('sessions')
-      .select('tutor_id, status, payment_status, price, cancelled_by, paid, is_complimentary, lesson_package_id, subjects(is_trial)')
+      .select('tutor_id, status, payment_status, price, cancelled_by, paid, is_complimentary, lesson_package_id, subject_id, subjects(is_trial)')
       .in('tutor_id', tutorIds);
 
     const proKlaseOrgKey = orgId || tutorProfiles[0]?.organization_id;
@@ -558,6 +559,12 @@ async function preloadStats(tutorProfiles: any[], tutorIds: string[], orgId?: st
         s.status === 'completed' || ['paid', 'confirmed'].includes(s.payment_status)
       );
       const earnings = paid.reduce((sum: number, s: any) => sum + (s.price || 0), 0);
+      const netEarnings = sumOrgTutorLessonsPayEur(
+        paid,
+        tutorPayPerSession,
+        tutor.company_commission_by_subject,
+        orgId,
+      );
       return {
         id: tutor.id, full_name: tutor.full_name,
         completedSessions: paid.length,
@@ -565,8 +572,8 @@ async function preloadStats(tutorProfiles: any[], tutorIds: string[], orgId?: st
         cancelledByStudent: cancelledByStudent.length,
         totalCancelled: totalCancelledCount,
         earnings,
-        companyCommission: earnings - tutorPayPerSession * paid.length,
-        netEarnings: tutorPayPerSession * paid.length,
+        companyCommission: earnings - netEarnings,
+        netEarnings,
       };
     });
 

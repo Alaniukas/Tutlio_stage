@@ -10,6 +10,10 @@ import {
   isManoKorepetitoriusTutorInvoice,
 } from './_lib/manoKorepetitoriusInvoice.js';
 import { proKlaseSessionPayEur } from './_lib/proKlaseTutorPay.js';
+import {
+  orgTutorLessonPayEur,
+  orgTutorSessionPayEur,
+} from '../src/lib/orgTutorLessonPay.js';
 import { proKlaseVatExemptionNote } from './_lib/proKlaseInvoice.js';
 import { getOrgAdminAccessByUserId } from './_lib/orgAdminAccess.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
@@ -19,14 +23,6 @@ import {
   groupSessionsByStudent,
   orgHasPvmEducationInvoice,
 } from './_lib/pvmEducationInvoice.js';
-
-/** EUR per lesson for org-tutor → company invoices (see profiles.company_commission_percent). */
-function orgTutorLessonPayEur(tutorPayRate: number | null | undefined, sessionPrice: number | null | undefined): number {
-  const rate = Number(tutorPayRate);
-  if (Number.isFinite(rate) && rate > 0) return rate;
-  const price = Number(sessionPrice);
-  return Number.isFinite(price) && price > 0 ? price : 0;
-}
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -102,7 +98,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('id, full_name, email, phone, organization_id, company_commission_percent')
+      .select('id, full_name, email, phone, organization_id, company_commission_percent, company_commission_by_subject')
       .eq('id', tutorId)
       .single();
 
@@ -486,10 +482,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const group of groups) {
       const orgTutorRateEur = isOrgTutor ? Number((profile as any)?.company_commission_percent) || 0 : null;
       const proKlasePay = isOrgTutor && isProKlaseOrg(profile.organization_id);
+      const lessonPayEur = (s: { status?: string; price?: number | null; subject_id?: string | null; subjects?: unknown }) =>
+        proKlasePay
+          ? proKlaseSessionPayEur(
+              { status: String(s.status || ''), price: s.price, subjects: s.subjects as { is_trial?: boolean | null } | null },
+              orgTutorRateEur,
+            )
+          : orgTutorSessionPayEur({
+              organizationId: profile.organization_id,
+              defaultRate: orgTutorRateEur,
+              bySubject: (profile as any)?.company_commission_by_subject,
+              subjectId: s.subject_id,
+              sessionPrice: s.price,
+            });
       let lineItems = buildLineItems(group.sessions, groupingType, {
         orgTutorRateEur,
         detailed: detailedLineItems,
         proKlasePay,
+        lessonPayEur: orgTutorRateEur != null ? lessonPayEur : undefined,
       });
 
       if (proKlasePay && isOrgTutor) {
@@ -531,13 +541,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ? buildClassicLtTutorPdfMeta({
               sessions: group.sessions,
               issuedByName: sellerSnapshot.name,
-              lessonPayEur: (s) =>
-                proKlasePay
-                  ? proKlaseSessionPayEur(
-                      { status: (s as any).status, price: s.price, subjects: (s as any).subjects },
-                      orgTutorRateEur,
-                    )
-                  : orgTutorLessonPayEur(orgTutorRateEur, s.price),
+              lessonPayEur: (s) => lessonPayEur(s as any),
             })
           : null;
 
@@ -802,18 +806,25 @@ interface LineItemData {
 function buildLineItems(
   sessions: any[],
   groupingType: GroupingType,
-  opts?: { orgTutorRateEur: number | null; detailed?: boolean; proKlasePay?: boolean }
+  opts?: {
+    orgTutorRateEur: number | null;
+    detailed?: boolean;
+    proKlasePay?: boolean;
+    lessonPayEur?: (session: any) => number;
+  }
 ): LineItemData[] {
   const orgTutorPayRate = opts?.orgTutorRateEur ?? null;
   const detailed = opts?.detailed === true && orgTutorPayRate == null;
   if (orgTutorPayRate != null) {
     const linePay = (s: any) =>
-      opts?.proKlasePay
-        ? proKlaseSessionPayEur(
-            { status: s.status, price: s.price, subjects: s.subjects },
-            orgTutorPayRate,
-          )
-        : orgTutorLessonPayEur(orgTutorPayRate, s.price);
+      opts?.lessonPayEur
+        ? opts.lessonPayEur(s)
+        : opts?.proKlasePay
+          ? proKlaseSessionPayEur(
+              { status: s.status, price: s.price, subjects: s.subjects },
+              orgTutorPayRate,
+            )
+          : orgTutorLessonPayEur(orgTutorPayRate, s.price);
 
     if (groupingType === 'per_payment') {
       return sessions.map(s => {

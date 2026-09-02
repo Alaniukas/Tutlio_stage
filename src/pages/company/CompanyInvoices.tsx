@@ -34,7 +34,7 @@ import {
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
-import { orgTutorLessonPayEur } from '@/lib/orgTutorLessonPay';
+import { orgTutorSessionPayEur } from '@/lib/orgTutorLessonPay';
 import { ORG_TUTOR_CARD_LIST_SCROLL_CLASS } from '@/lib/orgUi';
 
 interface Invoice {
@@ -217,17 +217,24 @@ export default function CompanyInvoices() {
     const [{ data: sessions }, { data: tutorProfiles }] = await Promise.all([
       supabase
         .from('sessions')
-        .select('tutor_id, price, status, paid, payment_status')
+        .select('tutor_id, price, status, paid, payment_status, subject_id')
         .in('tutor_id', tutorIds)
         .gte('start_time', tutorEffectiveRange.start)
         .lte('start_time', tutorEffectiveRange.end + 'T23:59:59')
         .neq('status', 'cancelled'),
-      supabase.from('profiles').select('id, company_commission_percent').in('id', tutorIds),
+      supabase.from('profiles').select('id, company_commission_percent, company_commission_by_subject').in('id', tutorIds),
     ]);
-    const payRateByTutor = new Map(
-      (tutorProfiles || []).map((p: { id: string; company_commission_percent?: number | null }) => [
+    const payByTutor = new Map(
+      (tutorProfiles || []).map((p: {
+        id: string;
+        company_commission_percent?: number | null;
+        company_commission_by_subject?: unknown;
+      }) => [
         p.id,
-        p.company_commission_percent,
+        {
+          defaultRate: p.company_commission_percent,
+          bySubject: p.company_commission_by_subject,
+        },
       ]),
     );
     const map: Record<string, { count: number; total: number }> = {};
@@ -236,7 +243,14 @@ export default function CompanyInvoices() {
       if (!isCountedAsPaid) continue;
       if (!map[s.tutor_id]) map[s.tutor_id] = { count: 0, total: 0 };
       map[s.tutor_id].count++;
-      map[s.tutor_id].total += orgTutorLessonPayEur(payRateByTutor.get(s.tutor_id), s.price);
+      const pay = payByTutor.get(s.tutor_id);
+      map[s.tutor_id].total += orgTutorSessionPayEur({
+        organizationId: orgId,
+        defaultRate: pay?.defaultRate,
+        bySubject: pay?.bySubject,
+        subjectId: (s as { subject_id?: string | null }).subject_id,
+        sessionPrice: s.price,
+      });
     }
     setTutorSessions(map);
     setLoadingTutorSessions(false);

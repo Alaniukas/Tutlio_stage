@@ -12,7 +12,7 @@ import { format, subDays } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { fetchPaidSalesInvoiceCandidates } from '@/lib/manualSalesInvoicePreview';
 import { fetchOrgTutorInvoicesDeduped } from '@/lib/fetchOrgTutorInvoicesDeduped';
-import { orgTutorLessonPayEur } from '@/lib/orgTutorLessonPay';
+import { orgTutorSessionPayEur } from '@/lib/orgTutorLessonPay';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 
 type GroupingType = 'per_payment' | 'per_week' | 'single';
@@ -230,7 +230,7 @@ export default function CreateInvoiceModal({
         }
 
         const [{ data: prof }, { data: sessRows, error: sessErr }] = await Promise.all([
-          supabase.from('profiles').select('company_commission_percent').eq('id', tutorId).maybeSingle(),
+          supabase.from('profiles').select('organization_id, company_commission_percent, company_commission_by_subject').eq('id', tutorId).maybeSingle(),
           supabase
             .from('sessions')
             .select('id, tutor_id, start_time, end_time, status, subject_id, price, students(full_name, email), subjects(name)')
@@ -246,7 +246,13 @@ export default function CreateInvoiceModal({
         const tutorPayRate = Number((prof as any)?.company_commission_percent) || 0;
         const rows = (sessRows || []).map((s: any) => ({
           ...s,
-          price: orgTutorLessonPayEur(tutorPayRate, s.price),
+          price: orgTutorSessionPayEur({
+            organizationId: (prof as any)?.organization_id,
+            defaultRate: tutorPayRate,
+            bySubject: (prof as any)?.company_commission_by_subject,
+            subjectId: s.subject_id,
+            sessionPrice: s.price,
+          }),
         }));
         if (!rows.length) {
           setError(t('invoiceCreate.noSessions'));

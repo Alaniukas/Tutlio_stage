@@ -7,6 +7,7 @@ import { useTranslation } from '@/lib/i18n';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { isProKlaseOrg, orgFeeProfile } from '@/lib/marketMoney';
+import { sumOrgTutorLessonsPayEur } from '@/lib/orgTutorLessonPay';
 import {
   packageClientPaidEur,
   proKlaseAdminFinanceSplit,
@@ -63,7 +64,7 @@ export default function CompanyStats() {
     const tutorList = await getOrgVisibleTutors(
       supabase as any,
       adminRow.organization_id,
-      'id, full_name, email, company_commission_percent',
+      'id, full_name, email, company_commission_percent, company_commission_by_subject',
     );
 
     if (tutorList.length === 0) { setLoading(false); return; }
@@ -72,7 +73,7 @@ export default function CompanyStats() {
 
     let query = supabase
       .from('sessions')
-      .select('tutor_id, status, payment_status, price, cancelled_by, paid, is_complimentary, lesson_package_id, subjects(is_trial)')
+      .select('tutor_id, status, payment_status, price, cancelled_by, paid, is_complimentary, lesson_package_id, subject_id, subjects(is_trial)')
       .in('tutor_id', tutorIds);
 
     if (isFilterActive) {
@@ -175,7 +176,12 @@ export default function CompanyStats() {
       );
       const sessionsEarnings = paid.reduce((sum, s) => sum + (s.price || 0), 0);
       const earnings = sessionsEarnings;
-      const netEarnings = tutorPayPerSession * paid.length;
+      const netEarnings = sumOrgTutorLessonsPayEur(
+        paid as Array<{ subject_id?: string | null; price?: number | null }>,
+        tutorPayPerSession,
+        (tutor as any).company_commission_by_subject,
+        adminRow.organization_id,
+      );
       const companyCommission = earnings - netEarnings;
 
       return {

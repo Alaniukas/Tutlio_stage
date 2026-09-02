@@ -13,6 +13,7 @@ export type OrgTutorRow = {
   break_between_lessons?: number | null;
   min_booking_hours?: number | null;
   company_commission_percent?: number | null;
+  company_commission_by_subject?: Record<string, number> | null;
   personal_meeting_link?: string | null;
 };
 

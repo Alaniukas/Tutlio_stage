@@ -17,8 +17,9 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
-import { fmtMoney, isProKlaseOrg } from '@/lib/marketMoney';
+import { fmtMoney, isManoKorepetitoriusOrg, isProKlaseOrg } from '@/lib/marketMoney';
 import { sumProKlasePayBreakdown, type ProKlasePayBreakdown } from '@/lib/proKlaseTutorPay';
+import { parseTutorPayBySubject, sumOrgTutorLessonsPayEur } from '@/lib/orgTutorLessonPay';
 import { useUser } from '@/contexts/UserContext';
 import InvoiceSettingsForm from '@/components/InvoiceSettingsForm';
 import CreateInvoiceModal from '@/components/CreateInvoiceModal';
@@ -64,6 +65,7 @@ export default function OrgTutorFinanceSummary() {
   const { t, dateFnsLocale } = useTranslation();
   const { profile } = useUser();
   const proKlasePayMode = isProKlaseOrg(profile?.organization_id);
+  const manoPayMode = isManoKorepetitoriusOrg(profile?.organization_id);
   const { payPerLessonEur, loading: policyLoading, invoiceIssuerMode } = useOrgTutorPolicy();
   const tutorCanIssueInvoice = invoiceIssuerMode !== 'company';
 
@@ -74,6 +76,8 @@ export default function OrgTutorFinanceSummary() {
   const [rangeError, setRangeError] = useState<string | null>(null);
   const [completedCount, setCompletedCount] = useState(0);
   const [payBreakdown, setPayBreakdown] = useState<ProKlasePayBreakdown | null>(null);
+  const [manoPayEur, setManoPayEur] = useState<number | null>(null);
+  const [manoHasSubjectRates, setManoHasSubjectRates] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -159,6 +163,8 @@ export default function OrgTutorFinanceSummary() {
         .lte('start_time', endIso);
 
       let breakdown: ProKlasePayBreakdown | null = null;
+      let manoTotal: number | null = null;
+      let manoSubjectRates = false;
       if (proKlasePayMode) {
         const { data: sessionRows } = await supabase
           .from('sessions')
@@ -189,6 +195,28 @@ export default function OrgTutorFinanceSummary() {
           payPerLessonEur,
           adjustmentsEur,
         );
+      } else if (manoPayMode) {
+        const { data: sessionRows } = await supabase
+          .from('sessions')
+          .select('id, status, price, subject_id')
+          .eq('tutor_id', user.id)
+          .eq('status', 'completed')
+          .lte('end_time', new Date().toISOString())
+          .gte('start_time', startIso)
+          .lte('start_time', endIso);
+        const { data: payProfile } = await supabase
+          .from('profiles')
+          .select('company_commission_by_subject')
+          .eq('id', user.id)
+          .maybeSingle();
+        const bySubject = parseTutorPayBySubject((payProfile as any)?.company_commission_by_subject);
+        manoSubjectRates = Object.keys(bySubject).length > 0;
+        manoTotal = sumOrgTutorLessonsPayEur(
+          (sessionRows || []) as Array<{ subject_id?: string | null; price?: number | null }>,
+          payPerLessonEur,
+          bySubject,
+          profile?.organization_id,
+        );
       }
 
       if (cancelled) return;
@@ -196,9 +224,13 @@ export default function OrgTutorFinanceSummary() {
         console.error('[OrgTutorFinanceSummary]', error);
         setCompletedCount(0);
         setPayBreakdown(null);
+        setManoPayEur(null);
+        setManoHasSubjectRates(false);
       } else {
         setCompletedCount(count ?? 0);
         setPayBreakdown(breakdown);
+        setManoPayEur(manoTotal);
+        setManoHasSubjectRates(manoSubjectRates);
       }
       setLoading(false);
     };
@@ -208,7 +240,7 @@ export default function OrgTutorFinanceSummary() {
     return () => {
       cancelled = true;
     };
-  }, [month, periodMode, rangeStart, rangeEnd, policyLoading, proKlasePayMode, payPerLessonEur, profile?.organization_id, t]);
+  }, [month, periodMode, rangeStart, rangeEnd, policyLoading, proKlasePayMode, manoPayMode, payPerLessonEur, profile?.organization_id, t]);
 
   const fetchInvoices = useCallback(async () => {
     const user = await dedupeAuthGetUser();
@@ -274,7 +306,7 @@ export default function OrgTutorFinanceSummary() {
     );
   };
 
-  const gross = payBreakdown?.totalEur ?? completedCount * payPerLessonEur;
+  const gross = payBreakdown?.totalEur ?? manoPayEur ?? completedCount * payPerLessonEur;
 
   return (
     <div className="space-y-6">
@@ -287,7 +319,9 @@ export default function OrgTutorFinanceSummary() {
           <div>
             <h2 className="text-lg font-bold text-gray-900">{t('orgFinance.yourPay')}</h2>
             <p className="text-xs text-gray-500">
-              {t('orgFinance.fixedPayPerLesson', { amount: payPerLessonEur.toFixed(2) })}
+              {manoHasSubjectRates
+                ? t('orgFinance.payUsesSubjectRates', { amount: payPerLessonEur.toFixed(2) })
+                : t('orgFinance.fixedPayPerLesson', { amount: payPerLessonEur.toFixed(2) })}
             </p>
           </div>
         </div>

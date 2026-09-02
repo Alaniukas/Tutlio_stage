@@ -26,7 +26,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import BuyLicensesDialog from '@/components/company/BuyLicensesDialog';
-import { fmtMoney, isProKlaseOrg } from '@/lib/marketMoney';
+import { fmtMoney, isManoKorepetitoriusOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import { compactTutorPayBySubject, parseTutorPayBySubject } from '@/lib/orgTutorLessonPay';
 import { authHeaders } from '@/lib/apiHelpers';
 import { isPlMarket } from '@/lib/market';
 
@@ -44,6 +45,7 @@ interface Tutor {
   break_between_lessons: number;
   min_booking_hours: number;
   company_commission_percent?: number;
+  company_commission_by_subject?: Record<string, number> | null;
   personal_meeting_link?: string | null;
   /** Free-text subjects/grades note, e.g. "MAT 2-6 kls, LT 1-8 kls". */
   teaching_notes?: string | null;
@@ -69,6 +71,7 @@ interface Subject {
   duration_minutes: number;
   price: number;
   color: string;
+  is_trial?: boolean | null;
 }
 
 interface SubjectPreset {
@@ -515,6 +518,7 @@ export default function CompanyTutors() {
   const [editBreakBetween, setEditBreakBetween] = useState(0);
   const [editMinBooking, setEditMinBooking] = useState(1);
   const [editCommissionPercent, setEditCommissionPercent] = useState(0);
+  const [editSubjectPay, setEditSubjectPay] = useState<Record<string, string>>({});
   const [editMeetingLink, setEditMeetingLink] = useState('');
   const [tutorInvoiceProfile, setTutorInvoiceProfile] = useState<Record<string, string | null> | null>(null);
   const [penaltyManualAmount, setPenaltyManualAmount] = useState('');
@@ -523,6 +527,7 @@ export default function CompanyTutors() {
   const [applyingPenaltyType, setApplyingPenaltyType] = useState<string | null>(null);
   const [penaltyFeedback, setPenaltyFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const isProKlaseAdmin = isProKlaseOrg(orgId);
+  const isManoKorepetitoriusAdmin = isManoKorepetitoriusOrg(orgId);
   const classGroupsEnabled = isSchoolView && !orgFeaturesLoading && hasFeature('school_class_groups');
 
   useEffect(() => {
@@ -681,7 +686,7 @@ export default function CompanyTutors() {
     startLicenseInfoFetch();
 
     const tutorSelect =
-      'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, personal_meeting_link, teaching_notes, has_active_license';
+      'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, company_commission_by_subject, personal_meeting_link, teaching_notes, has_active_license';
 
     const { data: tutorData } = await supabase
       .from('profiles')
@@ -1004,6 +1009,13 @@ export default function CompanyTutors() {
     setEditBreakBetween(tutor.break_between_lessons ?? orgDefaults.break_between_lessons);
     setEditMinBooking(tutor.min_booking_hours ?? orgDefaults.min_booking_hours);
     setEditCommissionPercent(tutor.company_commission_percent ?? orgDefaults.company_commission_percent);
+    const parsedPay = parseTutorPayBySubject(tutor.company_commission_by_subject);
+    const nextPay: Record<string, string> = {};
+    for (const subj of (subjects || []) as Subject[]) {
+      if (subj.is_trial) continue;
+      nextPay[subj.id] = parsedPay[subj.id] != null ? String(parsedPay[subj.id]) : '';
+    }
+    setEditSubjectPay(nextPay);
     setEditMeetingLink(tutor.personal_meeting_link || '');
     setTutorInvoiceProfile(null);
     setPenaltyFeedback(null);
@@ -1039,6 +1051,9 @@ export default function CompanyTutors() {
       break_between_lessons: editBreakBetween,
       min_booking_hours: editMinBooking,
       company_commission_percent: editCommissionPercent,
+      ...(isManoKorepetitoriusAdmin
+        ? { company_commission_by_subject: compactTutorPayBySubject(editSubjectPay) }
+        : {}),
       personal_meeting_link: editMeetingLink.trim() || null,
       teaching_notes: editTeachingNotes.trim() || null,
     }).eq('id', selectedTutor.id);
@@ -1150,6 +1165,9 @@ export default function CompanyTutors() {
         });
       }
       setSelectedTutor({ ...selectedTutor, subjects: [...selectedTutor.subjects, data] });
+      if (isManoKorepetitoriusAdmin && data.id && !(data as Subject).is_trial) {
+        setEditSubjectPay((prev) => ({ ...prev, [data.id]: prev[data.id] ?? '' }));
+      }
       await loadData({ silent: true });
     }
     setNewSubjectName(''); setNewSubjectDuration(60); setNewSubjectPrice(25); setNewSubjectColor('#6366f1');
@@ -1160,6 +1178,12 @@ export default function CompanyTutors() {
   const handleDeleteSubject = async (subjectId: string) => {
     await supabase.from('subjects').delete().eq('id', subjectId);
     if (selectedTutor) setSelectedTutor({ ...selectedTutor, subjects: selectedTutor.subjects.filter(s => s.id !== subjectId) });
+    setEditSubjectPay((prev) => {
+      if (!(subjectId in prev)) return prev;
+      const next = { ...prev };
+      delete next[subjectId];
+      return next;
+    });
   };
 
   if (loading) {
@@ -1686,6 +1710,32 @@ export default function CompanyTutors() {
                     />
                     <span className="text-xs text-gray-500">{t('compTut.eurPerLesson')}</span>
                   </div>
+                  {isManoKorepetitoriusAdmin && selectedTutor.subjects.filter((s) => !s.is_trial).length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      <p className="text-xs font-medium text-gray-600">{t('compTut.payBySubject')}</p>
+                      <p className="text-[11px] text-gray-500">{t('compTut.payBySubjectHint')}</p>
+                      <div className="space-y-2">
+                        {selectedTutor.subjects.filter((s) => !s.is_trial).map((subj) => (
+                          <div
+                            key={subj.id}
+                            className="flex items-center gap-2 rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2"
+                          >
+                            <span className="min-w-0 flex-1 text-sm font-medium text-gray-800 truncate">{subj.name}</span>
+                            <Input
+                              type="number"
+                              min={0}
+                              step={0.5}
+                              placeholder={String(editCommissionPercent || '')}
+                              value={editSubjectPay[subj.id] ?? ''}
+                              onChange={(e) => setEditSubjectPay((prev) => ({ ...prev, [subj.id]: e.target.value }))}
+                              className="rounded-xl w-24 h-9 bg-white"
+                            />
+                            <span className="text-xs text-gray-500 shrink-0">{t('compTut.eurPerLesson')}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="pb-3 border-b border-gray-100">
                   <Label className="text-xs font-medium text-gray-600">{t('compTut.personalMeetingLink')}</Label>
