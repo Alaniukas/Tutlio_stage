@@ -232,7 +232,7 @@ Migracijos: `supabase/migrations/` (datuotos `202603*`–`202608*`).
 |---------|-----------|
 | `organizations` | Org/mokykla (`entity_type`, `features` JSON) |
 | `organization_admins` | Org adminų ryšys |
-| `profiles` | Tutor profiliai |
+| `profiles` | Tutor profiliai (`company_commission_percent`; Mano Korepetitorius dar `company_commission_by_subject`) |
 | `students` | Mokiniai (`grade`, `media_publicity_consent`, `school_year`, `enrollment_status`, `municipality`, `exit_*`, `has_debt_manual`) |
 | `sessions` | Pamokos (`is_makeup`, `is_complimentary`; school extra: `school_billing_kind`, `student_joined_at`) |
 | `school_contract_templates` | Sutarčių šablonai (DOCX body) |
