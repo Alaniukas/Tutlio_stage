@@ -544,6 +544,16 @@ Išėję / baigę (`left`, `graduated`) — archyvas (šiukšlinė), ne pagrindi
 
 **Testai:** `tests/lib/proKlaseTutorPay.test.ts`, `tests/api/proklase-invoice.test.ts`, `tests/lib/session-complimentary.test.ts`, `tests/lib/proklase-legal.test.ts`, `tests/lib/pending-package-edit.test.ts`, `tests/api/update-pending-package.test.ts`
 
+### Mano Korepetitorius — atlygis pagal dalyką
+
+**Org ID:** `2c4e4c2a-4e12-44ca-b327-d605bbb0d50b` (`isManoKorepetitoriusOrg()` `src/lib/marketMoney.ts`)
+
+Numatytasis atlygis lieka `profiles.company_commission_percent` (€ / pamoka). Papildomai admin gali nustatyti tarifą **pagal dalyką** korepetitoriaus modale (`CompanyTutors.tsx`): tuščias laukas = numatytasis. Override'ai — `profiles.company_commission_by_subject` (`subject_id` → EUR).
+
+**Svarbu:** taikoma **tik** šiai org. Pro Klasė ir kitos įmonės naudoja vieną tarifą (Pro Klasė — atskiras `proKlaseSessionPayEur`: bandomoji / no-show). Skaičiavimas: `orgTutorSessionPayEur()` / `sumOrgTutorLessonsPayEur()` (`src/lib/orgTutorLessonPay.ts`) — sąskaitos (`generate-invoice.ts`, `CreateInvoiceModal`), statistika, `OrgTutorFinanceSummary`.
+
+**Testai:** `tests/lib/org-tutor-lesson-pay.test.ts`. Migracija: `20260902190000_tutor_pay_by_subject.sql`.
+
 ### Complimentary pamokos (ne tik Pro Klasė)
 
 Admin gali pažymėti pamoką nemokama (`compSess.markComplimentary`). Klientas / statistika neskaito kainos (`sessionClientRevenueEur()`). Pažymėjus kaip neapmokėtą complimentary nuimamas.
@@ -762,6 +772,7 @@ npm run security:pencheck
 21. **AI support žinios** — nekurk naujų viešų URL Luna atsakymuose. Puslapiai tik `supportPageSuggestions.ts`. Kainos / licencijos — `supportKnowledge.ts` + `productFeatureCatalog.ts`, ne „iš galvos“. `OPENAI_API_KEY` be `VITE_`.
 22. **Serverio i18n bundle** — `api/_lib/i18n.ts` / `ssr-i18n.ts` negali statiniu importu krauti visų ~36 locale failų (~5k raktų). Extra kalbos tik per `loadExtraLocaleDict`. `FUNCTION_INVOCATION_FAILED` kviečiant korep — visoms org, ne tik Pro Klasei.
 23. **Join no-show ≠ tėvų laiškas** — cronas tik keičia `sessions.status`. Laiškas `session_student_no_show` tik po rankinio žymėjimo + `payer_email` + pasibaigęs `end_time`.
+24. **Atlygis pagal dalyką** — UI ir `company_commission_by_subject` tik `isManoKorepetitoriusOrg`. Pro Klasei netaikyti; ten lieka `proKlaseTutorPay.ts`.
 
 ---
 
@@ -784,6 +795,7 @@ npm run security:pencheck
 | Complimentary pamoka | `sessionComplimentary.ts`, `api/mark-session-complimentary.ts` |
 | PVM S.F. / numeracija | `pvmEducationInvoice.ts`, `invoiceNumber.ts`, `reserve-invoice-number.ts` |
 | Pro Klasė atlygis / baudos / S.F. PVM | `proKlaseTutorPay.ts`, `proKlaseInvoice.ts`, `api/tutor-adjustment.ts`, `CompanyTutors.tsx` |
+| Mano Korepetitorius atlygis pagal dalyką | `orgTutorLessonPay.ts`, `CompanyTutors.tsx`, `generate-invoice.ts` |
 | Pro Klasė legal / pending package | `proKlaseLegal.ts`, `pendingPackageEdit.ts`, `api/update-pending-package.ts` |
 | Capacity / chat Broadcast | `docs/CAPACITY_1000_USERS_RUNBOOK.md`, `src/hooks/useChat.ts`, `src/lib/chatMessages.ts` |
 | Tutor quiz / lead | `QuizFunnel.tsx`, `src/lib/quizFunnel.ts`, `api/landing-lead.ts` |
@@ -836,4 +848,4 @@ npm run security:pencheck
 
 ---
 
-*Paskutinis atnaujinimas: 2026-09-02 (`alano-local`): tėvų informavimas vs `school_join_no_show`; serverio i18n lazy-load (`FUNCTION_INVOCATION_FAILED` / `invite-tutor`). Jei radai neatitikimų su kodu — prioritetas kodui, atnaujink šį failą.*
+*Paskutinis atnaujinimas: 2026-09-02 (`alano-local`): Mano Korepetitorius atlygis pagal dalyką (`company_commission_by_subject`); Pro Klasės tarifai neliesti. Jei radai neatitikimų su kodu — prioritetas kodui, atnaujink šį failą.*
