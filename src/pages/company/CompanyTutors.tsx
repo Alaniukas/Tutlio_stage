@@ -942,8 +942,9 @@ export default function CompanyTutors() {
       }
     } catch (e: any) {
       setInviteError(e?.message || t('compTut.serverErrorGeneric'));
+    } finally {
+      setSendingInvite(false);
     }
-    setSendingInvite(false);
   };
 
   const handleDeleteInvite = async (inviteId: string) => {

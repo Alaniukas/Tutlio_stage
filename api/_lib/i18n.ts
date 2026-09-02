@@ -1,29 +1,7 @@
 import { interpolateTranslation } from '../../src/lib/i18n/interpolate.js';
-import { it } from '../../src/lib/i18n/it.js';
-import { fil } from '../../src/lib/i18n/fil.js';
-import { th } from '../../src/lib/i18n/th.js';
-import { tr } from '../../src/lib/i18n/tr.js';
-import { zhHk } from '../../src/lib/i18n/zh-hk.js';
-import { pt } from '../../src/lib/i18n/pt.js';
-import { ro } from '../../src/lib/i18n/ro.js';
-import { cs } from '../../src/lib/i18n/cs.js';
-import { el } from '../../src/lib/i18n/el.js';
-import { hu } from '../../src/lib/i18n/hu.js';
-import { bg } from '../../src/lib/i18n/bg.js';
-import { hr } from '../../src/lib/i18n/hr.js';
-import { sk } from '../../src/lib/i18n/sk.js';
-import { sl } from '../../src/lib/i18n/sl.js';
-import { hi } from '../../src/lib/i18n/hi.js';
-import { ko } from '../../src/lib/i18n/ko.js';
-import { ja } from '../../src/lib/i18n/ja.js';
-import { id } from '../../src/lib/i18n/id.js';
-import { ar } from '../../src/lib/i18n/ar.js';
-import { he } from '../../src/lib/i18n/he.js';
-import { uk } from '../../src/lib/i18n/uk.js';
-import { ptBr } from '../../src/lib/i18n/pt-br.js';
-import { esMx } from '../../src/lib/i18n/es-mx.js';
 import type { Locale as FullLocale } from './seo-routing.js';
 import { LOCALES } from './seo-routing.js';
+import { loadExtraLocaleDict } from './loadExtraLocaleDict.js';
 import { lt } from '../../src/lib/i18n/lt.js';
 import { en } from '../../src/lib/i18n/en.js';
 import { pl } from '../../src/lib/i18n/pl.js';
@@ -44,32 +22,19 @@ export function isValidLocale(v: unknown): v is Locale {
   return typeof v === 'string' && (LOCALES as readonly string[]).includes(v);
 }
 
-const translations: Record<Locale, Record<string, string>> = {
-  th,
-  'zh-hk': zhHk,
+/**
+ * Eager-load only the original 13 dictionaries. Statically importing all ~36
+ * locale files made serverless functions OOM on cold start
+ * (FUNCTION_INVOCATION_FAILED on invite-tutor / send-email) after the i18n merge.
+ * Extra locales are required on first use only.
+ */
+const translations: Partial<Record<Locale, Record<string, string>>> = {
   lt, en, pl, lv, ee, fr, es, de, se, dk, fi, no, nl,
-  'it': it,
-  fil,
-  tr,
-  'pt': pt,
-  'ro': ro,
-  'cs': cs,
-  'el': el,
-  'hu': hu,
-  'bg': bg,
-  'hr': hr,
-  'sk': sk,
-  'sl': sl,
-  'hi': hi,
-  'ko': ko,
-  'ja': ja,
-  'id': id,
-  'ar': ar,
-  he,
-  uk,
-  'pt-br': ptBr,
-  'es-mx': esMx,
 };
+
+function dictFor(locale: Locale): Record<string, string> | undefined {
+  return translations[locale] ?? loadExtraLocaleDict(locale);
+}
 
 /** Server funkcijose kai kur bundle neįtraukia naujausių raktų – būtiniausi el. pašto fragmentai čia visada. */
 const EMAIL_SERVER_FALLBACKS: Partial<Record<Locale, Record<string, string>>> = {
@@ -129,12 +94,13 @@ export function t(
   params?: Record<string, string | number>,
 ): string {
   const lc: Locale = isValidLocale(locale) ? locale : 'lt';
+  const dict = dictFor(lc);
   const text =
-    translations[lc]?.[key] ??
+    dict?.[key] ??
     EMAIL_SERVER_FALLBACKS[lc]?.[key] ??
-    translations.en[key] ??
+    dictFor('en')?.[key] ??
     EMAIL_SERVER_FALLBACKS.en?.[key] ??
-    translations.lt[key] ??
+    dictFor('lt')?.[key] ??
     EMAIL_SERVER_FALLBACKS.lt?.[key] ??
     key;
   return interpolateTranslation(text, params);
