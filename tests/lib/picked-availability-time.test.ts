@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  appendUniqueBySlotKey,
+  availabilitySlotKey,
   combineLocalDateAndTime,
   defaultLessonRange,
   intervalsOverlap,
@@ -63,5 +65,12 @@ describe('picked availability exact times', () => {
       start_time: '16:00',
       end_time: '18:00',
     });
+  });
+
+  it('keeps two slots with the same tutor instead of replacing the first', () => {
+    const tue = { tutorId: 't1', subjectId: 'math', startIso: '2026-09-08T15:00:00.000Z' };
+    const sun = { tutorId: 't1', subjectId: 'math', startIso: '2026-09-13T15:00:00.000Z' };
+    expect(availabilitySlotKey(tue)).not.toBe(availabilitySlotKey(sun));
+    expect(appendUniqueBySlotKey([tue], [sun, tue])).toEqual([tue, sun]);
   });
 });

@@ -53,3 +53,26 @@ export function intervalsOverlap(
 ): boolean {
   return busy.some((item) => endMs > item.start && startMs < item.end);
 }
+
+export function availabilitySlotKey(input: {
+  tutorId: string;
+  subjectId: string;
+  startIso: string;
+}): string {
+  return `${input.tutorId}|${input.subjectId}|${input.startIso}`;
+}
+
+export function appendUniqueBySlotKey<T extends { tutorId: string; subjectId: string; startIso: string }>(
+  current: T[],
+  incoming: T[],
+): T[] {
+  const seen = new Set(current.map((row) => availabilitySlotKey(row)));
+  const next = [...current];
+  for (const row of incoming) {
+    const key = availabilitySlotKey(row);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    next.push(row);
+  }
+  return next;
+}

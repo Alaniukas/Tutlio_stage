@@ -125,7 +125,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const relatedRows = await fetchRelatedBlogPosts(supabase as any, { limit: 3 });
     const related = relatedPostsForLocale(relatedRows, locale);
     if (related.length) {
-      const heading = locale === 'lt' ? 'Straipsniai iš tinklaraščio' : 'From the blog';
+      const heading = t(locale, 'blog.readAlso');
       relatedHtml = `<div class="section"><h2>${esc(heading)}</h2>${renderRelatedPostsHtml(related, locale)}</div>`;
     }
   }

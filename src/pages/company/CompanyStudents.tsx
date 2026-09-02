@@ -91,7 +91,7 @@ import {
 } from '@/lib/studentAvailability';
 import PickedAvailabilityTimeEditor from '@/components/company/PickedAvailabilityTimeEditor';
 import { runOrgAdminCreateSession } from '@/pages/company/orgAdminSessionCreate';
-import { defaultLessonRange, lessonFitsAvailabilityWindow } from '@/lib/pickedAvailabilityTime';
+import { defaultLessonRange, lessonFitsAvailabilityWindow, appendUniqueBySlotKey, availabilitySlotKey } from '@/lib/pickedAvailabilityTime';
 import { orgCanonicalOrigin } from '@/lib/orgPublicOrigin';
 import type { BusyInterval } from '@/lib/tutorMatching';
 import PackageItemsEditor, { type PackageEditorItem, type PackageEditorSubject } from '@/components/PackageItemsEditor';
@@ -175,6 +175,22 @@ type AddStudentLessonPick = {
   lessonStartIso: string;
   lessonEndIso: string;
 };
+
+function lessonPickKey(item: AddStudentLessonPick): string {
+  return availabilitySlotKey(item.pick);
+}
+
+function appendStudentLessonPicks(current: AddStudentLessonPick[], incoming: AddStudentLessonPick[]): AddStudentLessonPick[] {
+  const seen = new Set(current.map(lessonPickKey));
+  const next = [...current];
+  for (const row of incoming) {
+    const key = lessonPickKey(row);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    next.push(row);
+  }
+  return next;
+}
 
 function formatTutorSubjectsLine(names: string[] | undefined, noSubjectsLabel: string): string {
   if (!names?.length) return noSubjectsLabel;
@@ -373,6 +389,7 @@ export default function CompanyStudents() {
   });
   const [tutorSubjects, setTutorSubjects] = useState<SubjectOption[]>([]);
   const [selectedSubjectForInvite, setSelectedSubjectForInvite] = useState('');
+  const [useIndividualPrice, setUseIndividualPrice] = useState(false);
   const [customPrice, setCustomPrice] = useState<number | ''>('');
   const [customDuration, setCustomDuration] = useState<number | ''>('');
   const [customCancellationHours, setCustomCancellationHours] = useState(24);
@@ -389,7 +406,7 @@ export default function CompanyStudents() {
 
   // Book a lesson from the student card (req 4, gated by student_card_booking)
   const [findLessonOpen, setFindLessonOpen] = useState(false);
-  const [findLessonPick, setFindLessonPick] = useState<FindLessonBookPick | null>(null);
+  const [findLessonPicks, setFindLessonPicks] = useState<FindLessonBookPick[]>([]);
   const [findLessonBookedIntervals, setFindLessonBookedIntervals] = useState<BusyInterval[]>([]);
 
   // Student Detail Modal State
@@ -1824,13 +1841,15 @@ export default function CompanyStudents() {
           child_birth_date: newStudent.child_birth_date?.trim() || null,
           invite_code: inviteCode,
           ...(() => {
-            const match =
-              addStudentPickedLessons.find((item) => item.pick.tutorId === tutorId) || addStudentPickedLessons[0];
-            if (!match) return {};
+            const matchWindows = addStudentPickedLessons.filter((item) => item.pick.tutorId === tutorId);
+            if (matchWindows.length === 0) return {};
             return {
-              preferred_availability: [
-                preferredWindowFromDateRange(new Date(match.pick.startIso), new Date(match.pick.endIso)),
-              ],
+              preferred_availability: matchWindows.map((item) =>
+                preferredWindowFromDateRange(
+                  new Date(item.lessonStartIso || item.pick.startIso),
+                  new Date(item.lessonEndIso || item.pick.endIso),
+                ),
+              ),
             };
           })(),
           ...(effectiveOrgId ? { organization_id: effectiveOrgId } : {}),
@@ -1939,7 +1958,7 @@ export default function CompanyStudents() {
     }
 
     // Optional: apply individual pricing to the first selected tutor only (as a helper)
-    if (selectedSubjectForInvite && customPrice !== '' && customDuration !== '' && inserted[0]?.tutor_id) {
+    if (useIndividualPrice && selectedSubjectForInvite && customPrice !== '' && customDuration !== '' && inserted[0]?.tutor_id) {
       const first = inserted[0];
       const firstTutorId = first.tutor_id;
       const { error: pricingError } = await supabase.from('student_individual_pricing').insert({
@@ -2057,6 +2076,7 @@ export default function CompanyStudents() {
       invite_target: 'student',
     });
     setSelectedSubjectForInvite('');
+    setUseIndividualPrice(false);
     setCustomPrice('');
     setCustomDuration('');
     setCustomCancellationHours(24);
@@ -2757,7 +2777,7 @@ export default function CompanyStudents() {
                       {t('compStu.tutorPickerHint')}
                     </p>
                     {addStudentPickedLessons.map((item) => (
-                      <div key={item.pick.tutorId} className="space-y-2">
+                      <div key={lessonPickKey(item)} className="space-y-2">
                         <PickedAvailabilityTimeEditor
                           tutorId={item.pick.tutorId}
                           tutorName={item.pick.tutorName}
@@ -2770,7 +2790,7 @@ export default function CompanyStudents() {
                           onChange={({ startIso, endIso }) => {
                             setAddStudentPickedLessons((current) =>
                               current.map((row) =>
-                                row.pick.tutorId === item.pick.tutorId
+                                lessonPickKey(row) === lessonPickKey(item)
                                   ? { ...row, lessonStartIso: startIso, lessonEndIso: endIso }
                                   : row,
                               ),
@@ -2779,7 +2799,7 @@ export default function CompanyStudents() {
                           onSubjectChange={({ subjectId, subjectName }) => {
                             setAddStudentPickedLessons((current) =>
                               current.map((row) =>
-                                row.pick.tutorId === item.pick.tutorId
+                                lessonPickKey(row) === lessonPickKey(item)
                                   ? { ...row, pick: { ...row.pick, subjectId, subjectName } }
                                   : row,
                               ),
@@ -2787,7 +2807,7 @@ export default function CompanyStudents() {
                           }}
                           onClear={() => {
                             setAddStudentPickedLessons((current) =>
-                              current.filter((row) => row.pick.tutorId !== item.pick.tutorId),
+                              current.filter((row) => lessonPickKey(row) !== lessonPickKey(item)),
                             );
                           }}
                         />
@@ -3138,11 +3158,33 @@ export default function CompanyStudents() {
                   )}
 
                   <div className="border-t border-gray-200 pt-4 space-y-3">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Sparkles className="w-4 h-4 text-amber-500" />
-                      <Label className="text-sm font-semibold">{t('compStu.individualPriceOptional')}</Label>
-                    </div>
-                    {!newStudent.tutor_ids[0] ? (
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={useIndividualPrice}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setUseIndividualPrice(checked);
+                          if (!checked) {
+                            setSelectedSubjectForInvite('');
+                            setCustomPrice('');
+                            setCustomDuration('');
+                            setCustomCancellationHours(24);
+                            setCustomCancellationFee(0);
+                          }
+                        }}
+                        className="rounded border-gray-300"
+                      />
+                      <span className="flex items-center gap-2 text-sm font-semibold">
+                        <Sparkles className="w-4 h-4 text-amber-500" />
+                        {t('compStu.useIndividualPrice')}
+                      </span>
+                    </label>
+                    {!useIndividualPrice ? (
+                      <p className="text-xs text-gray-600 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2">
+                        {t('compStu.individualPriceOptional')}
+                      </p>
+                    ) : !newStudent.tutor_ids[0] ? (
                       <p className="text-xs text-gray-600 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2">
                         {t('compStu.selectTutorFirst')}
                       </p>
@@ -4653,7 +4695,7 @@ export default function CompanyStudents() {
                           </p>
                         ) : (
                           <>
-                            {studentIndividualPricing.length > 0 && !addingIndividualPrice && (
+                            {studentIndividualPricing.length > 0 && (
                               <div className="space-y-2">
                                 {studentIndividualPricing.map((pricing) => (
                                   <div
@@ -4686,11 +4728,12 @@ export default function CompanyStudents() {
                                       type="button"
                                       variant="ghost"
                                       size="sm"
-                                      className="text-red-600 hover:text-red-700 hover:bg-red-50 shrink-0"
+                                      className="text-red-600 hover:text-red-700 hover:bg-red-50 shrink-0 text-xs gap-1"
                                       disabled={savingStudentIndividualPricing}
                                       onClick={() => void handleDeleteIndividualPrice(pricing.id)}
                                     >
                                       <Trash2 className="w-4 h-4" />
+                                      {t('compStu.clearIndividualPrice')}
                                     </Button>
                                   </div>
                                 ))}
@@ -5314,24 +5357,34 @@ export default function CompanyStudents() {
                       <Search className="w-4 h-4 mr-2" />
                       {t('compStu.bookLessonFindTutor')}
                     </Button>
-                    <FindLessonBookDialog
-                      variant="inline"
-                      pick={findLessonPick}
-                      studentId={selectedStudent?.id ?? ''}
-                      onClose={() => setFindLessonPick(null)}
-                      onBooked={(booking) => {
-                        setFindLessonBookedIntervals((current) => [
-                          ...current,
-                          {
-                            tutor_id: booking.tutorId,
-                            start: new Date(booking.startIso),
-                            end: new Date(booking.endIso),
-                          },
-                        ]);
-                        setModalSessionsRefreshKey((k) => k + 1);
-                        fetchData();
-                      }}
-                    />
+                    {findLessonPicks.map((pick) => (
+                      <FindLessonBookDialog
+                        key={availabilitySlotKey(pick)}
+                        variant="inline"
+                        pick={pick}
+                        studentId={selectedStudent?.id ?? ''}
+                        onClose={() =>
+                          setFindLessonPicks((current) =>
+                            current.filter((row) => availabilitySlotKey(row) !== availabilitySlotKey(pick)),
+                          )
+                        }
+                        onBooked={(booking) => {
+                          setFindLessonBookedIntervals((current) => [
+                            ...current,
+                            {
+                              tutor_id: booking.tutorId,
+                              start: new Date(booking.startIso),
+                              end: new Date(booking.endIso),
+                            },
+                          ]);
+                          setFindLessonPicks((current) =>
+                            current.filter((row) => availabilitySlotKey(row) !== availabilitySlotKey(pick)),
+                          );
+                          setModalSessionsRefreshKey((k) => k + 1);
+                          fetchData();
+                        }}
+                      />
+                    ))}
                   </div>
                 )}
 
@@ -5375,30 +5428,30 @@ export default function CompanyStudents() {
           onClose={() => setAddStudentFindTutorOpen(false)}
           orgId={orgId}
           frequencyEnabled
-          onPickTutor={(tutor, slot) => {
+          confirmSelection
+          onConfirmSlots={(slots) => {
+            const tutorIds = [...new Set(slots.map((slot) => slot.tutorId))];
             setNewStudent((current) => ({
               ...current,
-              tutor_ids: current.tutor_ids.includes(tutor.id)
-                ? current.tutor_ids
-                : [...current.tutor_ids, tutor.id],
+              tutor_ids: [...new Set([...current.tutor_ids, ...tutorIds])],
             }));
-            const range = defaultLessonRange(slot.start, slot.end, slot.durationMinutes || 60);
-            const nextItem: AddStudentLessonPick = {
-              pick: {
-                tutorId: slot.tutorId,
-                tutorName: slot.tutorName,
-                subjectId: slot.subjectId,
-                subjectName: slot.subjectName,
-                startIso: slot.start.toISOString(),
-                endIso: slot.end.toISOString(),
-              },
-              lessonStartIso: range.start.toISOString(),
-              lessonEndIso: range.end.toISOString(),
-            };
-            setAddStudentPickedLessons((current) => {
-              const withoutTutor = current.filter((item) => item.pick.tutorId !== tutor.id);
-              return [...withoutTutor, nextItem];
+            const nextItems: AddStudentLessonPick[] = slots.map((slot) => {
+              const range = defaultLessonRange(slot.start, slot.end, slot.durationMinutes || 60);
+              return {
+                pick: {
+                  tutorId: slot.tutorId,
+                  tutorName: slot.tutorName,
+                  subjectId: slot.subjectId,
+                  subjectName: slot.subjectName,
+                  startIso: slot.start.toISOString(),
+                  endIso: slot.end.toISOString(),
+                },
+                lessonStartIso: range.start.toISOString(),
+                lessonEndIso: range.end.toISOString(),
+              };
             });
+            setAddStudentPickedLessons((current) => appendStudentLessonPicks(current, nextItems));
+            setAddStudentFindTutorOpen(false);
           }}
           busyIntervals={addStudentPickedLessons.map((item) => ({
             tutor_id: item.pick.tutorId,
@@ -5417,21 +5470,23 @@ export default function CompanyStudents() {
               primaryTutorId={selectedStudent?.tutor_id ?? null}
               frequencyEnabled={pkFeat('tutor_frequency_search')}
               hidePrices={pkFeat('hide_admin_lesson_prices')}
+              confirmSelection
               initialPreferredWindows={toFindTutorWindows(
                 pickGroupPreferredAvailability(
                   selectedStudentGroup.length > 0 ? selectedStudentGroup : (selectedStudent ? [selectedStudent] : []),
                 ),
               )}
               busyIntervals={findLessonBookedIntervals}
-              onPickSlot={(slot) => {
-                setFindLessonPick({
+              onConfirmSlots={(slots) => {
+                const incoming = slots.map((slot) => ({
                   tutorId: slot.tutorId,
                   tutorName: slot.tutorName,
                   subjectId: slot.subjectId,
                   subjectName: slot.subjectName,
                   startIso: slot.start.toISOString(),
                   endIso: slot.end.toISOString(),
-                });
+                }));
+                setFindLessonPicks((current) => appendUniqueBySlotKey(current, incoming));
                 setFindLessonOpen(false);
               }}
             />

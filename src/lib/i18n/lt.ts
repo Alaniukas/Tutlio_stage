@@ -929,6 +929,9 @@ export const lt: Record<string, string> = {
   'findLesson.search': 'Ieškoti',
   'findLesson.noResults': 'Nerasta laisvų laikų',
   'findLesson.tapToBook': 'Paspauskite rezultatą, norėdami iš karto priskirti mokinį šiam laikui.',
+  'findLesson.tapToSelect': 'Pažymėkite vieną ar kelis laikus, tada spauskite „Išsaugoti“. Galite pasirinkti kelis to paties korepetitoriaus laikus.',
+  'findLesson.saveSelection': 'Išsaugoti',
+  'findLesson.saveSelectionCount': 'Išsaugoti ({count})',
   'findLesson.bookDialogTitle': 'Pridėti mokinį į laisvą laiką',
   'findLesson.bookDialogIntro':
     'Pasirinkite mokinį (galite ir iš kito korepetitoriaus – tai bus įprasta aktyvi pamoka su šiuo korepetitoriumi).',
@@ -940,7 +943,7 @@ export const lt: Record<string, string> = {
   'findLesson.endTime': 'Pabaiga',
   'findLesson.outsideWindow': 'Pamoka turi tilpti į pasirinktą laisvą langą.',
   'findLesson.clearPickedSlot': 'Pašalinti laiką',
-  'findLesson.willCreateOnSave': 'Išsaugojus mokinį kiekvienam pasirinktam korepetitoriui bus rezervuota pamoka.',
+  'findLesson.willCreateOnSave': 'Išsaugojus mokinį kiekvienam pasirinktam laikui bus rezervuota pamoka.',
   'findLesson.noSubSlots':
     'Pasirinkto dalyko trukmei šiame laisvame lange netelpa nė viena pamoka. Pakeiskite laisvą laiką arba dalyko trukmę pamokų nustatymuose.',
   'findLesson.meetingLinkHint':
@@ -1394,6 +1397,8 @@ export const lt: Record<string, string> = {
   'compStu.individualPriceDeleteFailed': 'Nepavyko pašalinti individualios kainos',
   'compStu.individualPriceDeleted': 'Individuali kaina pašalinta.',
   'compStu.individualPriceOptional': 'Individuali kaina (neprivaloma)',
+  'compStu.useIndividualPrice': 'Nustatyti individualią kainą',
+  'compStu.clearIndividualPrice': 'Nuimti individualią kainą',
   'compStu.individualPriceSaveFailed': 'Nepavyko išsaugoti individualios kainos',
   'compStu.individualPriceSaved': 'Individuali kaina išsaugota.',
   'compStu.individualPrices': 'Individualios kainos',

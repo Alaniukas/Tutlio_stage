@@ -300,14 +300,14 @@ const no = {
 };
 
 const nl = {
-  'support.widget.label': 'AI-ondersteuning',
-  'support.widget.title': 'Tutlio AI-ondersteuning',
+  'support.widget.label': 'AI-hulp',
+  'support.widget.title': 'Tutlio AI-hulp',
   'support.widget.online': 'Online · antwoordt direct',
-  'support.widget.welcome': 'Laten we snel kijken of Tutlio bij uw behoeften past. Welke optie beschrijft u het best?',
-  'support.widget.nudge': 'Twijfelt u of Tutlio past? Laten we het uitzoeken',
+  'support.widget.welcome': 'Laten we snel kijken of Tutlio bij je past. Welke omschrijving klopt het best?',
+  'support.widget.nudge': 'Twijfel je of Tutlio past? Laten we het uitzoeken',
   'support.widget.contact': 'Neem contact op',
   'support.widget.contactHint': 'We antwoorden meestal binnen 15 min.',
-  'support.widget.placeholder': 'Vraag iets over Tutlio…',
+  'support.widget.placeholder': 'Stel een vraag over Tutlio…',
   'support.widget.send': 'Bericht versturen',
   'support.widget.stop': 'Antwoord stoppen',
   'support.widget.thinking': 'Het juiste productonderdeel wordt opgezocht…',
@@ -316,9 +316,9 @@ const nl = {
   'support.widget.suggestion2': 'Ik leid een bijlesteam',
   'support.widget.suggestion3': 'Ik vertegenwoordig een school',
   'support.widget.recommendedPages': 'Aanbevolen pagina’s',
-  'support.contact.title': 'Neem contact op met Tutlio-support',
+  'support.contact.title': 'Neem contact op met Tutlio',
   'support.contact.subtitle': 'We beantwoorden e-mails meestal binnen 15 minuten.',
-  'support.contact.whatsapp': 'Na een B2B-aankoop maken we een WhatsApp-supportchat voor snelle, doorlopende hulp.',
+  'support.contact.whatsapp': 'Na een B2B-aankoop maken we een WhatsApp-gesprek voor snelle, doorlopende hulp.',
   'support.contact.name': 'Naam',
   'support.contact.email': 'E-mail',
   'support.contact.phone': 'Telefoon (optioneel)',
@@ -329,7 +329,7 @@ const nl = {
   'support.contact.successBody': 'Bedankt — het Tutlio-team antwoordt per e-mail, meestal binnen 15 minuten.',
   'support.contact.safety': 'Vermeld geen wachtwoorden, verificatiecodes of volledige betaalkaartgegevens.',
   'support.contact.error': 'Het formulier kon niet worden verzonden. Probeer het opnieuw of mail naar info@tutlio.lt.',
-  'support.contact.back': 'Terug naar AI-ondersteuning',
+  'support.contact.back': 'Terug naar AI-hulp',
 };
 
 const supplemental = {
@@ -462,11 +462,11 @@ const supplemental = {
   nl: {
     'support.widget.purchaseCta': 'Ik wil Tutlio',
     'support.widget.dismissNudge': 'Verbergen',
-    'support.widget.close': 'Ondersteuning sluiten',
+    'support.widget.close': 'Hulp sluiten',
     'support.widget.whatsappAlternative': 'of stuur ons een bericht via WhatsApp',
-    'support.widget.closeWarningTitle': 'Chat sluiten en wissen?',
-    'support.widget.closeWarningBody': 'Bij sluiten wordt de chat uit deze widget gewist. Een privékopie blijft bewaard voor supportanalyse.',
-    'support.widget.keepChat': 'Chat behouden',
+    'support.widget.closeWarningTitle': 'Gesprek sluiten en wissen?',
+    'support.widget.closeWarningBody': 'Als je sluit, verdwijnt het gesprek uit dit venster. Een privékopie blijft bewaard voor onze interne analyse.',
+    'support.widget.keepChat': 'Gesprek behouden',
     'support.widget.closeAndClear': 'Sluiten en wissen',
     'support.contact.attachImage': 'Afbeelding toevoegen',
     'support.contact.attachImageHint': 'PNG, JPEG of WebP · maximaal 5 MB',

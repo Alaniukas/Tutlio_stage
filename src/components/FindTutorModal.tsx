@@ -21,6 +21,7 @@ import {
   type MatchSlot,
   type MatchSubject,
 } from '@/lib/tutorMatching';
+import { availabilitySlotKey } from '@/lib/pickedAvailabilityTime';
 
 export type TutorSlotPick = MatchSlot;
 
@@ -47,6 +48,12 @@ interface FindTutorModalProps {
   /** Student's saved availability — seeds the preferred day/time windows on open. */
   initialPreferredWindows?: Array<{ dayOfWeek: number; startTime: string; endTime: string }>;
   /**
+   * Checkbox multi-select: picking does not book immediately. Confirm with Save
+   * so several slots (including the same tutor) can be chosen together.
+   */
+  confirmSelection?: boolean;
+  onConfirmSlots?: (slots: TutorSlotPick[]) => void;
+  /**
    * Paprasta org admin paieška: neprivalomi filtrai (mokinys, korepetitorius, dalykas,
    * datos, dienos, laikas) be Pro Klasė frequency UI.
    */
@@ -69,6 +76,14 @@ type SubjectCriterion = {
 
 const SEARCH_HORIZON_DAYS = 27;
 
+function matchSlotKey(slot: MatchSlot): string {
+  return availabilitySlotKey({
+    tutorId: slot.tutorId,
+    subjectId: slot.subjectId,
+    startIso: slot.start.toISOString(),
+  });
+}
+
 function windowId(dayOfWeek: number): string {
   return `${dayOfWeek}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
@@ -84,6 +99,8 @@ export default function FindTutorModal({
   busyIntervals = [],
   hidePrices,
   initialPreferredWindows,
+  confirmSelection = false,
+  onConfirmSlots,
   orgAdminMode = false,
   students = [],
 }: FindTutorModalProps) {
@@ -104,6 +121,7 @@ export default function FindTutorModal({
   const [results, setResults] = useState<MatchSlot[]>([]);
   const [searched, setSearched] = useState(false);
   const [tutors, setTutors] = useState<Record<string, string>>({});
+  const [selectedSlotKeys, setSelectedSlotKeys] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (busyIntervals.length === 0) return;
@@ -115,6 +133,7 @@ export default function FindTutorModal({
     setResults([]);
     setSearched(false);
     setLoading(false);
+    setSelectedSlotKeys(new Set());
   }, [isOpen]);
 
   useEffect(() => {
@@ -301,32 +320,78 @@ export default function FindTutorModal({
     [results, subjectCriteria, primaryTutorId],
   );
 
-  const renderSlotButton = (slot: MatchSlot) => (
+  const toggleSlot = (slot: MatchSlot) => {
+    const key = matchSlotKey(slot);
+    setSelectedSlotKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const confirmSelectedSlots = () => {
+    const selected = results.filter((slot) => selectedSlotKeys.has(matchSlotKey(slot)));
+    if (selected.length === 0) return;
+    if (onConfirmSlots) onConfirmSlots(selected);
+    else {
+      for (const slot of selected) {
+        if (onPickSlot) onPickSlot(slot);
+        else if (onPickTutor) onPickTutor({ id: slot.tutorId, name: slot.tutorName }, slot);
+      }
+    }
+    onClose();
+  };
+
+  const renderSlotButton = (slot: MatchSlot) => {
+    const selected = selectedSlotKeys.has(matchSlotKey(slot));
+    return (
     <button
       key={`${slot.tutorId}-${slot.subjectId}-${slot.start.getTime()}`}
       type="button"
-      disabled={!onPickSlot && !onPickTutor}
+      disabled={!onPickSlot && !onPickTutor && !onConfirmSlots}
       onClick={() => {
+        if (confirmSelection) {
+          toggleSlot(slot);
+          return;
+        }
         const pickContext: FindTutorPickContext | undefined =
           orgAdminMode && filterStudentId !== '__all__' ? { studentId: filterStudentId } : undefined;
         if (onPickSlot) onPickSlot(slot, pickContext);
         else if (onPickTutor) onPickTutor({ id: slot.tutorId, name: slot.tutorName }, slot);
       }}
       className={cn(
-        'w-full flex items-center justify-between p-3 border border-gray-200 rounded-xl text-left transition-colors',
-        onPickSlot || onPickTutor
+        'w-full flex items-center justify-between gap-3 p-3 border rounded-xl text-left transition-colors',
+        confirmSelection && selected
+          ? 'border-indigo-500 bg-indigo-50'
+          : 'border-gray-200',
+        onPickSlot || onPickTutor || onConfirmSlots
           ? 'hover:border-indigo-400 hover:bg-indigo-50/50 cursor-pointer'
           : 'opacity-90 cursor-default',
       )}
     >
-      <div>
-        <p className="text-xs text-gray-500">
-          {slot.subjectName} &middot; {format(slot.start, 'EEE d MMM, HH:mm', { locale: dateFnsLocale })}–{format(slot.end, 'HH:mm')}
-          {!hidePrices && <> &middot; {fmtMoney(slot.price)}</>}
-        </p>
+      <div className="flex items-center gap-3 min-w-0">
+        {confirmSelection && (
+          <span
+            className={cn(
+              'flex h-4 w-4 shrink-0 items-center justify-center rounded border',
+              selected ? 'border-indigo-600 bg-indigo-600' : 'border-gray-300 bg-white',
+            )}
+            aria-hidden
+          >
+            {selected ? <span className="block h-2 w-2 rounded-sm bg-white" /> : null}
+          </span>
+        )}
+        <div>
+          <p className="text-xs text-gray-500">
+            {slot.subjectName} &middot; {format(slot.start, 'EEE d MMM, HH:mm', { locale: dateFnsLocale })}–{format(slot.end, 'HH:mm')}
+            {!hidePrices && <> &middot; {fmtMoney(slot.price)}</>}
+          </p>
+        </div>
       </div>
     </button>
-  );
+    );
+  };
 
   return (
     <Dialog open={isOpen} onOpenChange={open => { if (!open) onClose(); }}>
@@ -678,9 +743,9 @@ export default function FindTutorModal({
             </div>
           )}
 
-          {results.length > 0 && (onPickSlot || onPickTutor) && (
+          {results.length > 0 && (onPickSlot || onPickTutor || onConfirmSlots) && (
             <p className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-2.5 py-1.5">
-              {t('findLesson.tapToBook')}
+              {confirmSelection ? t('findLesson.tapToSelect') : t('findLesson.tapToBook')}
             </p>
           )}
 
@@ -720,6 +785,18 @@ export default function FindTutorModal({
                 </div>
               ))}
             </div>
+          )}
+
+          {confirmSelection && results.length > 0 && (
+            <Button
+              className="w-full rounded-xl bg-indigo-600 hover:bg-indigo-700"
+              disabled={selectedSlotKeys.size === 0}
+              onClick={confirmSelectedSlots}
+            >
+              {selectedSlotKeys.size > 0
+                ? t('findLesson.saveSelectionCount', { count: String(selectedSlotKeys.size) })
+                : t('findLesson.saveSelection')}
+            </Button>
           )}
         </div>
       </DialogContent>

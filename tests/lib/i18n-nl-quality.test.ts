@@ -99,7 +99,7 @@ describe('Dutch locale production contracts', () => {
     expect(Object.keys(nlQuiz).filter(key => JSON.stringify(numbers(nlQuiz[key]))
       !== JSON.stringify(numbers(en[key])))).toEqual([]);
     for (const key of Object.keys(nlQuiz).filter(key => /\.(?:name\d|customerName)$/.test(key)
-      && ['Rasa', 'Mantas', 'Ieva', 'Lukas', 'PRO KLASĖ', 'VšĮ “Laisvi vaikai”'].includes(en[key]))) {
+      && ['PRO KLASĖ', 'VšĮ “Laisvi vaikai”'].includes(en[key]))) {
       expect(nlQuiz[key]).toBe(en[key]);
     }
   });
@@ -120,6 +120,11 @@ describe('Dutch locale production contracts', () => {
     expect(t('nl', 'studentSettings.payerOptionSelf')).toBe('Ik betaal de lessen zelf');
     expect(t('nl', 'settings.monthlyPlan')).toBe('Maandelijks');
     expect(t('nl', 'studentWait.anyFreeLesson')).toBe('Elke beschikbare les');
+    expect(t('nl', 'landing.ctaButton')).toBe('Ga nu aan de slag');
+    expect(t('nl', 'nav.dashboard')).toBe('Overzicht');
+    expect(t('nl', 'login.parentLoginTitle')).toBe('Inloggen als ouder');
+    expect(t('nl', 'pricing.enterprise')).toBe('Voor organisaties');
+    expect(t('nl', 'companyDash.confirmNoShow')).toBe('Bevestig niet verschenen');
   });
 
   it('renders Dutch public booking copy without the English fallback', () => {

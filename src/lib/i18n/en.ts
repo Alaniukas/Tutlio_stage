@@ -875,6 +875,9 @@ export const en: Record<string, string> = {
   'findLesson.search': 'Search',
   'findLesson.noResults': 'No available slots found',
   'findLesson.tapToBook': 'Tap a result to book a student into that slot.',
+  'findLesson.tapToSelect': 'Tick one or more slots, then press Save. You can pick several times with the same tutor.',
+  'findLesson.saveSelection': 'Save',
+  'findLesson.saveSelectionCount': 'Save ({count})',
   'findLesson.bookDialogTitle': 'Add student to free slot',
   'findLesson.bookDialogIntro':
     'Pick a student (they can be with another tutor—this creates a normal active lesson with the tutor shown above).',
@@ -886,7 +889,7 @@ export const en: Record<string, string> = {
   'findLesson.endTime': 'End',
   'findLesson.outsideWindow': 'The lesson must stay inside the selected free window.',
   'findLesson.clearPickedSlot': 'Remove time',
-  'findLesson.willCreateOnSave': 'Saving the student will reserve a lesson for each selected tutor.',
+  'findLesson.willCreateOnSave': 'Saving the student will reserve a lesson for each selected time slot.',
   'findLesson.noSubSlots':
     'No lesson fits in this free window for the selected subject duration. Adjust availability or the subject duration in lesson settings.',
   'findLesson.meetingLinkHint':
@@ -1396,6 +1399,8 @@ export const en: Record<string, string> = {
   'compStu.individualPriceDeleteFailed': 'Failed to remove individual price',
   'compStu.individualPriceDeleted': 'Individual price deleted',
   'compStu.individualPriceOptional': 'Individual price (optional)',
+  'compStu.useIndividualPrice': 'Set an individual price',
+  'compStu.clearIndividualPrice': 'Remove individual price',
   'compStu.individualPriceSaveFailed': 'Failed to save individual price',
   'compStu.individualPriceSaved': 'Individual price saved.',
   'compStu.individualPrices': 'Individual prices',
