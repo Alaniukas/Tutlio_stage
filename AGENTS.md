@@ -269,7 +269,9 @@ Kiekvienas `api/foo-bar.ts` → endpoint `/api/foo-bar`.
 |------------|---------------------|
 | School sutartys (metinės) | `school-contract-sign-init.ts`, `school-contract-complete.ts`, `school-contract-mark-signed.ts` |
 | Extra-lessons sutartys | `extra-lessons-contract-offer.ts`, `extra-lessons-contract-accept.ts`, `extra-lessons-contract-withdraw.ts`, `bill-school-extra-lessons.ts` |
-| School grupės / įrašai / no-show | `school-class-groups.ts`, `school-lesson-recordings.ts`, `school-join-no-show.ts` |
+| School grupės / įrašai / no-show | `school-class-groups.ts`, `school-lesson-recordings.ts`, `school-join-no-show.ts` (DB only, be tėvų laiško) |
+| Neatvykimas tėvams | `notify-session-no-show.ts` → `session_student_no_show` (tik po rankinio žymėjimo) |
+| Org korep kvietimas | `invite-tutor.ts` + `sendTutorInviteResend.ts` |
 | Mokytojų sutartys (WIP) | `school-contract-teacher-invite.ts` — importuoja `inviteTeacherToSign` / `isTeacherContract`, kurių `schoolContractSigning.ts` dar neturi |
 | School mokėjimai | `pay-school-installment.ts`, `confirm-school-installment-manual.ts`, `school-installment-reminders.ts` |
 | Sąskaitos | `generate-invoice.ts`, `reserve-invoice-number.ts`, `invoice-pdf.ts` |
@@ -282,7 +284,7 @@ Kiekvienas `api/foo-bar.ts` → endpoint `/api/foo-bar`.
 | Email | `send-email.ts` |
 | SSR/SEO | `page-render.ts`, `blog-render.ts`, `sitemap.ts` |
 
-**Bendri helperiai:** `api/_lib/schoolContractSigning.ts`, `schoolContractPdf.ts`, `extraLessonsContractShared.ts`, `schoolInstallmentStripe.ts`, `gosign.ts`, `docxConverter.ts`, `invoiceNumber.ts`, `pvmEducationInvoice.ts`, `proKlaseInvoice.ts`, `emailOrgBranding.ts`, `supportKnowledge.ts`, `supportRequest.ts`, `supportPersistence.ts`, `supportContact.ts`.
+**Bendri helperiai:** `api/_lib/schoolContractSigning.ts`, `schoolContractPdf.ts`, `extraLessonsContractShared.ts`, `schoolInstallmentStripe.ts`, `gosign.ts`, `docxConverter.ts`, `invoiceNumber.ts`, `pvmEducationInvoice.ts`, `proKlaseInvoice.ts`, `emailOrgBranding.ts`, `i18n.ts` (el. paštas; paleidime tik 13 kalbų), `loadExtraLocaleDict.ts`, `ssr-i18n.ts`, `supportKnowledge.ts`, `supportRequest.ts`, `supportPersistence.ts`, `supportContact.ts`.
 
 ---
 
@@ -310,7 +312,7 @@ Kiekvienas `api/foo-bar.ts` → endpoint `/api/foo-bar`.
 | `school_extra_lessons_contract` | Papildomų pamokų sutartys (click-wrap, SHA-256, 14 d. atsisakymas). GoSign neprivalomas |
 | `school_class_groups` | Klasės grupės visiems mokslo metams; nav `/school/groups` |
 | `school_lesson_recordings` | Pamokų įrašai (Drive) — **parked**. Nav `/school/recordings` visada paslėptas (`SCHOOL_LESSON_RECORDINGS_NAV_READY`). Extra-lessons įrašų radio tik jei flag `true`. Demo seed = `false`. |
-| `school_join_no_show` | Mokinys nepaspaudė „Prisijungti“ per 10 min → no-show (`school-join-no-show` cron) |
+| `school_join_no_show` | Mokinys nepaspaudė „Prisijungti“ per ~10 min → `status=no_show` (`school-join-no-show` cron). **Tėvų / mokėtojo neinformuoja** (nei laiškas, nei push) |
 | `school_teacher_labels` | School portale „mokytojas“ vietoj „korepetitorius“ (`useStaffLabels`) |
 | `extra_lessons_billing` | Mėnesio pabaigos papildomų pamokų sąskaitos (company/Pro Klasė srautas, ne school click-wrap) |
 | `pvm_education_invoice` | PVM S.F. layout, atominė serijos numeracija, išorinių numerių rezervacija |
@@ -422,9 +424,26 @@ Tai **nėra** atskira lentelė ir **nėra** sutartis prie kiekvienos pamokos. Ta
 |------|----------|
 | `school_class_groups` | `/school/groups` → `CompanyClassGroups.tsx` + `ClassGroupFormDialog.tsx`, `PATCH /api/school-class-groups`. Slotai: kiekviena eilutė = savaitės diena + startas (pabaiga iš grupės `duration_minutes`). Pamokos materializuojamos iš slotų (`materialize-recurring-sessions.ts`) |
 | `school_lesson_recordings` | **Parked.** Nav visada off (`SCHOOL_LESSON_RECORDINGS_NAV_READY`). Kodas `/school/recordings` paliktas; tėvų įrašų radio tik jei org flag `true`. Būsimas kelias: Workspace Meet įrašas → Drive → Drive API → priskirti grupei. |
-| `school_join_no_show` | `api/school-join-no-show.ts` kas 5 min — jei mokinys per 10 min nepaspaudė Join |
+| `school_join_no_show` | `api/school-join-no-show.ts` kas 5 min — online pamoka, mokinys per ~10 min nepaspaudė Join, **mokytojas prisijungė**. Tik DB `no_show` + `no_show_reason=missed_join`. **Ne** kviečia `notify-session-no-show`. `auto-complete-sessions` tokias pamokas praleidžia, kad cronas spėtų pažymėti. |
 
 **Testai:** `tests/pages/company-class-groups.test.tsx`, `tests/lib/school-class-groups-recordings.test.ts`, `tests/lib/school-join-no-show.test.ts`.
+
+### Tėvų informavimas (portalas vs el. paštas)
+
+Tėvų paskyra (`/parent/*`, `parent_profiles` + `parent_students`) **nėra** atskiras pranešimų inbox. Neatvykimas / pamokos statusas matomas, kai tėvas pats atidaro dashboard / pamokas / kalendorių.
+
+Dauguma laiškų eina į **`students.payer_email`** (mokėtojas), ne būtinai į prisijungusio tėvo Auth el. paštą.
+
+| Įvykis | Ar pingina tėvą / mokėtoją? |
+|--------|------------------------------|
+| Cron `school_join_no_show` (nepaspaudė Join) | **Ne.** Tik statistika / `no_show`. |
+| Korep arba org admin **rankiniu** pažymi `no_show` (kalendorius, dashboard, `CompanySessions`, mokinių kortelė) | **Taip**, el. paštas `session_student_no_show` į `payer_email`, jei pamokos `end_time` jau praėjo. Push **nėra**. `CompanyTvarkarastis` šio API **nekviečia**. |
+| Prieš pamoką (tas pats langas kaip mokinio priminimas) | El. paštas + push `session_reminder_payer`. Default: tik jei `payment_payer === 'parent'`. Flag `flexible_invitations`: mokėtojas + antras tėvas + susietos `parent_profiles`. Opt-out: `parent_profiles.disable_lesson_reminders` / `/parent` nustatymai. |
+| Mokinys pats atšaukia | El. paštas + push `session_cancelled_parent` į `payer_email` (jei kitoks nei mokinio). Korep/admin atšaukimas tėvų atskiro laiško nesiunčia. |
+| Mokėjimai, paketai, school įmokos, extra-lessons, sutartys | El. paštas (dalį ir push) į `payer_email`. |
+| Chat | Push `chat_new_message`, jei PWA. |
+
+**Failai:** `api/notify-session-no-show.ts`, `api/send-reminders.ts`, `api/cancel-session.ts`, `api/send-email.ts` (`session_student_no_show` / `session_reminder_payer` / `session_cancelled_parent`), `api/_lib/sendPush.ts`, `src/pages/ParentSettings.tsx`, `ParentDashboard.tsx`.
 
 ### Mokytojų sutartys (committed WIP — nedeployinti į prod)
 
@@ -614,6 +633,7 @@ Webhook: `api/stripe-webhook.ts` — apdoroja subscriptions, checkout, Connect, 
 | `src/lib/i18n/supportTranslations.ts` | `support.*` 10 kalbų (ne lt/en/pl) |
 | `src/lib/i18n/index.ts` | `useTranslation()` hook |
 | `src/contexts/LocaleContext.tsx` | React provider |
+| `api/_lib/i18n.ts` / `ssr-i18n.ts` | El. paštas ir SSR. **Paleidime tik 13** žodynų (`lt`…`nl`). Likę — `loadExtraLocaleDict.ts` pirmą kartą naudojant. **Nedaryk** `import { ar } from '…/ar.js'` visų 36 — Vercel cold start OOM (`FUNCTION_INVOCATION_FAILED` ant `invite-tutor` / `send-email`). |
 
 **UI leidžiami locale:** lt, en, pl, lv, ee, fr, es, de, se, dk, fi, no, nl, th, tr, zh-hk, it, pt, ro, cs, el, hu, bg, hr, sk, sl, hi, ko, ja, id, ar, pt-br, es-mx, fil, he, uk
 
@@ -740,6 +760,8 @@ npm run security:pencheck
 19. **Įrašai parked** — negrąžink nav, kol Drive ingest. Restore: `SCHOOL_LESSON_RECORDINGS_NAV_READY = true` ir org flag.
 20. **Org login hang** — po admin login nenaudok PostgREST embed `organizations(...)` iš `organization_admins` / `profiles`. `getOrgAdminDashboardPath` + `fetchOrganizationRow`.
 21. **AI support žinios** — nekurk naujų viešų URL Luna atsakymuose. Puslapiai tik `supportPageSuggestions.ts`. Kainos / licencijos — `supportKnowledge.ts` + `productFeatureCatalog.ts`, ne „iš galvos“. `OPENAI_API_KEY` be `VITE_`.
+22. **Serverio i18n bundle** — `api/_lib/i18n.ts` / `ssr-i18n.ts` negali statiniu importu krauti visų ~36 locale failų (~5k raktų). Extra kalbos tik per `loadExtraLocaleDict`. `FUNCTION_INVOCATION_FAILED` kviečiant korep — visoms org, ne tik Pro Klasei.
+23. **Join no-show ≠ tėvų laiškas** — cronas tik keičia `sessions.status`. Laiškas `session_student_no_show` tik po rankinio žymėjimo + `payer_email` + pasibaigęs `end_time`.
 
 ---
 
@@ -767,6 +789,9 @@ npm run security:pencheck
 | Tutor quiz / lead | `QuizFunnel.tsx`, `src/lib/quizFunnel.ts`, `api/landing-lead.ts` |
 | AI support widget | `SupportWidget.tsx`, `api/support-chat.ts`, `supportKnowledge.ts`, `productFeatureCatalog.ts`, `docs/SUPPORT_AI.md` |
 | Org admin login kelias | `CompanyLogin.tsx`, `orgAdminDashboardPath.ts`, `orgLookup.ts` |
+| Tėvų priminimai / neatvykimas | `send-reminders.ts`, `notify-session-no-show.ts`, `schoolJoinNoShow.ts`, `ParentSettings.tsx` |
+| Serverio i18n (be OOM) | `api/_lib/i18n.ts`, `loadExtraLocaleDict.ts`, `ssr-i18n.ts` |
+| Org korep kvietimas | `CompanyTutors.tsx`, `api/invite-tutor.ts` |
 | Embedded prenumerata | `EmbeddedSubscriptionCheckoutDialog.tsx`, `create-subscription-checkout.ts` |
 | Tutor kalendorius / laisvas laikas | `Calendar.tsx`, `AvailabilityManager.tsx`, `calendarSessionEventStyle.ts` |
 | Org admin tutor filtrai (scroll) | `orgUi.ts` |
@@ -811,4 +836,4 @@ npm run security:pencheck
 
 ---
 
-*Paskutinis atnaujinimas: 2026-08-31 (`alano-local` + merge `Simo-local` `a5d73f5`: AI support widget + `productFeatureCatalog`, org login be RLS embed, complimentary / PVM S.F., mokinio kortelėje tikslus pamokos laikas). Jei radai neatitikimų su kodu — prioritetas kodui, atnaujink šį failą.*
+*Paskutinis atnaujinimas: 2026-09-02 (`alano-local`): tėvų informavimas vs `school_join_no_show`; serverio i18n lazy-load (`FUNCTION_INVOCATION_FAILED` / `invite-tutor`). Jei radai neatitikimų su kodu — prioritetas kodui, atnaujink šį failą.*
