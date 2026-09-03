@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   PRO_KLASE_STUDENT_NO_SHOW_PAY_EUR,
   PRO_KLASE_TRIAL_PAY_EUR,
+  countProKlaseRealizedSessions,
   proKlaseSessionPayEur,
   sumProKlasePayBreakdown,
+  sumProKlaseRealizedPayEur,
 } from '@/lib/proKlaseTutorPay';
 
 describe('proKlaseSessionPayEur', () => {
@@ -26,6 +28,38 @@ describe('proKlaseSessionPayEur', () => {
     expect(
       proKlaseSessionPayEur({ status: 'completed', price: 40 }, 25),
     ).toBe(25);
+  });
+
+  it('returns 0 for completed lesson when tutor rate is 0 (never session.price)', () => {
+    expect(
+      proKlaseSessionPayEur({ status: 'completed', price: 33 }, 0),
+    ).toBe(0);
+  });
+
+  it('unwraps array-shaped subjects from PostgREST embeds', () => {
+    expect(
+      proKlaseSessionPayEur(
+        {
+          status: 'completed',
+          price: 27,
+          subjects: [{ is_trial: false }],
+        },
+        15,
+      ),
+    ).toBe(15);
+  });
+
+  it('returns 0 for unpaid future sessions', () => {
+    expect(proKlaseSessionPayEur({ status: 'active', price: 10, subjects: { is_trial: true } }, 15)).toBe(0);
+  });
+
+  it('Rimantas shape: 1 completed regular + 1 future paid trial → 1 lesson, 15 EUR pay', () => {
+    const sessions = [
+      { status: 'completed', price: 27, subjects: { is_trial: false } },
+      { status: 'active', price: 10, paid: true, subjects: { is_trial: true } },
+    ];
+    expect(countProKlaseRealizedSessions(sessions)).toBe(1);
+    expect(sumProKlaseRealizedPayEur(sessions, 15)).toBe(15);
   });
 });
 

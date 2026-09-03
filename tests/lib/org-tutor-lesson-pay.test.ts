@@ -46,7 +46,7 @@ describe('resolveOrgTutorLessonPayEur', () => {
     ).toBe(15);
   });
 
-  it('falls back to session price when no tutor rate is set', () => {
+  it('returns zero when no tutor rate is set (never session.price)', () => {
     expect(
       resolveOrgTutorLessonPayEur({
         defaultRate: 0,
@@ -54,8 +54,8 @@ describe('resolveOrgTutorLessonPayEur', () => {
         subjectId: 'sub-b',
         sessionPrice: 40,
       }),
-    ).toBe(40);
-    expect(orgTutorLessonPayEur(0, 40)).toBe(40);
+    ).toBe(0);
+    expect(orgTutorLessonPayEur(0, 40)).toBe(0);
   });
 });
 
@@ -82,6 +82,17 @@ describe('orgTutorSessionPayEur', () => {
         sessionPrice: 40,
       }),
     ).toBe(15);
+  });
+
+  it('does not use client price when default rate is zero for generic company org', () => {
+    expect(
+      orgTutorSessionPayEur({
+        organizationId: '00000000-0000-4000-8000-000000000099',
+        defaultRate: 0,
+        subjectId: 'sub-a',
+        sessionPrice: 33,
+      }),
+    ).toBe(0);
   });
 });
 

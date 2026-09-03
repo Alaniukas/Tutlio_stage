@@ -224,6 +224,62 @@ export function rescheduleAttribution(row: SessionAttributionRow): 'student' | '
   return row.reschedule_reason && row.reschedule_reason.trim().length > 0 ? 'tutor' : 'student';
 }
 
+export interface CancellationCounters {
+  totalCancelled: number;
+  cancelledByTutor: number;
+  cancelledByStudent: number;
+  /** Admin / system / legacy rows without cancelled_by (e.g. recurring schedule removed). */
+  cancelledByAdmin: number;
+}
+
+/** Split cancelled sessions by who initiated — breakdown sums to totalCancelled. */
+export function countCancellationAttribution(
+  rows: Array<{ status?: string | null; cancelled_by?: string | null }>,
+): CancellationCounters {
+  const counters: CancellationCounters = {
+    totalCancelled: 0,
+    cancelledByTutor: 0,
+    cancelledByStudent: 0,
+    cancelledByAdmin: 0,
+  };
+  for (const row of rows) {
+    if (row.status !== 'cancelled') continue;
+    counters.totalCancelled += 1;
+    if (row.cancelled_by === 'student') counters.cancelledByStudent += 1;
+    else if (row.cancelled_by === 'tutor') counters.cancelledByTutor += 1;
+    else counters.cancelledByAdmin += 1;
+  }
+  return counters;
+}
+
+export type CancellationBreakdownLabelFn = (
+  role: 'tutor' | 'student' | 'admin',
+  count: number,
+) => string;
+
+/** Localized breakdown for org stats (was hardcoded K/M/A). */
+export function formatCancellationBreakdown(
+  counters: Pick<
+    CancellationCounters,
+    'totalCancelled' | 'cancelledByTutor' | 'cancelledByStudent' | 'cancelledByAdmin'
+  >,
+  label: CancellationBreakdownLabelFn,
+): string {
+  if (counters.totalCancelled <= 0) return '—';
+  const parts: string[] = [];
+  if (counters.cancelledByTutor > 0) parts.push(label('tutor', counters.cancelledByTutor));
+  if (counters.cancelledByStudent > 0) parts.push(label('student', counters.cancelledByStudent));
+  if (counters.cancelledByAdmin > 0) parts.push(label('admin', counters.cancelledByAdmin));
+  return parts.length > 0
+    ? `${counters.totalCancelled} (${parts.join(' ')})`
+    : String(counters.totalCancelled);
+}
+
+/** Tutor/student-initiated cancellations only (excludes admin schedule cleanup). */
+export function countUserInitiatedCancellations(counters: CancellationCounters): number {
+  return counters.cancelledByTutor + counters.cancelledByStudent;
+}
+
 export interface StudentSessionCounters {
   cancelledByStudent: number;
   cancelledByTutor: number;

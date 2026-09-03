@@ -47,7 +47,15 @@ interface FindLessonBookDialogProps {
   studentId: string;
   onClose: () => void;
   /** Called after a lesson is successfully created. */
-  onBooked: (booking: { tutorId: string; startIso: string; endIso: string }) => void;
+  onBooked: (booking: {
+    tutorId: string;
+    startIso: string;
+    endIso: string;
+    trialPaymentSent?: boolean;
+    recurringCreated?: boolean;
+    recurringFirstLessonTrial?: boolean;
+    sessionsCreated?: number;
+  }) => void;
   /** Inline panel inside the student modal instead of a covering dialog. */
   variant?: 'dialog' | 'inline';
 }
@@ -69,8 +77,8 @@ type TrialDefaults = { topic: string; durationMinutes: number; priceEur: number 
  * It narrows a free availability window into a concrete lesson slot and creates
  * the session through {@link runOrgAdminCreateSession} so the tutor is always
  * notified (and package credits / payment status are handled consistently).
- * Supports the same recurrence options as the org calendar, and the
- * first-ever-lesson trial recommendation (auto_trial_first_lesson).
+ * Supports the same recurrence options as the org calendar, and an optional
+ * manual “first lesson is trial” toggle (default off).
  */
 export default function FindLessonBookDialog({
   pick,
@@ -201,17 +209,8 @@ export default function FindLessonBookDialog({
     };
   }, [organizationId]);
 
-  // First-ever lesson: recommend a trial (pre-checked, admin can uncheck).
-  useEffect(() => {
-    if (!pick || orgFeaturesLoading) return;
-    if (sessionCount === 0 && pkFeat('auto_trial_first_lesson') && createdIntervals.length === 0) {
-      setIsTrial(true);
-      setIsRecurring(false);
-      setRecurringWeekdays([]);
-      setRecurringEndDate('');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pick, sessionCount, orgFeaturesLoading]);
+  const showTrialToggle =
+    pkFeat('trial_reservation_flow') || pkFeat('auto_trial_first_lesson');
 
   const durationMin = isTrial ? trialDefaults.durationMinutes : (subject?.duration_minutes || 60);
 
@@ -292,6 +291,7 @@ export default function FindLessonBookDialog({
         suppressSuccessAlert: true,
       });
 
+      let trialPaymentSent = false;
       // Trial payment email on creation (one-time pay link for that lesson).
       if (
         (isTrial || (isRecurring && firstLessonIsTrial)) &&
@@ -310,13 +310,15 @@ export default function FindLessonBookDialog({
               sessionId: result.createdSessionIds[0],
               topic: topic || trialDefaults.topic || undefined,
               durationMinutes: isTrial ? trialDefaults.durationMinutes : trialDefaults.durationMinutes,
-              priceEur: price,
+              priceEur: isTrial || firstLessonIsTrial ? trialDefaults.priceEur : price,
             }),
           });
           if (!resp.ok) {
             const txt = await resp.text().catch(() => '');
             console.error('[FindLessonBookDialog] trial payment email failed:', resp.status, txt);
             alert(t('compSch.trialPaymentEmailFailed'));
+          } else {
+            trialPaymentSent = true;
           }
         } catch (trialErr) {
           console.error('[FindLessonBookDialog] trial payment email failed:', trialErr);
@@ -325,15 +327,23 @@ export default function FindLessonBookDialog({
       }
 
       if (!isTrial && isRecurring) {
-        // Recurring: the whole schedule was created — the sub-slot "book
-        // another" loop only makes sense for one-off lessons.
-        setSuccessMessage(t('findLesson.recurringCreatedKeepOpen'));
-      } else {
+        setSuccessMessage(
+          firstLessonIsTrial
+            ? t('findLesson.recurringCreatedWithTrial')
+            : t('findLesson.recurringCreatedFullPrice'),
+        );
+      } else if (isTrial) {
+        setSuccessMessage(t('findLesson.trialLessonCreatedKeepOpen'));
         setCreatedIntervals((current) => [
           ...current,
           { start: new Date(lessonStartIso).getTime(), end: new Date(lessonEndIso).getTime() },
         ]);
+      } else {
         setSuccessMessage(t('findLesson.lessonCreatedKeepOpen'));
+        setCreatedIntervals((current) => [
+          ...current,
+          { start: new Date(lessonStartIso).getTime(), end: new Date(lessonEndIso).getTime() },
+        ]);
       }
       if (sessionCount != null) setSessionCount(sessionCount + 1);
       setIsTrial(false);
@@ -341,6 +351,10 @@ export default function FindLessonBookDialog({
         tutorId: pick.tutorId,
         startIso: lessonStartIso,
         endIso: lessonEndIso,
+        trialPaymentSent,
+        recurringCreated: !isTrial && isRecurring,
+        recurringFirstLessonTrial: !isTrial && isRecurring && firstLessonIsTrial,
+        sessionsCreated: result.createdSessionIds.length,
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -378,8 +392,7 @@ export default function FindLessonBookDialog({
               />
             )}
 
-            {/* First-ever lesson: recommended as a trial (admin can uncheck). */}
-            {(isTrial || (sessionCount === 0 && pkFeat('auto_trial_first_lesson'))) && !isRecurring && (
+            {showTrialToggle && !isRecurring && (
               <div className="border border-amber-200 rounded-xl p-3 bg-amber-50/60">
                 <button
                   type="button"
@@ -398,10 +411,10 @@ export default function FindLessonBookDialog({
                   <div>
                     <p className="text-sm font-medium text-amber-950 flex items-center gap-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                      {t('findLesson.trialToggle')}
+                      {t('compSch.trialLessonDesc')}
                     </p>
                     <p className="text-xs text-amber-900/80">
-                      {t('findLesson.trialToggleHint', {
+                      {t('findLesson.oneOffTrialHint', {
                         duration: String(trialDefaults.durationMinutes),
                         price: trialDefaults.priceEur.toFixed(2),
                       })}

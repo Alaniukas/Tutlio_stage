@@ -17,6 +17,6 @@ describe('organization sidebar navigation', () => {
       (item) => item.href,
     );
     expect(paths).not.toContain('/company/instructions');
-    expect(paths.at(-1)).toBe('/company/dynamic-pricing');
+    expect(paths.at(-1)).toBe('/company/team');
   });
 });

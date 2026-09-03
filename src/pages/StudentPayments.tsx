@@ -5,8 +5,10 @@ import { dedupeAuthGetUser, rpcGetStudentProfilesDeduped } from '@/lib/preload';
 import { useTranslation } from '@/lib/i18n';
 import { currentMarket } from '@/lib/market';
 import { formatMarketAmount } from '@/lib/stripeLessonPricing';
-import { CreditCard, FileText, Loader2, Package, CheckCircle, Landmark } from 'lucide-react';
+import { CreditCard, FileText, Loader2, Package, CheckCircle, Landmark, CalendarDays } from 'lucide-react';
 import { format } from 'date-fns';
+import { Link } from 'react-router-dom';
+import { viewerCanPayLessons } from '@/lib/lessonPayerView';
 
 type PackageRow = {
   id: string;
@@ -33,6 +35,15 @@ type InvoiceRow = {
   pdf_storage_path: string | null;
 };
 
+type LessonPaymentRow = {
+  id: string;
+  start_time: string;
+  price: number | null;
+  paid: boolean;
+  topic: string | null;
+  subject?: { name?: string | null } | null;
+};
+
 function packageLabel(pkg: PackageRow, fallback: string): string {
   const items = Array.isArray(pkg.lesson_package_items) ? pkg.lesson_package_items : [];
   const names = items
@@ -57,6 +68,9 @@ export default function StudentPayments() {
   const [pending, setPending] = useState<PackageRow[]>([]);
   const [history, setHistory] = useState<PackageRow[]>([]);
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
+  const [pendingLessons, setPendingLessons] = useState<LessonPaymentRow[]>([]);
+  const [paidLessons, setPaidLessons] = useState<LessonPaymentRow[]>([]);
+  const [canPayLessons, setCanPayLessons] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,13 +79,29 @@ export default function StudentPayments() {
         const user = await dedupeAuthGetUser();
         if (!user || cancelled) return;
         const { data: profileRows } = await rpcGetStudentProfilesDeduped(user.id, null);
-        const studentIds = ((profileRows || []) as Array<{ id: string }>).map((row) => row.id);
+        const profiles = (profileRows || []) as Array<{
+          id: string;
+          email?: string | null;
+          payer_email?: string | null;
+          payment_payer?: string | null;
+        }>;
+        const studentIds = profiles.map((row) => row.id);
         if (studentIds.length === 0) {
           if (!cancelled) setLoading(false);
           return;
         }
 
-        const [{ data: pkgRows }, { data: invoiceRows }] = await Promise.all([
+        const primaryProfile = profiles[0];
+        setCanPayLessons(
+          viewerCanPayLessons(
+            primaryProfile.payment_payer ?? null,
+            user.email ?? null,
+            primaryProfile.email ?? null,
+            primaryProfile.payer_email ?? null,
+          ),
+        );
+
+        const [{ data: pkgRows }, { data: invoiceRows }, { data: sessionRows }] = await Promise.all([
           supabase
             .from('lesson_packages')
             .select('id, total_lessons, available_lessons, total_price, paid, paid_at, created_at, payment_status, payment_method, extras_period_start, billing_period_start, billing_period_end, subject:subjects(name), lesson_package_items(subjects(name))')
@@ -83,6 +113,15 @@ export default function StudentPayments() {
             .select('id, invoice_number, total_amount, created_at, pdf_storage_path')
             .order('created_at', { ascending: false })
             .limit(50),
+          supabase
+            .from('sessions')
+            .select('id, start_time, price, paid, topic, subject:subjects(name)')
+            .in('student_id', studentIds)
+            .eq('status', 'active')
+            .not('price', 'is', null)
+            .gt('price', 0)
+            .order('start_time', { ascending: false })
+            .limit(50),
         ]);
         if (cancelled) return;
 
@@ -93,6 +132,13 @@ export default function StudentPayments() {
         setPending(packages.filter((pkg) => !pkg.paid && pkg.payment_status === 'pending'));
         setHistory(packages.filter((pkg) => pkg.paid));
         setInvoices((invoiceRows || []) as InvoiceRow[]);
+
+        const lessons = ((sessionRows || []) as any[]).map((row) => ({
+          ...row,
+          subject: Array.isArray(row.subject) ? row.subject[0] ?? null : row.subject ?? null,
+        })) as LessonPaymentRow[];
+        setPendingLessons(lessons.filter((s) => !s.paid));
+        setPaidLessons(lessons.filter((s) => s.paid).slice(0, 10));
       } catch (err) {
         console.error('[StudentPayments] load failed:', err);
       } finally {
@@ -127,6 +173,51 @@ export default function StudentPayments() {
           </div>
         ) : (
           <>
+            {canPayLessons && (pendingLessons.length > 0 || paidLessons.length > 0) && (
+              <section className="space-y-2">
+                <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">{t('stuPay.pendingLessonsTitle')}</h2>
+                {pendingLessons.length === 0 ? (
+                  <p className="text-sm text-gray-400 bg-gray-50 rounded-2xl p-4 text-center">{t('stuPay.pendingEmpty')}</p>
+                ) : (
+                  pendingLessons.map((lesson) => (
+                    <div key={lesson.id} className="rounded-2xl border border-amber-200 bg-amber-50/60 p-4 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-gray-900 truncate flex items-center gap-1.5">
+                          <CalendarDays className="w-4 h-4 text-amber-600 shrink-0" />
+                          {lesson.subject?.name || lesson.topic || t('stuPay.lessonFallback')}
+                        </p>
+                        <p className="text-xs text-gray-600 mt-0.5">
+                          {format(new Date(lesson.start_time), 'Pp', { locale: dateFnsLocale })}
+                          {lesson.price != null && <> · <span className="font-semibold">{fmt(Number(lesson.price))}</span></>}
+                        </p>
+                      </div>
+                      <Link
+                        to={`/student/sessions?sessionId=${encodeURIComponent(lesson.id)}`}
+                        className="inline-flex items-center rounded-xl bg-[var(--org-brand)] px-4 py-2 text-sm font-semibold text-white hover:opacity-90 shrink-0"
+                      >
+                        {t('stuPay.payNow')}
+                      </Link>
+                    </div>
+                  ))
+                )}
+                {paidLessons.length > 0 && (
+                  <div className="pt-2 space-y-2">
+                    {paidLessons.map((lesson) => (
+                      <div key={lesson.id} className="rounded-2xl border border-gray-100 bg-white p-4 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">{lesson.subject?.name || lesson.topic || t('stuPay.lessonFallback')}</p>
+                          <p className="text-xs text-gray-500 mt-0.5">{format(new Date(lesson.start_time), 'Pp', { locale: dateFnsLocale })}</p>
+                        </div>
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5 shrink-0">
+                          <CheckCircle className="w-3 h-3" /> {t('stuPay.paidBadge')}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+
             {/* Pending payments */}
             <section className="space-y-2">
               <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">{t('stuPay.pendingTitle')}</h2>

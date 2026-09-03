@@ -536,7 +536,7 @@ function sessionReminder(d: any, locale: Locale) {
   const dateParam = d.date ? encodeURIComponent(String(d.date)) : '';
   const calendarUrl = d.isTutor
     ? `${getAppUrl()}/calendar?${dateParam ? `date=${dateParam}&` : ''}sessionId=${sessionId}`
-    : `${getAppUrl()}/student/schedule?sessionId=${sessionId}`;
+    : `${getAppUrl()}/student/sessions?sessionId=${sessionId}`;
   return {
     subject: t(locale, 'em.reminderSub', { date: d.date, time: d.time }),
     html: wrap(`
@@ -639,17 +639,22 @@ function moksloVaisiaiStudentArchiveRequest(d: any, locale: Locale) {
   const studentEmail = esc(String(d.studentEmail || '—'));
   const studentPhone = esc(String(d.studentPhone || '—'));
   const payerEmail = esc(String(d.payerEmail || '—'));
+  const byParent = String(d.requestedBy || 'parent') === 'parent';
   return {
-    subject: `Mokinys nori ištrinti paskyrą: ${String(d.studentName || 'Mokinys')}`,
+    subject: byParent
+      ? `Tėvai nori ištrinti vaiko paskyrą: ${String(d.studentName || 'Mokinys')}`
+      : `Mokinys nori ištrinti paskyrą: ${String(d.studentName || 'Mokinys')}`,
     html: wrap(`
       <div class="header" style="${headerInlineStyle('#124410', '#5C2B02')}">
         <h1>Paskyros ištrynimo prašymas</h1>
-        <p>Mokinys suarchyvavo paskyrą Tutlio sistemoje</p>
+        <p>${byParent ? 'Tėvai suarchyvavo vaiko paskyrą Tutlio sistemoje' : 'Mokinys suarchyvavo paskyrą Tutlio sistemoje'}</p>
       </div>
       <div class="body">
         <p class="greeting">Sveiki,</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          Mokinys paprašė ištrinti savo paskyrą. Paskyra suarchyvuota; per 14 darbo dienų susisiekite ir ištrinkite ją rankiniu būdu.
+          ${byParent
+            ? 'Tėvai paprašė ištrinti vaiko paskyrą. Paskyra suarchyvuota; per 14 darbo dienų susisiekite ir ištrinkite ją rankiniu būdu.'
+            : 'Mokinys paprašė ištrinti savo paskyrą. Paskyra suarchyvuota; per 14 darbo dienų susisiekite ir ištrinkite ją rankiniu būdu.'}
         </p>
         ${table(
           td('Mokinys', studentName) +

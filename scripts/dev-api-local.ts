@@ -236,17 +236,20 @@ const handlerCache = new Map<
 >();
 
 function apiLibMtimeMs(): number {
-  const libDir = join(apiDir, '_lib');
-  if (!existsSync(libDir)) return 0;
   let max = 0;
-  for (const name of readdirSync(libDir)) {
-    const p = join(libDir, name);
-    try {
-      max = Math.max(max, statSync(p).mtimeMs);
-    } catch {
-      /* ignore */
+  const bump = (dir: string) => {
+    if (!existsSync(dir)) return;
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name);
+      try {
+        max = Math.max(max, statSync(p).mtimeMs);
+      } catch {
+        /* ignore */
+      }
     }
-  }
+  };
+  bump(join(apiDir, '_lib'));
+  bump(join(projectRoot, 'src', 'lib'));
   return max;
 }
 

@@ -1,14 +1,21 @@
 import type { User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { resolveAuthUser } from '@/lib/authSession';
-import { getCached, setCache, dedupeAsync } from '@/lib/dataCache';
+import { companyStatsCacheKey, getCached, setCache, dedupeAsync } from '@/lib/dataCache';
 import { startOfMonth, endOfMonth, isAfter, isBefore, addDays, subDays, subMonths, addMonths } from 'date-fns';
 import { isProKlaseOrg, orgFeeProfile } from '@/lib/marketMoney';
 import { sumOrgTutorLessonsPayEur } from '@/lib/orgTutorLessonPay';
+import { countProKlaseRealizedSessions } from '@/lib/proKlaseTutorPay';
+import {
+  countConductedOrgSessions,
+  filterConductedOrgSessions,
+} from '@/lib/orgTutorConductedSessions';
+import { countCancellationAttribution } from '@/lib/session-stats';
+import { defaultStatsDateRange, normalizeStatsDateRange } from '@/lib/statsDateRange';
 import {
   packageClientPaidEur,
-  proKlaseAdminFinanceSplit,
   standaloneSessionClientPaidEur,
+  sumProKlaseRealizedPaidTutorPayEur,
 } from '@/lib/proKlaseAdminFinance';
 
 /** Columns the tutor Dashboard needs (avoid `*` + share one deduped round-trip with Layout preload). */
@@ -425,7 +432,7 @@ export async function preloadOrgAdminData() {
       preloadDashboard(org, orgId, tutorIds, visibleTutors, sessionsRes.data || []);
     }
 
-    if (!getCached('company_stats')) {
+    if (orgId && !getCached(companyStatsCacheKey(orgId))) {
       preloadStats(visibleTutors, tutorIds, orgId);
     }
   } finally {
@@ -491,10 +498,14 @@ async function preloadDashboard(
 
 async function preloadStats(tutorProfiles: any[], tutorIds: string[], orgId?: string) {
   try {
+    const defaultRange = defaultStatsDateRange();
+    const { startIso, endIso } = normalizeStatsDateRange(defaultRange.start, defaultRange.end);
     const { data: sessionsData } = await supabase
       .from('sessions')
       .select('tutor_id, status, payment_status, price, cancelled_by, paid, is_complimentary, lesson_package_id, subject_id, subjects(is_trial)')
-      .in('tutor_id', tutorIds);
+      .in('tutor_id', tutorIds)
+      .gte('start_time', startIso)
+      .lte('start_time', endIso);
 
     const proKlaseOrgKey = orgId || tutorProfiles[0]?.organization_id;
     const proKlase = isProKlaseOrg(proKlaseOrgKey);
@@ -505,7 +516,9 @@ async function preloadStats(tutorProfiles: any[], tutorIds: string[], orgId?: st
         .from('lesson_packages')
         .select('tutor_id, total_price, price_per_lesson, total_lessons, paid, payment_status')
         .in('tutor_id', tutorIds)
-        .eq('paid', true);
+        .eq('paid', true)
+        .gte('paid_at', startIso)
+        .lte('paid_at', endIso);
       for (const pkg of packages || []) {
         const tutorId = String((pkg as { tutor_id?: string }).tutor_id || '');
         packagesByTutor.set(
@@ -517,9 +530,7 @@ async function preloadStats(tutorProfiles: any[], tutorIds: string[], orgId?: st
 
     const stats = tutorProfiles.map((tutor: any) => {
       const tutorSessions = (sessionsData || []).filter((s: any) => s.tutor_id === tutor.id);
-      const cancelledByTutor = tutorSessions.filter((s: any) => s.status === 'cancelled' && s.cancelled_by === 'tutor');
-      const cancelledByStudent = tutorSessions.filter((s: any) => s.status === 'cancelled' && s.cancelled_by === 'student');
-      const totalCancelledCount = tutorSessions.filter((s: any) => s.status === 'cancelled').length;
+      const cancellation = countCancellationAttribution(tutorSessions);
       const tutorPayPerSession = tutor.company_commission_percent ?? 0;
 
       if (proKlase) {
@@ -535,42 +546,36 @@ async function preloadStats(tutorProfiles: any[], tutorIds: string[], orgId?: st
         const clientPaidEur =
           (packagesByTutor.get(tutor.id) || 0) +
           mapped.reduce((sum: number, session: any) => sum + standaloneSessionClientPaidEur(session), 0);
-        const split = proKlaseAdminFinanceSplit({
-          clientPaidEur,
-          sessions: mapped,
-          tutorPayRate: tutorPayPerSession,
-        });
-        const billedCount = mapped.filter(
-          (s: any) => s.status !== 'cancelled' && (s.paid === true || ['paid', 'confirmed'].includes(String(s.payment_status || ''))),
-        ).length;
+        const netEarnings = sumProKlaseRealizedPaidTutorPayEur(mapped, tutorPayPerSession);
+        const completedSessions = countProKlaseRealizedSessions(mapped);
         return {
           id: tutor.id, full_name: tutor.full_name,
-          completedSessions: billedCount,
-          cancelledByTutor: cancelledByTutor.length,
-          cancelledByStudent: cancelledByStudent.length,
-          totalCancelled: totalCancelledCount,
-          earnings: split.clientPaidEur,
-          companyCommission: split.platformShareEur,
-          netEarnings: split.accruedTutorCostEur,
+          completedSessions,
+          cancelledByTutor: cancellation.cancelledByTutor,
+          cancelledByStudent: cancellation.cancelledByStudent,
+          cancelledByAdmin: cancellation.cancelledByAdmin,
+          totalCancelled: cancellation.totalCancelled,
+          earnings: clientPaidEur,
+          companyCommission: Math.round((clientPaidEur - netEarnings) * 100) / 100,
+          netEarnings,
         };
       }
 
-      const paid = tutorSessions.filter((s: any) =>
-        s.status === 'completed' || ['paid', 'confirmed'].includes(s.payment_status)
-      );
-      const earnings = paid.reduce((sum: number, s: any) => sum + (s.price || 0), 0);
+      const conducted = filterConductedOrgSessions(tutorSessions);
+      const earnings = conducted.reduce((sum: number, s: any) => sum + (Number(s.price) || 0), 0);
       const netEarnings = sumOrgTutorLessonsPayEur(
-        paid,
+        conducted,
         tutorPayPerSession,
         tutor.company_commission_by_subject,
         orgId,
       );
       return {
         id: tutor.id, full_name: tutor.full_name,
-        completedSessions: paid.length,
-        cancelledByTutor: cancelledByTutor.length,
-        cancelledByStudent: cancelledByStudent.length,
-        totalCancelled: totalCancelledCount,
+        completedSessions: countConductedOrgSessions(conducted),
+        cancelledByTutor: cancellation.cancelledByTutor,
+        cancelledByStudent: cancellation.cancelledByStudent,
+        cancelledByAdmin: cancellation.cancelledByAdmin,
+        totalCancelled: cancellation.totalCancelled,
         earnings,
         companyCommission: earnings - netEarnings,
         netEarnings,
@@ -578,14 +583,16 @@ async function preloadStats(tutorProfiles: any[], tutorIds: string[], orgId?: st
     });
 
     const sorted = stats.sort((a: any, b: any) => b.earnings - a.earnings);
-    setCache('company_stats', {
-      tutorStats: sorted,
-      totalEarnings: stats.reduce((s: number, t: any) => s + t.earnings, 0),
-      totalCompanyCommission: stats.reduce((s: number, t: any) => s + t.companyCommission, 0),
-      totalNetEarnings: stats.reduce((s: number, t: any) => s + t.netEarnings, 0),
-      totalSessions: stats.reduce((s: number, t: any) => s + t.completedSessions, 0),
-      totalCancelled: stats.reduce((s: number, t: any) => s + t.totalCancelled, 0),
-    });
+    if (proKlaseOrgKey) {
+      setCache(companyStatsCacheKey(proKlaseOrgKey), {
+        tutorStats: sorted,
+        totalEarnings: stats.reduce((s: number, t: any) => s + t.earnings, 0),
+        totalCompanyCommission: stats.reduce((s: number, t: any) => s + t.companyCommission, 0),
+        totalNetEarnings: stats.reduce((s: number, t: any) => s + t.netEarnings, 0),
+        totalSessions: stats.reduce((s: number, t: any) => s + t.completedSessions, 0),
+        totalCancelled: stats.reduce((s: number, t: any) => s + t.totalCancelled, 0),
+      });
+    }
   } catch {
     // Non-critical
   }

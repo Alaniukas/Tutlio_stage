@@ -3,7 +3,6 @@ import type { VercelRequest } from '../types.js';
 import { verifyRequestAuth } from './auth.js';
 import {
   hasOrgAdminPermission,
-  normalizeOrgAdminPermissions,
   type OrgAdminPermission,
   type OrgAdminPermissionMap,
   type OrgAdminRole,
@@ -68,6 +67,7 @@ export async function getOrgOwnerUserId(
     .eq('organization_id', organizationId)
     .eq('role', 'owner')
     .eq('status', 'active')
+    .limit(1)
     .maybeSingle();
   if (!primary.error) return primary.data?.user_id ? String(primary.data.user_id) : null;
   if (!isMissingPermissionColumns(primary.error)) return null;
@@ -100,7 +100,7 @@ export async function getOrgAdminSeatByUserId(
       organizationId: String(row.organization_id),
       role: row.role as OrgAdminRole,
       status: row.status as OrgAdminStatus,
-      permissions: normalizeOrgAdminPermissions(row.permissions),
+      permissions: (row.permissions as OrgAdminPermissionMap) || {},
       acceptedAt: typeof row.accepted_at === 'string' ? row.accepted_at : null,
     };
   }

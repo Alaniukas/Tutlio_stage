@@ -167,6 +167,7 @@ describe('organization access to the public page', () => {
   it('keeps instructions last even with the entry shown', () => {
     const paths = buildCompanyNavItems(false, '/company', translate, true, true).map((i) => i.href);
     expect(paths.at(-1)).toBe('/company/instructions');
-    expect(paths.at(-2)).toBe('/company/dynamic-pricing');
+    expect(paths.at(-2)).toBe('/company/team');
+    expect(paths.at(-3)).toBe('/company/dynamic-pricing');
   });
 });

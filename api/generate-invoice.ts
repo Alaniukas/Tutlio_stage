@@ -824,7 +824,12 @@ function buildLineItems(
               { status: s.status, price: s.price, subjects: s.subjects },
               orgTutorPayRate,
             )
-          : orgTutorLessonPayEur(orgTutorPayRate, s.price);
+          : orgTutorSessionPayEur({
+              organizationId: null,
+              defaultRate: orgTutorPayRate,
+              subjectId: s.subject_id,
+              sessionPrice: s.price,
+            });
 
     if (groupingType === 'per_payment') {
       return sessions.map(s => {

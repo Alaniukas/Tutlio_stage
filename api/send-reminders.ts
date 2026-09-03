@@ -11,6 +11,7 @@ import { requireCronAuth } from './_lib/cronAuth.js';
 import { dedupeReminderRecipients, type ReminderRecipient } from './_lib/reminderRecipients.js';
 import { loadReminderOptOuts } from './_lib/reminderOptOut.js';
 import { isMissingPostgrestRpc } from './_lib/postgrestRpc.js';
+import { moksloVaisiaiRoutesLessonCommsToPayer } from './_lib/moksloVaisiaiLessonComms.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -52,7 +53,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const sessionSelect = `
           id, start_time, end_time, topic, price, meeting_link,
           reminder_student_sent, reminder_tutor_sent, reminder_payer_sent,
-          student:students(id, full_name, email, payment_payer, payer_email, payer_name, parent_secondary_email, parent_secondary_name),
+          student:students(id, full_name, email, payment_payer, payer_email, payer_name, parent_secondary_email, parent_secondary_name, organization_id, linked_user_id),
           tutor:profiles(id, full_name, email, phone, reminder_student_hours, reminder_tutor_hours, organization_id)
         `;
     const { data: dueSessionRows, error: dueSessionError } = await supabase.rpc(
@@ -150,6 +151,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const payerEmail = (student as any)?.payer_email?.trim() || '';
           const payerName = (student as any)?.payer_name || null;
           const isPayerParent = (student as any)?.payment_payer === 'parent';
+          const mvPayerInbox = moksloVaisiaiRoutesLessonCommsToPayer({
+            organizationId: (student as any)?.organization_id ?? orgId,
+            tutorOrganizationId: orgId,
+            studentEmail: student?.email,
+            linkedUserId: (student as any)?.linked_user_id,
+          });
           const flexibleInvites = (await getOrgFeatures(orgId))?.flexible_invitations === true;
 
           const candidates: ReminderRecipient[] = [];
@@ -174,7 +181,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 if (p?.email) candidates.push({ email: String(p.email), name: p.full_name || null });
               }
             }
-          } else if (isPayerParent && payerEmail) {
+          } else if ((isPayerParent || mvPayerInbox) && payerEmail) {
             candidates.push({ email: payerEmail, name: payerName });
           }
 

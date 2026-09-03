@@ -7,6 +7,21 @@ Perėjimas kitam kompiuteriui. **Ne** siųsti šito failo Nadai. Payer / demo la
 
 ---
 
+## Trial account (2026-09-03 — Nada testuojasi)
+
+**Tuščia org** — jokių fake mokinių/docentų/pamokų. Tik **3 licencijos** + **manual payments** + NL UI.
+
+| | |
+|---|---|
+| **Admin login** | https://tutlio.lt/company/login |
+| **El. paštas** | `bijlesdetoekomst@outlook.com` |
+| **Slaptažodis** | `TutlioQaDemo2026!` (gali pakeisti profilyje) |
+| **Licencijos** | 3 (docentų dar neįdėta) |
+
+**Seed iš naujo (išvalo viską):** `node scripts/seed-haarlem-bijles-demo.mjs`
+
+---
+
 ## Ką ji parašė / ko nori
 
 Nada El Abouti, bijlesbedrijf **Haarlem** (Nyderlandai). Svetainė dar **negyva**.

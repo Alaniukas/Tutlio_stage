@@ -27,7 +27,16 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import BuyLicensesDialog from '@/components/company/BuyLicensesDialog';
 import { fmtMoney, isManoKorepetitoriusOrg, isProKlaseOrg } from '@/lib/marketMoney';
-import { compactTutorPayBySubject, parseTutorPayBySubject } from '@/lib/orgTutorLessonPay';
+import {
+  compactTutorPayBySubject,
+  parseTutorPayBySubject,
+  sumOrgTutorLessonsPayEur,
+} from '@/lib/orgTutorLessonPay';
+import {
+  countConductedOrgSessions,
+  filterConductedOrgSessions,
+} from '@/lib/orgTutorConductedSessions';
+import { sumProKlasePayBreakdown } from '@/lib/proKlaseTutorPay';
 import { authHeaders } from '@/lib/apiHelpers';
 import { isPlMarket } from '@/lib/market';
 
@@ -976,10 +985,11 @@ export default function CompanyTutors() {
 
     const { data: sessions } = await supabase
       .from('sessions')
-      .select('price, status')
+      .select('price, status, subject_id, is_complimentary, subjects(is_trial)')
       .eq('tutor_id', tutor.id)
-      .eq('status', 'completed')
+      .in('status', ['completed', 'no_show'])
       .gte('start_time', oneYearAgo.toISOString())
+      .lte('end_time', new Date().toISOString())
       .limit(1000);
 
     const { data: tspData } = await supabase
@@ -987,8 +997,17 @@ export default function CompanyTutors() {
       .select('*')
       .eq('tutor_id', tutor.id);
 
-    const sessionCount = (sessions || []).length;
-    const earnings = (sessions || []).reduce((sum, s: any) => sum + (s.price || 0), 0);
+    const conducted = filterConductedOrgSessions(sessions || []);
+    const sessionCount = countConductedOrgSessions(conducted);
+    const tutorRate = tutor.company_commission_percent ?? orgDefaults.company_commission_percent;
+    const earnings = isProKlaseAdmin
+      ? sumProKlasePayBreakdown(conducted as any[], tutorRate).totalEur
+      : sumOrgTutorLessonsPayEur(
+          conducted,
+          tutorRate,
+          tutor.company_commission_by_subject,
+          orgId,
+        );
     setTutorSubjectPrices((tspData || []).map((r: any) => ({
       id: r.id, tutor_id: r.tutor_id, org_subject_template_id: r.org_subject_template_id,
       price: Number(r.price), duration_minutes: r.duration_minutes,

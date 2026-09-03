@@ -11,6 +11,7 @@ import ParentLayout from '@/components/ParentLayout';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { authHeaders } from '@/lib/apiHelpers';
 import { computeInvoiceDisplayForChild } from '@/lib/billingBatchStudentSlice';
+import { fetchInvoiceIdsForSessionIds } from '@/lib/invoiceLineItemsForSessions';
 
 interface Invoice {
   id: string;
@@ -142,19 +143,11 @@ export default function ParentInvoices() {
       const { data: sessRows } = await supabase.from('sessions').select('id').in('student_id', studentIds);
       const sessionIds = [...new Set((sessRows ?? []).map((s) => s.id))];
       const childSessionIdSet = new Set(sessionIds);
-      const chunkSize = 80;
-      for (let i = 0; i < sessionIds.length; i += chunkSize) {
-        const chunk = sessionIds.slice(i, i + chunkSize);
-        if (!chunk.length) continue;
-        const { data: liRows, error: liErr } = await supabase
-          .from('invoice_line_items')
-          .select('invoice_id')
-          .overlaps('session_ids', chunk as unknown as string[]);
-        if (liErr) {
-          console.warn('[ParentInvoices] line_items overlaps:', liErr);
-          continue;
-        }
-        for (const row of liRows ?? []) invoiceIdSet.add(row.invoice_id as string);
+      try {
+        const fromSessions = await fetchInvoiceIdsForSessionIds(supabase, sessionIds);
+        for (const invId of fromSessions) invoiceIdSet.add(invId);
+      } catch (liErr) {
+        console.warn('[ParentInvoices] line_items session lookup:', liErr);
       }
 
       const invoiceIds = [...invoiceIdSet];

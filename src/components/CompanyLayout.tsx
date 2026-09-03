@@ -65,7 +65,6 @@ export function buildCompanyNavItems(
   showDynamicPricing: boolean,
   showPublicPage = false,
   showInstructions = true,
-  showTeam = false,
   showGroups = false,
   showRecordings = false,
 ): CompanyNavItem[] {
@@ -79,7 +78,7 @@ export function buildCompanyNavItems(
     { href: `${orgBasePath}/stats`, label: t('companyNav.stats'), icon: BarChart3, permission: 'stats.view', section: 'manage' },
     { href: `${orgBasePath}/settings`, label: t('companyNav.lessonSettings'), icon: Settings, permission: 'settings.view', section: 'manage' },
   ];
-  if (isSchool && showGroups) {
+  if (showGroups) {
     base.push({ href: `${orgBasePath}/groups`, label: t('companyNav.groups'), icon: UsersRound, permission: 'sessions.view', section: 'work' });
   }
   if (isSchool && showRecordings) {
@@ -95,9 +94,7 @@ export function buildCompanyNavItems(
   if (showDynamicPricing) {
     base.push({ href: `${orgBasePath}/dynamic-pricing`, label: t('companyNav.dynamicPricing'), icon: BadgeEuro, permission: 'settings.view', section: 'manage' });
   }
-  if (showTeam) {
-    base.push({ href: `${orgBasePath}/team`, label: t('companyNav.team'), icon: ShieldCheck, permission: null, section: 'manage' });
-  }
+  base.push({ href: `${orgBasePath}/team`, label: t('companyNav.team'), icon: ShieldCheck, permission: 'team.view', section: 'manage' });
   if (showInstructions) {
     base.push({ href: `${orgBasePath}/instructions`, label: t('companyNav.instructions'), icon: HelpCircle, permission: null, section: 'help' });
   }
@@ -107,7 +104,7 @@ export function buildCompanyNavItems(
 export default function CompanyLayout() {
   const { t } = useTranslation();
   const { user: ctxUser } = useUser();
-  const { can, isOwner, membership } = useOrgAdminAccess();
+  const { can, membership } = useOrgAdminAccess();
   const chatUnreadTotal = useTotalChatUnread();
   const location = useLocation();
   const ENTITY_KEY = 'tutlio_entity_type';
@@ -151,12 +148,11 @@ export default function CompanyLayout() {
         showDynamicPricing,
         showPublicPage,
         showInstructions,
-        isOwner,
-        isSchool && hasFeature('school_class_groups'),
+        hasFeature('school_class_groups'),
         SCHOOL_LESSON_RECORDINGS_NAV_READY && isSchool && hasFeature('school_lesson_recordings'),
       )
       .filter((item) => item.permission === null || can(item.permission)),
-    [t, isSchool, orgBasePath, showDynamicPricing, showPublicPage, showInstructions, isOwner, can, hasFeature],
+    [t, isSchool, orgBasePath, showDynamicPricing, showPublicPage, showInstructions, can, hasFeature],
   );
 
   useEffect(() => {

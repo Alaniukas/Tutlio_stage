@@ -23,14 +23,13 @@ export function compactTutorPayBySubject(
   return parseTutorPayBySubject(input);
 }
 
+/** Org tutor pay from the configured rate only — never client session.price. */
 export function orgTutorLessonPayEur(
   tutorPayRate: number | null | undefined,
-  sessionPrice: number | null | undefined,
+  _sessionPrice?: number | null | undefined,
 ): number {
   const rate = Number(tutorPayRate);
-  if (Number.isFinite(rate) && rate > 0) return rate;
-  const price = Number(sessionPrice);
-  return Number.isFinite(price) && price > 0 ? price : 0;
+  return Number.isFinite(rate) && rate > 0 ? rate : 0;
 }
 
 export function resolveOrgTutorLessonPayEur(opts: {

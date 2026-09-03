@@ -25,11 +25,16 @@ export function packageCountsAsUnpaid(row: {
 }
 
 export function invoiceCountsAsUnpaid(row: {
+  status?: string | null;
   paid?: boolean | null;
   payment_status?: string | null;
 }): boolean {
+  if (row.status != null && String(row.status).trim() !== '') {
+    const status = String(row.status).toLowerCase();
+    return status === 'issued';
+  }
   if (row.paid === true) return false;
-  const status = String(row.payment_status || '').toLowerCase();
-  if (status === 'paid' || status === 'void' || status === 'cancelled' || status === 'canceled') return false;
+  const legacy = String(row.payment_status || '').toLowerCase();
+  if (legacy === 'paid' || legacy === 'void' || legacy === 'cancelled' || legacy === 'canceled') return false;
   return true;
 }

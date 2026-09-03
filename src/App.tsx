@@ -80,6 +80,7 @@ const CompanyDynamicPricing = lazy(() => import('@/pages/company/CompanyDynamicP
 const CompanyMessages = lazy(() => import('@/pages/company/CompanyMessages'));
 const CompanyTeam = lazy(() => import('@/pages/company/CompanyTeam'));
 const CompanyClassGroups = lazy(() => import('@/pages/company/CompanyClassGroups'));
+const TutorClassGroupsPage = lazy(() => import('@/pages/TutorClassGroups'));
 const CompanyLessonRecordings = lazy(() => import('@/pages/company/CompanyLessonRecordings'));
 const PreviewAssignStudentModal = import.meta.env.DEV
   ? lazy(() => import('@/pages/dev/PreviewAssignStudentModal'))
@@ -351,7 +352,7 @@ export default function App({ basename }: { basename: string }) {
         <Route element={<ProtectedWithUser />}>
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/calendar" element={<CalendarPage />} />
-          <Route path="/groups" element={<CompanyClassGroups />} />
+          <Route path="/groups" element={<TutorClassGroupsPage />} />
           <Route path="/students" element={<StudentsPage />} />
           <Route path="/waitlist" element={<WaitlistPage />} />
           <Route path="/messages" element={<Messages />} />
@@ -430,7 +431,8 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/company/settings" element={<OrgPermissionRoute permission="settings.view" editPermission="settings.edit"><CompanySettings /></OrgPermissionRoute>} />
             <Route path="/company/finance" element={<OrgPermissionRoute permission="finance.view" editPermission="finance.edit"><CompanyFinanceHub /></OrgPermissionRoute>} />
             <Route path="/company/contracts" element={<OrgPermissionRoute permission="contracts.view" editPermission="contracts.edit"><CompanyContracts /></OrgPermissionRoute>} />
-            <Route path="/company/team" element={<OrgPermissionRoute ownerOnly><CompanyTeam /></OrgPermissionRoute>} />
+            <Route path="/company/team" element={<OrgPermissionRoute permission="team.view" editPermission="team.edit"><CompanyTeam /></OrgPermissionRoute>} />
+            <Route path="/company/groups" element={<OrgPermissionRoute permission="sessions.view" editPermission="sessions.edit"><CompanyClassGroups /></OrgPermissionRoute>} />
 
             <Route path="/school" element={<OrgPermissionRoute permission="dashboard.view"><CompanyDashboard /></OrgPermissionRoute>} />
             <Route path="/school/tutors" element={<OrgPermissionRoute permission="tutors.view" editPermission="tutors.edit"><CompanyTutors /></OrgPermissionRoute>} />
@@ -447,7 +449,7 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/school/settings" element={<OrgPermissionRoute permission="settings.view" editPermission="settings.edit"><CompanySettings /></OrgPermissionRoute>} />
             <Route path="/school/finance" element={<OrgPermissionRoute permission="finance.view" editPermission="finance.edit"><CompanyFinanceHub /></OrgPermissionRoute>} />
             <Route path="/school/contracts" element={<OrgPermissionRoute permission="contracts.view" editPermission="contracts.edit"><CompanyContracts /></OrgPermissionRoute>} />
-            <Route path="/school/team" element={<OrgPermissionRoute ownerOnly><CompanyTeam /></OrgPermissionRoute>} />
+            <Route path="/school/team" element={<OrgPermissionRoute permission="team.view" editPermission="team.edit"><CompanyTeam /></OrgPermissionRoute>} />
           </Route>
         </Route>
 

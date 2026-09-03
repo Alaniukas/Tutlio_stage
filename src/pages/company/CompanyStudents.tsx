@@ -91,8 +91,17 @@ import {
 } from '@/lib/studentAvailability';
 import PickedAvailabilityTimeEditor from '@/components/company/PickedAvailabilityTimeEditor';
 import { runOrgAdminCreateSession } from '@/pages/company/orgAdminSessionCreate';
+import {
+  markFirstChronologicalLessonAsTrial,
+  summarizePlannedStudentLessons,
+} from '@/lib/proKlaseStudentLessonPlan';
 import { defaultLessonRange, lessonFitsAvailabilityWindow, appendUniqueBySlotKey, availabilitySlotKey } from '@/lib/pickedAvailabilityTime';
 import { orgCanonicalOrigin } from '@/lib/orgPublicOrigin';
+import {
+  shouldSendParentInviteOnCreate,
+  shouldSendStudentInviteEmail,
+  type OrgStudentInviteTarget,
+} from '@/lib/moksloVaisiaiInvite';
 import type { BusyInterval } from '@/lib/tutorMatching';
 import PackageItemsEditor, { type PackageEditorItem, type PackageEditorSubject } from '@/components/PackageItemsEditor';
 import { pickStudentContactsForTutorEmail } from '@/lib/orgContactVisibility';
@@ -108,7 +117,7 @@ import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { useUser } from '@/contexts/UserContext';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import { proKlaseOrgAdminContext, proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
-import { isProKlaseOrg } from '@/lib/marketMoney';
+import { isProKlaseOrg, isMoksloVaisiaiOrg } from '@/lib/marketMoney';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import {
   parseStudentGrade,
@@ -152,6 +161,7 @@ interface Student {
   trial_offer_disabled?: boolean;
   invite_code: string;
   payment_model?: string | null;
+  payment_payer?: 'self' | 'parent' | string | null;
   linked_user_id?: string | null;
   created_at: string;
   admin_comment?: string | null;
@@ -344,8 +354,11 @@ export default function CompanyStudents() {
   const pkFeat = (flagId: string) =>
     proKlaseFeatureEnabled(orgId, orgEntityType, hasFeature, flagId, orgFeaturesLoading);
   const orgUsesManualPackages = !orgFeaturesLoading && hasFeature('manual_payments');
+  const isMvOrg = isMoksloVaisiaiOrg(orgId);
   /** Full contact editing: schools always; other orgs behind full_student_edit (email only until registered). */
   const canFullEditStudent = isSchoolView || (!orgFeaturesLoading && hasFeature('full_student_edit'));
+  /** Sutartims / school moduliui: asmens kodas, gimimo data, adresas — ne company / Pro Klasė. */
+  const showSchoolContractFields = isSchoolView;
   const stc = getCached<any>('company_students');
   const [students, setStudents] = useState<Student[]>(stc?.students ?? []);
   const [tutors, setTutors] = useState<Tutor[]>(stc?.tutors ?? []);
@@ -356,6 +369,7 @@ export default function CompanyStudents() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [addStudentFindTutorOpen, setAddStudentFindTutorOpen] = useState(false);
   const [addStudentPickedLessons, setAddStudentPickedLessons] = useState<AddStudentLessonPick[]>([]);
+  const [addStudentFirstLessonIsTrial, setAddStudentFirstLessonIsTrial] = useState(false);
   const [saving, setSaving] = useState(false);
   const [classGroups, setClassGroups] = useState<SchoolClassGroupRecord[]>([]);
   const [baseUrl, setBaseUrl] = useState('');
@@ -385,8 +399,10 @@ export default function CompanyStudents() {
     child_birth_date: '',
     tutor_ids: [] as string[],
     // Flexible invitations (req 7): who to invite on create when enabled.
-    invite_target: 'student' as 'student' | 'both',
+    invite_target: (isMoksloVaisiaiOrg(membership?.organizationId) ? 'parent' : 'student') as OrgStudentInviteTarget,
+    payment_payer: isMoksloVaisiaiOrg(membership?.organizationId) ? 'parent' : 'self',
   });
+  const parentFirstInvite = isMvOrg && !isSchoolView && newStudent.invite_target === 'parent';
   const [tutorSubjects, setTutorSubjects] = useState<SubjectOption[]>([]);
   const [selectedSubjectForInvite, setSelectedSubjectForInvite] = useState('');
   const [useIndividualPrice, setUseIndividualPrice] = useState(false);
@@ -434,6 +450,7 @@ export default function CompanyStudents() {
     student_address: '',
     student_city: '',
     child_birth_date: '',
+    payment_payer: 'self' as 'self' | 'parent',
   });
   const [studentEditOpen, setStudentEditOpen] = useState(false);
   const [studentEditSecondParentOpen, setStudentEditSecondParentOpen] = useState(false);
@@ -453,6 +470,7 @@ export default function CompanyStudents() {
 
   // Package state (student modal)
   const [studentPackages, setStudentPackages] = useState<any[]>([]);
+  const [packagesRefreshKey, setPackagesRefreshKey] = useState(0);
   /** Active auto (post-trial) monthly package plans for the selected identity group. */
   const [studentAutoPlans, setStudentAutoPlans] = useState<any[]>([]);
   const [annullingPackageId, setAnnullingPackageId] = useState<string | null>(null);
@@ -852,7 +870,7 @@ export default function CompanyStudents() {
       const [pkgRes, subjRes, pricingRes, dynamicPricingRes] = await Promise.all([
         supabase
           .from('lesson_packages')
-          .select('*, subject:subjects(name, color), lesson_package_items(subject_id, total_lessons, available_lessons, total_price, position, subjects!inner(name, color))')
+          .select('*, subject:subjects(name, color, is_trial), lesson_package_items(subject_id, total_lessons, available_lessons, total_price, position, subjects!inner(name, color, is_trial))')
           .eq('student_id', selectedStudent.id)
           // Show both "active" and "pending" packages (org admin wants to see what is sent vs paid)
           .or('active.eq.true,payment_status.eq.pending')
@@ -914,7 +932,7 @@ export default function CompanyStudents() {
       }
     })();
     return () => { cancelled = true; };
-  }, [selectedStudent, isStudentModalOpen, orgId, monthlyPackageMode]);
+  }, [selectedStudent, isStudentModalOpen, orgId, monthlyPackageMode, packagesRefreshKey]);
 
   // Auto (post-trial) monthly package plans across the identity group.
   useEffect(() => {
@@ -1023,6 +1041,8 @@ export default function CompanyStudents() {
       student_address: selectedStudent.student_address || '',
       student_city: selectedStudent.student_city || '',
       child_birth_date: selectedStudent.child_birth_date || '',
+      payment_payer:
+        String(selectedStudent.payment_payer || '').toLowerCase() === 'parent' ? 'parent' : 'self',
     });
     setStudentEditOpen(false);
     setStudentEditSecondParentOpen(
@@ -1404,7 +1424,7 @@ export default function CompanyStudents() {
       setPkgSlotTime('16:00');
       const { data } = await supabase
         .from('lesson_packages')
-        .select('*, subject:subjects(name, color), lesson_package_items(subject_id, total_lessons, available_lessons, total_price, position, subjects!inner(name, color))')
+        .select('*, subject:subjects(name, color, is_trial), lesson_package_items(subject_id, total_lessons, available_lessons, total_price, position, subjects!inner(name, color, is_trial))')
         .eq('student_id', selectedStudent.id)
         .or('active.eq.true,payment_status.eq.pending')
         .order('created_at', { ascending: false });
@@ -1439,7 +1459,7 @@ export default function CompanyStudents() {
     if (!selectedStudent) return;
     const { data } = await supabase
       .from('lesson_packages')
-      .select('*, subject:subjects(name, color), lesson_package_items(subject_id, total_lessons, available_lessons, total_price, position, subjects!inner(name, color))')
+      .select('*, subject:subjects(name, color, is_trial), lesson_package_items(subject_id, total_lessons, available_lessons, total_price, position, subjects!inner(name, color, is_trial))')
       .eq('student_id', selectedStudent.id)
       .or('active.eq.true,payment_status.eq.pending')
       .order('created_at', { ascending: false });
@@ -1746,6 +1766,24 @@ export default function CompanyStudents() {
       setToastMessage({ message: t('compStu.phoneFormat'), type: 'error' });
       return;
     }
+    if (
+      !isSchoolView &&
+      isMvOrg &&
+      newStudent.invite_target === 'parent' &&
+      !newStudent.payer_name.trim()
+    ) {
+      setToastMessage({ message: t('compStu.parentInviteNameRequired'), type: 'error' });
+      return;
+    }
+    if (
+      !isSchoolView &&
+      isMvOrg &&
+      newStudent.invite_target === 'parent' &&
+      !newStudent.payer_email.trim()
+    ) {
+      setToastMessage({ message: t('compStu.parentInviteEmailRequired'), type: 'error' });
+      return;
+    }
 
     for (const item of addStudentPickedLessons) {
       const windowStart = new Date(item.pick.startIso);
@@ -1819,8 +1857,11 @@ export default function CompanyStudents() {
         .from('students')
         .insert({
           ...(tutorId ? { tutor_id: tutorId } : {}),
-          full_name: newStudent.full_name,
-          email: newStudent.email,
+          full_name:
+            !isSchoolView && isMvOrg && newStudent.invite_target === 'parent'
+              ? t('parent.pendingChildName')
+              : newStudent.full_name,
+          email: newStudent.email?.trim() || null,
           phone: newStudent.phone?.trim() || null,
           grade: (normalizeStudentGrade1to12(newStudent.grade) ?? newStudent.grade) || null,
           school_year: isSchoolView ? (newStudent.school_year || null) : null,
@@ -1829,17 +1870,18 @@ export default function CompanyStudents() {
           payer_name: contactParent.name || null,
           payer_email: contactParent.email || null,
           payer_phone: contactParent.phone || null,
-          payer_personal_code: contactParent.personalCode || null,
+          payer_personal_code: showSchoolContractFields ? (contactParent.personalCode || null) : null,
           parent_secondary_name: isSchoolView ? (secondaryParent.name || null) : null,
           parent_secondary_email: isSchoolView ? (secondaryParent.email || null) : null,
           parent_secondary_phone: isSchoolView ? (secondaryParent.phone || null) : null,
           parent_secondary_personal_code: isSchoolView ? (secondaryParent.personalCode || null) : null,
           parent_secondary_address: isSchoolView ? (resolvedParent2Address || null) : null,
           contact_parent: isSchoolView ? newStudent.contact_parent : 'primary',
-          student_address: newStudent.student_address?.trim() || null,
-          student_city: newStudent.student_city?.trim() || null,
-          child_birth_date: newStudent.child_birth_date?.trim() || null,
+          student_address: showSchoolContractFields ? (newStudent.student_address?.trim() || null) : null,
+          student_city: showSchoolContractFields ? (newStudent.student_city?.trim() || null) : null,
+          child_birth_date: showSchoolContractFields ? (newStudent.child_birth_date?.trim() || null) : null,
           invite_code: inviteCode,
+          payment_payer: newStudent.payment_payer,
           ...(() => {
             const matchWindows = addStudentPickedLessons.filter((item) => item.pick.tutorId === tutorId);
             if (matchWindows.length === 0) return {};
@@ -1884,8 +1926,11 @@ export default function CompanyStudents() {
         typeof featObj.trial_lesson_topic === 'string' && featObj.trial_lesson_topic.trim()
           ? featObj.trial_lesson_topic.trim()
           : '';
-      const isTrial = pkFeat('auto_trial_first_lesson');
-      for (const item of addStudentPickedLessons) {
+      const plannedLessons = markFirstChronologicalLessonAsTrial(
+        addStudentPickedLessons,
+        addStudentFirstLessonIsTrial,
+      );
+      for (const item of plannedLessons) {
         const lessonRow = inserted.find((row) => row.tutor_id === item.pick.tutorId) || inserted[0];
         try {
           const { data: subj } = await supabase
@@ -1894,7 +1939,9 @@ export default function CompanyStudents() {
             .eq('id', item.pick.subjectId)
             .maybeSingle();
           if (!subj || !lessonRow.id) continue;
-          const price = isTrial ? trialPrice : Number((subj as { price?: number | null }).price ?? 0);
+          const price = item.isTrial
+            ? trialPrice
+            : Number((subj as { price?: number | null }).price ?? 0);
           const result = await runOrgAdminCreateSession({
             supabase,
             createTutorId: item.pick.tutorId,
@@ -1903,7 +1950,9 @@ export default function CompanyStudents() {
             createStudentIds: [lessonRow.id],
             createStartTime: item.lessonStartIso,
             createEndTime: item.lessonEndIso,
-            createTopic: trialTopic || item.pick.subjectName || (subj as { name?: string | null }).name || '',
+            createTopic: item.isTrial
+              ? trialTopic || item.pick.subjectName || (subj as { name?: string | null }).name || ''
+              : item.pick.subjectName || (subj as { name?: string | null }).name || '',
             createMeetingLink: String((subj as { meeting_link?: string | null }).meeting_link || ''),
             createIsRecurring: false,
             createRecurringEndDate: '',
@@ -1911,7 +1960,7 @@ export default function CompanyStudents() {
             createRecurringWeekdays: [],
             createIsPaid: false,
             createPrice: price,
-            createIsTrial: isTrial,
+            createIsTrial: item.isTrial,
             createFirstLessonIsTrial: false,
             createTutorComment: '',
             createShowCommentToStudent: false,
@@ -1929,7 +1978,7 @@ export default function CompanyStudents() {
             suppressSuccessAlert: true,
           });
           if (
-            isTrial &&
+            item.isTrial &&
             price > 0 &&
             pkFeat('trial_creation_payment_email') &&
             result.createdSessionIds.length > 0
@@ -1982,7 +2031,8 @@ export default function CompanyStudents() {
     let emailOk = true;
     let inviteSkippedExisting = false;
 
-    const shouldSendInviteOnCreate = !isSchoolView;
+    const shouldSendInviteOnCreate =
+      !isSchoolView && shouldSendStudentInviteEmail(newStudent.invite_target);
     if (shouldSendInviteOnCreate && newStudent.email?.trim()) {
       const inviteBaseUrl = orgCanonicalOrigin(orgPreferredLocale) ?? baseUrl;
       for (const row of inserted) {
@@ -2007,7 +2057,7 @@ export default function CompanyStudents() {
 
     // When admin chose "student + parent", send parent portal invites.
     // Plain company: always; school: only with flexible_invitations (Pro Klasė-style).
-    if (newStudent.invite_target === 'both' && (!isSchoolView || hasFeature('flexible_invitations'))) {
+    if (shouldSendParentInviteOnCreate(newStudent.invite_target) && (!isSchoolView || hasFeature('flexible_invitations'))) {
       for (const row of inserted) {
         await sendParentPortalInvites(row.id, false);
       }
@@ -2034,6 +2084,13 @@ export default function CompanyStudents() {
       }
     }
 
+    const plannedSummary =
+      addStudentPickedLessons.length > 0
+        ? summarizePlannedStudentLessons(
+            markFirstChronologicalLessonAsTrial(addStudentPickedLessons, addStudentFirstLessonIsTrial),
+          )
+        : null;
+
     const toastType: 'success' | 'error' =
       (shouldSendInviteOnCreate && newStudent.email?.trim() && !emailOk) || lessonCreateFailed ? 'error' : 'success';
     const toastMessage =
@@ -2043,13 +2100,26 @@ export default function CompanyStudents() {
           ? t('compStu.studentAddedLessonFailed')
           : inviteSkippedExisting
             ? t('compStu.inviteSkippedAlreadyRegistered')
-            : t('compStu.studentAdded');
+            : newStudent.invite_target === 'parent'
+              ? t('compStu.parentInvitedFirst')
+              : plannedSummary && plannedSummary.totalLessons > 0
+              ? plannedSummary.trialLessons > 0
+                ? t('compStu.studentAddedWithLessonsTrial', {
+                    total: plannedSummary.totalLessons,
+                    regular: plannedSummary.regularLessons,
+                  })
+                : t('compStu.studentAddedWithLessonsFull', {
+                    total: plannedSummary.totalLessons,
+                  })
+              : t('compStu.studentAdded');
 
     setToastMessage({
       message: toastMessage,
       type: toastType,
     });
     setIsDialogOpen(false);
+    setAddStudentFirstLessonIsTrial(false);
+    setAddStudentPickedLessons([]);
     setNewStudent({
       full_name: '',
       email: '',
@@ -2073,7 +2143,8 @@ export default function CompanyStudents() {
       student_city: '',
       child_birth_date: '',
       tutor_ids: [],
-      invite_target: 'student',
+      invite_target: isMvOrg ? 'parent' : 'student',
+      payment_payer: isMvOrg ? 'parent' : 'self',
     });
     setSelectedSubjectForInvite('');
     setUseIndividualPrice(false);
@@ -2213,16 +2284,17 @@ export default function CompanyStudents() {
       payer_name: contactParent.name || null,
       payer_email: contactParent.email || null,
       payer_phone: contactParent.phone || null,
-      payer_personal_code: contactParent.personalCode || null,
+      payer_personal_code: showSchoolContractFields ? (contactParent.personalCode || null) : null,
       parent_secondary_name: isSchoolView ? (secondaryParent.name || null) : null,
       parent_secondary_email: isSchoolView ? (secondaryParent.email || null) : null,
       parent_secondary_phone: isSchoolView ? (secondaryParent.phone || null) : null,
       parent_secondary_personal_code: isSchoolView ? (secondaryParent.personalCode || null) : null,
       parent_secondary_address: isSchoolView ? (resolvedParent2AddressEdit || null) : null,
       contact_parent: isSchoolView ? studentEditDraft.contact_parent : 'primary',
-      student_address: studentEditDraft.student_address.trim() || null,
-      student_city: studentEditDraft.student_city.trim() || null,
-      child_birth_date: studentEditDraft.child_birth_date || null,
+      student_address: showSchoolContractFields ? (studentEditDraft.student_address.trim() || null) : null,
+      student_city: showSchoolContractFields ? (studentEditDraft.student_city.trim() || null) : null,
+      child_birth_date: showSchoolContractFields ? (studentEditDraft.child_birth_date || null) : null,
+      payment_payer: studentEditDraft.payment_payer,
       ...(isSchoolView
         ? {
             grade: studentEditDraft.grade || null,
@@ -2678,7 +2750,7 @@ export default function CompanyStudents() {
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-3">
                       <Label>{t('compStu.tutorsRequired')}</Label>
-                      {proKlaseAdminUi && (
+                      {proKlaseAdminUi && !parentFirstInvite && (
                       <Button
                         type="button"
                         size="sm"
@@ -2813,11 +2885,40 @@ export default function CompanyStudents() {
                         />
                       </div>
                     ))}
+                    {addStudentPickedLessons.length > 0 && proKlaseAdminUi && (
+                      <div className="border border-amber-100 rounded-xl p-3 bg-amber-50/50">
+                        <button
+                          type="button"
+                          onClick={() => setAddStudentFirstLessonIsTrial((prev) => !prev)}
+                          className="flex items-center justify-between gap-3 w-full text-left"
+                        >
+                          <div>
+                            <p className="text-sm font-medium text-amber-900">{t('compSch.firstLessonTrial')}</p>
+                            <p className="text-xs text-amber-800/80">{t('compSch.firstLessonTrialDesc')}</p>
+                          </div>
+                          <div
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full flex-shrink-0 ${addStudentFirstLessonIsTrial ? 'bg-amber-500' : 'bg-gray-300'}`}
+                          >
+                            <span
+                              className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${addStudentFirstLessonIsTrial ? 'translate-x-6' : 'translate-x-1'}`}
+                            />
+                          </div>
+                        </button>
+                      </div>
+                    )}
                     {addStudentPickedLessons.length > 0 && (
                       <p className="text-[11px] text-gray-500">{t('findLesson.willCreateOnSave')}</p>
                     )}
                   </div>
 
+                  {parentFirstInvite && (
+                    <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm font-medium text-violet-900">
+                      {t('compStu.inviteParentFirstNotice')}
+                    </div>
+                  )}
+
+                  {!parentFirstInvite && (
+                  <>
                   <div className="space-y-2">
                     <Label>{t('compStu.fullNameRequired')}</Label>
                     <Input
@@ -2950,6 +3051,8 @@ export default function CompanyStudents() {
                     </div>
                   )}
                   </div>
+                  </>
+                  )}
 
                   {!isSchoolView && (
                     <div className="rounded-xl border border-gray-200 p-3 space-y-3">
@@ -2998,7 +3101,61 @@ export default function CompanyStudents() {
                           >
                             {t('compStu.inviteStudentAndParent')}
                           </Button>
+                          {isMvOrg && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant={newStudent.invite_target === 'parent' ? 'default' : 'outline'}
+                              className="rounded-xl text-xs"
+                              onClick={() => {
+                                setAddStudentPickedLessons([]);
+                                setNewStudent({
+                                  ...newStudent,
+                                  invite_target: 'parent',
+                                  payment_payer: 'parent',
+                                  full_name: '',
+                                  email: '',
+                                  phone: '',
+                                  grade: '',
+                                });
+                              }}
+                            >
+                              {t('compStu.inviteParentFirst')}
+                            </Button>
+                          )}
                         </div>
+                        {isMvOrg && newStudent.invite_target === 'parent' && (
+                          <>
+                            <div className="rounded-xl border border-violet-100 bg-violet-50/80 px-3 py-2.5 text-sm font-medium text-violet-900">
+                              {t('compStu.inviteParentFirstNotice')}
+                            </div>
+                            <p className="text-[11px] text-gray-500">{t('compStu.inviteParentFirstHint')}</p>
+                          </>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <Label>{t('compStu.paymentPayerLabel')}</Label>
+                        <div className="flex gap-2 flex-wrap">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={newStudent.payment_payer === 'self' ? 'default' : 'outline'}
+                            className="rounded-xl text-xs"
+                            onClick={() => setNewStudent({ ...newStudent, payment_payer: 'self' })}
+                          >
+                            {t('compStu.paymentPayerSelf')}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={newStudent.payment_payer === 'parent' ? 'default' : 'outline'}
+                            className="rounded-xl text-xs"
+                            onClick={() => setNewStudent({ ...newStudent, payment_payer: 'parent' })}
+                          >
+                            {t('compStu.paymentPayerParent')}
+                          </Button>
+                        </div>
+                        <p className="text-[11px] text-gray-500">{t('compStu.paymentPayerHint')}</p>
                       </div>
                     </div>
                   )}
@@ -3821,7 +3978,7 @@ export default function CompanyStudents() {
         )}
 
         {/* Student Detail Modal */}
-        <Dialog open={isStudentModalOpen} onOpenChange={(open) => { setIsStudentModalOpen(open); if (!open) { setSendPackageOpen(false); setFindLessonPick(null); } }}>
+        <Dialog open={isStudentModalOpen} onOpenChange={(open) => { setIsStudentModalOpen(open); if (!open) { setSendPackageOpen(false); setFindLessonPicks([]); } }}>
           <DialogContent
             className={cn(
               'w-[calc(100%-1.5rem)] max-h-[90vh] overflow-y-auto p-5 sm:p-6',
@@ -4118,9 +4275,13 @@ export default function CompanyStudents() {
                               className="rounded-xl bg-white"
                             />
                             <Input value={studentEditDraft.phone} onChange={(e) => setStudentEditDraft((p) => ({ ...p, phone: formatLocalizedPhone(e.target.value, locale) }))} placeholder={t('compStu.phoneLabel')} className="rounded-xl bg-white" />
+                            {showSchoolContractFields && (
+                              <>
                             <DateInput value={studentEditDraft.child_birth_date} onChange={(e) => setStudentEditDraft((p) => ({ ...p, child_birth_date: e.target.value }))} />
                             <Input value={studentEditDraft.student_address} onChange={(e) => setStudentEditDraft((p) => ({ ...p, student_address: e.target.value }))} placeholder={t('invoiceSettings.address')} className="rounded-xl bg-white" />
                             <Input value={studentEditDraft.student_city} onChange={(e) => setStudentEditDraft((p) => ({ ...p, student_city: e.target.value }))} placeholder={t('perlasFinance.city')} className="rounded-xl bg-white" />
+                              </>
+                            )}
                             {isSchoolView && (
                               <>
                                 <div className="space-y-1 sm:col-span-2">
@@ -4208,7 +4369,7 @@ export default function CompanyStudents() {
                                 )}
                               </>
                             )}
-                            {studentEditDraft.child_birth_date && (
+                            {showSchoolContractFields && studentEditDraft.child_birth_date && (
                               <p className="text-xs text-gray-500 sm:col-span-2">{t('studentSettings.age')}: {calculateAgeFromDate(studentEditDraft.child_birth_date) ?? '—'}</p>
                             )}
                           </div>
@@ -4220,12 +4381,37 @@ export default function CompanyStudents() {
                               <Input value={studentEditDraft.payer_name} onChange={(e) => setStudentEditDraft((p) => ({ ...p, payer_name: e.target.value }))} placeholder={t('compStu.parentFullNameRequired')} className="rounded-xl bg-white" />
                               <Input type="email" value={studentEditDraft.payer_email} onChange={(e) => setStudentEditDraft((p) => ({ ...p, payer_email: e.target.value }))} placeholder={t('compStu.parentEmailRequired')} className="rounded-xl bg-white" />
                               <Input value={studentEditDraft.payer_phone} onChange={(e) => setStudentEditDraft((p) => ({ ...p, payer_phone: formatLocalizedPhone(e.target.value, locale) }))} placeholder={t('compStu.parentPhoneRequired')} className="rounded-xl bg-white" />
+                              {showSchoolContractFields && (
                               <Input
                                 value={studentEditDraft.payer_personal_code}
                                 onChange={(e) => setStudentEditDraft((p) => ({ ...p, payer_personal_code: e.target.value }))}
                                 placeholder={t('invoiceSettings.personalCode')}
                                 className="rounded-xl bg-white"
                               />
+                              )}
+                            </div>
+                            <div className="space-y-2">
+                              <Label className="text-xs text-gray-500">{t('compStu.paymentPayerLabel')}</Label>
+                              <div className="flex gap-2 flex-wrap">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant={studentEditDraft.payment_payer === 'self' ? 'default' : 'outline'}
+                                  className="rounded-xl text-xs"
+                                  onClick={() => setStudentEditDraft((p) => ({ ...p, payment_payer: 'self' }))}
+                                >
+                                  {t('compStu.paymentPayerSelf')}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant={studentEditDraft.payment_payer === 'parent' ? 'default' : 'outline'}
+                                  className="rounded-xl text-xs"
+                                  onClick={() => setStudentEditDraft((p) => ({ ...p, payment_payer: 'parent' }))}
+                                >
+                                  {t('compStu.paymentPayerParent')}
+                                </Button>
+                              </div>
                             </div>
                           </div>
                           {isSchoolView && (
@@ -5235,6 +5421,11 @@ export default function CompanyStudents() {
                                   ? items.map((it: any) => it.subjects?.name).filter(Boolean).join(', ')
                                   : (pkg.subject?.name || '—')}
                               </span>
+                              {(pkg.subject?.is_trial || items.some((it: any) => it.subjects?.is_trial)) && (
+                                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800">
+                                  {t('compSch.firstLessonTrial')}
+                                </span>
+                              )}
                               <span className="text-gray-500">{t('compStu.lessonsCount', { count: String(pkg.total_lessons) })}</span>
                               {pkg.total_price != null && Number.isFinite(Number(pkg.total_price)) && (
                                 <span className="font-semibold text-gray-800">{fmt(Number(pkg.total_price))}</span>
@@ -5381,6 +5572,17 @@ export default function CompanyStudents() {
                             current.filter((row) => availabilitySlotKey(row) !== availabilitySlotKey(pick)),
                           );
                           setModalSessionsRefreshKey((k) => k + 1);
+                          setPackagesRefreshKey((k) => k + 1);
+                          if (booking.trialPaymentSent) {
+                            setToastMessage({ message: t('compStu.trialSent'), type: 'success' });
+                          } else if (booking.recurringCreated) {
+                            setToastMessage({
+                              message: booking.recurringFirstLessonTrial
+                                ? t('findLesson.recurringCreatedWithTrial')
+                                : t('findLesson.recurringCreatedFullPrice'),
+                              type: 'success',
+                            });
+                          }
                           fetchData();
                         }}
                       />

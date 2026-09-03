@@ -79,7 +79,8 @@ vi.mock('@/contexts/OrgAdminAccessContext', () => ({
 vi.mock('@/hooks/useOrgFeatures', () => ({
   useOrgFeatures: () => ({
     loading: false,
-    hasFeature: (id: string) => id === 'monthly_packages' || id === 'student_card_booking',
+    hasFeature: (id: string) =>
+      id === 'monthly_packages' || id === 'student_card_booking' || id === 'full_student_edit',
   }),
 }));
 
@@ -116,5 +117,19 @@ describe('CompanyStudents Pro Klasė list', () => {
 
     fireEvent.click(screen.getAllByText(/Pro Klasė Mokinys/)[0]);
     expect(screen.getByText('Mokinio informacija')).toBeTruthy();
+  });
+
+  it('does not show school-only personal code fields for company orgs with full_student_edit', () => {
+    render(
+      <MemoryRouter initialEntries={['/company/students']}>
+        <CompanyStudents />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getAllByText(/Pro Klasė Mokinys/)[0]);
+    fireEvent.click(screen.getByRole('button', { name: /rodyti|show/i }));
+
+    expect(screen.queryByPlaceholderText('Asmens kodas')).toBeNull();
+    expect(screen.queryByPlaceholderText(/adresas/i)).toBeNull();
   });
 });

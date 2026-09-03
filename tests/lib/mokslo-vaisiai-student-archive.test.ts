@@ -31,6 +31,9 @@ describe('Mokslo vaisiai student archive unpaid checks', () => {
     expect(packageCountsAsUnpaid({ paid: false, payment_status: 'pending' })).toBe(true);
     expect(packageCountsAsUnpaid({ paid: true, payment_status: 'pending' })).toBe(false);
     expect(packageCountsAsUnpaid({ paid: false, payment_status: 'expired' })).toBe(false);
+    expect(invoiceCountsAsUnpaid({ status: 'issued' })).toBe(true);
+    expect(invoiceCountsAsUnpaid({ status: 'paid' })).toBe(false);
+    expect(invoiceCountsAsUnpaid({ status: 'cancelled' })).toBe(false);
     expect(invoiceCountsAsUnpaid({ paid: false })).toBe(true);
     expect(invoiceCountsAsUnpaid({ paid: true })).toBe(false);
   });

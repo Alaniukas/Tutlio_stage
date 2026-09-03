@@ -29,6 +29,10 @@ import { useUser } from '@/contexts/UserContext';
 import { fetchStudentActiveLessonPackagesDeduped, fetchSubjectNamesByIds } from '@/lib/studentLessonPackagesLight';
 import { tutorUsesManualStudentPayments } from '@/lib/subscription';
 import {
+  viewerCanPayLessons,
+  viewerSeesLessonPaymentAmounts,
+} from '@/lib/lessonPayerView';
+import {
     isMonthlyBillingOnlyStudent,
     shouldShowPerLessonPaymentUi,
 } from '@/lib/studentPaymentModel';
@@ -200,6 +204,15 @@ export default function StudentSessions() {
     const [trackedStudentId, setTrackedStudentId] = useState<string | null>(null);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
     const now = new Date();
+    const viewerEmail = ctxUser?.email ?? null;
+    const seesPaymentAmounts = useMemo(
+        () => viewerSeesLessonPaymentAmounts(paymentPayer, viewerEmail, studentEmail, payerEmail),
+        [paymentPayer, viewerEmail, studentEmail, payerEmail],
+    );
+    const canPayLessons = useMemo(
+        () => viewerCanPayLessons(paymentPayer, viewerEmail, studentEmail, payerEmail),
+        [paymentPayer, viewerEmail, studentEmail, payerEmail],
+    );
 
     /** Parent: only re-fetch when path or ?studentId= changes (avoids extra runs from irrelevant search noise). */
     const parentLessonsFetchKey = isParentLessonsRoute ? (urlParentStudentId ?? '') : '';
@@ -530,6 +543,21 @@ export default function StudentSessions() {
             navigate(location.pathname, { replace: true, state: null });
         }
     }, [sessions, studentActionsDisabled, studentActionsResolved]);
+
+    // Open lesson modal from email CTA (?sessionId=)
+    const sessionIdFromUrlHandledRef = useRef(false);
+    useEffect(() => {
+        if (isParentLessonsRoute) return;
+        const sid = searchParams.get('sessionId');
+        if (!sid || sessions.length === 0) return;
+        if (sessionIdFromUrlHandledRef.current) return;
+        const session = sessions.find((s) => s.id === sid);
+        if (!session) return;
+        sessionIdFromUrlHandledRef.current = true;
+        setSelectedSession(session);
+        setIsModalOpen(true);
+        navigate(location.pathname, { replace: true });
+    }, [sessions, searchParams, isParentLessonsRoute, location.pathname, navigate]);
 
     const fetchSessions = async () => {
         if (isParentLessonsRoute && skipNextParentDuplicateFetchRef.current) {
@@ -1672,7 +1700,7 @@ export default function StudentSessions() {
                                         <span className={cn("text-xs font-bold px-3 py-1 rounded-full border whitespace-nowrap", statusCfg.color)}>
                                             {t(statusCfg.labelKey)}
                                         </span>
-                                        {paymentPayer !== 'parent' && s.status !== 'cancelled' && (
+                                        {seesPaymentAmounts && s.status !== 'cancelled' && (
                                             <div>
                                                 {s.paid ? (
                                                     <div className="flex items-center gap-1">
@@ -1738,8 +1766,8 @@ export default function StudentSessions() {
                             </div>
                         </div>
 
-                        {paymentPayer !== 'parent' && (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                            {seesPaymentAmounts && (
                                 <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
                                     <p className="text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">{t('stuSess.price')}</p>
                                     <p className="font-bold text-gray-900">{fmt(selectedSession?.price)}</p>
@@ -1749,19 +1777,22 @@ export default function StudentSessions() {
                                         </p>
                                     )}
                                 </div>
-                                <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100 flex flex-col items-center justify-center">
-                                    <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wider">{t('stuSess.status')}</p>
-                                    <StatusBadge
-                                        status={selectedSession?.status || ''}
-                                        paymentStatus={selectedSession?.payment_status}
-                                        paid={selectedSession?.paid}
-                                        isTrial={selectedSession?.subjects?.is_trial === true}
-                                        endTime={selectedSession?.end_time}
-                                        treatUnpaidAsReserved={!showPerLessonStripeButton}
-                                    />
-                                </div>
+                            )}
+                            <div className={`bg-gray-50 rounded-xl p-3 text-center border border-gray-100 flex flex-col items-center justify-center ${seesPaymentAmounts ? '' : 'sm:col-span-2'}`}>
+                                <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wider">{t('stuSess.status')}</p>
+                                <StatusBadge
+                                    status={selectedSession?.status || ''}
+                                    paymentStatus={selectedSession?.payment_status}
+                                    paid={selectedSession?.paid}
+                                    isTrial={selectedSession?.subjects?.is_trial === true}
+                                    endTime={selectedSession?.end_time}
+                                    treatUnpaidAsReserved={!showPerLessonStripeButton}
+                                />
                             </div>
-                        )}
+                            {!seesPaymentAmounts && paymentPayer === 'parent' && (
+                                <p className="text-xs text-gray-500 sm:col-span-2 text-center">{t('stuSess.payerPaysElsewhere')}</p>
+                            )}
+                        </div>
 
                         {/* Tutor comment (visible only if marked "show to student") */}
                         {selectedSession?.show_comment_to_student && selectedSession?.tutor_comment && (
@@ -1810,9 +1841,9 @@ export default function StudentSessions() {
                                     <Video className="w-4 h-4" /> {t('studentDash.joinMeeting')}
                                 </a>
                             ) : (
-                                <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-100 text-gray-400 text-sm">
-                                    <Video className="w-4 h-4" />
-                                    <span>{t('stuSess.linkNotAvailable')}</span>
+                                <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-100 text-gray-500 text-sm">
+                                    <Video className="w-4 h-4 shrink-0" />
+                                    <span>{t('stuSess.meetingLinkPending')}</span>
                                 </div>
                             )
                         )}
@@ -1833,7 +1864,7 @@ export default function StudentSessions() {
 
                         {/* Credit balance + payment buttons for unpaid sessions (only for self-payers, not monthly billing).
                             Stripe checkout is unavailable for manual-payment tutors (server rejects it), but Perlas bank payments stay available. */}
-                        {selectedSession?.status === 'active' && !selectedSession.paid && paymentPayer !== 'parent' && showPerLessonStripeButton && (!manualPaymentsOnly || tutorPerlasEnabled) && (
+                        {selectedSession?.status === 'active' && !selectedSession.paid && canPayLessons && showPerLessonStripeButton && (!manualPaymentsOnly || tutorPerlasEnabled) && (
                             <div className="space-y-2">
                                 {!manualPaymentsOnly && (
                                     <>

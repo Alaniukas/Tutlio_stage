@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { calculateSessionStats, isStudentNoShowSession } from '@/lib/session-stats';
+import {
+  calculateSessionStats,
+  countCancellationAttribution,
+  countUserInitiatedCancellations,
+  formatCancellationBreakdown,
+  isStudentNoShowSession,
+} from '@/lib/session-stats';
 
 const base = {
   id: 's1',
@@ -40,6 +46,27 @@ describe('isStudentNoShowSession', () => {
       end_time: '2026-08-31T08:45:00.000Z',
       status: 'completed',
     }, now)).toBe(false);
+  });
+});
+
+describe('countCancellationAttribution', () => {
+  it('Ona shape: 13 cancelled = K:3 M:1 A:9 (admin recurring cleanup)', () => {
+    const rows = [
+      ...Array.from({ length: 3 }, () => ({ status: 'cancelled', cancelled_by: 'tutor' })),
+      { status: 'cancelled', cancelled_by: 'student' },
+      ...Array.from({ length: 9 }, () => ({ status: 'cancelled', cancelled_by: null })),
+    ];
+    const counters = countCancellationAttribution(rows);
+    expect(counters.totalCancelled).toBe(13);
+    expect(counters.cancelledByTutor).toBe(3);
+    expect(counters.cancelledByStudent).toBe(1);
+    expect(counters.cancelledByAdmin).toBe(9);
+    expect(formatCancellationBreakdown(counters, (role, count) => {
+      if (role === 'tutor') return `K:${count}`;
+      if (role === 'student') return `M:${count}`;
+      return `A:${count}`;
+    })).toBe('13 (K:3 M:1 A:9)');
+    expect(countUserInitiatedCancellations(counters)).toBe(4);
   });
 });
 

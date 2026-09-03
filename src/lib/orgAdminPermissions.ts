@@ -10,11 +10,14 @@ export const ORG_ADMIN_PERMISSION_KEYS = [
   'messages.edit',
   'stats.view',
   'finance.view',
+  'finance.totals',
   'finance.edit',
   'contracts.view',
   'contracts.edit',
   'settings.view',
   'settings.edit',
+  'team.view',
+  'team.edit',
 ] as const;
 
 export type OrgAdminPermission = (typeof ORG_ADMIN_PERMISSION_KEYS)[number];
@@ -41,12 +44,16 @@ export const ORG_ADMIN_PERMISSION_GROUPS: readonly OrgAdminPermissionGroup[] = [
   { id: 'settings', labelKey: 'orgTeam.permissionSettings', view: 'settings.view', edit: 'settings.edit' },
 ] as const;
 
-const FULL_ADMIN_PERMISSIONS: OrgAdminPermissionMap = Object.fromEntries(
-  ORG_ADMIN_PERMISSION_KEYS.map((permission) => [permission, true]),
+/** Full operator access except revenue totals (finance.totals) and owner-only team grant rules. */
+const ADMIN_PERMISSIONS: OrgAdminPermissionMap = Object.fromEntries(
+  ORG_ADMIN_PERMISSION_KEYS
+    .filter((permission) => permission !== 'finance.totals' && permission !== 'team.view' && permission !== 'team.edit')
+    .map((permission) => [permission, true]),
 ) as OrgAdminPermissionMap;
 
 const ACCOUNTANT_PERMISSIONS: OrgAdminPermissionMap = {
   'finance.view': true,
+  'finance.totals': true,
   'finance.edit': true,
 };
 
@@ -54,7 +61,7 @@ export function permissionsForRole(
   role: Exclude<OrgAdminRole, 'owner'>,
   custom: OrgAdminPermissionMap = {},
 ): OrgAdminPermissionMap {
-  if (role === 'admin') return { ...FULL_ADMIN_PERMISSIONS };
+  if (role === 'admin') return { ...ADMIN_PERMISSIONS };
   if (role === 'accountant') return { ...ACCOUNTANT_PERMISSIONS };
   return normalizeOrgAdminPermissions(custom);
 }
@@ -72,14 +79,45 @@ export function normalizeOrgAdminPermissions(value: unknown): OrgAdminPermission
   return normalized;
 }
 
+/** Owner JSON may store `finance.totals: false` to hide revenue totals while keeping super-admin access. */
+export function ownerHidesFinanceTotals(permissions: unknown): boolean {
+  if (!permissions || typeof permissions !== 'object' || Array.isArray(permissions)) return false;
+  return (permissions as Record<string, unknown>)['finance.totals'] === false;
+}
+
+/** Stored JSON merged with role preset (admin / accountant). Owner is full access unless totals are explicitly hidden. */
+export function resolveOrgAdminPermissions(
+  role: OrgAdminRole | null | undefined,
+  permissions: unknown,
+): OrgAdminPermissionMap {
+  if (role === 'owner') {
+    const full = Object.fromEntries(
+      ORG_ADMIN_PERMISSION_KEYS.map((key) => [key, true]),
+    ) as OrgAdminPermissionMap;
+    if (ownerHidesFinanceTotals(permissions)) delete full['finance.totals'];
+    return full;
+  }
+  const stored = normalizeOrgAdminPermissions(permissions);
+  if (role === 'admin') return { ...permissionsForRole('admin'), ...stored };
+  if (role === 'accountant') return { ...permissionsForRole('accountant'), ...stored };
+  return stored;
+}
+
+/** Directors (owners who see revenue) can see other owner seats. Operators cannot. */
+export function canSeePeerOrgOwners(
+  role: OrgAdminRole | null | undefined,
+  permissions: unknown,
+): boolean {
+  return role === 'owner' && hasOrgAdminPermission(role, permissions, 'finance.totals');
+}
+
 export function hasOrgAdminPermission(
   role: OrgAdminRole | null | undefined,
   permissions: unknown,
   permission: OrgAdminPermission,
 ): boolean {
-  if (role === 'owner') return true;
   if (!role) return false;
-  return normalizeOrgAdminPermissions(permissions)[permission] === true;
+  return resolveOrgAdminPermissions(role, permissions)[permission] === true;
 }
 
 export function hasAnyOrgAdminPermission(
@@ -104,8 +142,45 @@ export const ORG_ADMIN_ROUTE_PERMISSION: Readonly<Record<string, OrgAdminPermiss
   'dynamic-pricing': 'settings.view',
   settings: 'settings.view',
   instructions: null,
-  team: null,
+  team: 'team.view',
 };
+
+/** Permissions a non-owner team manager must not grant to others. */
+const DELEGATION_RESTRICTED: readonly OrgAdminPermission[] = [
+  'stats.view',
+  'finance.totals',
+  'team.view',
+  'team.edit',
+];
+
+export function permissionGroupsForTeamManager(isOwner: boolean): readonly OrgAdminPermissionGroup[] {
+  if (isOwner) return ORG_ADMIN_PERMISSION_GROUPS;
+  return ORG_ADMIN_PERMISSION_GROUPS.filter((group) => group.id !== 'stats');
+}
+
+export function sanitizeDelegatedPermissions(
+  grantorRole: OrgAdminRole,
+  grantorPermissions: unknown,
+  granted: OrgAdminPermissionMap,
+): OrgAdminPermissionMap {
+  let normalized = normalizeOrgAdminPermissions(granted);
+  if (grantorRole === 'owner') {
+    if (ownerHidesFinanceTotals(grantorPermissions)) delete normalized['finance.totals'];
+    return normalizeOrgAdminPermissions(normalized);
+  }
+
+  normalized = { ...normalized };
+  for (const key of DELEGATION_RESTRICTED) {
+    delete normalized[key];
+  }
+  if (grantorRole === 'custom') {
+    const grantorMap = normalizeOrgAdminPermissions(grantorPermissions);
+    for (const key of ORG_ADMIN_PERMISSION_KEYS) {
+      if (normalized[key] && !grantorMap[key]) delete normalized[key];
+    }
+  }
+  return normalizeOrgAdminPermissions(normalized);
+}
 
 export function roleLabelKey(role: OrgAdminRole): string {
   return `orgTeam.role.${role}`;

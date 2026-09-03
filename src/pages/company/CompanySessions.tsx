@@ -41,6 +41,11 @@ import { DateTimeSpinner } from '@/components/TimeSpinner';
 import { useHideWaitlist } from '@/hooks/useHideWaitlist';
 import { isWaitlistHiddenForOrg, isProKlaseOrg } from '@/lib/marketMoney';
 import { setSessionComplimentary } from '@/lib/setSessionComplimentary';
+import {
+  resolveOrgSessionSubjectDefaults,
+  type OrgSubjectForDefaults,
+} from '@/lib/orgSessionSubjectDefaults';
+import type { OrganizationDynamicPricingRule } from '@/lib/organizationDynamicPricing';
 
 interface Session {
   id: string;
@@ -71,12 +76,22 @@ interface Session {
   student_joined_at?: string | null;
 }
 
-interface Subject {
-  id: string;
+interface Subject extends OrgSubjectForDefaults {
   name: string;
   price: number;
   tutor_id: string;
 }
+
+type OrgTutorRow = { id: string; full_name: string; personal_meeting_link?: string | null };
+type OrgStudentRow = {
+  id: string;
+  full_name: string;
+  tutor_id: string;
+  linked_user_id: string | null;
+  personal_meeting_link?: string | null;
+  grade?: string | null;
+  pricing_lessons_per_week?: number | null;
+};
 
 const ORG_SESSION_DETAIL_SELECT =
   '*, student:students(full_name, admin_comment, admin_comment_visible_to_tutor), subjects(is_group), tutor_comment, show_comment_to_student';
@@ -137,7 +152,7 @@ export default function CompanySessions() {
   const sc = getCached<any>('company_sessions');
   const [loading, setLoading] = useState(!sc);
   const [sessions, setSessions] = useState<Session[]>(sc?.sessions ?? []);
-  const [tutors, setTutors] = useState<{ id: string; full_name: string }[]>(sc?.tutors ?? []);
+  const [tutors, setTutors] = useState<OrgTutorRow[]>(sc?.tutors ?? []);
   const [filterTutor, setFilterTutor] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [search, setSearch] = useState('');
@@ -171,12 +186,98 @@ export default function CompanySessions() {
   const [deletingSession, setDeletingSession] = useState(false);
   const [deleteRecurringOpen, setDeleteRecurringOpen] = useState(false);
   const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [students, setStudents] = useState<{ id: string; full_name: string; tutor_id: string; linked_user_id: string | null }[]>(sc?.students ?? []);
+  const [students, setStudents] = useState<OrgStudentRow[]>(sc?.students ?? []);
+  const [individualPricing, setIndividualPricing] = useState<
+    Array<{ student_id: string; subject_id: string; price: number }>
+  >([]);
+  const [tutorSubjectPrices, setTutorSubjectPrices] = useState<
+    Array<{ tutor_id: string; org_subject_template_id: string; price: number; duration_minutes: number }>
+  >([]);
+  const [orgSubjectTemplates, setOrgSubjectTemplates] = useState<Array<{ id: string; name: string }>>([]);
+  const [dynamicPricingRules, setDynamicPricingRules] = useState<OrganizationDynamicPricingRule[]>([]);
+  const [trialDefaults, setTrialDefaults] = useState<{ topic: string; durationMinutes: number; priceEur: number }>({
+    topic: '',
+    durationMinutes: 60,
+    priceEur: 0,
+  });
   const [filterStudent, setFilterStudent] = useState('');
 
   useEffect(() => {
     if (!getCached('company_sessions')) loadData();
   }, []);
+
+  useEffect(() => {
+    if (!organizationId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('organizations')
+        .select('features, org_subject_templates')
+        .eq('id', organizationId)
+        .maybeSingle();
+      if (cancelled) return;
+      const feat = (data as any)?.features;
+      const featObj = feat && typeof feat === 'object' && !Array.isArray(feat) ? (feat as Record<string, unknown>) : {};
+      setTrialDefaults({
+        topic: typeof featObj.trial_lesson_topic === 'string' && featObj.trial_lesson_topic.trim()
+          ? featObj.trial_lesson_topic.trim()
+          : '',
+        durationMinutes: typeof featObj.trial_lesson_duration_minutes === 'number' && Number.isFinite(featObj.trial_lesson_duration_minutes)
+          ? Math.max(15, Math.round(featObj.trial_lesson_duration_minutes))
+          : 60,
+        priceEur: typeof featObj.trial_lesson_price_eur === 'number' && Number.isFinite(featObj.trial_lesson_price_eur)
+          ? Math.max(0, featObj.trial_lesson_price_eur)
+          : 0,
+      });
+      const tpl = (data as any)?.org_subject_templates;
+      if (Array.isArray(tpl)) {
+        setOrgSubjectTemplates(
+          tpl.filter((t: any) => t?.id && t?.name).map((t: any) => ({ id: t.id, name: String(t.name).trim() })),
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [organizationId]);
+
+  const applyEditSubjectDefaults = useCallback(
+    (subjectId: string) => {
+      const subj = subjects.find((s) => s.id === subjectId);
+      if (!subj) return;
+
+      const tutorRow = editTutorId ? tutors.find((t) => t.id === editTutorId) : undefined;
+      const defaults = resolveOrgSessionSubjectDefaults({
+        subject: subj,
+        studentId: editStudentId,
+        tutorId: editTutorId,
+        students,
+        individualPricing,
+        dynamicPricingRules: subj.is_group || subj.is_trial ? [] : dynamicPricingRules,
+        orgSubjectTemplates,
+        tutorSubjectPrices,
+        tutorPersonalMeetingLink: tutorRow?.personal_meeting_link,
+        trialDefaults,
+      });
+
+      setEditTopic(defaults.topic);
+      setEditPrice(defaults.price);
+      setEditDurationMinutes(defaults.durationMinutes);
+      setEditMeetingLink(defaults.meetingLink);
+    },
+    [
+      subjects,
+      editTutorId,
+      editStudentId,
+      tutors,
+      students,
+      individualPricing,
+      dynamicPricingRules,
+      orgSubjectTemplates,
+      tutorSubjectPrices,
+      trialDefaults,
+    ],
+  );
 
   const loadData = async () => {
     if (!getCached('company_sessions')) setLoading(true);
@@ -195,28 +296,53 @@ export default function CompanySessions() {
     const tutorList = await getOrgVisibleTutors(
       supabase as any,
       adminRow.organization_id,
-      'id, full_name, email',
+      'id, full_name, email, personal_meeting_link',
     );
     setTutors(tutorList);
 
-    const [studentsResult, subjectsResult] = await Promise.all([
+    const tutorIds = tutorList.map((t) => t.id);
+
+    const [studentsResult, subjectsResult, pricingResult, tspResult, dynamicResult] = await Promise.all([
       supabase
         .from('students')
-        .select('id, full_name, tutor_id, linked_user_id')
+        .select('id, full_name, tutor_id, linked_user_id, personal_meeting_link, grade, pricing_lessons_per_week')
         .eq('organization_id', adminRow.organization_id)
         .order('full_name'),
       supabase
         .from('subjects')
-        .select('id, name, price, tutor_id')
-        .in('tutor_id', tutorList.map(t => t.id))
+        .select('id, name, price, tutor_id, duration_minutes, is_group, is_trial, meeting_link')
+        .in('tutor_id', tutorIds)
         .order('name'),
+      supabase
+        .from('student_individual_pricing')
+        .select('student_id, subject_id, price')
+        .in('tutor_id', tutorIds),
+      supabase
+        .from('tutor_subject_prices')
+        .select('tutor_id, org_subject_template_id, price, duration_minutes')
+        .in('tutor_id', tutorIds),
+      isProKlaseOrg(adminRow.organization_id)
+        ? supabase
+            .from('organization_dynamic_pricing')
+            .select('id, organization_id, grade_min, grade_max, lessons_per_week, price')
+            .eq('organization_id', adminRow.organization_id)
+        : Promise.resolve({ data: [] as OrganizationDynamicPricingRule[] }),
     ]);
     setStudents(studentsResult.data || []);
     setSubjects(subjectsResult.data || []);
+    setIndividualPricing(pricingResult.data || []);
+    setTutorSubjectPrices(tspResult.data || []);
+    setDynamicPricingRules(
+      (dynamicResult.data ?? []).map((row) => ({
+        ...row,
+        grade_min: Number(row.grade_min),
+        grade_max: Number(row.grade_max),
+        lessons_per_week: Number(row.lessons_per_week),
+        price: Number(row.price),
+      })),
+    );
 
     if (tutorList.length === 0) return;
-
-    const tutorIds = tutorList.map(t => t.id);
 
     const threeMonthsAgo = new Date();
     threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
@@ -934,8 +1060,7 @@ export default function CompanySessions() {
                     <Select value={editSubjectId || 'none'} onValueChange={(v) => {
                       const val = v === 'none' ? '' : v;
                       setEditSubjectId(val);
-                      const subj = subjects.find(s => s.id === val);
-                      if (subj) { setEditTopic(subj.name); setEditPrice(subj.price); }
+                      if (val) applyEditSubjectDefaults(val);
                     }}>
                       <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
                       <SelectContent>

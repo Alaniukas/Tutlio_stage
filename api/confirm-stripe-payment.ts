@@ -3,7 +3,6 @@ import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { syncSessionToGoogle } from './_lib/google-calendar.js';
 import { isOrgTutor } from './_lib/isOrgTutor.js';
-import { verifyRequestAuth } from './_lib/auth.js';
 import { recordStripePlatformFee, metadataBaseEur } from './_lib/platformFeeLedger.js';
 
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL || 'https://tutlio.lt';
@@ -20,9 +19,6 @@ function getSupabase() {
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-
-    const auth = await verifyRequestAuth(req);
-    if (!auth) return res.status(401).json({ error: 'Unauthorized' });
 
     const { sessionId, checkoutSessionId } = req.body as { sessionId?: string; checkoutSessionId?: string };
     if (!sessionId) return res.status(400).json({ error: 'sessionId is required' });

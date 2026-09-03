@@ -132,6 +132,15 @@ import { isProKlaseOrg } from '@/lib/marketMoney';
 import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import { calendarSessionTitlePrefix, getCalendarSessionEventStyle } from '@/lib/calendarSessionEventStyle';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import {
+  buildClassGroupMetaMap,
+  calendarTitleForSession,
+  classGroupParticipantsForModal,
+  isMergedClassGroupSession,
+  mergeSchoolClassGroupSessions,
+  type MergedClassGroupSession,
+} from '@/lib/schoolClassGroupSessions';
+import type { SchoolClassGroupRecord } from '@/lib/schoolClassGroups';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { formatContactForTutorView } from '@/lib/orgContactVisibility';
 import Toast from '@/components/Toast';
@@ -205,6 +214,12 @@ interface Session {
   lesson_package_id?: string | null;
   available_spots?: number | null;
   recurring_session_id?: string | null;
+  class_group_id?: string | null;
+  _isClassGroup?: boolean;
+  _classGroupId?: string;
+  _classGroupName?: string;
+  _classGroupSessions?: Session[];
+  _classGroupMembers?: Array<{ student_id: string; full_name: string; grade?: string | null }>;
   student?: {
     full_name: string;
     email?: string;
@@ -358,6 +373,8 @@ export default function CalendarPage() {
       setGroupEditChoice(null);
       setGroupCancelChoice(null);
       setEventModalNotice(null);
+      setIsClassGroupSession(false);
+      setClassGroupParticipants([]);
     }
   };
   const [isAvailabilityModalOpen, setIsAvailabilityModalOpen] = useState(false);
@@ -370,6 +387,11 @@ export default function CalendarPage() {
   const [selectedEvent, setSelectedEvent] = useState<Session | null>(null);
   const [selectedGroupSessions, setSelectedGroupSessions] = useState<Session[]>([]);
   const [isGroupSession, setIsGroupSession] = useState(false);
+  const [isClassGroupSession, setIsClassGroupSession] = useState(false);
+  const [classGroupParticipants, setClassGroupParticipants] = useState<
+    Array<{ student_id: string; full_name: string; grade?: string | null; session: Session | null }>
+  >([]);
+  const [classGroups, setClassGroups] = useState<SchoolClassGroupRecord[]>([]);
   const [cancelConfirmId, setCancelConfirmId] = useState<string | null>(null);
 
   // Deep-link from lesson reminder emails: /calendar?sessionId=…
@@ -379,6 +401,8 @@ export default function CalendarPage() {
     const sess = sessions.find((s) => s.id === sessionId);
     if (!sess) return;
     setIsGroupSession(false);
+    setIsClassGroupSession(false);
+    setClassGroupParticipants([]);
     setSelectedGroupSessions([]);
     setSelectedEvent(sess);
     setIsEventModalOpen(true);
@@ -693,6 +717,20 @@ export default function CalendarPage() {
 
     const { data: av } = await tutorAvailabilityAllRowsDeduped(user.id);
     setAvailability(av || []);
+
+    if (profileData?.organization_id && hasOrgFeature('school_class_groups')) {
+      try {
+        const headers = await authHeaders();
+        const res = await fetch('/api/school-class-groups', { headers });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) setClassGroups((data.groups || []) as SchoolClassGroupRecord[]);
+        else setClassGroups([]);
+      } catch {
+        setClassGroups([]);
+      }
+    } else {
+      setClassGroups([]);
+    }
     } catch (error) {
       console.error('[Calendar] fetchData failed:', error);
     } finally {
@@ -861,12 +899,23 @@ export default function CalendarPage() {
   }, [availability, currentDate, currentView, sessions, locale]);
 
   // Helper function to merge group lesson sessions
-  const mergeGroupSessions = useCallback((sessions: Session[]) => {
+  const classGroupMeta = useMemo(() => buildClassGroupMetaMap(classGroups), [classGroups]);
+
+  const sessionsAfterClassGroups = useMemo(
+    () => mergeSchoolClassGroupSessions(sessions, classGroupMeta) as Session[],
+    [sessions, classGroupMeta],
+  );
+
+  const mergeGroupSessions = useCallback((sessionsToMerge: Session[]) => {
     const grouped = new Map<string, Session[]>();
     const individual: Session[] = [];
 
     // Group sessions by time + subject for group lessons
-    sessions.forEach(session => {
+    sessionsToMerge.forEach(session => {
+      if (isMergedClassGroupSession(session)) {
+        individual.push(session);
+        return;
+      }
       const subject = subjects.find(s => s.id === session.subject_id);
       if (subject?.is_group) {
         const key = `${session.start_time.getTime()}_${session.end_time.getTime()}_${session.subject_id}`;
@@ -916,7 +965,10 @@ export default function CalendarPage() {
     return [...individual, ...mergedGroups];
   }, [subjects, orgPolicy.isOrgTutor]);
 
-  const mergedSessions = useMemo(() => mergeGroupSessions(sessions), [sessions, mergeGroupSessions]);
+  const mergedSessions = useMemo(
+    () => mergeGroupSessions(sessionsAfterClassGroups),
+    [sessionsAfterClassGroups, mergeGroupSessions],
+  );
 
   const allEvents = useMemo(() => {
     return [...mergedSessions, ...backgroundEvents];
@@ -1343,13 +1395,26 @@ export default function CalendarPage() {
       return;
     }
 
-    // Check if this is a group session
-    if (event._isGroup && event._groupSessions) {
+    // School class group (merged by class_group_id + time)
+    if (event._isClassGroup && event._classGroupSessions) {
       setIsGroupSession(true);
+      setIsClassGroupSession(true);
+      setSelectedGroupSessions(event._classGroupSessions);
+      setClassGroupParticipants(classGroupParticipantsForModal(event as MergedClassGroupSession<Session>));
+      setSelectedEvent({
+        ...event._classGroupSessions[0],
+        topic: event._classGroupName || event._classGroupSessions[0].topic,
+      });
+    } else if (event._isGroup && event._groupSessions) {
+      setIsGroupSession(true);
+      setIsClassGroupSession(false);
+      setClassGroupParticipants([]);
       setSelectedGroupSessions(event._groupSessions);
       setSelectedEvent(event._groupSessions[0]); // Use first session as base
     } else {
       setIsGroupSession(false);
+      setIsClassGroupSession(false);
+      setClassGroupParticipants([]);
       setSelectedGroupSessions([]);
       setSelectedEvent(event);
     }
@@ -2393,7 +2458,7 @@ export default function CalendarPage() {
           if (selectedEvent.student_id) {
             const { data: studentRow } = await supabase
               .from('students')
-              .select('email, payer_email, full_name, linked_user_id')
+              .select('email, payer_email, full_name, linked_user_id, organization_id, tutor_id')
               .eq('id', selectedEvent.student_id)
               .single();
             payerEmail = (studentRow?.payer_email || null) as any;
@@ -4376,7 +4441,7 @@ export default function CalendarPage() {
               titleAccessor={(event) => {
                 if (event.isBackground) return t('cal.freeSlot');
 
-                const name = event.student?.full_name || t('cal.unknown');
+                const name = calendarTitleForSession(event, t('cal.unknown'));
                 const topic = event.topic ? ` · ${event.topic}` : '';
 
                 let statusText = '';
@@ -4904,16 +4969,45 @@ export default function CalendarPage() {
                     <div className="flex items-center gap-2">
                       <Users className="w-5 h-5 text-violet-600" />
                       <div>
-                        <p className="font-bold text-gray-900">{t('cal.groupLessonTitle')}</p>
+                        <p className="font-bold text-gray-900">
+                          {isClassGroupSession
+                            ? (selectedEvent?.topic || t('school.groups.title'))
+                            : t('cal.groupLessonTitle')}
+                        </p>
                         <p className="text-xs text-violet-600">
-                          {t('cal.studentsCount', { count: String(selectedGroupSessions.length) })}
-                          {selectedEvent?.topic && ` • ${selectedEvent.topic}`}
+                          {isClassGroupSession
+                            ? `${t('school.groups.members')}: ${classGroupParticipants.length}`
+                            : t('cal.studentsCount', { count: String(selectedGroupSessions.length) })}
+                          {!isClassGroupSession && selectedEvent?.topic && ` • ${selectedEvent.topic}`}
                         </p>
                       </div>
                     </div>
                   </div>
                   <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                    {selectedGroupSessions.map((session, idx) => (
+                    {(isClassGroupSession ? classGroupParticipants : selectedGroupSessions.map((session) => ({
+                      student_id: session.student_id,
+                      full_name: session.student?.full_name || '—',
+                      grade: session.student?.grade,
+                      session,
+                    }))).map((participant) => {
+                      const session = participant.session;
+                      if (!session && isClassGroupSession) {
+                        return (
+                          <div key={participant.student_id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg opacity-80">
+                            <div className="w-8 h-8 rounded-full bg-gray-400 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
+                              {participant.full_name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?'}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-gray-900">{participant.full_name}</p>
+                              {participant.grade && (
+                                <p className="text-xs text-emerald-600">🎓 {participant.grade}</p>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      }
+                      if (!session) return null;
+                      return (
                       <div key={session.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
                         <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
                           {session.student?.full_name?.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?'}
@@ -5042,7 +5136,7 @@ export default function CalendarPage() {
                           )}
                         </div>
                       </div>
-                    ))}
+                    );})}
                   </div>
                 </div>
               ) : (

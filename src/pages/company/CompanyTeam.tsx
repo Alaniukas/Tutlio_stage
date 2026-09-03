@@ -13,6 +13,7 @@ import Toast from '@/components/Toast';
 import {
   ORG_ADMIN_PERMISSION_GROUPS,
   normalizeOrgAdminPermissions,
+  permissionGroupsForTeamManager,
   permissionsForRole,
   roleLabelKey,
   type OrgAdminPermission,
@@ -54,7 +55,8 @@ async function callMembersApi(method: 'GET' | 'POST', body?: Record<string, unkn
 
 export default function CompanyTeam() {
   const { t } = useTranslation();
-  const { membership, refresh } = useOrgAdminAccess();
+  const { membership, refresh, isOwner, can } = useOrgAdminAccess();
+  const seesPeerOwners = isOwner && can('finance.totals');
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -65,11 +67,16 @@ export default function CompanyTeam() {
   const [role, setRole] = useState<ManagedRole>('admin');
   const [permissions, setPermissions] = useState<OrgAdminPermissionMap>(() => permissionsForRole('admin'));
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const canViewTeam = can('team.view');
 
   useEffect(() => {
     let active = true;
 
     const load = async () => {
+      if (!canViewTeam) {
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       try {
         const payload = await callMembersApi('GET');
@@ -85,13 +92,20 @@ export default function CompanyTeam() {
     return () => {
       active = false;
     };
-  }, [t]);
+  }, [canViewTeam, t]);
 
-  const sortedMembers = useMemo(() => [...members].sort((a, b) => {
-    if (a.role === 'owner') return -1;
-    if (b.role === 'owner') return 1;
-    return a.fullName.localeCompare(b.fullName);
-  }), [members]);
+  const permissionGroups = useMemo(
+    () => permissionGroupsForTeamManager(isOwner),
+    [isOwner],
+  );
+
+  const sortedMembers = useMemo(() => [...members]
+    .filter((member) => seesPeerOwners || member.role !== 'owner' || member.userId === membership?.userId)
+    .sort((a, b) => {
+      if (a.role === 'owner') return -1;
+      if (b.role === 'owner') return 1;
+      return a.fullName.localeCompare(b.fullName);
+    }), [members, membership?.userId, seesPeerOwners]);
 
   const openInvite = () => {
     setEditing(null);
@@ -178,7 +192,7 @@ export default function CompanyTeam() {
           </h1>
           <p className="mt-1 text-sm text-gray-500">{t('orgTeam.subtitle')}</p>
         </div>
-        <Button onClick={openInvite} className="gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700">
+        <Button onClick={openInvite} disabled={!can('team.edit')} className="gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700">
           <UserPlus className="h-4 w-4" />
           {t('orgTeam.invite')}
         </Button>
@@ -235,7 +249,7 @@ export default function CompanyTeam() {
                     </span>
                   </div>
 
-                  {!owner && (
+                  {!owner && can('team.edit') && (
                     <div className="flex flex-wrap gap-2 lg:justify-end">
                       <Button variant="outline" size="sm" onClick={() => openEdit(member)} disabled={saving} className="gap-1.5">
                         <Pencil className="h-3.5 w-3.5" /> {t('common.edit')}
@@ -244,14 +258,16 @@ export default function CompanyTeam() {
                         {member.status === 'active' ? <UserRoundX className="h-3.5 w-3.5" /> : <UserRoundCheck className="h-3.5 w-3.5" />}
                         {member.status === 'active' ? t('orgTeam.suspend') : t('orgTeam.activate')}
                       </Button>
-                      {member.acceptedAt && (
+                      {member.acceptedAt && seesPeerOwners && (
                         <Button variant="outline" size="sm" onClick={() => void memberAction(member, 'transfer_owner')} disabled={saving} className="gap-1.5">
                           <Crown className="h-3.5 w-3.5" /> {t('orgTeam.transfer')}
                         </Button>
                       )}
-                      <Button variant="outline" size="sm" onClick={() => void memberAction(member, 'remove')} disabled={saving} className="gap-1.5 text-red-600 hover:text-red-700">
-                        <Trash2 className="h-3.5 w-3.5" /> {t('common.delete')}
-                      </Button>
+                      {isOwner && (
+                        <Button variant="outline" size="sm" onClick={() => void memberAction(member, 'remove')} disabled={saving} className="gap-1.5 text-red-600 hover:text-red-700">
+                          <Trash2 className="h-3.5 w-3.5" /> {t('common.delete')}
+                        </Button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -305,7 +321,7 @@ export default function CompanyTeam() {
                   <span className="text-center">{t('orgTeam.view')}</span>
                   <span className="text-center">{t('orgTeam.edit')}</span>
                 </div>
-                {ORG_ADMIN_PERMISSION_GROUPS.map((group) => (
+                {permissionGroups.map((group) => (
                   <div key={group.id} className="grid grid-cols-[1fr_90px_90px] items-center border-t border-gray-100 px-4 py-3 text-sm">
                     <span className="font-medium text-gray-800">{t(group.labelKey)}</span>
                     <label className="flex justify-center">

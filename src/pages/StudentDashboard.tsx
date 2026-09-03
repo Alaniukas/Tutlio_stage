@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import StudentLayout from '@/components/StudentLayout';
 import StatusBadge from '@/components/StatusBadge';
 import SessionFiles from '@/components/SessionFiles';
@@ -26,6 +26,7 @@ import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVis
 import { formatLessonStripeChargeEur, formatMarketAmount, orgFeeProfile, type OrgFeeProfile } from '@/lib/stripeLessonPricing';
 import { currentMarket } from '@/lib/market';
 import { tutorUsesManualStudentPayments } from '@/lib/subscription';
+import { viewerCanPayLessons } from '@/lib/lessonPayerView';
 import {
     isMonthlyBillingOnlyStudent,
     shouldShowPerLessonPaymentUi,
@@ -39,6 +40,8 @@ interface Session { id: string; start_time: string; end_time: string; status: st
 interface StudentInfo {
     full_name: string;
     grade: string | null;
+    email?: string | null;
+    payer_email?: string | null;
     tutor: { full_name: string; email?: string; phone?: string | null } | null;
 }
 interface LessonPackageItem {
@@ -113,6 +116,15 @@ export default function StudentDashboard() {
     const { blocked: paymentBookingBlocked, loading: paymentBlockLoading } = useStudentPaymentBlock(activeStudentId);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
     const now = new Date();
+    const canPayLessons = useMemo(
+        () => viewerCanPayLessons(
+            paymentPayer,
+            ctxUser?.email ?? null,
+            student?.email ?? null,
+            student?.payer_email ?? null,
+        ),
+        [paymentPayer, ctxUser?.email, student?.email, student?.payer_email],
+    );
 
     const handleStripePayment = async (session: Session) => {
         setStripeLoading(true);
@@ -325,6 +337,8 @@ export default function StudentDashboard() {
             setStudent({
                 full_name: studentRow.full_name,
                 grade: studentRow.grade,
+                email: studentRow.email ?? null,
+                payer_email: (studentRow as { payer_email?: string | null }).payer_email ?? null,
                 tutor: tutorInfo,
             });
 
@@ -843,7 +857,7 @@ export default function StudentDashboard() {
                         )}
 
                         {/* Stripe checkout is unavailable for manual-payment tutors (server rejects it), but Perlas bank payments stay available. */}
-                        {selectedSession?.status === 'active' && !selectedSession.paid && paymentPayer !== 'parent' && isAfter(new Date(selectedSession.end_time), now) && showPerLessonPayment && (!manualPaymentsOnly || tutorPerlasEnabled) && (
+                        {selectedSession?.status === 'active' && !selectedSession.paid && canPayLessons && isAfter(new Date(selectedSession.end_time), now) && showPerLessonPayment && (!manualPaymentsOnly || tutorPerlasEnabled) && (
                             <div className="space-y-2">
                                 {!manualPaymentsOnly && (
                                     <button

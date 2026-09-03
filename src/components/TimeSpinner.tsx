@@ -10,9 +10,10 @@ interface TimeSpinnerProps {
 
 const ITEM_HEIGHT = 36;
 const VISIBLE_EXTRA = 2;
-const WHEEL_STEP_THRESHOLD_PX = 80;
-const WHEEL_STEP_COOLDOWN_MS = 120;
-const WHEEL_GESTURE_RESET_MS = 180;
+/** One step per tick; speed comes from short cooldown + draining leftover delta. */
+const WHEEL_STEP_THRESHOLD_PX = 28;
+const WHEEL_STEP_COOLDOWN_MS = 20;
+const WHEEL_GESTURE_RESET_MS = 100;
 
 function SpinnerColumn({
   items,
@@ -34,12 +35,51 @@ function SpinnerColumn({
   const wheelDelta = useRef(0);
   const lastWheelStepAt = useRef(Number.NEGATIVE_INFINITY);
   const wheelResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wheelDrainTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [inputVal, setInputVal] = useState('');
 
   useEffect(() => {
     selectedIndexRef.current = selectedIndex;
   }, [selectedIndex]);
+
+  const stepOnceFromWheel = useCallback((): boolean => {
+    const now = Date.now();
+    if (now - lastWheelStepAt.current < WHEEL_STEP_COOLDOWN_MS) return false;
+    if (Math.abs(wheelDelta.current) < WHEEL_STEP_THRESHOLD_PX) return false;
+
+    const direction = wheelDelta.current > 0 ? 1 : -1;
+    wheelDelta.current -= direction * WHEEL_STEP_THRESHOLD_PX;
+    lastWheelStepAt.current = now;
+
+    let newIndex = selectedIndexRef.current + direction;
+    newIndex = ((newIndex % items.length) + items.length) % items.length;
+    selectedIndexRef.current = newIndex;
+    onIndexChange(newIndex);
+    return true;
+  }, [items.length, onIndexChange]);
+
+  const scheduleWheelDrain = useCallback(() => {
+    if (wheelDrainTimer.current !== null) return;
+    if (Math.abs(wheelDelta.current) < WHEEL_STEP_THRESHOLD_PX) return;
+
+    const tick = () => {
+      wheelDrainTimer.current = null;
+      if (Math.abs(wheelDelta.current) < WHEEL_STEP_THRESHOLD_PX) return;
+
+      const now = Date.now();
+      const wait = Math.max(0, WHEEL_STEP_COOLDOWN_MS - (now - lastWheelStepAt.current));
+      wheelDrainTimer.current = setTimeout(() => {
+        wheelDrainTimer.current = null;
+        if (stepOnceFromWheel()) {
+          scheduleWheelDrain();
+        } else if (Math.abs(wheelDelta.current) >= WHEEL_STEP_THRESHOLD_PX) {
+          scheduleWheelDrain();
+        }
+      }, wait);
+    };
+    tick();
+  }, [stepOnceFromWheel]);
 
   const handleWheel = useCallback(
     (e: WheelEvent) => {
@@ -58,26 +98,16 @@ function SpinnerColumn({
       if (wheelResetTimer.current) clearTimeout(wheelResetTimer.current);
       wheelResetTimer.current = setTimeout(() => {
         wheelDelta.current = 0;
+        if (wheelDrainTimer.current) {
+          clearTimeout(wheelDrainTimer.current);
+          wheelDrainTimer.current = null;
+        }
       }, WHEEL_GESTURE_RESET_MS);
 
-      const now = Date.now();
-      if (
-        Math.abs(wheelDelta.current) < WHEEL_STEP_THRESHOLD_PX ||
-        now - lastWheelStepAt.current < WHEEL_STEP_COOLDOWN_MS
-      ) {
-        return;
-      }
-
-      const delta = wheelDelta.current > 0 ? 1 : -1;
-      wheelDelta.current = 0;
-      lastWheelStepAt.current = now;
-
-      let newIndex = (selectedIndexRef.current + delta) % items.length;
-      if (newIndex < 0) newIndex += items.length;
-      selectedIndexRef.current = newIndex;
-      onIndexChange(newIndex);
+      stepOnceFromWheel();
+      scheduleWheelDrain();
     },
-    [items.length, onIndexChange]
+    [stepOnceFromWheel, scheduleWheelDrain]
   );
 
   useEffect(() => {
@@ -87,6 +117,7 @@ function SpinnerColumn({
     return () => {
       el.removeEventListener('wheel', handleWheel);
       if (wheelResetTimer.current) clearTimeout(wheelResetTimer.current);
+      if (wheelDrainTimer.current) clearTimeout(wheelDrainTimer.current);
     };
   }, [handleWheel]);
 

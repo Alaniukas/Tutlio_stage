@@ -18,6 +18,10 @@ export function getCached<T>(key: string): T | null {
   return entry.data;
 }
 
+export function companyStatsCacheKey(orgId: string): string {
+  return `company_stats:${orgId}`;
+}
+
 export function setCache<T>(key: string, data: T, ttl = DEFAULT_TTL): void {
   store.set(key, { data, ts: Date.now(), ttl });
 }

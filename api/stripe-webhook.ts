@@ -1011,6 +1011,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.json({ received: true });
     } catch (err: any) {
         console.error('[stripe-webhook] Handler error:', err);
-        return res.status(200).json({ received: true, warning: 'processing_error' });
+        return res.status(500).json({ error: 'Webhook processing failed' });
     }
 }

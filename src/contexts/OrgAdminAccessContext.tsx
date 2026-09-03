@@ -3,7 +3,6 @@ import { supabase } from '@/lib/supabase';
 import { useUser } from '@/contexts/UserContext';
 import {
   hasOrgAdminPermission,
-  normalizeOrgAdminPermissions,
   type OrgAdminPermission,
   type OrgAdminPermissionMap,
   type OrgAdminRole,
@@ -125,7 +124,7 @@ export function OrgAdminAccessProvider({ children }: { children: ReactNode }) {
         organizationId,
         role: seat.legacy ? 'owner' : row.role as OrgAdminRole,
         status: seat.legacy ? 'active' : row.status as OrgAdminStatus,
-        permissions: seat.legacy ? {} : normalizeOrgAdminPermissions(row.permissions),
+        permissions: seat.legacy ? {} : (row.permissions as OrgAdminPermissionMap) || {},
         acceptedAt: typeof row.accepted_at === 'string' ? row.accepted_at : null,
         organizationName,
         entityType,
@@ -179,6 +178,7 @@ export function OrgAdminAccessProvider({ children }: { children: ReactNode }) {
         ['finance.view', `${portalBase}/finance`],
         ['contracts.view', `${portalBase}/contracts`],
         ['settings.view', `${portalBase}/settings`],
+        ['team.view', `${portalBase}/team`],
       ];
       return choices.find(([permission]) => can(permission))?.[1] || `${portalBase}/instructions`;
     };

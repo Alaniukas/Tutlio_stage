@@ -2,12 +2,29 @@ import type { VercelRequest, VercelResponse } from './types';
 import { createClient } from '@supabase/supabase-js';
 import { supabaseServiceRoleClientOptions } from './_lib/supabaseServiceRoleClientOptions.js';
 import {
+  hasOrgAdminPermission,
+  canSeePeerOrgOwners,
+  ownerHidesFinanceTotals,
   permissionsForRole,
   normalizeOrgAdminPermissions,
+  type OrgAdminPermission,
   type OrgAdminPermissionMap,
   type OrgAdminRole,
 } from '../src/lib/orgAdminPermissions.js';
-import { isOrgOwner, requireOrgAdminAccess } from './_lib/orgAdminAccess.js';
+import {
+  isOrgOwner,
+  getOrgOwnerUserId,
+  requireOrgAdminAccess,
+  type OrgAdminAccess,
+} from './_lib/orgAdminAccess.js';
+
+function canViewOrgTeam(access: OrgAdminAccess): boolean {
+  return isOrgOwner(access) || hasOrgAdminPermission(access.role, access.permissions, 'team.view');
+}
+
+function canManageOrgTeam(access: OrgAdminAccess): boolean {
+  return isOrgOwner(access) || hasOrgAdminPermission(access.role, access.permissions, 'team.edit');
+}
 
 type ManagedRole = Exclude<OrgAdminRole, 'owner'>;
 
@@ -26,8 +43,45 @@ function parseManagedRole(value: unknown): ManagedRole | null {
   return value === 'admin' || value === 'accountant' || value === 'custom' ? value : null;
 }
 
-function permissionsForInput(role: ManagedRole, raw: unknown): OrgAdminPermissionMap {
-  return permissionsForRole(role, role === 'custom' ? normalizeOrgAdminPermissions(raw) : {});
+const DELEGATION_RESTRICTED: readonly OrgAdminPermission[] = [
+  'stats.view',
+  'finance.totals',
+  'team.view',
+  'team.edit',
+];
+
+function sanitizeDelegatedPermissions(
+  grantorRole: OrgAdminRole,
+  grantorPermissions: unknown,
+  granted: OrgAdminPermissionMap,
+): OrgAdminPermissionMap {
+  let normalized = normalizeOrgAdminPermissions(granted);
+  if (grantorRole === 'owner') {
+    if (ownerHidesFinanceTotals(grantorPermissions)) delete normalized['finance.totals'];
+    return normalizeOrgAdminPermissions(normalized);
+  }
+
+  normalized = { ...normalized };
+  for (const key of DELEGATION_RESTRICTED) {
+    delete normalized[key];
+  }
+  if (grantorRole === 'custom') {
+    const grantorMap = normalizeOrgAdminPermissions(grantorPermissions);
+    for (const key of Object.keys(normalized) as OrgAdminPermission[]) {
+      if (normalized[key] && !grantorMap[key]) delete normalized[key];
+    }
+  }
+  return normalizeOrgAdminPermissions(normalized);
+}
+
+function permissionsForInput(
+  role: ManagedRole,
+  raw: unknown,
+  grantorRole: OrgAdminRole,
+  grantorPermissions: unknown,
+): OrgAdminPermissionMap {
+  const base = permissionsForRole(role, role === 'custom' ? normalizeOrgAdminPermissions(raw) : {});
+  return sanitizeDelegatedPermissions(grantorRole, grantorPermissions, base);
 }
 
 async function audit(
@@ -51,7 +105,9 @@ async function audit(
 async function listMembers(
   supabase: NonNullable<ReturnType<typeof serviceClient>>,
   organizationId: string,
+  access: OrgAdminAccess,
 ) {
+  const hidePeerOwners = !canSeePeerOrgOwners(access.role, access.permissions);
   const { data: rows, error } = await supabase
     .from('organization_admins')
     .select('id, user_id, role, status, permissions, invited_by_user_id, accepted_at, revoked_at, created_at, updated_at')
@@ -66,22 +122,28 @@ async function listMembers(
     : { data: [] as Array<{ id: string; full_name: string | null; email: string | null }> };
   const profileById = new Map((profiles || []).map((profile) => [profile.id, profile]));
 
-  return (rows || []).map((row) => {
-    const profile = profileById.get(row.user_id);
-    return {
-      id: row.id,
-      userId: row.user_id,
-      fullName: profile?.full_name || '',
-      email: profile?.email || '',
-      role: row.role,
-      status: row.status,
-      permissions: normalizeOrgAdminPermissions(row.permissions),
-      invitedByUserId: row.invited_by_user_id,
-      acceptedAt: row.accepted_at,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    };
-  });
+  return (rows || [])
+    .filter((row) => (
+      row.role !== 'owner'
+      || row.user_id === access.userId
+      || !hidePeerOwners
+    ))
+    .map((row) => {
+      const profile = profileById.get(row.user_id);
+      return {
+        id: row.id,
+        userId: row.user_id,
+        fullName: profile?.full_name || '',
+        email: profile?.email || '',
+        role: row.role,
+        status: row.status,
+        permissions: normalizeOrgAdminPermissions(row.permissions),
+        invitedByUserId: row.invited_by_user_id,
+        acceptedAt: row.accepted_at,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      };
+    });
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -113,11 +175,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const accessResult = await requireOrgAdminAccess(req, supabase);
     if (accessResult.ok === false) return json(res, accessResult.status, { error: accessResult.error });
     const { access } = accessResult;
-    if (!isOrgOwner(access)) return json(res, 403, { error: 'Only the organization owner can manage seats' });
 
     if (req.method === 'GET') {
-      const members = await listMembers(supabase, access.organizationId);
+      if (!canViewOrgTeam(access)) {
+        return json(res, 403, { error: 'Insufficient organization permission' });
+      }
+      const members = await listMembers(supabase, access.organizationId, access);
       return json(res, 200, { members, currentUserId: access.userId });
+    }
+
+    if (!canManageOrgTeam(access)) {
+      return json(res, 403, { error: 'Insufficient organization permission' });
     }
 
     if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
@@ -142,7 +210,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const invitedUserId = invited.user.id;
-      const permissions = permissionsForInput(role, req.body?.permissions);
+      const permissions = permissionsForInput(role, req.body?.permissions, access.role, access.permissions);
       const now = new Date().toISOString();
       const { error: membershipError } = await supabase.from('organization_admins').insert({
         user_id: invitedUserId,
@@ -171,7 +239,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       await audit(supabase, access.organizationId, access.userId, invitedUserId, 'seat.invited', { role, permissions });
-      return json(res, 201, { success: true, members: await listMembers(supabase, access.organizationId) });
+      return json(res, 201, { success: true, members: await listMembers(supabase, access.organizationId, access) });
     }
 
     const memberId = String(req.body?.memberId || '').trim();
@@ -189,7 +257,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (target.role === 'owner') return json(res, 400, { error: 'Owner permissions cannot be restricted' });
       const role = parseManagedRole(req.body?.role);
       if (!role) return json(res, 400, { error: 'Invalid role' });
-      const permissions = permissionsForInput(role, req.body?.permissions);
+      const permissions = permissionsForInput(role, req.body?.permissions, access.role, access.permissions);
       const now = new Date().toISOString();
       const { error } = await supabase
         .from('organization_admins')
@@ -198,7 +266,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq('organization_id', access.organizationId);
       if (error) return json(res, 500, { error: error.message });
       await audit(supabase, access.organizationId, access.userId, target.user_id, 'seat.permissions_updated', { role, permissions });
-      return json(res, 200, { success: true, members: await listMembers(supabase, access.organizationId) });
+      return json(res, 200, { success: true, members: await listMembers(supabase, access.organizationId, access) });
     }
 
     if (action === 'set_status') {
@@ -213,16 +281,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq('organization_id', access.organizationId);
       if (error) return json(res, 500, { error: error.message });
       await audit(supabase, access.organizationId, access.userId, target.user_id, `seat.${status}`);
-      return json(res, 200, { success: true, members: await listMembers(supabase, access.organizationId) });
+      return json(res, 200, { success: true, members: await listMembers(supabase, access.organizationId, access) });
     }
 
     if (action === 'remove') {
       if (target.role === 'owner' || target.user_id === access.userId) {
         return json(res, 400, { error: 'The organization owner cannot be removed' });
       }
+      const ownerUserId = isOrgOwner(access)
+        ? access.userId
+        : await getOrgOwnerUserId(supabase, access.organizationId);
+      if (!ownerUserId) return json(res, 500, { error: 'Organization owner not found' });
       const { error: revokeError } = await supabase.rpc('revoke_org_admin_seat', {
         p_org_id: access.organizationId,
-        p_owner_user_id: access.userId,
+        p_owner_user_id: ownerUserId,
         p_target_user_id: target.user_id,
       });
       if (revokeError) return json(res, 500, { error: revokeError.message });
@@ -240,11 +312,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return json(res, 200, {
         success: true,
         authUserDeleted: !deleteError,
-        members: await listMembers(supabase, access.organizationId),
+        members: await listMembers(supabase, access.organizationId, access),
       });
     }
 
     if (action === 'transfer_owner') {
+      if (!canSeePeerOrgOwners(access.role, access.permissions)) {
+        return json(res, 403, { error: 'Only the organization owner can transfer ownership' });
+      }
       if (target.status !== 'active' || !target.accepted_at) {
         return json(res, 400, { error: 'Ownership can only be transferred to an active accepted seat' });
       }
@@ -255,7 +330,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
       if (error) return json(res, 500, { error: error.message });
       await audit(supabase, access.organizationId, access.userId, target.user_id, 'ownership.transferred');
-      return json(res, 200, { success: true, members: await listMembers(supabase, access.organizationId) });
+      return json(res, 200, { success: true, members: await listMembers(supabase, access.organizationId, access) });
     }
 
     return json(res, 400, { error: 'Unsupported action' });

@@ -153,22 +153,15 @@ export default function OrgTutorFinanceSummary() {
         endIso = b.toISOString();
       }
 
-      const { count, error } = await supabase
-        .from('sessions')
-        .select('*', { count: 'estimated', head: true })
-        .eq('tutor_id', user.id)
-        .in('status', proKlasePayMode ? ['completed', 'no_show'] : ['completed'])
-        .lte('end_time', new Date().toISOString())
-        .gte('start_time', startIso)
-        .lte('start_time', endIso);
-
       let breakdown: ProKlasePayBreakdown | null = null;
       let manoTotal: number | null = null;
-      let manoSubjectRates = false;
+      let manoHasSubjectRatesLocal = false;
+      let conductedCount = 0;
+
       if (proKlasePayMode) {
-        const { data: sessionRows } = await supabase
+        const { data: sessionRows, error: sessionErr } = await supabase
           .from('sessions')
-          .select('id, status, price, subjects(is_trial)')
+          .select('id, status, price, is_complimentary, subjects(is_trial)')
           .eq('tutor_id', user.id)
           .in('status', ['completed', 'no_show'])
           .lte('end_time', new Date().toISOString())
@@ -195,12 +188,30 @@ export default function OrgTutorFinanceSummary() {
           payPerLessonEur,
           adjustmentsEur,
         );
-      } else if (manoPayMode) {
-        const { data: sessionRows } = await supabase
+        conductedCount = (sessionRows || []).length;
+        if (cancelled) return;
+        if (sessionErr) {
+          console.error('[OrgTutorFinanceSummary]', sessionErr);
+          setCompletedCount(0);
+          setPayBreakdown(null);
+          setManoPayEur(null);
+          setManoHasSubjectRates(false);
+        } else {
+          setCompletedCount(conductedCount);
+          setPayBreakdown(breakdown);
+          setManoPayEur(null);
+          setManoHasSubjectRates(false);
+        }
+        setLoading(false);
+        return;
+      }
+
+      if (manoPayMode) {
+        const { data: sessionRows, error: sessionErr } = await supabase
           .from('sessions')
           .select('id, status, price, subject_id')
           .eq('tutor_id', user.id)
-          .eq('status', 'completed')
+          .in('status', ['completed', 'no_show'])
           .lte('end_time', new Date().toISOString())
           .gte('start_time', startIso)
           .lte('start_time', endIso);
@@ -210,14 +221,39 @@ export default function OrgTutorFinanceSummary() {
           .eq('id', user.id)
           .maybeSingle();
         const bySubject = parseTutorPayBySubject((payProfile as any)?.company_commission_by_subject);
-        manoSubjectRates = Object.keys(bySubject).length > 0;
+        manoHasSubjectRatesLocal = Object.keys(bySubject).length > 0;
         manoTotal = sumOrgTutorLessonsPayEur(
           (sessionRows || []) as Array<{ subject_id?: string | null; price?: number | null }>,
           payPerLessonEur,
           bySubject,
           profile?.organization_id,
         );
+        conductedCount = (sessionRows || []).length;
+        if (cancelled) return;
+        if (sessionErr) {
+          console.error('[OrgTutorFinanceSummary]', sessionErr);
+          setCompletedCount(0);
+          setPayBreakdown(null);
+          setManoPayEur(null);
+          setManoHasSubjectRates(false);
+        } else {
+          setCompletedCount(conductedCount);
+          setPayBreakdown(null);
+          setManoPayEur(manoTotal);
+          setManoHasSubjectRates(manoHasSubjectRatesLocal);
+        }
+        setLoading(false);
+        return;
       }
+
+      const { data: genericRows, error } = await supabase
+        .from('sessions')
+        .select('id, status')
+        .eq('tutor_id', user.id)
+        .eq('status', 'completed')
+        .lte('end_time', new Date().toISOString())
+        .gte('start_time', startIso)
+        .lte('start_time', endIso);
 
       if (cancelled) return;
       if (error) {
@@ -227,10 +263,10 @@ export default function OrgTutorFinanceSummary() {
         setManoPayEur(null);
         setManoHasSubjectRates(false);
       } else {
-        setCompletedCount(count ?? 0);
-        setPayBreakdown(breakdown);
-        setManoPayEur(manoTotal);
-        setManoHasSubjectRates(manoSubjectRates);
+        setCompletedCount((genericRows || []).length);
+        setPayBreakdown(null);
+        setManoPayEur(null);
+        setManoHasSubjectRates(false);
       }
       setLoading(false);
     };

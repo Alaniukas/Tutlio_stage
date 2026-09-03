@@ -13,6 +13,8 @@ import { cn } from '@/lib/utils';
 import { fetchPaidSalesInvoiceCandidates } from '@/lib/manualSalesInvoicePreview';
 import { fetchOrgTutorInvoicesDeduped } from '@/lib/fetchOrgTutorInvoicesDeduped';
 import { orgTutorSessionPayEur } from '@/lib/orgTutorLessonPay';
+import { isProKlaseOrg } from '@/lib/marketMoney';
+import { proKlaseSessionPayEur } from '@/lib/proKlaseTutorPay';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 
 type GroupingType = 'per_payment' | 'per_week' | 'single';
@@ -233,26 +235,37 @@ export default function CreateInvoiceModal({
           supabase.from('profiles').select('organization_id, company_commission_percent, company_commission_by_subject').eq('id', tutorId).maybeSingle(),
           supabase
             .from('sessions')
-            .select('id, tutor_id, start_time, end_time, status, subject_id, price, students(full_name, email), subjects(name)')
+            .select('id, tutor_id, start_time, end_time, status, subject_id, price, is_complimentary, students(full_name, email), subjects(name, is_trial)')
             .eq('tutor_id', tutorId)
-            .neq('status', 'cancelled')
-            .neq('status', 'no_show')
+            .in('status', ['completed', 'no_show'])
             .gte('start_time', periodStart + 'T00:00:00')
             .lte('start_time', periodEnd + 'T23:59:59')
             .lte('end_time', new Date().toISOString()),
         ]);
 
         if (sessErr) throw sessErr;
+        const orgId = (prof as any)?.organization_id as string | undefined;
         const tutorPayRate = Number((prof as any)?.company_commission_percent) || 0;
+        const proKlasePay = isProKlaseOrg(orgId);
         const rows = (sessRows || []).map((s: any) => ({
           ...s,
-          price: orgTutorSessionPayEur({
-            organizationId: (prof as any)?.organization_id,
-            defaultRate: tutorPayRate,
-            bySubject: (prof as any)?.company_commission_by_subject,
-            subjectId: s.subject_id,
-            sessionPrice: s.price,
-          }),
+          price: proKlasePay
+            ? proKlaseSessionPayEur(
+                {
+                  status: String(s.status || ''),
+                  price: s.price,
+                  is_complimentary: s.is_complimentary,
+                  subjects: s.subjects,
+                },
+                tutorPayRate,
+              )
+            : orgTutorSessionPayEur({
+                organizationId: orgId,
+                defaultRate: tutorPayRate,
+                bySubject: (prof as any)?.company_commission_by_subject,
+                subjectId: s.subject_id,
+                sessionPrice: s.price,
+              }),
         }));
         if (!rows.length) {
           setError(t('invoiceCreate.noSessions'));

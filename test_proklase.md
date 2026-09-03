@@ -33,6 +33,20 @@ npm test -- tests/lib/student-grade.test.ts tests/lib/proklase-copy.test.ts test
 
 ---
 
+## 0c. Pilnas QA planas (finance + payment payer) — 2026-09-03
+
+**Vienas dokumentas viskam:** [`test_proklase_qa.md`](test_proklase_qa.md)
+
+```powershell
+node scripts/seed-qa-demo-orgs.mjs
+node scripts/seed-proklase-finance-bugs-qa.mjs
+node scripts/seed-proklase-payer-view-qa.mjs
+```
+
+Apima: atlygis / bandomosios / statistika **ir** Mantvidas payment_payer UI. Senesnis tik finance: [`test_proklase_finance_bugs.md`](test_proklase_finance_bugs.md) (nuoroda).
+
+---
+
 ## 0b. Trys fix'ai (paieška / statusas / keli korep) — 2026-08-31
 
 Seed (vieną kartą, kol serveris `npm run dev`):

@@ -28,6 +28,7 @@ import { authHeaders } from '@/lib/apiHelpers';
 import { deriveAttendance, isAttendanceFlagged } from '@/lib/attendance';
 import { buildNoShowSessionPatch, defaultNoShowWhenForNow } from '@/lib/noShowWhen';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
+import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 
 interface StatCard {
   label: string;
@@ -98,6 +99,8 @@ function attendanceAttentionSummary(
 export default function CompanyDashboard() {
   const { t, dateFnsLocale } = useTranslation();
   const { fmt } = useMarketMoney();
+  const { can } = useOrgAdminAccess();
+  const showFinanceTotals = can('finance.totals');
   const orgEntityType = useOrgEntityType();
   const location = useLocation();
   const navigate = useNavigate();
@@ -591,22 +594,43 @@ export default function CompanyDashboard() {
       iconBg: 'bg-blue-100',
       iconColor: 'text-blue-600',
     },
-    {
-      label: t('companyDash.earningsThisMonth'),
-      value: fmt(earningsThisMonth),
-      sub: format(new Date(), 'MMMM yyyy', { locale: dateFnsLocale }),
-      icon: <Wallet className="w-5 h-5" />,
-      iconBg: 'bg-green-100',
-      iconColor: 'text-green-600',
-    },
-    {
-      label: t('companyDash.totalEarnings'),
-      value: fmt(earningsTotal),
-      sub: t('companyDash.sinceStart'),
-      icon: <TrendingUp className="w-5 h-5" />,
-      iconBg: 'bg-violet-100',
-      iconColor: 'text-violet-600',
-    },
+    ...(showFinanceTotals
+      ? [
+          {
+            label: t('companyDash.earningsThisMonth'),
+            value: fmt(earningsThisMonth),
+            sub: format(new Date(), 'MMMM yyyy', { locale: dateFnsLocale }),
+            icon: <Wallet className="w-5 h-5" />,
+            iconBg: 'bg-green-100',
+            iconColor: 'text-green-600',
+          },
+          {
+            label: t('companyDash.totalEarnings'),
+            value: fmt(earningsTotal),
+            sub: t('companyDash.sinceStart'),
+            icon: <TrendingUp className="w-5 h-5" />,
+            iconBg: 'bg-violet-100',
+            iconColor: 'text-violet-600',
+          },
+        ]
+      : [
+          {
+            label: t('companyDash.needsAttention'),
+            value: attentionList.length,
+            sub: t('companyDash.entries'),
+            icon: <AlertCircle className="w-5 h-5" />,
+            iconBg: 'bg-amber-100',
+            iconColor: 'text-amber-600',
+          },
+          {
+            label: t('companyDash.paymentFollowups'),
+            value: attentionList.filter((s) => s.reasons.includes('payment')).length,
+            sub: t('companyDash.entries'),
+            icon: <CreditCard className="w-5 h-5" />,
+            iconBg: 'bg-emerald-100',
+            iconColor: 'text-emerald-600',
+          },
+        ]),
   ];
 
   const visibleCompanyAttention = attentionList.filter((s) => !dismissedCompanyAttentionIds.has(s.id));
@@ -712,7 +736,7 @@ export default function CompanyDashboard() {
                           {staffLabel}: {s.tutor_name || '—'}
                         </p>
                       </div>
-                      {s.price != null && (
+                      {showFinanceTotals && s.price != null && (
                         <span className="text-sm font-semibold text-gray-700 flex-shrink-0">{fmt(s.price)}</span>
                       )}
                     </div>
@@ -886,8 +910,9 @@ export default function CompanyDashboard() {
           </div>
         )}
 
-        {(activeTutors > 0 || recentPayments.length > 0) && (
-          <div className={`grid gap-6 ${activeTutors > 0 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'}`}>
+        {(activeTutors > 0 || (showFinanceTotals && recentPayments.length > 0)) && (
+          <div className={`grid gap-6 ${activeTutors > 0 && showFinanceTotals && recentPayments.length > 0 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'}`}>
+            {showFinanceTotals && (
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -959,6 +984,7 @@ export default function CompanyDashboard() {
                 </div>
               )}
             </div>
+            )}
 
             {activeTutors > 0 ? (
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">

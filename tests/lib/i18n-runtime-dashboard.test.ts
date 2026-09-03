@@ -16,6 +16,7 @@ const DASHBOARD_KEYS = [
   'companyDash.allLabel',
   'companyDash.noUpcoming',
   'companyDash.needsAttention',
+  'companyDash.paymentFollowups',
   'companyDash.entries',
   'companyDash.recentPayments',
   'companyDash.cancelledPaid',

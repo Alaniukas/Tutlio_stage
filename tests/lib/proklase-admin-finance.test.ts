@@ -4,6 +4,7 @@ import {
   proKlaseAccruedTutorCostEur,
   proKlaseAdminFinanceSplit,
   standaloneSessionClientPaidEur,
+  sumProKlaseRealizedPaidTutorPayEur,
 } from '../../src/lib/proKlaseAdminFinance';
 import { orgFeeProfile } from '../../src/lib/marketMoney';
 
@@ -78,5 +79,13 @@ describe('proKlaseAdminFinance', () => {
     expect(
       standaloneSessionClientPaidEur(paidLesson({ lesson_package_id: 'pkg-1', status: 'cancelled' })),
     ).toBe(0);
+  });
+
+  it('stats tutor pay ignores completed lessons that are still unpaid', () => {
+    const sessions = [
+      paidLesson({ status: 'completed', paid: false, payment_status: 'unpaid', lesson_package_id: null, price: 27 }),
+      paidLesson({ status: 'completed', paid: true, payment_status: 'paid', lesson_package_id: null, price: 29 }),
+    ];
+    expect(sumProKlaseRealizedPaidTutorPayEur(sessions, 25)).toBe(25);
   });
 });
