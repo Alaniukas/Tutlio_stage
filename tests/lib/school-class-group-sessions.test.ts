@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildClassGroupMetaMap,
   calendarTitleForSession,
+  classGroupDisplayName,
   classGroupParticipantsForModal,
   isMergedClassGroupSession,
   mergeSchoolClassGroupSessions,
@@ -89,5 +90,70 @@ describe('schoolClassGroupSessions', () => {
     expect(participants).toHaveLength(2);
     expect(participants.find((p) => p.student_id === 's1')?.session?.id).toBe('a');
     expect(participants.find((p) => p.student_id === 's2')?.session).toBeNull();
+  });
+
+  it('keeps separate calendar rows for different class groups at the same time', () => {
+    const groups = [
+      {
+        id: 'g1',
+        name: 'LT 5 kl.',
+        tutor_id: 't1',
+        school_year_start: '2026-09-01',
+        school_year_end: '2027-06-15',
+        slots: [{ weekday: 2, start_time: '11:00', end_time: '11:45' }],
+        members: [{ student_id: 's1', student: { full_name: 'Jonas' } }],
+      },
+      {
+        id: 'g2',
+        name: 'Matematika 6 kl.',
+        tutor_id: 't1',
+        school_year_start: '2026-09-01',
+        school_year_end: '2027-06-15',
+        slots: [{ weekday: 2, start_time: '11:00', end_time: '11:45' }],
+        members: [{ student_id: 's3', student: { full_name: 'Petras' } }],
+      },
+    ];
+    const meta = buildClassGroupMetaMap(groups);
+    const merged = mergeSchoolClassGroupSessions(
+      [
+        {
+          id: 'a',
+          student_id: 's1',
+          class_group_id: 'g1',
+          start_time: start,
+          end_time: end,
+          status: 'active',
+        },
+        {
+          id: 'b',
+          student_id: 's3',
+          class_group_id: 'g2',
+          start_time: start,
+          end_time: end,
+          status: 'active',
+        },
+      ],
+      meta,
+    );
+
+    expect(merged).toHaveLength(2);
+    const names = merged.map((row) => (row as MergedClassGroupSession<(typeof merged)[0]>)._classGroupName);
+    expect(names).toEqual(['LT 5 kl.', 'Matematika 6 kl.']);
+  });
+
+  it('resolves class group display name from meta map', () => {
+    const meta = buildClassGroupMetaMap([
+      {
+        id: 'g1',
+        name: 'LT 5 kl.',
+        tutor_id: 't1',
+        school_year_start: '2026-09-01',
+        school_year_end: '2027-06-15',
+        slots: [],
+        members: [],
+      },
+    ]);
+    expect(classGroupDisplayName('g1', meta)).toBe('LT 5 kl.');
+    expect(classGroupDisplayName('missing', meta)).toBeNull();
   });
 });

@@ -128,6 +128,14 @@ export function calendarTitleForSession(
   return session.student?.full_name || fallbackUnknown;
 }
 
+export function classGroupDisplayName(
+  classGroupId: string | null | undefined,
+  groupMeta: Map<string, ClassGroupMeta>,
+): string | null {
+  if (!classGroupId) return null;
+  return groupMeta.get(classGroupId)?.name ?? null;
+}
+
 export function classGroupParticipantsForModal<T extends ClassGroupSessionRow>(
   merged: MergedClassGroupSession<T>,
 ): Array<ClassGroupMemberDisplay & { session: T | null }> {

@@ -66,4 +66,22 @@ describe('getOrgVisibleTutors', () => {
 
     expect(result.map((row) => row.id)).toEqual(['tutor-1', 'tutor-2']);
   });
+
+  it('falls back to student/invite relationships when the tutor-id RPC returns empty', async () => {
+    const client = clientFor({
+      adminUsers: [{ user_id: 'admin-1' }],
+      rpcTutors: [],
+      linkedStudents: [{ tutor_id: 'tutor-1' }],
+      inviteTutors: [{ used_by_profile_id: 'tutor-2' }],
+      profiles: [
+        { id: 'admin-1', full_name: 'Owner' },
+        { id: 'tutor-1', full_name: 'Tutor One' },
+        { id: 'tutor-2', full_name: 'Tutor Two' },
+      ],
+    });
+
+    const result = await getOrgVisibleTutors(client as any, 'org-1', 'id, full_name');
+
+    expect(result.map((row) => row.id)).toEqual(['tutor-1', 'tutor-2']);
+  });
 });

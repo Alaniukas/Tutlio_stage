@@ -81,8 +81,18 @@ export async function getOrgVisibleTutors(
     [...(adminUsers || []), ...(teammateAdmins || [])].map((a: any) => a.user_id),
   );
 
-  const tutorIdSet = !visibleTutorIds.error && (adminUsers || []).length > 0
-    ? new Set<string>((visibleTutorIds.data || []).map((row: any) => row.user_id).filter(Boolean))
-    : buildOrgTutorIdSet(linkedStudents, inviteData);
+  const relationshipTutorIds = buildOrgTutorIdSet(linkedStudents, inviteData);
+  const rpcTutorIds =
+    !visibleTutorIds.error && (adminUsers || []).length > 0
+      ? (visibleTutorIds.data || []).map((row: any) => row.user_id).filter(Boolean)
+      : null;
+  // If the RPC succeeds but returns no rows (e.g. auth.uid() not ready yet), fall back
+  // to student/invite relationships so the tutor list does not flash empty.
+  const tutorIdSet =
+    rpcTutorIds != null
+      ? rpcTutorIds.length > 0
+        ? new Set<string>(rpcTutorIds)
+        : relationshipTutorIds
+      : relationshipTutorIds;
   return filterConfirmedOrgTutors((profileRows || []) as unknown as OrgTutorRow[], adminIds, tutorIdSet);
 }

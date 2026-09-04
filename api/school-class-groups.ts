@@ -10,6 +10,54 @@ import {
 
 const GROUP_SELECT = '*, slots:school_class_group_slots(*), members:school_class_group_members(student_id, enrolled_at, student:students(full_name, email))';
 
+async function resolveStudentIdsForPortal(
+  supabase: ReturnType<typeof serviceSupabase>,
+  userId: string,
+  studentIdParam: string,
+): Promise<string[]> {
+  if (studentIdParam) {
+    const [{ data: student }, { data: parentProfile }] = await Promise.all([
+      supabase.from('students').select('id, linked_user_id').eq('id', studentIdParam).maybeSingle(),
+      supabase.from('parent_profiles').select('id').eq('user_id', userId).maybeSingle(),
+    ]);
+    if (!student) return [];
+    if (student.linked_user_id === userId) return [student.id];
+    if (parentProfile?.id) {
+      const { data: link } = await supabase
+        .from('parent_students')
+        .select('id')
+        .eq('parent_id', parentProfile.id)
+        .eq('student_id', studentIdParam)
+        .maybeSingle();
+      if (link) return [studentIdParam];
+    }
+    return [];
+  }
+
+  const { data: linkedStudents } = await supabase
+    .from('students')
+    .select('id')
+    .eq('linked_user_id', userId);
+  return (linkedStudents || []).map((row: { id: string }) => row.id);
+}
+
+async function resolveOrgIdForClassGroups(
+  supabase: ReturnType<typeof serviceSupabase>,
+  adminOrgId: string | null | undefined,
+  profileOrgId: string | null | undefined,
+  studentIds: string[],
+): Promise<string | null> {
+  if (adminOrgId) return adminOrgId;
+  if (profileOrgId) return profileOrgId;
+  if (!studentIds.length) return null;
+  const { data: studentRow } = await supabase
+    .from('students')
+    .select('organization_id')
+    .eq('id', studentIds[0])
+    .maybeSingle();
+  return studentRow?.organization_id ?? null;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const supabase = serviceSupabase();
   const auth = await verifyRequestAuth(req);
@@ -22,7 +70,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .eq('id', auth.userId)
     .maybeSingle();
 
-  const orgId = admin.ok ? admin.access.organizationId : profile?.organization_id;
+  const studentIdParam = String(req.query?.studentId || '').trim();
+  const portalStudentIds = await resolveStudentIdsForPortal(supabase, auth.userId, studentIdParam);
+  const orgId = await resolveOrgIdForClassGroups(
+    supabase,
+    admin.ok ? admin.access.organizationId : null,
+    profile?.organization_id,
+    portalStudentIds,
+  );
   if (!orgId) return res.status(403).json({ error: 'No organization' });
 
   if (req.method === 'GET') {
@@ -32,8 +87,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq('organization_id', orgId)
       .order('name');
     if (error) return res.status(500).json({ error: error.message });
-    const mine = admin.ok ? data : (data || []).filter((g) => g.tutor_id === auth.userId);
-    return res.status(200).json({ groups: mine || [] });
+    if (admin.ok) {
+      return res.status(200).json({ groups: data || [] });
+    }
+    if (profile?.organization_id === orgId) {
+      const tutorGroups = (data || []).filter((g) => g.tutor_id === auth.userId);
+      return res.status(200).json({ groups: tutorGroups });
+    }
+    if (portalStudentIds.length) {
+      const { data: memberships } = await supabase
+        .from('school_class_group_members')
+        .select('group_id')
+        .in('student_id', portalStudentIds);
+      const groupIds = new Set((memberships || []).map((row: { group_id: string }) => row.group_id));
+      const studentGroups = (data || []).filter((g) => groupIds.has(g.id));
+      return res.status(200).json({ groups: studentGroups });
+    }
+    return res.status(200).json({ groups: [] });
   }
 
   if (req.method === 'POST') {
