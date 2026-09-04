@@ -36,6 +36,8 @@ import { rpcGetStudentProfilesDeduped } from '@/lib/preload';
 import { useUser } from '@/contexts/UserContext';
 import { tutorUsesManualStudentPayments, trimManualPaymentBankDetails } from '@/lib/subscription';
 import { useStudentPolicy } from '@/contexts/StudentPolicyContext';
+import { buildClassGroupMetaMap, classGroupDisplayName } from '@/lib/schoolClassGroupSessions';
+import type { SchoolClassGroupRecord } from '@/lib/schoolClassGroups';
 
 // BigCalendar Setup
 const locales = { lt: lt };
@@ -65,6 +67,7 @@ interface ExistingSession {
     tutor_comment?: string | null;
     show_comment_to_student?: boolean;
     subject_id?: string | null;
+    class_group_id?: string | null;
     available_spots?: number | null;
     subjects?: { is_group?: boolean; max_students?: number; name?: string } | null;
 }
@@ -89,7 +92,7 @@ interface LessonPackageSummary {
 
 /** Be įterptų `subjects(*)`: RLS/postgres užklausos nerą lūžta nuo 57014 (statement timeout). */
 const PARENT_SCHEDULE_SESSION_COLS =
-    'id,start_time,end_time,status,paid,price,topic,meeting_link,whiteboard_room_id,payment_status,tutor_comment,show_comment_to_student,subject_id,student_id,available_spots';
+    'id,start_time,end_time,status,paid,price,topic,meeting_link,whiteboard_room_id,payment_status,tutor_comment,show_comment_to_student,subject_id,student_id,class_group_id,available_spots';
 
 async function enrichScheduleSessionsWithSubjects(
     client: typeof supabase,
@@ -250,6 +253,8 @@ export default function StudentSchedule() {
     const [creditBalance, setCreditBalance] = useState(0);
     const [activePackages, setActivePackages] = useState<LessonPackageSummary[]>([]);
     const [tutorOrgIsSchool, setTutorOrgIsSchool] = useState(false);
+    const [schoolClassGroupsEnabled, setSchoolClassGroupsEnabled] = useState(false);
+    const [classGroups, setClassGroups] = useState<SchoolClassGroupRecord[]>([]);
     /** Org feature `disable_student_reschedule_cancel`: students/parents cannot move or cancel lessons.
      * Seeded from the pre-mount StudentPolicyProvider (unresolved default in the
      * parent-embed mode, where the page's own fetch keeps governing). */
@@ -305,6 +310,40 @@ export default function StudentSchedule() {
         return () => window.removeEventListener('student-profile-changed', onProfileChange);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [ctxUser?.id]);
+
+    const classGroupMeta = useMemo(() => buildClassGroupMetaMap(classGroups), [classGroups]);
+    const showStudentClassGroups = tutorOrgIsSchool && schoolClassGroupsEnabled;
+
+    useEffect(() => {
+        if (!showStudentClassGroups || !studentId) {
+            setClassGroups([]);
+            return;
+        }
+        let cancelled = false;
+        void (async () => {
+            try {
+                const headers = await authHeaders();
+                const query = parentBookingStudentId
+                    ? `?studentId=${encodeURIComponent(parentBookingStudentId)}`
+                    : studentId
+                        ? `?studentId=${encodeURIComponent(studentId)}`
+                        : '';
+                const res = await fetch(`/api/school-class-groups${query}`, { headers });
+                const data = await res.json().catch(() => ({}));
+                if (!cancelled && res.ok) {
+                    setClassGroups((data.groups || []) as SchoolClassGroupRecord[]);
+                } else if (!cancelled) {
+                    setClassGroups([]);
+                }
+            } catch {
+                if (!cancelled) setClassGroups([]);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [showStudentClassGroups, studentId, parentBookingStudentId]);
+
     // OPTIMIZED: Memoize slot calculation to avoid recalculating on every render
     const { memoizedEvents, memoizedBgEvents } = useMemo(() => {
         const generatedEvents: SlotEvent[] = [];
@@ -352,22 +391,33 @@ export default function StudentSchedule() {
         }
 
         // Generate normal Events for occupied slots
-        const addOccupiedEvent = (sStart: Date, sEnd: Date, isMySession: boolean, sessionId?: string, isGroup?: boolean, subjectName?: string) => {
+        const addOccupiedEvent = (
+            sStart: Date,
+            sEnd: Date,
+            isMySession: boolean,
+            sessionId?: string,
+            isGroup?: boolean,
+            classGroupName?: string | null,
+        ) => {
             const extendedEnd = new Date(sEnd.getTime() + breakBetweenLessons * 60000);
             const isPast = isBefore(sStart, now);
+            const isSchoolClassGroup = Boolean(classGroupName);
+            const isGroupLesson = isGroup || isSchoolClassGroup;
             // In parent mode the "my session" actually means the *child's* session,
             // so swap copy to make ownership clear when many kids share a household.
             let title: string;
             if (!isMySession) {
                 title = t('stuSched.occupied');
+            } else if (classGroupName) {
+                title = classGroupName;
             } else if (isPast) {
-                if (isGroup) {
+                if (isGroupLesson) {
                     title = isParentRoute ? t('stuSched.childOccurredGroup') : t('stuSched.occurredGroup');
                 } else {
                     title = isParentRoute ? t('stuSched.childOccurred') : t('stuSched.occurred');
                 }
             } else {
-                if (isGroup) {
+                if (isGroupLesson) {
                     title = isParentRoute ? t('stuSched.childLessonGroup') : t('stuSched.myLessonGroup');
                 } else {
                     title = isParentRoute ? t('stuSched.childLesson') : t('stuSched.myLesson');
@@ -388,14 +438,14 @@ export default function StudentSchedule() {
         existingSessions.forEach(s => {
             if (s.status !== 'cancelled') {
                 const isGroup = s.subjects?.is_group === true;
-                const subjectName = s.subjects?.name;
+                const classGroupName = classGroupDisplayName(s.class_group_id, classGroupMeta);
                 addOccupiedEvent(
                     new Date(s.start_time),
                     new Date(s.end_time),
                     s.student_id === studentId,
                     s.id,
                     isGroup,
-                    subjectName
+                    classGroupName,
                 );
             }
         });
@@ -422,7 +472,7 @@ export default function StudentSchedule() {
     // NOTE: do NOT add `t` to deps — `useTranslation()` returns a fresh `t`
     // ref every render, which would trigger an infinite re-render loop here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [availability, existingSessions, occupiedSlots, minBookingHours, breakBetweenLessons, studentId, subjects, loadedRanges, isParentRoute]);
+    }, [availability, existingSessions, occupiedSlots, minBookingHours, breakBetweenLessons, studentId, subjects, loadedRanges, isParentRoute, classGroupMeta]);
 
     useEffect(() => {
         // Always update events when memoized values change
@@ -730,6 +780,7 @@ export default function StudentSchedule() {
                 tutorOrgSchoolResolved = oe?.entity_type === 'school';
                 resolvedFeeProfile = orgFeeProfile((oe as { slug?: string | null })?.slug) ?? orgFeeProfile(orgId);
                 const orgFeatures = (oe as { features?: Record<string, unknown> | null })?.features;
+                setSchoolClassGroupsEnabled(orgFeatures?.school_class_groups === true);
                 actionsDisabledResolved = orgFeatures?.disable_student_reschedule_cancel === true;
                 bookingDisabledResolved = orgFeatures?.disable_student_booking === true;
                 if (oe) {
@@ -2205,7 +2256,11 @@ export default function StudentSchedule() {
                                     whiteboard_room_id: (mySessionData as any).whiteboard_room_id ?? null,
                                     tutor_comment: mySessionData.tutor_comment ?? null,
                                     show_comment_to_student: !!mySessionData.show_comment_to_student,
-                                    isGroupSubject: mySessionData.subjects?.is_group === true,
+                                    isGroupSubject: mySessionData.subjects?.is_group === true || !!mySessionData.class_group_id,
+                                    classGroupName: classGroupDisplayName(mySessionData.class_group_id, classGroupMeta),
+                                    classGroupMemberNames: mySessionData.class_group_id
+                                        ? (classGroupMeta.get(mySessionData.class_group_id)?.members || []).map((m) => m.full_name)
+                                        : undefined,
                                 }
                                 : null
                         }
@@ -2229,14 +2284,31 @@ export default function StudentSchedule() {
                         <div className="space-y-4 py-3">
                             <div>
                                 <div className="flex items-center gap-2 mb-2">
-                                    <p className="text-xl font-black text-gray-900 leading-tight">{mySessionData?.subjects?.name || mySessionData?.topic || t('common.lesson')}</p>
-                                    {mySessionData?.subjects?.is_group && (
+                                    <p className="text-xl font-black text-gray-900 leading-tight">
+                                        {classGroupDisplayName(mySessionData?.class_group_id, classGroupMeta)
+                                            || mySessionData?.subjects?.name
+                                            || mySessionData?.topic
+                                            || t('common.lesson')}
+                                    </p>
+                                    {(mySessionData?.subjects?.is_group || mySessionData?.class_group_id) && (
                                         <span className="bg-violet-100 text-violet-700 px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1">
                                             <Users className="w-3.5 h-3.5" />
                                             {t('stuSess.groupLesson')}
                                         </span>
                                     )}
                                 </div>
+                                {mySessionData?.class_group_id && (classGroupMeta.get(mySessionData.class_group_id)?.members || []).length > 0 && (
+                                    <div className="mt-3 rounded-xl border border-violet-100 bg-violet-50/60 px-3 py-2">
+                                        <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-700 mb-1">
+                                            {t('school.groups.members')}
+                                        </p>
+                                        <p className="text-sm text-violet-950">
+                                            {(classGroupMeta.get(mySessionData.class_group_id)?.members || [])
+                                                .map((member) => member.full_name)
+                                                .join(', ')}
+                                        </p>
+                                    </div>
+                                )}
                                 <div className="flex items-center gap-2 mt-2 text-gray-600 font-medium">
                                     <Clock className="w-4 h-4" />
                                     <span>

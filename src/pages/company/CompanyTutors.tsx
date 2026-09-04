@@ -59,7 +59,11 @@ interface Tutor {
   /** Free-text subjects/grades note, e.g. "MAT 2-6 kls, LT 1-8 kls". */
   teaching_notes?: string | null;
   has_active_license?: boolean;
+  /** Earliest accepted invite timestamp — used for school tutor list sorting. */
+  joined_at?: string | null;
 }
+
+type SchoolTutorSort = 'alpha' | 'newest' | 'oldest';
 
 interface Invite {
   id: string;
@@ -445,6 +449,7 @@ export default function CompanyTutors() {
   const [classGroups, setClassGroups] = useState<SchoolClassGroupRecord[]>([]);
   const [tutorLicenseCount, setTutorLicenseCount] = useState<number>(tc?.tutorLicenseCount ?? 0);
   const [tutors, setTutors] = useState<Tutor[]>(tc?.tutors ?? []);
+  const [tutorSort, setTutorSort] = useState<SchoolTutorSort>('alpha');
   const [invites, setInvites] = useState<Invite[]>(tc?.invites ?? []);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [usedInvitesOpen, setUsedInvitesOpen] = useState(false);
@@ -538,6 +543,24 @@ export default function CompanyTutors() {
   const isProKlaseAdmin = isProKlaseOrg(orgId);
   const isManoKorepetitoriusAdmin = isManoKorepetitoriusOrg(orgId);
   const classGroupsEnabled = isSchoolView && !orgFeaturesLoading && hasFeature('school_class_groups');
+
+  const sortedTutors = useMemo(() => {
+    const rows = [...tutors];
+    if (tutorSort === 'alpha') {
+      rows.sort((a, b) => a.full_name.localeCompare(b.full_name, locale || 'lt'));
+      return rows;
+    }
+    const joinTime = (row: Tutor) => {
+      const ts = row.joined_at ? Date.parse(row.joined_at) : NaN;
+      return Number.isFinite(ts) ? ts : 0;
+    };
+    rows.sort((a, b) => {
+      const diff = joinTime(a) - joinTime(b);
+      if (diff !== 0) return tutorSort === 'newest' ? -diff : diff;
+      return a.full_name.localeCompare(b.full_name, locale || 'lt');
+    });
+    return rows;
+  }, [tutors, tutorSort, locale]);
 
   useEffect(() => {
     if (!classGroupsEnabled) {
@@ -694,6 +717,8 @@ export default function CompanyTutors() {
     };
     startLicenseInfoFetch();
 
+    // Keep in sync with preload.ts — do not add optional migration columns here or
+    // profiles SELECT fails on DBs without them and wipes the tutor list on reload.
     const tutorSelect =
       'id, full_name, email, phone, cancellation_hours, cancellation_fee_percent, reminder_student_hours, reminder_tutor_hours, break_between_lessons, min_booking_hours, company_commission_percent, company_commission_by_subject, personal_meeting_link, teaching_notes, has_active_license';
 
@@ -708,18 +733,31 @@ export default function CompanyTutors() {
       .eq('organization_id', adminRow.organization_id)
       .order('created_at', { ascending: false });
 
-    const visibleTutors = await getOrgVisibleTutors(
-      supabase as any,
-      adminRow.organization_id,
-      tutorSelect,
-    );
-    setTutors(visibleTutors as Tutor[]);
-
     const enriched = (inviteData || []).map((inv: any) => ({
       ...inv,
       tutor: (tutorData || []).find((t: any) => t.id === inv.used_by_profile_id) || null,
     }));
     setInvites(enriched);
+
+    const joinedAtByTutorId = new Map<string, string>();
+    for (const inv of enriched) {
+      if (!inv.used_by_profile_id || !inv.used) continue;
+      const prev = joinedAtByTutorId.get(inv.used_by_profile_id);
+      if (!prev || String(inv.created_at) < prev) {
+        joinedAtByTutorId.set(inv.used_by_profile_id, String(inv.created_at));
+      }
+    }
+
+    const visibleTutors = (await getOrgVisibleTutors(
+      supabase as any,
+      adminRow.organization_id,
+      tutorSelect,
+    )) as Tutor[];
+    const tutorsWithJoinedAt = visibleTutors.map((tutor) => ({
+      ...tutor,
+      joined_at: joinedAtByTutorId.get(tutor.id) ?? null,
+    }));
+    setTutors(tutorsWithJoinedAt);
 
     const catalogOptions: { key: string; preset: SubjectPreset }[] = [];
     const rawTpl = (orgData as { org_subject_templates?: unknown } | null)?.org_subject_templates;
@@ -770,7 +808,8 @@ export default function CompanyTutors() {
     setCache(COMPANY_TUTORS_CACHE_KEY, {
       orgId: adminRow.organization_id,
       tutorLicenseCount: effectiveLicenseCount,
-      tutors: visibleTutors, invites: enriched,
+      tutors: tutorsWithJoinedAt,
+      invites: enriched,
     });
     } catch (err) {
       console.error('[CompanyTutors] loadData failed:', err);
@@ -1292,12 +1331,29 @@ export default function CompanyTutors() {
 
         {/* Registered tutors */}
         <section>
-          <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-3">{t('compTut.registered', { count: String(tutors.length) })}</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wider">{t('compTut.registered', { count: String(tutors.length) })}</h2>
+            {isSchoolView && tutors.length > 1 && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500">{t('school.tutors.sortLabel')}</span>
+                <Select value={tutorSort} onValueChange={(v) => setTutorSort(v as SchoolTutorSort)}>
+                  <SelectTrigger className="h-8 w-[170px] text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="alpha">{t('school.tutors.sortAlpha')}</SelectItem>
+                    <SelectItem value="newest">{t('school.tutors.sortNewest')}</SelectItem>
+                    <SelectItem value="oldest">{t('school.tutors.sortOldest')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
           {tutors.length === 0 ? (
             <div className="bg-white rounded-2xl border border-dashed border-gray-200 p-8 text-center text-gray-400 text-sm">{t('compTut.noTutors')}</div>
           ) : (
             <div className="space-y-2">
-              {tutors.map(tutor => (
+              {sortedTutors.map(tutor => (
                 <button key={tutor.id} onClick={() => openTutor(tutor)}
                   className="w-full bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-3.5 flex items-center gap-3 hover:border-indigo-200 hover:shadow-md transition-all text-left hover:bg-indigo-50/40"
                 >

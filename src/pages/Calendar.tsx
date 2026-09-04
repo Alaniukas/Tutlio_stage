@@ -302,6 +302,7 @@ export default function CalendarPage() {
   const orgPolicy = useOrgTutorPolicy();
   const licenseFrozen = orgPolicy.isOrgTutor && orgPolicy.orgUsesLicenses && !orgPolicy.hasActiveLicense;
   const { contactVisibility, hasFeature: hasOrgFeature, entityType: orgEntityType, organizationId, loading: orgFeaturesLoading } = useOrgFeatures();
+  const showClassGroups = !!organizationId && !orgFeaturesLoading && hasOrgFeature('school_class_groups');
   const pkMonthlyPackages = proKlaseFeatureEnabled(organizationId, orgEntityType, hasOrgFeature, 'monthly_packages', orgFeaturesLoading);
   const { user: ctxUser, profile: ctxProfile } = useUser();
   // Org feature: ended lessons are not auto-completed — the tutor must confirm the outcome.
@@ -516,6 +517,31 @@ export default function CalendarPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctxUser?.id]);
 
+  useEffect(() => {
+    if (!showClassGroups) {
+      setClassGroups([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const headers = await authHeaders();
+        const res = await fetch('/api/school-class-groups', { headers });
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled && res.ok) {
+          setClassGroups((data.groups || []) as SchoolClassGroupRecord[]);
+        } else if (!cancelled) {
+          setClassGroups([]);
+        }
+      } catch {
+        if (!cancelled) setClassGroups([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showClassGroups]);
+
   // Set default dates when mass cancel modal opens
   useEffect(() => {
     if (isMassCancelModalOpen) {
@@ -717,20 +743,6 @@ export default function CalendarPage() {
 
     const { data: av } = await tutorAvailabilityAllRowsDeduped(user.id);
     setAvailability(av || []);
-
-    if (profileData?.organization_id && hasOrgFeature('school_class_groups')) {
-      try {
-        const headers = await authHeaders();
-        const res = await fetch('/api/school-class-groups', { headers });
-        const data = await res.json().catch(() => ({}));
-        if (res.ok) setClassGroups((data.groups || []) as SchoolClassGroupRecord[]);
-        else setClassGroups([]);
-      } catch {
-        setClassGroups([]);
-      }
-    } else {
-      setClassGroups([]);
-    }
     } catch (error) {
       console.error('[Calendar] fetchData failed:', error);
     } finally {

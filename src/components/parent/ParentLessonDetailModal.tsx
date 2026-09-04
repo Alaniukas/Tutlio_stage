@@ -68,6 +68,8 @@ export type ParentLessonModalSession = {
   tutor_comment?: string | null;
   show_comment_to_student?: boolean;
   isGroupSubject?: boolean;
+  classGroupName?: string | null;
+  classGroupMemberNames?: string[];
 };
 
 export function ParentLessonDetailModal({
@@ -99,9 +101,11 @@ export function ParentLessonDetailModal({
   perlasEnabled?: boolean;
 }) {
   const headline =
+    session?.classGroupName ||
     session?.subjectName ||
     session?.topic ||
     (session ? t('common.lesson') : '');
+  const isGroupLesson = Boolean(session?.classGroupName || session?.isGroupSubject);
 
   const orgIsSchool = !!tutorPolicy?.orgIsSchool;
   const orgFee = tutorPolicy?.orgFeeProfile ?? null;
@@ -221,13 +225,21 @@ export function ParentLessonDetailModal({
               <p className="text-xl font-black text-gray-900 leading-tight">
                 {headline}
               </p>
-              {session.isGroupSubject && (
+              {isGroupLesson && (
                 <span className="bg-violet-100 text-violet-700 px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1">
                   <Users className="w-3.5 h-3.5" />
                   {t('studentDash.groupLesson')}
                 </span>
               )}
             </div>
+            {session.classGroupMemberNames && session.classGroupMemberNames.length > 0 && (
+              <div className="mt-3 rounded-xl border border-violet-100 bg-violet-50/60 px-3 py-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-700 mb-1">
+                  {t('school.groups.members')}
+                </p>
+                <p className="text-sm text-violet-950">{session.classGroupMemberNames.join(', ')}</p>
+              </div>
+            )}
             {childName && (
               <p className="text-xs text-gray-500 mt-1 font-semibold">
                 {t('parent.forChild', { name: childName })}

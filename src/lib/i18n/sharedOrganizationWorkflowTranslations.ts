@@ -128,4 +128,8 @@ export const sharedOrganizationWorkflowTranslations: Record<string, string> = {
   'invoices.reserveFailed': 'Could not reserve the number.',
   'invoices.badgeExternal': 'External',
   'invoices.externalNoPdf': 'No PDF',
+  'school.tutors.sortLabel': 'Sort',
+  'school.tutors.sortAlpha': 'Alphabetical',
+  'school.tutors.sortNewest': 'Newest first',
+  'school.tutors.sortOldest': 'Oldest first',
 };
