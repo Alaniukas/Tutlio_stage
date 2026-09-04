@@ -1,4 +1,4 @@
-import { LOCALE_FORMAT_TAGS, LOCALE_NAMES, localeDirection, withEnglishLocaleFallback } from '../../src/lib/i18n/locales.js';
+import { LEGACY_LOCALES, LOCALE_FORMAT_TAGS, LOCALE_NAMES, SUPPORT_LOCALE_NAMES, localeDirection, withEnglishLocaleFallback } from '../../src/lib/i18n/locales.js';
 import { isSeoPublished, seoLocalesForPath } from '../../src/lib/i18n/localeRelease.js';
 export {
   type Locale,
@@ -278,7 +278,7 @@ export function organizationJsonLd(locale: Locale = 'en'): string {
       email: 'info@tutlio.lt',
       telephone: '+37062394956',
       contactType: 'customer support',
-      availableLanguage: ['English', 'Lithuanian', 'Polish'],
+      availableLanguage: LEGACY_LOCALES.map((l) => SUPPORT_LOCALE_NAMES[l]),
     },
   });
 }
