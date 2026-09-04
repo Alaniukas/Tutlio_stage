@@ -200,6 +200,15 @@ a:hover{text-decoration:underline}
 .footer-langs{display:flex;flex-wrap:wrap;justify-content:center;gap:12px;margin-bottom:12px;font-size:.8rem}
 .footer-langs a{color:#666}
 .footer-langs span{color:#1a1a1a;font-weight:600}
+.hero-note{color:#6b7280;font-size:.9rem;margin-top:12px}
+.badge{display:inline-block;margin:0 0 8px;background:#4f46e5;color:#fff;padding:3px 8px;border-radius:999px;font-size:.68rem;font-weight:700;text-transform:uppercase}
+.plain{list-style:none;display:flex;flex-wrap:wrap;gap:6px 14px;color:#555;font-size:.9rem;margin:8px 0}
+.pills{list-style:none;display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.pills li{background:#eef2ff;color:#4f46e5;border-radius:999px;padding:4px 12px;font-size:.85rem;font-weight:500}
+.steps{list-style:none}
+.btn-secondary{background:#fff;color:#1a1a1a;border:1px solid #e5e7eb;margin-left:8px}
+.btn-secondary:hover{background:#f9fafb}
+.chips{list-style:none;display:flex;flex-wrap:wrap;justify-content:center;gap:8px 20px;margin-top:20px;color:#6b7280;font-size:.9rem}
 .legal-sub{color:#555;margin-bottom:24px}
 .legal h2{font-size:1.25rem;font-weight:600;margin:28px 0 10px}
 .legal h3{font-size:1.05rem;font-weight:600;margin:20px 0 8px}

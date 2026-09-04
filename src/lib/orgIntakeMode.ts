@@ -1,6 +1,6 @@
 import type { OrgEntityType } from '@/contexts/OrgEntityContext';
-import { FEATURE_REGISTRY, type FeatureDefinition } from '@/lib/featureRegistry';
-import { isProKlaseOrg } from '@/lib/marketMoney';
+import { FEATURE_REGISTRY, type FeatureDefinition } from './featureRegistry.js';
+import { isProKlaseOrg } from './marketMoney.js';
 
 /** Traditional school org (contracts, installments, school parent flows). Not Pro Klasė. */
 export function isSchoolOrg(entityType: OrgEntityType | string | null | undefined): boolean {

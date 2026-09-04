@@ -15,6 +15,13 @@ operational work below after a production deployment.
 3. Confirm production has the Supabase service-role variables required by the
    sitemap, blog renderer, and public-page renderer.
 4. Deploy only through the normal reviewed production process.
+5. Run `npm test -- tests/api/esm-import-extensions.test.ts` before every
+   deploy. Vercel executes `api/*.ts` as Node ESM without bundling, so one
+   relative import without a `.js` extension (or a `@/` alias) in any module
+   an API function loads crashes that function at cold start with
+   `FUNCTION_INVOCATION_FAILED`. Vitest and `tsc` resolve those imports and
+   never notice; on 2026-09-05 this took down the crawler render of the home,
+   pricing, about, contact, blog and tutor pages plus `sitemap.xml`.
 
 ## 2. Automated production verification
 

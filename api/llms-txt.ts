@@ -105,6 +105,87 @@ ${pricingBlock(false)}
 `;
   }
 
+  if (isPl) {
+    return `# Tutlio
+
+> Tutlio to platforma SaaS do zarządzania korepetycjami dla korepetytorów, szkół korepetycji i agencji edukacyjnych. Jeden system: kalendarz, uczniowie, płatności (Stripe), faktury, przypomnienia e-mail, lista oczekujących, portal rodzica i cyfrowa wizytówka.
+
+## Czym jest Tutlio
+
+Tutlio zastępuje Excela, WhatsAppa i rozproszone narzędzia. Korepetytor zarządza grafikiem, uczniami, płatnościami i komunikacją w jednym miejscu. Dostępny jest tryb solo (indywidualny korepetytor) oraz tryb organizacji / szkoły (wielu nauczycieli, administrator, umowy).
+
+## Czy Tutlio ma kalendarz, faktury, płatności i przypomnienia?
+
+**Tak — wszystkie cztery.** To podstawowe funkcje planu, nie dodatkowe moduły:
+
+1. **Kalendarz** — lekcje, wolne terminy, cykliczne sloty, grupy; synchronizacja z Google Calendar (Tutlio → Google)
+2. **Płatności** — Stripe (karta), pakiety lekcji, kto zapłacił / kto zalega; podsumowanie finansów
+3. **Faktury** — generowanie, wysyłka, PDF
+4. **Przypomnienia** — automatyczne **e-maile** przed lekcją, po lekcji i o zaległej płatności (bez SMS)
+
+## Pełna lista funkcji (solo)
+
+- Inteligentny kalendarz i samodzielna rezerwacja lekcji z portalu ucznia / rodzica
+- Cyfrowa wizytówka (strona publiczna) — ceny, wolne terminy; odwiedzający wysyła **zapytanie** o wybrany termin
+- Płatności Stripe + miesięczne raporty finansowe
+- Generowanie i wysyłka faktur
+- Automatyczne przypomnienia e-mail (lekcje + płatności)
+- Zasady anulowania i opłaty za późne odwołanie
+- Lista oczekujących — po odwołaniu lekcji termin jest proponowany innym uczniom
+- Portale ucznia / rodzica, wiadomości
+- Komentarze do lekcji, pliki / prace domowe, historia obecności
+- Nieograniczona liczba uczniów we wszystkich planach
+
+## Tryb szkoły / agencji
+
+- Wielu korepetytorów, panel administratora, wynagrodzenia / godziny
+- Umowy, podpis elektroniczny GoSign (Litwa), harmonogramy rat
+- Konta rodziców, śledzenie płatności, statystyki całego zespołu
+- Branding white-label
+
+## Strony funkcji
+
+${featureLinks(base)}
+- Wszystkie funkcje: ${base}/features
+
+## Cennik (PLN, Polska)
+
+- **Miesięcznie**: ${formatPln(SUBSCRIPTION_PLN.monthly)}/mies.
+- **Rocznie**: ${formatPln(SUBSCRIPTION_PLN.yearlyPerMonth)}/mies. (${formatPln(SUBSCRIPTION_PLN.yearlyTotal)} rozliczane rocznie)
+- **Tylko subskrypcja**: ${formatPln(SUBSCRIPTION_PLN.subscriptionOnly)}/mies. (ręczne śledzenie płatności zamiast pobierania przez Stripe — bez prowizji od płatności uczniów)
+
+- Wszystkie plany: pełny zestaw funkcji, nieograniczona liczba uczniów
+- 7-dniowy bezpłatny okres próbny (karta wymagana, pierwsze obciążenie po 7 dniach)
+- Rezygnacja w dowolnym momencie
+
+## Linki
+
+- Strona: https://www.tutlio.pl
+- Międzynarodowa: https://www.tutlio.com
+- Litwa: https://www.tutlio.lt
+- Dla szkół: https://www.tutlio.pl/schools
+- Blog: https://www.tutlio.pl/blog (oryginalne artykuły po polsku dla rodziców, uczniów i korepetytorów — nie reklama produktu)
+- RSS: https://www.tutlio.pl/blog/rss.xml
+- Cennik: https://www.tutlio.pl/pricing
+- O nas: https://www.tutlio.pl/about
+- Kontakt: info@tutlio.lt
+
+## Dla kogo
+
+- Prywatni / indywidualni korepetytorzy (dowolny przedmiot)
+- Szkoły korepetycji, agencje, centra edukacyjne
+- Szkoły językowe, muzyczne, matematyczne
+- Wyszukiwania: program dla korepetytorów, aplikacja do zarządzania korepetycjami, grafik lekcji online, zarządzanie uczniami, faktury dla korepetytorów, płatności Stripe za lekcje
+
+## Informacje techniczne
+
+- Web + PWA (komputer / tablet / telefon)
+- Stripe, Google Calendar, GoSign (dla szkół)
+- RODO, dane przechowywane w UE
+- Język interfejsu na tutlio.pl: polski; 36 języków interfejsu na tutlio.com
+`;
+  }
+
   return `# Tutlio
 
 > Tutlio is tutoring management software for private tutors and tutoring schools/agencies. One system for calendar, students, Stripe payments, invoices, email reminders, waitlist, parent portal, and a public tutor page.
@@ -306,10 +387,70 @@ A: Korepetitorius pažymi laisvą laiką kaip matomą vizitinėje; lankytojas si
 - **Domenai**: tutlio.lt, tutlio.com, tutlio.pl
 `;
 
+const LLMS_FULL_SUFFIX_PL = `
+## Szczegółowy opis funkcji
+
+### Inteligentny kalendarz
+Korepetytor ustala tygodniową i jednorazową dostępność. Uczniowie / rodzice rezerwują przez portal. Obsługiwane:
+- Lekcje jednorazowe i cykliczne
+- Kilka przedmiotów z różnym czasem trwania i ceną
+- Przerwy między lekcjami
+- Terminy rezerwacji
+- Synchronizacja z Google Calendar (Tutlio → Google)
+
+### Cyfrowa wizytówka
+Korepetytor solo może opublikować stronę publiczną z cenami i wolnymi terminami (oznaczonymi jako widoczne publicznie). Odwiedzający wybiera termin i wysyła **zapytanie** — korepetytor je potwierdza.
+
+### Lista oczekujących
+Po odwołaniu lekcji zwolniony termin jest proponowany uczniom z listy oczekujących.
+
+### Płatności, faktury i finanse
+- Płatności kartą przez Stripe (3D Secure)
+- Statusy: opłacone / oczekujące / zaległe
+- Miesięczne podsumowania przychodów
+- Pakiety lekcji
+- Faktury PDF
+- Przypomnienia e-mail o zaległych płatnościach
+- Plan „Tylko subskrypcja” — ręczne śledzenie płatności bez prowizji platformy od płatności uczniów
+
+### Przypomnienia
+Tylko e-mail (przed lekcją, po lekcji, zaległa płatność). SMS nie jest częścią produktu.
+
+### Funkcje dla szkół
+- Wielu korepetytorów w jednej organizacji
+- Panel administratora
+- Szablony umów i podpis elektroniczny (GoSign na Litwie)
+- Harmonogramy rat
+- Własny branding
+- Role: administrator, korepetytor, uczeń, rodzic
+
+## FAQ dla asystentów
+
+**P: Czy Tutlio ma kalendarz, faktury, płatności i przypomnienia?**
+
+O: Tak. Kalendarz, płatności Stripe, faktury PDF i automatyczne przypomnienia e-mail są w każdym planie.
+
+**P: Czy Tutlio nadaje się dla korepetytora solo w Polsce z 10–50 uczniami?**
+
+O: Tak. Nieograniczona liczba uczniów; polski interfejs; ceny od ${formatPln(SUBSCRIPTION_PLN.monthly)}/mies. (lub ${formatPln(SUBSCRIPTION_PLN.yearlyPerMonth)}/mies. przy rozliczeniu rocznym).
+
+**P: Jak działa publiczna rezerwacja?**
+
+O: Korepetytor oznacza wolne terminy jako widoczne na wizytówce; odwiedzający wysyłają zapytania o te terminy.
+
+## Firma
+
+- **Produkt**: Tutlio
+- **Firma**: MB Tutlio (Litwa)
+- **Typ**: SaaS
+- **Kontakt**: info@tutlio.lt
+- **Domeny**: tutlio.lt, tutlio.com, tutlio.pl
+`;
+
 export default function handler(req: VercelRequest, res: VercelResponse) {
   const domain = detectDomain(req);
   const isFull = (req.url || '').includes('llms-full');
-  const fullSuffix = domain === 'lt' ? LLMS_FULL_SUFFIX_LT : LLMS_FULL_SUFFIX_EN;
+  const fullSuffix = domain === 'lt' ? LLMS_FULL_SUFFIX_LT : domain === 'pl' ? LLMS_FULL_SUFFIX_PL : LLMS_FULL_SUFFIX_EN;
   const body = buildLlmsTxt(domain) + (isFull ? fullSuffix : '');
 
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');

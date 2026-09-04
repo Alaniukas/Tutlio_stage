@@ -1,4 +1,4 @@
-import { isMoksloVaisiaiOrg } from '@/lib/marketMoney';
+import { isMoksloVaisiaiOrg } from './marketMoney.js';
 
 /** MV-only: vaikas be portalo paskyros — pamokų info siunčiama mokėtojui, ne kitoms org. */
 export function moksloVaisiaiRoutesLessonCommsToPayer(opts: {

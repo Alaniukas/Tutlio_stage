@@ -25,6 +25,8 @@ import { SUBSCRIPTION_PLN } from '../src/lib/subscriptionPricing.js';
 import { formatPln } from '../src/lib/formatPln.js';
 import { getSeoMeta } from '../src/lib/seoMeta.js';
 import { localeAvailabilityParams } from '../src/lib/i18n/localeAvailability.js';
+import { hasLocalizedAssets } from '../src/lib/i18n/localeRelease.js';
+import { FEATURE_PAGES } from '../src/lib/featurePages.js';
 
 type PageId = 'landing' | 'pricing' | 'about' | 'contacts';
 
@@ -45,76 +47,146 @@ function ssrPlanPrice(locale: Locale, plan: 'monthly' | 'yearly' | 'subscription
   return eur(eurAmounts[plan]);
 }
 
+/** Sections mirror src/pages/NewLanding.tsx (solo audience, the SPA default)
+ * so crawlers and AI fetchers read the same page humans see. Keep the two in
+ * sync when the marketing landing changes. Placeholder social proof
+ * (LogoWall, CaseStudy, Testimonials) is deliberately left out until it names
+ * attributable customers. */
+const LANDING_OLD_TOOL_KEYS = ['spreadsheets', 'messages', 'calendar', 'reminders', 'contacts', 'calculator'];
+const LANDING_PILLARS = [
+  { titleKey: 'landing.insideStudents', subKey: 'landing.v2.pillar.studentsSub', path: '/features' },
+  { titleKey: 'landing.feature.calendar', subKey: 'landing.v2.pillar.calendarSub', path: FEATURE_PAGES.calendar.path },
+  { titleKey: 'landing.feature.payments', subKey: 'landing.v2.pillar.paymentsSub', path: FEATURE_PAGES.payments.path },
+  { titleKey: 'landing.feature.waitlist', subKey: 'landing.v2.pillar.waitlistSub', path: FEATURE_PAGES.waitlist.path },
+] as const;
+const LANDING_WALK_STEPS = ['Schedule', 'Calendar', 'Payment', 'Invoice'] as const;
+const LANDING_FEATURE_CARDS: { key: string; isNew?: boolean }[] = [
+  { key: 'digital-business-card', isNew: true },
+  { key: 'calendar' },
+  { key: 'waitlist' },
+  { key: 'payments' },
+  { key: 'reminders' },
+  { key: 'cancellation' },
+  { key: 'comments' },
+];
+
 function renderLanding(locale: Locale, domain: DomainKey): string {
   const languageParams = localeAvailabilityParams(locale);
-  const features = [
-    { key: 'digital-business-card', isNew: true },
-    { key: 'calendar' },
-    { key: 'waitlist' },
-    { key: 'payments' },
-    { key: 'reminders' },
-    { key: 'cancellation' },
-    { key: 'comments' },
-  ];
+  const pricingPath = buildPath('/pricing', locale, domain);
+  const featuresPath = buildPath('/features', locale, domain);
+  const contactsPath = buildPath(localizedPagePath('contacts', locale), locale, domain);
+  const calendarImage = `/landing/calendar-solo-${hasLocalizedAssets(locale) ? locale : 'en'}.jpg`;
+  const tx = (key: string, params?: Record<string, string | number>) => esc(t(locale, key, params));
 
-  const featuresHtml = features
+  const oldToolsHtml = LANDING_OLD_TOOL_KEYS.map((k) => `<li>${tx(`landing.v2.app.${k}`)}</li>`).join('');
+  const oldPillsHtml = ['oldPill1', 'oldPill2', 'oldPill3'].map((k) => `<li>${tx(`landing.v2.${k}`)}</li>`).join('');
+  const newPillsHtml = ['newPill1', 'newPill2'].map((k) => `<li>${tx(`landing.v2.${k}`)}</li>`).join('');
+
+  const bentoHtml = [
+    `<div class="card"><h3>${tx('landing.v2.bento2Title')}</h3><p>${tx('landing.v2.bento2Sub')}</p></div>`,
+    `<div class="card"><h3>${tx('landing.v2.bento3Title')}</h3><p>${tx('landing.v2.bento3Sub')}</p></div>`,
+    `<div class="card"><p class="badge">${tx('featuresIndex.newBadge')}</p><h3>${tx('landing.v2.bento4Title')}</h3><p>${tx('landing.v2.bento4Sub')}</p><p><a href="${buildPath(FEATURE_PAGES['digital-business-card'].path, locale, domain)}">${tx('landing.v2.businessCardCta')}</a></p></div>`,
+    `<div class="card"><h3>${tx('landing.v2.bento5Title')}</h3><p>${tx('landing.v2.bento5Sub')}</p></div>`,
+  ].join('\n');
+
+  const pillarsHtml = LANDING_PILLARS
     .map(
-      (f) => {
-        const featurePath = buildPath(`/features/${f.key}`, locale, domain);
-        return `<a href="${featurePath}" class="card" style="text-decoration:none;color:inherit">
-    ${f.isNew ? `<p style="display:inline-block;margin:0 0 8px;background:#4f46e5;color:#fff;padding:3px 8px;border-radius:999px;font-size:.68rem;font-weight:700;text-transform:uppercase">${esc(t(locale, 'featuresIndex.newBadge'))}</p>` : ''}
-    <h3>${esc(t(locale, `landing.feature.${f.key}`))}</h3>
-    <p>${esc(t(locale, `landing.feature.${f.key}Desc`))}</p>
+      (p) => `<a href="${buildPath(p.path, locale, domain)}" class="card" style="text-decoration:none;color:inherit">
+    <h3>${tx(p.titleKey)}</h3>
+    <p>${tx(p.subKey)}</p>
+  </a>`,
+    )
+    .join('\n');
+
+  const featuresHtml = LANDING_FEATURE_CARDS
+    .map((f) => {
+      const featurePath = buildPath(`/features/${f.key}`, locale, domain);
+      return `<a href="${featurePath}" class="card" style="text-decoration:none;color:inherit">
+    ${f.isNew ? `<p class="badge">${tx('featuresIndex.newBadge')}</p>` : ''}
+    <h3>${tx(`landing.feature.${f.key}`)}</h3>
+    <p>${tx(`landing.feature.${f.key}Desc`)}</p>
   </a>`;
-      },
-    )
+    })
     .join('\n');
 
-  const stepsHtml = [1, 2, 3]
+  const stepsHtml = LANDING_WALK_STEPS
     .map(
-      (n) => `<div class="card">
-    <h3>${n}. ${esc(t(locale, `landing.step${n}Title`))}</h3>
-    <p>${esc(t(locale, `landing.step${n}Desc`))}</p>
-  </div>`,
+      (step, i) => `<li class="card">
+    <h3>${i + 1}. ${tx(`landing.v2.walkStep${step}`)}</h3>
+    <p>${tx(`landing.v2.walkStep${step}Desc`)}</p>
+  </li>`,
     )
     .join('\n');
 
-  const faqItems = ['whatIs', 'whoFor', 'waitlist', 'freeTrial', 'languages'];
-  const faqHtml = faqItems
+  const faqHtml = LANDING_FAQ_KEYS
     .map(
       (f) => `<details>
-    <summary>${esc(t(locale, `landing.faq.${f}Q`))}</summary>
-    <p>${esc(t(locale, `landing.faq.${f}A`, f === 'languages' ? languageParams : undefined))}</p>
+    <summary>${tx(`landing.faq.${f}Q`)}</summary>
+    <p>${tx(`landing.faq.${f}A`, f === 'languages' ? languageParams : undefined)}</p>
   </details>`,
     )
     .join('\n');
 
-  const pricingPath = buildPath('/pricing', locale, domain);
+  const chipsHtml = ['chip1', 'chip2', 'chip3']
+    .map((k) => `<li>${tx(`landing.v2.${k}`, k === 'chip3' ? { count: languageParams.count } : undefined)}</li>`)
+    .join('');
 
   return `
 <div class="hero">
-  <h1>${esc(t(locale, 'landing.heroTitle'))}${esc(t(locale, 'landing.heroTitleHighlight'))}</h1>
-  <p>${t(locale, 'landing.heroDesc')}</p>
-  <a href="${pricingPath}" class="btn">${esc(t(locale, 'landing.ctaButton'))}</a>
+  <h1>${tx('landing.v2.heroTitleSolo')}${tx('landing.v2.heroTitleSoloHighlight')}</h1>
+  <p>${tx('landing.v2.heroSubSolo')}</p>
+  <a href="${pricingPath}" class="btn">${tx('landing.v2.heroCtaSolo')}</a>
+  <p class="hero-note">${tx('landing.v2.heroTrial')}</p>
 </div>
 <div class="section">
-  <h2>${esc(t(locale, 'landing.featuresTitle'))}</h2>
-  <p>${esc(t(locale, 'landing.featuresDesc'))}</p>
+  <h2>${tx('landing.v2.compareTitle')}</h2>
+  <p>${tx('landing.v2.compareSub')}</p>
+  <div class="grid">
+    <div class="card">
+      <h3>${tx('landing.v2.oldWay')}</h3>
+      <ul class="plain">${oldToolsHtml}</ul>
+      <ul class="pills">${oldPillsHtml}</ul>
+    </div>
+    <div class="card">
+      <h3>${tx('landing.v2.newWay')}</h3>
+      <ul class="pills">${newPillsHtml}</ul>
+    </div>
+  </div>
+</div>
+<div class="section">
+  <h2>${tx('landing.v2.bento1Title')}</h2>
+  <p>${tx('landing.v2.bento1Sub')}</p>
+  <img src="${calendarImage}" alt="${tx('landing.calendarAlt')}" loading="lazy" style="display:block;width:100%;height:auto;border-radius:16px;margin:8px 0 24px;border:1px solid #e5e7eb" />
+  <div class="grid">${bentoHtml}</div>
+</div>
+<div class="section">
+  <h2>${tx('landing.v2.pillarsTitle')}</h2>
+  <p>${tx('landing.v2.pillarsSub')}</p>
+  <div class="grid">${pillarsHtml}</div>
+  <p style="margin-top:24px"><a href="${featuresPath}">${tx('landing.v2.exploreAll')}</a></p>
+</div>
+<div class="section">
+  <h2>${tx('landing.featuresTitle')}</h2>
+  <p>${tx('landing.featuresDesc')}</p>
   <div class="grid">${featuresHtml}</div>
 </div>
 <div class="section">
-  <h2>${esc(t(locale, 'landing.stepsTitle'))}</h2>
-  <p>${esc(t(locale, 'landing.stepsDesc'))}</p>
-  <div class="grid">${stepsHtml}</div>
+  <h2>${tx('landing.v2.videoTitleSolo')}</h2>
+  <p>${tx('landing.v2.videoSubSolo')}</p>
+  <ol class="grid steps">${stepsHtml}</ol>
 </div>
 <div class="section">
-  <h2>${esc(t(locale, 'landing.faqTitle'))}</h2>
+  <h2>${tx('landing.faqTitle')}</h2>
+  <p>${tx('landing.v2.faqSub')}</p>
 </div>
-<div class="faq">${faqHtml}</div>
+<div class="faq">${faqHtml}
+  <p style="margin-top:24px"><a href="${featuresPath}">${tx('landing.v2.exploreAll')}</a> &middot; <a href="${contactsPath}">${tx('common.contacts')}</a></p>
+</div>
 <div class="section" style="text-align:center;padding:60px 24px">
-  <h2>${esc(t(locale, 'landing.ctaTitle'))}</h2>
-  <p>${esc(t(locale, 'landing.ctaDesc'))}</p>
-  <a href="${pricingPath}" class="btn">${esc(t(locale, 'landing.startFree'))}</a>
+  <h2>${tx('landing.ctaTitle')}</h2>
+  <p>${tx('landing.ctaDesc')}</p>
+  <p><a href="${pricingPath}" class="btn">${tx('landing.startFree')}</a> <a href="${featuresPath}" class="btn btn-secondary">${tx('landing.v2.ctaSecondary')}</a></p>
+  <ul class="chips">${chipsHtml}</ul>
 </div>`;
 }
 

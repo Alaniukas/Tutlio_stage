@@ -1,6 +1,6 @@
-import type { Platform } from '@/lib/platform';
-import type { Locale } from './core';
-import { PLATFORM_COPY_LOCALES } from './localeRelease';
+import type { Platform } from '../platform.js';
+import type { Locale } from './core.js';
+import { PLATFORM_COPY_LOCALES } from './localeRelease.js';
 
 type TermReplacement = [string, string] | [string, string, 'stem'];
 

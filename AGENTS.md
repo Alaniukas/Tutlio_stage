@@ -773,6 +773,7 @@ npm run security:pencheck
 22. **Serverio i18n bundle** — `api/_lib/i18n.ts` / `ssr-i18n.ts` negali statiniu importu krauti visų ~36 locale failų (~5k raktų). Extra kalbos tik per `loadExtraLocaleDict`. `FUNCTION_INVOCATION_FAILED` kviečiant korep — visoms org, ne tik Pro Klasei.
 23. **Join no-show ≠ tėvų laiškas** — cronas tik keičia `sessions.status`. Laiškas `session_student_no_show` tik po rankinio žymėjimo + `payer_email` + pasibaigęs `end_time`.
 24. **Atlygis pagal dalyką** — UI ir `company_commission_by_subject` tik `isManoKorepetitoriusOrg`. Pro Klasei netaikyti; ten lieka `proKlaseTutorPay.ts`.
+27. **API importų plėtiniai** — kiekvienas `src/lib/*` failas, kurį runtime pasiekia `api/*.ts`, privalo importuoti su `.js` (`from './i18n/locales.js'`), be `@/` alias. Node ESM Vercel funkcijoje neranda `./i18n/locales` → visa funkcija `FUNCTION_INVOCATION_FAILED` (2026-09-05 taip nukrito bot SSR: landing, pricing, blog, tutor puslapiai, `sitemap.xml`, auto-blog cron). Vitest/tsc to nemato — saugo `tests/api/esm-import-extensions.test.ts`; po deploy `npm run seo:smoke`.
 
 ---
 

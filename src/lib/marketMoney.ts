@@ -1,6 +1,6 @@
-import type { TutlioMarket } from './market';
-import { currentMarket } from './market';
-import { formatPln } from './formatPln';
+import type { TutlioMarket } from './market.js';
+import { currentMarket } from './market.js';
+import { formatPln } from './formatPln.js';
 
 export type ChargeCurrency = 'eur' | 'pln';
 

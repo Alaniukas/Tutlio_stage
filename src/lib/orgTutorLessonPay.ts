@@ -3,7 +3,7 @@
  * Per-subject overrides (profiles.company_commission_by_subject) apply only for
  * MB Mano korepetitorius. Pro Klasė keeps its own trial / no-show pay rules.
  */
-import { isManoKorepetitoriusOrg } from '@/lib/marketMoney';
+import { isManoKorepetitoriusOrg } from './marketMoney.js';
 
 export function parseTutorPayBySubject(raw: unknown): Record<string, number> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};

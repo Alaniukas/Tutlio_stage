@@ -1,5 +1,5 @@
-import { withEnglishLocaleFallback } from './i18n/locales';
-import type { Locale } from './i18n/core';
+import { withEnglishLocaleFallback } from './i18n/locales.js';
+import type { Locale } from './i18n/core.js';
 
 export type CoreSeoPage = 'landing' | 'pricing';
 
