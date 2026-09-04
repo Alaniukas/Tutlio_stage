@@ -22,6 +22,9 @@ operational work below after a production deployment.
    `FUNCTION_INVOCATION_FAILED`. Vitest and `tsc` resolve those imports and
    never notice; on 2026-09-05 this took down the crawler render of the home,
    pricing, about, contact, blog and tutor pages plus `sitemap.xml`.
+   For the runtime proof, `npm run verify:api-esm` compiles every function the
+   way Vercel does and imports each one under Node ESM; it must print
+   "All API functions resolve their imports" before you deploy.
 
 ## 2. Automated production verification
 
