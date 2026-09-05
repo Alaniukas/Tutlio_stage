@@ -129,14 +129,14 @@ describe('CompanyContracts list filter', () => {
 
     // Search without diacritics finds the diacritic name (within "Visos").
     pickFilter('Visos (2)');
-    fireEvent.change(screen.getByPlaceholderText('Ieškoti pagal mokinį, tėvą ar sutarties nr.'), {
+    fireEvent.change(screen.getByPlaceholderText('Ieškoti pagal mokinį, tėvą, dalyką, mokytoją ar sutarties nr.'), {
       target: { value: 'vegele' },
     });
     expect(screen.getByText('Vėgėlė Ąžuolas')).toBeTruthy();
     expect(screen.queryByText('Petraitis Jonas')).toBeNull();
 
     // No matches → dedicated empty message.
-    fireEvent.change(screen.getByPlaceholderText('Ieškoti pagal mokinį, tėvą ar sutarties nr.'), {
+    fireEvent.change(screen.getByPlaceholderText('Ieškoti pagal mokinį, tėvą, dalyką, mokytoją ar sutarties nr.'), {
       target: { value: 'nėra tokio' },
     });
     expect(screen.getByText('Pagal pasirinktą filtrą ar paiešką sutarčių nerasta.')).toBeTruthy();

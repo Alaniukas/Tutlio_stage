@@ -70,8 +70,8 @@ describe('school_extra_first_lesson_invite', () => {
       homeworkUrl: 'https://tutlio.lt/school-homework?student=s1&t=abc',
       waitsFor14Days: false,
     });
-    expect(subject).toBe('Kvietimas į pirmą pamoką — Austėja Mockutė, 2026-09-08 16:00');
-    expect(html).toContain('Prisijungti prie pamokos');
+    expect(subject).toBe('Kvietimas į pirmą užsiėmimą — Austėja Mockutė, 2026-09-08 16:00');
+    expect(html).toContain('Prisijungti prie užsiėmimo');
     expect(html).toContain('/api/join-session?');
     expect(html).toContain('school-homework?student=s1');
     expect(html).toContain('Demo Mokytoja Ana');
@@ -91,7 +91,7 @@ describe('school_extra_first_lesson_invite', () => {
       waitsFor14Days: true,
       homeworkUrl: 'https://tutlio.lt/school-homework?student=s1&t=abc',
     });
-    expect(subject).toBe('Kvietimas į pirmą pamoką — Austėja Mockutė');
+    expect(subject).toBe('Kvietimas į pirmą užsiėmimą — Austėja Mockutė');
     expect(html).toContain('antradienis 16:00–16:45');
     expect(html).toContain('2026-09-19');
     expect(html).toContain('14 dienų');

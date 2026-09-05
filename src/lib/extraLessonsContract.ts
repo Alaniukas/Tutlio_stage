@@ -101,6 +101,7 @@ export type ExtraLessonsOrderSnapshot = {
   data_protection_contact: string;
   group_id?: string | null;
   group_name?: string | null;
+  tutor_name?: string | null;
 };
 
 export const START_WITHIN_14_CHECKBOX_TEXT =
@@ -108,6 +109,15 @@ export const START_WITHIN_14_CHECKBOX_TEXT =
 
 export const EXTRA_LESSONS_TERMS_CHECKBOX_TEXT =
   'Perskaičiau Sutartį, susipažinau su jos priedais ir privatumo pranešimu, pateikti duomenys yra teisingi ir sutinku su Sutarties sąlygomis.';
+
+export const EXTRA_LESSONS_BEHAVIOR_RULES_CHECKBOX_APPEND =
+  'Patvirtinu, kad susipažinau ir sutinku su nuotolinių užsiėmimų elgesio taisyklėmis: vaikas turi prisijungti laiku savo vardu ir pavarde, laikytis mokytojo nurodymų, mandagiai bendrauti ir netrukdyti kitiems, nesidalinti užsiėmimo nuoroda bei nefotografuoti, nefilmuoti ir neįrašinėti užsiėmimo. Įsipareigoju supažindinti vaiką su šiomis taisyklėmis ir užtikrinti, kad jis jų laikytųsi.';
+
+export const EXTRA_LESSONS_FULL_TERMS_CHECKBOX_TEXT =
+  `${EXTRA_LESSONS_TERMS_CHECKBOX_TEXT} ${EXTRA_LESSONS_BEHAVIOR_RULES_CHECKBOX_APPEND}`;
+
+export const EXTRA_LESSONS_GROUP_MONTHLY_BILLING_NOTE =
+  'Grupiniai užsiėmimai užsakomi visam mėnesiui. Mokestis skaičiuojamas ir už tuos pagal tvarkaraštį įvykusius užsiėmimus, kuriuose vaikas nedalyvavo.';
 
 export type StartWithin14Status = 'yes' | 'no' | 'na';
 
@@ -155,6 +165,7 @@ export function buildExtraLessonsOrderSnapshot(input: {
   data_protection_contact?: string;
   group_id?: string | null;
   group_name?: string | null;
+  tutor_name?: string | null;
   individual_cancel_terms?: string;
   revision_label?: string;
 }): ExtraLessonsOrderSnapshot {
@@ -181,7 +192,7 @@ export function buildExtraLessonsOrderSnapshot(input: {
     indicative_monthly_eur: indicativeMonthlyPrice(base, unit),
     individual_cancel_terms:
       type === 'individual'
-        ? String(input.individual_cancel_terms || 'Individuali pamoka atšaukiama ne vėliau kaip 24 val. iki pradžios; vėliau pamoka apmokama.').trim()
+        ? String(input.individual_cancel_terms || 'Individualus užsiėmimas atšaukiamas ne vėliau kaip 24 val. iki pradžios; vėliau užsiėmimas apmokamas.').trim()
         : type === 'group'
           ? 'netaikoma'
           : String(input.individual_cancel_terms || '').trim(),
@@ -190,6 +201,7 @@ export function buildExtraLessonsOrderSnapshot(input: {
     data_protection_contact: String(input.data_protection_contact || input.school_email || '').trim(),
     group_id: input.group_id || null,
     group_name: input.group_name || null,
+    tutor_name: input.tutor_name ? String(input.tutor_name).trim() || null : null,
   };
 }
 

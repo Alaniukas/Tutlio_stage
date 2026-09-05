@@ -1694,8 +1694,10 @@ export default function StudentSessions() {
                                             {s.meeting_link && !isPast && (
                                                 <JoinLessonButton
                                                     session={s as any}
-                                                    showHint={false}
+                                                    showHint
                                                     stopPropagation
+                                                    inactiveClassName="ml-2 bg-gray-100 text-gray-400 px-2.5 py-1 rounded-lg text-xs font-bold cursor-not-allowed border border-gray-200"
+                                                    hintClassName="ml-2 text-[10px] text-gray-400"
                                                     className="ml-2 bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors"
                                                 >
                                                     {t('stuSess.joinLesson')}

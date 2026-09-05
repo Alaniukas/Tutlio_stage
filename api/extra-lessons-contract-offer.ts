@@ -147,7 +147,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const order = snapshotFromRow(contract) || buildExtraLessonsOrderSnapshot({
       unit_price_eur: Number(contract.unit_price_eur || 0),
-      service_name: 'Papildomos pamokos',
+      service_name: 'Papildomi užsiėmimai',
       duration_minutes: 0,
       start_date: '',
       end_date: '',
@@ -224,8 +224,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .maybeSingle();
   if (!student) return res.status(404).json({ error: 'Student not found' });
 
+  let tutorName = body.tutor_name ? String(body.tutor_name).trim() : '';
+  let groupName = body.group_name ? String(body.group_name) : null;
+  const groupId = body.group_id ? String(body.group_id) : null;
+  if (groupId && !tutorName) {
+    const { data: grp } = await supabase
+      .from('school_class_groups')
+      .select('name, tutor:profiles!school_class_groups_tutor_id_fkey(full_name)')
+      .eq('id', groupId)
+      .maybeSingle();
+    if (grp?.tutor?.full_name) tutorName = String(grp.tutor.full_name);
+    if (!groupName && grp?.name) groupName = String(grp.name);
+  }
+
   const order = buildExtraLessonsOrderSnapshot({
-    service_name: String(body.service_name || body.group_name || ''),
+    service_name: String(body.service_name || groupName || ''),
     service_type: parseExtraLessonsServiceType(body.service_type),
     platform: String(body.platform || ''),
     duration_minutes: Number(body.duration_minutes || 0),
@@ -239,8 +252,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     school_email: String(org?.email || ''),
     school_phone: String(org?.phone || ''),
     data_protection_contact: String(body.data_protection_contact || org?.email || ''),
-    group_id: body.group_id ? String(body.group_id) : null,
-    group_name: body.group_name ? String(body.group_name) : null,
+    group_id: groupId,
+    group_name: groupName,
+    tutor_name: tutorName || null,
     individual_cancel_terms: String(body.individual_cancel_terms || ''),
   });
   const missing = validateExtraLessonsOffer(order);

@@ -174,12 +174,20 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function bodyAlreadyShowsContactEmail(html: string, email: string): boolean {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return false;
+  const body = html.replace(/<div class="footer">[\s\S]*<\/div>/gi, '');
+  return body.toLowerCase().includes(normalized);
+}
+
 /** Org contact last; drop Tutlio opt-out so it is not mixed into the org footer. */
 export function injectOrgEmailFooter(html: string, extras: EmailFooterExtras): string {
   const phone = String(extras.contactPhone || '').trim();
   const email = String(extras.contactEmail || '').trim();
   const powered = extras.poweredByTutlio === true;
-  const brandedFooter = !!(phone || email || powered);
+  const skipFooterEmail = email && bodyAlreadyShowsContactEmail(html, email);
+  const brandedFooter = !!(phone || (email && !skipFooterEmail) || powered);
   if (!brandedFooter) return html;
 
   return html.replace(/<div class="footer">([\s\S]*?)<\/div>/g, (_full, inner: string) => {
@@ -204,7 +212,7 @@ export function injectOrgEmailFooter(html: string, extras: EmailFooterExtras): s
         `<p style="margin:12px 0 0;font-size:12px;color:#6b7280;">${escapeHtml(phone)}</p>`,
       );
     }
-    if (email) {
+    if (email && !skipFooterEmail) {
       const safe = escapeHtml(email);
       tail.push(
         `<p style="margin:4px 0 0;font-size:12px;color:#6b7280;"><a href="mailto:${safe}" style="color:#6b7280;text-decoration:none;">${safe}</a></p>`,

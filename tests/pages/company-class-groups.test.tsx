@@ -73,6 +73,23 @@ describe('CompanyClassGroups edit modal', () => {
     });
   });
 
+  it('renders the groups page without raw i18n keys', async () => {
+    render(
+      <OrgEntityProvider value="school">
+        <MemoryRouter initialEntries={['/school/groups']}>
+          <CompanyClassGroups />
+        </MemoryRouter>
+      </OrgEntityProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('QA Legal Matematika')).toBeTruthy();
+    });
+    expect(screen.getByText('Redaguoti')).toBeTruthy();
+    expect(screen.queryByText('common.edit')).toBeNull();
+    expect(screen.queryByText('school.groups.edit')).toBeNull();
+  });
+
   it('opens a wide edit modal from the group card with members to add or remove', async () => {
     render(
       <OrgEntityProvider value="school">

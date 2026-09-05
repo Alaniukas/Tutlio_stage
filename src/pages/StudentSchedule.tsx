@@ -253,6 +253,10 @@ export default function StudentSchedule() {
     const [creditBalance, setCreditBalance] = useState(0);
     const [activePackages, setActivePackages] = useState<LessonPackageSummary[]>([]);
     const [tutorOrgIsSchool, setTutorOrgIsSchool] = useState(false);
+    const defaultStaffName = useMemo(
+        () => (tutorOrgIsSchool ? t('role.staffSchool') : t('role.staff')),
+        [tutorOrgIsSchool, t],
+    );
     const [schoolClassGroupsEnabled, setSchoolClassGroupsEnabled] = useState(false);
     const [classGroups, setClassGroups] = useState<SchoolClassGroupRecord[]>([]);
     /** Org feature `disable_student_reschedule_cancel`: students/parents cannot move or cancel lessons.
@@ -1445,7 +1449,7 @@ export default function StudentSchedule() {
                 end: endDT,
                 price: selectedSubject?.price ?? null,
                 deadline,
-                tutorName: tutorProfile?.full_name ?? 'Korepetitorius',
+                tutorName: tutorProfile?.full_name ?? defaultStaffName,
                 tutorSoloManual: bookingTutorManual,
             });
             setShowPaymentModal(!usesPackage && requiresImmediatePayment);
@@ -1504,7 +1508,7 @@ export default function StudentSchedule() {
                         data: {
                             sessionId: sessionData.id,
                             studentName: studentName || 'Mokinys',
-                            tutorName: tutorProfile?.full_name || 'Korepetitorius',
+                            tutorName: tutorProfile?.full_name || defaultStaffName,
                             date: format(selectedTime, 'yyyy-MM-dd'),
                             time: format(selectedTime, 'HH:mm'),
                             subject: selectedSubject?.name || '',
@@ -1546,7 +1550,7 @@ export default function StudentSchedule() {
                             forPayer: true,
                             bookedBy: 'student',
                             studentName: studentName || 'Mokinys',
-                            tutorName: tutorProfile?.full_name || 'Korepetitorius',
+                            tutorName: tutorProfile?.full_name || defaultStaffName,
                             date: format(selectedTime, 'yyyy-MM-dd'),
                             time: format(selectedTime, 'HH:mm'),
                             subject: selectedSubject?.name || '',
@@ -1592,7 +1596,7 @@ export default function StudentSchedule() {
                                     to: payerEmail,
                                     data: {
                                         studentName: studentName || 'Mokinys',
-                                        tutorName: tutorProfile?.full_name || 'Korepetitorius',
+                                        tutorName: tutorProfile?.full_name || defaultStaffName,
                                         date: format(selectedTime, 'yyyy-MM-dd'),
                                         time: format(selectedTime, 'HH:mm'),
                                         amount: selectedSubject?.price ?? null,
@@ -1612,7 +1616,7 @@ export default function StudentSchedule() {
                                     to: payerEmail,
                                     data: {
                                         studentName: studentName || 'Mokinys',
-                                        tutorName: tutorProfile?.full_name || 'Korepetitorius',
+                                        tutorName: tutorProfile?.full_name || defaultStaffName,
                                         date: format(selectedTime, 'yyyy-MM-dd'),
                                         time: format(selectedTime, 'HH:mm'),
                                         amount: selectedSubject?.price ?? null,

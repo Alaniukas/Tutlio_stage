@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from './types';
 import {
-  EXTRA_LESSONS_TERMS_CHECKBOX_TEXT,
+  EXTRA_LESSONS_FULL_TERMS_CHECKBOX_TEXT,
   START_WITHIN_14_CHECKBOX_TEXT,
   canClickWrapAccept,
   freezeDocumentSource,
@@ -127,7 +127,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       body: filled,
       startWithin14Applies: start14.applies,
       firstLessonDate: start14.firstLessonYmd,
-      termsCheckboxText: EXTRA_LESSONS_TERMS_CHECKBOX_TEXT,
+      termsCheckboxText: EXTRA_LESSONS_FULL_TERMS_CHECKBOX_TEXT,
       startWithin14CheckboxText: START_WITHIN_14_CHECKBOX_TEXT,
       recordingsEnabled,
       legalLinks: {
@@ -179,7 +179,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ? null
     : recordingRaw === true ? true : recordingRaw === false ? false : null;
   if (recordingsEnabled && recordingConsent === null) {
-    return res.status(400).json({ error: 'Pasirinkite, ar sutinkate su pamokų įrašymu.' });
+    return res.status(400).json({ error: 'Pasirinkite, ar sutinkate su užsiėmimų įrašymu.' });
   }
   const acceptedAt = new Date();
   const resolved14 = resolveStartWithin14Status({

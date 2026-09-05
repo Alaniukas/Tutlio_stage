@@ -455,6 +455,8 @@ export default function App({ basename }: { basename: string }) {
           </Route>
         </Route>
 
+        <Route path="/contracts" element={<Navigate to="/school/contracts" replace />} />
+
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
       </Suspense>

@@ -14,6 +14,7 @@ import {
 import { ScheduleSlotPicker } from '@/components/company/ScheduleSlotPicker';
 import { authHeaders } from '@/lib/apiHelpers';
 import { useStaffLabels } from '@/hooks/useStaffLabels';
+import { usesLaisviStyleExtraLessonsPrefill } from '@/lib/laisviVaikaiExtraLessonsDefaults';
 import { useTranslation } from '@/lib/i18n';
 import {
   addMinutesToTime,
@@ -38,6 +39,7 @@ export type ClassGroupStudentOption = {
 export type ClassGroupTutorOption = {
   id: string;
   full_name: string;
+  personal_meeting_link?: string | null;
 };
 
 const WEEKDAY_KEYS: { v: number; key: 'cal.monday' | 'cal.tuesday' | 'cal.wednesday' | 'cal.thursday' | 'cal.friday' | 'cal.saturday' | 'cal.sunday' }[] = [
@@ -78,7 +80,8 @@ export default function ClassGroupFormDialog(props: {
   /** Org admins may delete a group (its future lessons go with it). */
   canDelete?: boolean;
   defaultTutorId: string;
-  onSaved: () => void;
+  organizationId?: string | null;
+  onSaved: (result?: { materializeError?: string | null }) => void;
   /** Resolves true when the group is gone; the dialog closes itself. */
   onDelete?: (group: SchoolClassGroupRecord) => Promise<boolean>;
 }) {
@@ -177,6 +180,16 @@ export default function ClassGroupFormDialog(props: {
     [studentIds, props.students, props.group],
   );
 
+  const extraLessonsQaPrefill = usesLaisviStyleExtraLessonsPrefill(props.organizationId);
+
+  const pickTutor = (id: string) => {
+    setTutorId(id);
+    if (!extraLessonsQaPrefill || !id) return;
+    const tutor = props.tutors.find((row) => row.id === id);
+    const link = String(tutor?.personal_meeting_link || '').trim();
+    if (link && !meetingLink.trim()) setMeetingLink(link);
+  };
+
   const tutorOptions = useMemo(() => {
     if (tutorId && !props.tutors.some((tutor) => tutor.id === tutorId)) {
       return [{ id: tutorId, full_name: staff }, ...props.tutors];
@@ -221,7 +234,7 @@ export default function ClassGroupFormDialog(props: {
         setBusy(false);
         return;
       }
-      props.onSaved();
+      props.onSaved(typeof data.materializeError === 'string' ? { materializeError: data.materializeError } : undefined);
       props.onOpenChange(false);
     } catch {
       setError(t('school.groups.saveError'));
@@ -254,7 +267,7 @@ export default function ClassGroupFormDialog(props: {
               <select
                 className="w-full border rounded-xl h-9 px-2 text-sm bg-white"
                 value={tutorId}
-                onChange={(e) => setTutorId(e.target.value)}
+                onChange={(e) => pickTutor(e.target.value)}
               >
                 <option value="">{t('school.groups.pickTeacher')}</option>
                 {tutorOptions.map((tutor) => (

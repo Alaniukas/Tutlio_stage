@@ -25,6 +25,8 @@ import {
   Globe,
   ShieldCheck,
   Video,
+  PanelLeftClose,
+  PanelLeft,
   UsersRound,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -43,6 +45,7 @@ import type { OrgAdminPermission } from '@/lib/orgAdminPermissions';
 
 /** Parked until Drive Meet ingest. Restore: true AND org flag `school_lesson_recordings`. */
 const SCHOOL_LESSON_RECORDINGS_NAV_READY = false;
+const SIDEBAR_COLLAPSED_KEY = 'tutlio_org_sidebar_collapsed';
 
 interface CompanyNavItem {
   href: string;
@@ -117,6 +120,25 @@ export default function CompanyLayout() {
     return (dashCache?.entityType as OrgEntityType) || 'company';
   });
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleSidebarCollapsed = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
 
   const setEntityType = (et: OrgEntityType) => {
     setEntityTypeRaw(et);
@@ -195,61 +217,85 @@ export default function CompanyLayout() {
   const isActive = (item: (typeof NAV_ITEMS)[0]) =>
     item.exact ? location.pathname === item.href : location.pathname.startsWith(item.href);
 
-  const sidebarBg = isSchool ? 'bg-emerald-950' : 'bg-slate-900';
-  const borderColor = isSchool ? 'border-emerald-800' : 'border-slate-700';
-  const inactiveText = isSchool ? 'text-emerald-300/60' : 'text-slate-400';
-  const headerIconColor = isSchool ? 'text-emerald-700' : 'text-slate-700';
+  const sidebarBg = isSchool ? 'bg-[#163028]' : 'bg-[#1c2430]';
+  const borderColor = isSchool ? 'border-white/10' : 'border-white/10';
+  const inactiveText = isSchool ? 'text-emerald-100/55' : 'text-slate-400';
+  const headerIconColor = isSchool ? 'text-emerald-800' : 'text-slate-700';
 
   const Sidebar = ({ mobile = false }: { mobile?: boolean }) => (
-    <nav className={cn('flex flex-col h-full min-h-0', mobile && 'pt-4')}>
-      <Link
-        to={orgBasePath}
-        onClick={() => setMobileOpen(false)}
-        className={cn('px-5 py-4 flex items-center gap-3 border-b flex-shrink-0', borderColor)}
-      >
-        <div className="w-9 h-9 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center flex-shrink-0">
-          <BrandIcon className="w-5 h-5 text-white" />
-        </div>
-        <div className="min-w-0">
-          <p className={cn('text-xs font-medium leading-none mb-0.5', inactiveText)}>{brandLabel}</p>
-          <p className="text-sm font-semibold text-white truncate">{orgName || '...'}</p>
-        </div>
-      </Link>
+    <nav className={cn('flex flex-col h-full min-h-0 font-[system-ui,-apple-system,"Segoe_UI",sans-serif]', mobile && 'pt-4')}>
+      <div className={cn('flex items-center gap-2 border-b flex-shrink-0 px-3 py-3', borderColor)}>
+        <Link
+          to={orgBasePath}
+          onClick={() => setMobileOpen(false)}
+          className={cn('flex min-w-0 flex-1 items-center gap-2.5', sidebarCollapsed && !mobile && 'justify-center')}
+          title={orgName || brandLabel}
+        >
+          <div className="w-8 h-8 rounded-md bg-white/10 flex items-center justify-center flex-shrink-0">
+            <BrandIcon className="w-4 h-4 text-white" />
+          </div>
+          {(!sidebarCollapsed || mobile) && (
+            <div className="min-w-0">
+              <p className={cn('text-[11px] leading-none mb-0.5', inactiveText)}>{brandLabel}</p>
+              <p className="text-[13px] font-medium text-white truncate">{orgName || '...'}</p>
+            </div>
+          )}
+        </Link>
+        {!mobile && (
+          <button
+            type="button"
+            onClick={toggleSidebarCollapsed}
+            className={cn(
+              'flex-shrink-0 rounded-md p-1.5 transition-colors hover:bg-white/10 hover:text-white',
+              inactiveText,
+            )}
+            title={sidebarCollapsed ? t('companyNav.expandSidebar') : t('companyNav.collapseSidebar')}
+            aria-label={sidebarCollapsed ? t('companyNav.expandSidebar') : t('companyNav.collapseSidebar')}
+          >
+            {sidebarCollapsed ? <PanelLeft className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+          </button>
+        )}
+      </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide px-3 py-3 space-y-4">
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide px-2 py-3 space-y-3">
         {NAV_SECTIONS.map((section) => {
           const items = NAV_ITEMS.filter((item) => item.section === section.id);
           if (items.length === 0) return null;
           return (
             <div key={section.id}>
-              <p className={cn('px-3 mb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em]', inactiveText)}>
-                {t(section.labelKey)}
-              </p>
+              {(!sidebarCollapsed || mobile) && (
+                <p className={cn('px-2.5 mb-1 text-[11px] font-medium', inactiveText)}>
+                  {t(section.labelKey)}
+                </p>
+              )}
               <div className="space-y-0.5">
                 {items.map((item) => {
                   const showChatBadge = item.href === `${orgBasePath}/messages` && chatUnreadTotal > 0;
+                  const active = isActive(item);
                   return (
                     <Link
                       key={item.href}
                       to={item.href}
                       onClick={() => setMobileOpen(false)}
+                      title={sidebarCollapsed && !mobile ? item.label : undefined}
                       className={cn(
-                        'relative flex items-center gap-3 px-3 rounded-lg font-medium transition-colors',
-                        mobile ? 'min-h-[44px] py-2 text-sm touch-manipulation' : 'py-1.5 text-[13px]',
-                        isActive(item)
-                          ? 'bg-white/15 text-white'
-                          : cn(inactiveText, 'hover:text-white hover:bg-white/10'),
+                        'relative flex items-center rounded-md transition-colors',
+                        sidebarCollapsed && !mobile ? 'justify-center px-2 py-2.5' : 'gap-2.5 px-2.5',
+                        mobile ? 'min-h-[44px] py-2 text-sm touch-manipulation' : 'py-2 text-[13px] leading-snug',
+                        active
+                          ? cn('bg-white/12 text-white', !sidebarCollapsed || mobile ? 'border-l-2 border-white/70 pl-2' : '')
+                          : cn(inactiveText, 'hover:text-white hover:bg-white/8'),
                       )}
                     >
                       <span className="relative flex-shrink-0">
-                        <item.icon className="w-4 h-4 flex-shrink-0" />
+                        <item.icon className="w-[17px] h-[17px] flex-shrink-0" strokeWidth={1.75} />
                         {showChatBadge && (
                           <span className="absolute -top-1 -right-1 min-w-[14px] h-3.5 px-0.5 rounded-full bg-rose-500 text-[9px] font-bold text-white flex items-center justify-center border border-slate-900">
                             {chatUnreadTotal > 9 ? '9+' : chatUnreadTotal}
                           </span>
                         )}
                       </span>
-                      {item.label}
+                      {(!sidebarCollapsed || mobile) && <span className="truncate">{item.label}</span>}
                     </Link>
                   );
                 })}
@@ -259,13 +305,18 @@ export default function CompanyLayout() {
         })}
       </div>
 
-      <div className={cn('px-3 pb-4 border-t pt-3 flex-shrink-0', borderColor, sidebarBg)}>
+      <div className={cn('px-2 pb-3 border-t pt-2 flex-shrink-0', borderColor, sidebarBg)}>
         <button
           onClick={handleLogout}
-          className={cn('flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium hover:text-white hover:bg-white/10 transition-colors w-full', inactiveText)}
+          title={sidebarCollapsed && !mobile ? t('common.logout') : undefined}
+          className={cn(
+            'flex items-center rounded-md text-[13px] hover:text-white hover:bg-white/8 transition-colors w-full',
+            sidebarCollapsed && !mobile ? 'justify-center px-2 py-2.5' : 'gap-2.5 px-2.5 py-2',
+            inactiveText,
+          )}
         >
-          <LogOut className="w-4 h-4 flex-shrink-0" />
-          {t('common.logout')}
+          <LogOut className="w-[17px] h-[17px] flex-shrink-0" strokeWidth={1.75} />
+          {(!sidebarCollapsed || mobile) && t('common.logout')}
         </button>
       </div>
     </nav>
@@ -276,7 +327,11 @@ export default function CompanyLayout() {
       <div className="flex h-dvh max-h-dvh flex-col overflow-hidden bg-[#f4f5f9]">
         <OrgSuspendedBanner />
         <div className="flex min-h-0 flex-1">
-          <aside className={cn('hidden lg:flex w-60 flex-shrink-0 flex-col', sidebarBg)}>
+          <aside className={cn(
+            'hidden lg:flex flex-shrink-0 flex-col transition-[width] duration-200',
+            sidebarCollapsed ? 'w-[4.25rem]' : 'w-56',
+            sidebarBg,
+          )}>
             <Sidebar />
           </aside>
 

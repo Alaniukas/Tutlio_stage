@@ -13,6 +13,7 @@ import ClassGroupFormDialog, {
   type ClassGroupStudentOption,
   type ClassGroupTutorOption,
 } from '@/components/company/ClassGroupFormDialog';
+import { usesLaisviStyleExtraLessonsPrefill } from '@/lib/laisviVaikaiExtraLessonsDefaults';
 import {
   classGroupMatchesQuery,
   classGroupTutorName,
@@ -49,7 +50,9 @@ export default function CompanyClassGroups() {
   const [editing, setEditing] = useState<SchoolClassGroupRecord | null>(null);
   const [tutorFilter, setTutorFilter] = useState<string>('all');
   const [query, setQuery] = useState('');
+  const [orgId, setOrgId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [materializeWarning, setMaterializeWarning] = useState<string | null>(null);
 
   const loadGroups = async () => {
     const headers = await authHeaders();
@@ -76,22 +79,30 @@ export default function CompanyClassGroups() {
         .select('id, full_name, organization_id')
         .eq('id', user.id)
         .maybeSingle();
-      const orgId = adminRow?.organization_id || profile?.organization_id;
+      const orgIdResolved = adminRow?.organization_id || profile?.organization_id || null;
+      setOrgId(orgIdResolved);
       const admin = Boolean(adminRow?.organization_id);
       setIsOrgAdmin(admin);
-      if (!orgId) return;
+      if (!orgIdResolved) return;
 
       const { data: studentRows } = await supabase
         .from('students')
         .select('id, full_name, grade, enrollment_status')
-        .eq('organization_id', orgId)
+        .eq('organization_id', orgIdResolved)
         .is('detached_at', null)
         .order('full_name');
       setStudents((studentRows || []) as ClassGroupStudentOption[]);
 
       if (admin) {
-        const visible = await getOrgVisibleTutors(supabase as never, orgId, 'id, full_name');
-        setTutors(visible.map((row) => ({ id: row.id, full_name: row.full_name || row.id })));
+        const tutorFields = usesLaisviStyleExtraLessonsPrefill(orgIdResolved)
+          ? 'id, full_name, personal_meeting_link'
+          : 'id, full_name';
+        const visible = await getOrgVisibleTutors(supabase as never, orgIdResolved, tutorFields);
+        setTutors(visible.map((row) => ({
+          id: row.id,
+          full_name: row.full_name || row.id,
+          personal_meeting_link: (row as { personal_meeting_link?: string | null }).personal_meeting_link ?? null,
+        })));
       } else if (profile) {
         setTutors([{ id: profile.id, full_name: profile.full_name || profile.id }]);
       }
@@ -184,7 +195,7 @@ export default function CompanyClassGroups() {
         </div>
         <span className="inline-flex items-center gap-1 shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800">
           <Pencil className="w-3.5 h-3.5" />
-          {t('common.edit')}
+          {t('school.groups.edit')}
         </span>
       </div>
     </button>
@@ -202,6 +213,13 @@ export default function CompanyClassGroups() {
           {t('school.groups.new')}
         </Button>
       </div>
+
+      {materializeWarning && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="alert">
+          <p className="font-semibold">{t('school.groups.materializeWarningTitle')}</p>
+          <p className="mt-1">{materializeWarning}</p>
+        </div>
+      )}
 
       {(showTutorTools || showSearch) && (
         <div className="flex flex-col sm:flex-row gap-2">
@@ -262,7 +280,12 @@ export default function CompanyClassGroups() {
         canEditMembers={isOrgAdmin}
         canDelete={isOrgAdmin}
         defaultTutorId={isOrgAdmin ? (tutors.length === 1 ? tutors[0].id : '') : userId}
-        onSaved={() => { dropCalendarCaches(); void loadGroups(); }}
+        organizationId={orgId}
+        onSaved={(result) => {
+          setMaterializeWarning(result?.materializeError ? t('school.groups.materializeWarningBody') : null);
+          dropCalendarCaches();
+          void loadGroups();
+        }}
         onDelete={deleteGroup}
       />
     </div>

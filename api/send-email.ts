@@ -580,7 +580,7 @@ function sessionReminderPayer(d: any, locale: Locale) {
     ? t(locale, 'em.reminderPayerSchoolLead', { student: d.studentName })
     : t(locale, 'em.reminderPayerBody', { student: d.studentName, tutor: d.tutorName });
   const homeworkButton = schoolFlow && d.homeworkUrl
-    ? `<div style="text-align:center; margin-top:10px;">${outlookEmailButton(String(d.homeworkUrl), 'Namų darbai ir pamokų medžiaga', '#059669', { fontWeight: '600', fontSize: '13px', padding: '11px 24px' })}</div>`
+    ? `<div style="text-align:center; margin-top:10px;">${outlookEmailButton(String(d.homeworkUrl), 'Namų darbai ir užsiėmimo medžiaga', '#059669', { fontWeight: '600', fontSize: '13px', padding: '11px 24px' })}</div>`
     : '';
   const cta = schoolFlow
     ? (d.meetingLink
@@ -2335,21 +2335,21 @@ function schoolContractExtraOffer(d: any, locale: Locale) {
     extraLessonsOfferRow('Paslauga', d.serviceName),
     extraLessonsOfferRow('Grafikas', d.schedule),
     extraLessonsOfferRow('Laikotarpis', period || d.period),
-    extraLessonsOfferRow('Pamokos kaina', d.unitPrice, { money: true }),
+    extraLessonsOfferRow('Užsiėmimo kaina', d.unitPrice, { money: true }),
     extraLessonsOfferRow('Orientacinė mėnesio kaina', d.monthlyPrice, { money: true }),
   ].filter(Boolean).join('');
   const contact = schoolParentContactEmail(d);
   return {
-    subject: `Papildomų pamokų sutartis${d.contractNumber ? ` Nr. ${d.contractNumber}` : ''} — ${d.studentName || 'Mokinys'}`,
+    subject: `Papildomų užsiėmimų sutartis${d.contractNumber ? ` Nr. ${d.contractNumber}` : ''} — ${d.studentName || 'Mokinys'}`,
     html: wrap(`
       <div class="header" style="${headerInlineStyle('#059669', '#047857')}">
-        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Papildomų pamokų sutartis</h1>
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Papildomų užsiėmimų sutartis</h1>
         <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${esc(d.schoolName || 'Mokykla')}</p>
       </div>
       <div class="body">
         <p class="greeting">Sveiki, ${esc(d.parentName || d.studentName || '')},</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          ${esc(d.schoolName || 'Mokykla')} parengė nuotolinių papildomų pamokų sutartį mokiniui
+          ${esc(d.schoolName || 'Mokykla')} parengė nuotolinių papildomų užsiėmimų sutartį mokiniui
           <strong>${esc(d.studentName)}</strong>. Atidarykite nuorodą, peržiūrėkite dokumentą ir, jei viskas tinka, patvirtinkite sutartį.
         </p>
         ${rows ? `<div class="info-card"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${rows}</table></div>` : ''}
@@ -2392,10 +2392,10 @@ function schoolExtraFirstLessonInvite(d: any, locale: Locale) {
   const hasSession = Boolean(d.sessionId && d.date && d.time);
   const contractRef = d.contractNumber ? ` Nr. ${d.contractNumber}` : '';
   const joinButton = hasSession && d.meetingLink
-    ? `<div style="text-align:center; margin:22px 0 6px;">${outlookEmailButton(String(d.meetingLink), 'Prisijungti prie pamokos', '#4f46e5', { fontWeight: '600', fontSize: '15px', padding: '14px 32px' })}</div>`
+    ? `<div style="text-align:center; margin:22px 0 6px;">${outlookEmailButton(String(d.meetingLink), 'Prisijungti prie užsiėmimo', '#4f46e5', { fontWeight: '600', fontSize: '15px', padding: '14px 32px' })}</div>`
     : '';
   const homeworkButton = d.homeworkUrl
-    ? `<div style="text-align:center; margin:6px 0 4px;">${outlookEmailButton(String(d.homeworkUrl), 'Namų darbai ir pamokų medžiaga', '#059669', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}</div>`
+    ? `<div style="text-align:center; margin:6px 0 4px;">${outlookEmailButton(String(d.homeworkUrl), 'Namų darbai ir užsiėmimo medžiaga', '#059669', { fontWeight: '600', fontSize: '14px', padding: '12px 28px' })}</div>`
     : '';
   const rows = hasSession
     ? [
@@ -2406,21 +2406,21 @@ function schoolExtraFirstLessonInvite(d: any, locale: Locale) {
       td('Grupė', String(d.groupName || '—'), false),
     ].join('')
     : [
-      d.serviceStartDate ? td('Pamokos nuo', String(d.serviceStartDate)) : '',
+      d.serviceStartDate ? td('Užsiėmimai nuo', String(d.serviceStartDate)) : '',
       d.scheduleLabel ? td('Tvarkaraštis', String(d.scheduleLabel)) : '',
       td('Grupė', String(d.groupName || '—'), false),
     ].join('');
   const lead = hasSession
-    ? `Sutartis${contractRef} patvirtinta. Kviečiame <strong>${d.studentName}</strong> į artimiausią pamoką:`
-    : `Sutartis${contractRef} patvirtinta. Artimiausios pamokos laiką patikslins mokykla — prisijungimo nuorodą atsiųsime priminimu el. paštu prieš pamoką.`;
+    ? `Sutartis${contractRef} patvirtinta. Kviečiame <strong>${d.studentName}</strong> į artimiausią užsiėmimą:`
+    : `Sutartis${contractRef} patvirtinta. Artimiausio užsiėmimo laiką patikslins mokykla — prisijungimo nuorodą atsiųsime priminimu el. paštu prieš užsiėmimą.`;
   const waitNote = d.waitsFor14Days && d.serviceStartDate
-    ? `<p style="color:#92400e; background:#fffbeb; border:1px solid #fde68a; border-radius:12px; padding:12px 14px; font-size:13px; line-height:1.6;">Pasirinkote pradėti pasibaigus 14 dienų atsisakymo terminui, todėl pamokos vyks nuo <strong>${d.serviceStartDate}</strong>.</p>`
+    ? `<p style="color:#92400e; background:#fffbeb; border:1px solid #fde68a; border-radius:12px; padding:12px 14px; font-size:13px; line-height:1.6;">Pasirinkote pradėti pasibaigus 14 dienų atsisakymo terminui, todėl užsiėmimai vyks nuo <strong>${d.serviceStartDate}</strong>.</p>`
     : '';
   return {
-    subject: `Kvietimas į pirmą pamoką — ${d.studentName || 'Mokinys'}${hasSession ? `, ${d.date} ${d.time}` : ''}`,
+    subject: `Kvietimas į pirmą užsiėmimą — ${d.studentName || 'Mokinys'}${hasSession ? `, ${d.date} ${d.time}` : ''}`,
     html: wrap(`
       <div class="header" style="${headerInlineStyle('#4f46e5', '#7c3aed')}">
-        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Kvietimas į pirmą pamoką</h1>
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Kvietimas į pirmą užsiėmimą</h1>
         <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${d.schoolName || 'Mokykla'}</p>
       </div>
       <div class="body">
@@ -2431,7 +2431,7 @@ function schoolExtraFirstLessonInvite(d: any, locale: Locale) {
         ${joinButton}
         ${homeworkButton}
         <p style="color:#6b7280; font-size:13px; line-height:1.6; margin-top:16px;">
-          Prieš kiekvieną pamoką atsiųsime priminimą su prisijungimo nuoroda. Namų darbus ir mokytojo medžiagą rasite pagal aukščiau esančią nuorodą — paskyros kurti nereikia.
+          Prieš kiekvieną užsiėmimą atsiųsime priminimą su prisijungimo nuoroda. Namų darbus ir mokytojo medžiagą rasite pagal aukščiau esančią nuorodą — paskyros kurti nereikia.
         </p>
       </div>${footerFor(locale)}`, locale),
   };
@@ -2444,10 +2444,10 @@ function schoolMonthlyInvoice(d: any, locale: Locale) {
   const rows = [
     td('Laikotarpis', String(d.periodLabel || `${d.periodStart} – ${d.periodEnd}`)),
     baseLessons > 0
-      ? td(`Bazinės pamokos (${baseLessons} × ${emailMoney(d.unitPrice, locale)})`, emailMoney(d.baseAmount, locale))
+      ? td(`Baziniai užsiėmimai (${baseLessons} × ${emailMoney(d.unitPrice, locale)})`, emailMoney(d.baseAmount, locale))
       : '',
     extraLessons > 0
-      ? td(`Papildomos pamokos (${extraLessons} × ${emailMoney(d.unitPrice, locale)})`, emailMoney(d.extraAmount, locale))
+      ? td(`Papildomi užsiėmimai (${extraLessons} × ${emailMoney(d.unitPrice, locale)})`, emailMoney(d.extraAmount, locale))
       : '',
     td('Mokėtina suma', `<strong>${emailMoney(d.totalAmount, locale)}</strong>`),
     td('Apmokėti iki', String(d.dueDate || '—'), false),
@@ -2460,13 +2460,13 @@ function schoolMonthlyInvoice(d: any, locale: Locale) {
     subject: `Sąskaita už ${d.periodLabel || 'mėnesį'} — ${d.studentName || 'Mokinys'}`,
     html: wrap(`
       <div class="header" style="${headerInlineStyle('#0f766e', '#115e59')}">
-        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Papildomų pamokų sąskaita</h1>
+        <h1 style="color:#ffffff; font-size:22px; margin:0; font-weight:700;">Papildomų užsiėmimų sąskaita</h1>
         <p style="color:rgba(255,255,255,0.85); font-size:14px; margin:8px 0 0;">${d.schoolName || 'Mokykla'}</p>
       </div>
       <div class="body">
         <p class="greeting">Sveiki${d.parentName ? `, ${d.parentName}` : ''}!</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          Pateikiame <strong>${d.studentName || 'mokinio'}</strong> papildomų pamokų sąskaitą už ${d.periodLabel || 'praėjusį mėnesį'}${d.contractNumber ? ` (sutartis Nr. ${d.contractNumber})` : ''}.
+          Pateikiame <strong>${d.studentName || 'mokinio'}</strong> papildomų užsiėmimų sąskaitą už ${d.periodLabel || 'praėjusį mėnesį'}${d.contractNumber ? ` (sutartis Nr. ${d.contractNumber})` : ''}.
         </p>
         <div class="info-card"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${rows}</table></div>
         ${payBlock}
@@ -2486,7 +2486,7 @@ function schoolContractExtraWithdrawn(d: any, locale: Locale) {
       <div class="body">
         <p class="greeting">Sveiki, ${esc(d.parentName || d.studentName || '')},</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          Gavome jūsų atsisakymą nuo papildomų pamokų sutarties per 14 dienų terminą. Pareiškimo kopija pridėta.
+          Gavome jūsų atsisakymą nuo papildomų užsiėmimų sutarties per 14 dienų terminą. Pareiškimo kopija pridėta.
           Mokytojo atskirai informuoti nereikia.
         </p>
         <div class="info-card">
@@ -2510,7 +2510,7 @@ function schoolContractExtraTerminated(d: any, locale: Locale) {
       <div class="body">
         <p class="greeting">Sveiki, ${esc(d.parentName || d.studentName || '')},</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
-          Gavome prašymą nutraukti papildomų pamokų sutartį. Pareiškimo kopija pridėta.
+          Gavome prašymą nutraukti papildomų užsiėmimų sutartį. Pareiškimo kopija pridėta.
           Mokytojo atskirai informuoti nereikia.
         </p>
         <div class="info-card">
