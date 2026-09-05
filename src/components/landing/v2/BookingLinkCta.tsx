@@ -88,7 +88,7 @@ function BookingAnimation() {
                   key={slot}
                   className={`flex items-center justify-between rounded-md border px-2.5 py-2 text-[11px] font-medium transition-all duration-300 ${
                     i === picked
-                      ? 'border-violet-500 bg-violet-50 text-violet-700'
+                      ? 'border-zinc-900 bg-zinc-900 text-white'
                       : 'border-gray-200 bg-white text-gray-600'
                   }`}
                 >

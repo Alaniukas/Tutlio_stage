@@ -1,4 +1,4 @@
-import { SUPPORTED_LOCALES, LEGACY_LOCALES, type Locale } from './locales.js';
+import { SUPPORTED_LOCALES, LEGACY_LOCALES, PENDING_TRANSLATION_LOCALES, type Locale } from './locales.js';
 
 /** Public application language options. Search publication remains independently
  * gated below so releasing the UI cannot index English-fallback legal, school or
@@ -14,14 +14,26 @@ export type BlogSchemaLocale = (typeof BLOG_SCHEMA_LOCALES)[number];
 export const LOCALIZED_ASSET_LOCALES: readonly Locale[] = [...LEGACY_LOCALES];
 export const PLATFORM_COPY_LOCALES: readonly Locale[] = [...LEGACY_LOCALES];
 
+/**
+ * 2026-09-05: every registered locale renders fully localized marketing,
+ * feature, schools and public-page HTML (scripts/seo-locale-readiness.ts), so
+ * those surfaces publish all 36. Legal pages and the blog stay on the legacy
+ * 13: the newer locales still serve English legal text and have no blog
+ * columns, and neither may be indexed under a foreign lang code.
+ */
+const ALL_LOCALES: readonly Locale[] = [...LEGACY_LOCALES, ...PENDING_TRANSLATION_LOCALES];
+
 export const SEO_LOCALES_BY_SURFACE: Record<SeoSurface, readonly Locale[]> = {
-  marketing: [...LEGACY_LOCALES],
-  schools: [...LEGACY_LOCALES],
+  marketing: [...ALL_LOCALES],
+  schools: [...ALL_LOCALES],
   legal: [...LEGACY_LOCALES],
-  publicPage: [...LEGACY_LOCALES],
+  publicPage: [...ALL_LOCALES],
   blog: [...LEGACY_LOCALES],
+  // Competitor comparisons are hand-written per market rather than translated
+  // UI copy, so only the three domain languages are published to search.
+  compare: ['en', 'lt', 'pl'],
 };
-export type SeoSurface = 'marketing' | 'schools' | 'legal' | 'publicPage' | 'blog';
+export type SeoSurface = 'marketing' | 'schools' | 'legal' | 'publicPage' | 'blog' | 'compare';
 
 /** Known dictionaries that are still withheld from public selectors. */
 export const DRAFT_UI_LOCALES = SUPPORTED_LOCALES.filter(
@@ -44,6 +56,7 @@ export function seoSurfaceForPath(path: string): SeoSurface {
   const segments = path.split(/[?#]/)[0].split('/').filter(Boolean);
   if ((SUPPORTED_LOCALES as readonly string[]).includes(segments[0])) segments.shift();
   if (segments[0] === 'schools') return 'schools';
+  if (segments[0] === 'compare') return 'compare';
   if (['privacy-policy', 'terms', 'dpa'].includes(segments[0])) return 'legal';
   if (segments[0] === 'blog') return 'blog';
   if (['tutor', 'korepetitorius'].includes(segments[0])) return 'publicPage';

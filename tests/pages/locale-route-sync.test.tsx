@@ -26,11 +26,11 @@ describe('language navigation', () => {
     meta.name = 'robots'; meta.content = 'index, nofollow, noarchive';
     document.head.appendChild(meta);
     try {
-      const restore = applyLocalePublicationMeta('he', '/he/login');
+      const restore = applyLocalePublicationMeta('he', '/he/blog');
       expect(meta.content).toBe('noindex, nofollow, noarchive');
       restore();
       expect(meta.content).toBe('index, nofollow, noarchive');
-      const restoreAgain = applyLocalePublicationMeta('he', '/he/login');
+      const restoreAgain = applyLocalePublicationMeta('he', '/he/blog');
       meta.content = 'noindex, nofollow, nosnippet';
       restoreAgain();
       expect(meta.content).toBe('noindex, nofollow, nosnippet');
@@ -55,7 +55,7 @@ describe('language navigation', () => {
     expect(sync('/login?lang=unknown')).not.toHaveBeenCalled();
   });
   it('marks draft pages noindex and removes its temporary tag on unmount', () => {
-    sync('/he/login', 'he');
+    sync('/he/blog', 'he');
     expect(document.querySelector('meta[name="robots"]')?.getAttribute('content')).toBe('noindex, follow');
     cleanup();
     expect(document.querySelector('meta[name="robots"]')).toBeNull();
@@ -69,8 +69,9 @@ describe('language navigation', () => {
       restore();
       applyLocalePublicationMeta('it', '/it/pricing')();
       expect(document.querySelector('meta[name="robots"]')).toBeNull();
+      // Schools marketing is published for Italian since 2026-09-05, so no temporary tag is added.
       sync('/it/pricing', 'it', 'schools');
-      expect(document.querySelector('meta[name="robots"]')?.getAttribute('content')).toBe('noindex, follow');
+      expect(document.querySelector('meta[name="robots"]')).toBeNull();
     } finally {
       SEO_LOCALES_BY_SURFACE.marketing = prior;
     }

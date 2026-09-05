@@ -16,7 +16,6 @@ import { TUTOR_PLANS, eur } from '@/lib/pricing';
 import { isPlMarket } from '@/lib/market';
 import { formatPln } from '@/lib/formatPln';
 import { tutorPlanPriceLabels } from '@/lib/pricingDisplay';
-import { subscriptionPriceLabels } from '@/lib/subscriptionPricing';
 import PwaInstallGuide from '@/components/PwaInstallGuide';
 import OrgTutorPolicyModal from '@/components/OrgTutorPolicyModal';
 
@@ -332,8 +331,8 @@ export default function SettingsPage() {
     const price = formatPrice(profile.subscription_price_amount, profile.subscription_price_currency);
     if (price) return price;
     return profile.subscription_plan === 'yearly'
-      ? (isPlMarket() ? subscriptionPriceLabels.yearlyTotal() : eur(TUTOR_PLANS.yearly.pricePerYearEur))
-      : (isPlMarket() ? subscriptionPriceLabels.monthly() : eur(TUTOR_PLANS.monthly.pricePerMonthEur));
+      ? tutorPlanPriceLabels.yearlyTotal()
+      : tutorPlanPriceLabels.monthly();
   };
 
   return (

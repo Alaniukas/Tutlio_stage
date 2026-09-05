@@ -38,13 +38,7 @@ function AnimatedCount({ value }: { value: number }) {
   return <span ref={ref}>{display.toLocaleString()}</span>;
 }
 
-export default function HeroSection({
-  audience,
-  onAudienceChange,
-}: {
-  audience: LandingAudience;
-  onAudienceChange: (a: LandingAudience) => void;
-}) {
+export default function HeroSection({ audience }: { audience: LandingAudience }) {
   const { t, locale } = useTranslation();
   const isSolo = audience === 'solo';
 
@@ -67,40 +61,6 @@ export default function HeroSection({
       <div className="mx-auto w-full max-w-[1224px] px-5 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
         <div className="flex flex-col items-center gap-10 lg:flex-row lg:items-center lg:gap-16 xl:gap-20">
           <div className="flex flex-1 flex-col items-center gap-5 text-center sm:gap-6 lg:items-start lg:text-start">
-            <div
-              role="tablist"
-              aria-label={t('landing.v2.audienceLabel')}
-              className="flex flex-wrap items-baseline justify-center gap-x-4 gap-y-1 lg:justify-start"
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={isSolo}
-                onClick={() => onAudienceChange('solo')}
-                className={`border-b-2 pb-0.5 text-[15px] transition-colors sm:text-base ${
-                  isSolo
-                    ? 'border-zinc-900 font-semibold text-zinc-900'
-                    : 'border-transparent font-normal text-zinc-400 hover:text-zinc-700'
-                }`}
-              >
-                {t('landing.v2.audienceSolo')}
-              </button>
-              <span className="text-zinc-300" aria-hidden>·</span>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={!isSolo}
-                onClick={() => onAudienceChange('biz')}
-                className={`border-b-2 pb-0.5 text-[15px] transition-colors sm:text-base ${
-                  !isSolo
-                    ? 'border-zinc-900 font-semibold text-zinc-900'
-                    : 'border-transparent font-normal text-zinc-400 hover:text-zinc-700'
-                }`}
-              >
-                {t('landing.v2.audienceBiz')}
-              </button>
-            </div>
-
             <h1 className="font-display text-[32px] font-bold leading-[1.15] tracking-[-1.5px] text-zinc-900 sm:text-[40px] lg:text-[50px] lg:tracking-[-2px] rtl:tracking-normal">
               {t(isSolo ? 'landing.v2.heroTitleSolo' : 'landing.v2.heroTitleBiz')}
               <span className="text-zinc-900">

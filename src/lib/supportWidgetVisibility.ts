@@ -1,9 +1,9 @@
 /**
  * Landing routes, with or without a locale prefix ("/", "/lt", "/new-landing",
- * "/lt/new-landing"). Everything else on the marketing site — pricing, blog,
+ * "/lt/new-landing", "/for-tutors"). Everything else on the marketing site - pricing, blog,
  * features, tutor pages, the quiz — is out of scope.
  */
-const LANDING_PATHS = ['/', '/new-landing'];
+const LANDING_PATHS = ['/', '/new-landing', '/for-tutors'];
 
 /** Strip an optional leading locale segment ("/lt/new-landing" → "/new-landing"). */
 function withoutLocalePrefix(pathname: string): string {

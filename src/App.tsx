@@ -19,6 +19,8 @@ const AboutUs = lazy(() => import('@/pages/AboutUs'));
 const Contact = lazy(() => import('@/pages/Contact'));
 const FeaturePage = lazy(() => import('@/pages/FeaturePage'));
 const FeaturesIndexPage = lazy(() => import('@/pages/FeaturesIndexPage'));
+const ComparePage = lazy(() => import('@/pages/ComparePage'));
+const CompareIndexPage = lazy(() => import('@/pages/CompareIndexPage'));
 const Pricing = lazy(() => import('@/pages/Pricing'));
 const Blog = lazy(() => import('@/pages/Blog'));
 const BlogPost = lazy(() => import('@/pages/BlogPost'));
@@ -271,6 +273,13 @@ export default function App({ basename }: { basename: string }) {
             /:locale above, so /new-landing is never read as a locale. */}
         <Route path="/new-landing" element={<Landing />} />
         <Route path="/:locale/new-landing" element={<Landing />} />
+        {/* Solo-tutor landing on its own URL; `/` is the agency/school landing. */}
+        <Route path="/for-tutors" element={<Landing audience="solo" />} />
+        <Route path="/:locale/for-tutors" element={<Landing audience="solo" />} />
+        <Route path="/compare" element={<CompareIndexPage />} />
+        <Route path="/:locale/compare" element={<CompareIndexPage />} />
+        <Route path="/compare/:competitor" element={<ComparePage />} />
+        <Route path="/:locale/compare/:competitor" element={<ComparePage />} />
         <Route path="/apie-mus" element={<AboutUs />} />
         <Route path="/:locale/apie-mus" element={<AboutUs />} />
         {/* English aliases — same canonical pages, kept in sync with bot SSR (middleware.ts). */}

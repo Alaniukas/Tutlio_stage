@@ -1,4 +1,7 @@
-import { TUTOR_PLANS, eur } from '../../src/lib/pricing.js';
+import { TUTOR_PLANS, TUTOR_PLANS_USD, eur, usd } from '../../src/lib/pricing.js';
+import { USD_LOCALES } from '../../src/lib/localeCurrency.js';
+import { LOCALE_NAMES } from '../../src/lib/i18n/locales.js';
+
 import { SUBSCRIPTION_PLN, formatSubscriptionPln } from '../../src/lib/subscriptionPricing.js';
 import {
   PRODUCT_SUPPORT_AREA_IDS,
@@ -27,6 +30,10 @@ const yearlyTotalEur = eur(TUTOR_PLANS.yearly.pricePerYearEur);
 const noCommissionEur = eur(TUTOR_PLANS.subscriptionOnly.pricePerMonthEur);
 const monthlyPln = formatSubscriptionPln(SUBSCRIPTION_PLN.monthly, { perMonth: true });
 const yearlyMonthlyPln = formatSubscriptionPln(SUBSCRIPTION_PLN.yearlyPerMonth, { perMonth: true });
+const monthlyUsd = usd(TUTOR_PLANS_USD.monthly.pricePerMonth);
+const yearlyMonthlyUsd = usd(TUTOR_PLANS_USD.yearly.pricePerMonth);
+const noCommissionUsd = usd(TUTOR_PLANS_USD.subscriptionOnly.pricePerMonth);
+const usdMarketNames = USD_LOCALES.map((l) => LOCALE_NAMES[l]).join(', ');
 const { minLicenses: enterpriseMinLicenses, maxSelfServe: enterpriseMaxSelfServe } = getEnterpriseLicenseBounds();
 
 export const ENTERPRISE_SELF_SERVE_SUPPORT_KNOWLEDGE = `
@@ -115,6 +122,7 @@ export const SUPPORT_KNOWLEDGE_AREAS: readonly SupportKnowledgeArea[] = [
 - EUR yearly plan: ${yearlyMonthlyEur}/month, billed as ${yearlyTotalEur} per year.
 - EUR Subscription Only plan: ${noCommissionEur}/month; it keeps full platform access but uses manual payment tracking instead of collecting student payments through Tutlio, so there is no Tutlio commission on those student payments.
 - Poland list pricing: ${monthlyPln} monthly or ${yearlyMonthlyPln} on the yearly plan.
+- USD list pricing for interface languages without a supported local currency (${usdMarketNames}): ${monthlyUsd}/month, ${yearlyMonthlyUsd}/month on the yearly plan, ${noCommissionUsd}/month Subscription Only. Same numbers as EUR, charged in USD at checkout.
 - Solo plans include all main product features and unlimited students.
 - New solo subscriptions include a 7-day free trial. A payment card is entered at checkout, the first charge is after the trial, and the subscription can be cancelled during the trial.
 - Plans can be cancelled from Settings / the Stripe customer portal. Access continues until the end of the paid billing period.

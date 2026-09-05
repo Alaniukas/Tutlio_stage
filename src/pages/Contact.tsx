@@ -1,5 +1,6 @@
 import LandingNavbar from '@/components/LandingNavbar';
 import LandingFooter from '@/components/LandingFooter';
+import FeatureIcon from '@/components/landing/FeatureIcon';
 import { Phone, Mail, MapPin } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 
@@ -35,27 +36,21 @@ export default function Contact() {
                 </div>
                 <div className="space-y-5">
                   <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-[#4f46e5] shrink-0">
-                      <Phone className="w-[18px] h-[18px]" />
-                    </div>
+                    <FeatureIcon icon={Phone} />
                     <div>
                       <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">{t('common.phone')}</p>
                       <a href="tel:+37062394956" className="text-[15px] font-semibold text-gray-900 hover:text-[#4f46e5] transition-colors">+370 623 94956</a>
                     </div>
                   </div>
                   <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-[#4f46e5] shrink-0">
-                      <Mail className="w-[18px] h-[18px]" />
-                    </div>
+                    <FeatureIcon icon={Mail} />
                     <div>
                       <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">{t('common.email')}</p>
                       <a href="mailto:info@tutlio.lt" className="text-[15px] font-semibold text-gray-900 hover:text-[#4f46e5] transition-colors">info@tutlio.lt</a>
                     </div>
                   </div>
                   <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-[#4f46e5] shrink-0">
-                      <MapPin className="w-[18px] h-[18px]" />
-                    </div>
+                    <FeatureIcon icon={MapPin} />
                     <div>
                       <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">{t('common.location')}</p>
                       <p className="text-[15px] font-semibold text-gray-900">{t('common.lithuania')}</p>

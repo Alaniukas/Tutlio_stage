@@ -30,7 +30,7 @@ describe('translation-ready international locales', () => {
     expect(getLocaleFromPathname(url)).toBe(locale);
     expect(stripLocalePrefix(url)).toBe('/company/login');
     expect(buildCanonicalUrl('/pricing', locale)).toBe(`https://www.tutlio.com/${locale}/pricing`);
-    expect(hreflangTags('/pricing')).not.toContain(`hreflang="${htmlLanguageCode(locale)}"`);
+    expect(hreflangTags('/pricing')).toContain(`hreflang="${htmlLanguageCode(locale)}"`);
   });
 
   it('keeps regional tags and Arabic direction distinct from URL slugs', () => {

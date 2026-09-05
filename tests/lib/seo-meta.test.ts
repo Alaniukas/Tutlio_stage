@@ -27,6 +27,22 @@ describe('localized SEO metadata', () => {
 
     expect(landingTitles.size).toBe(TRANSLATED_LOCALES.length);
   });
+
+  it('gives the solo-tutor landing its own search copy in every translated locale', () => {
+    for (const locale of TRANSLATED_LOCALES) {
+      const landing = getSeoMeta(locale, 'landing');
+      const forTutors = getSeoMeta(locale, 'forTutors');
+
+      expect(forTutors.title).toContain('Tutlio');
+      expect(forTutors.title.length, `${locale} forTutors title`).toBeGreaterThanOrEqual(35);
+      expect(forTutors.title.length, `${locale} forTutors title`).toBeLessThanOrEqual(65);
+      expect(forTutors.description.length, `${locale} forTutors description`).toBeGreaterThanOrEqual(90);
+      expect(forTutors.description.length, `${locale} forTutors description`).toBeLessThanOrEqual(180);
+      expect(forTutors.title).not.toBe(landing.title);
+      expect(forTutors.description).not.toBe(landing.description);
+      expect(forTutors.description).not.toContain('—');
+    }
+  });
 });
 
 describe('blog crawler HTML', () => {

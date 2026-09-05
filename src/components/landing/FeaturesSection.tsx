@@ -7,6 +7,7 @@ import {
   Clock, Palette, PenTool,
 } from 'lucide-react';
 import Reveal from './Reveal';
+import FeatureIcon from './FeatureIcon';
 import type { LandingVariant } from './HeroSection';
 import { PUBLIC_PRODUCT_FEATURE_HUB_IDS } from '@/lib/productFeatureCatalog';
 
@@ -216,9 +217,7 @@ export default function FeaturesSection({ variant = 'tutor' }: { variant?: Landi
                       {t(`${p}.hl.comingSoon`)}
                     </span>
                   )}
-                  <div className="w-10 h-10 rounded-xl bg-[#4f46e5]/10 flex items-center justify-center mb-4">
-                    <Icon className="w-5 h-5 text-[#4f46e5]" />
-                  </div>
+                  <FeatureIcon icon={Icon} className="mb-4" />
                   <h3 className="font-semibold text-gray-900 text-[14px] mb-1.5">
                     {t(`${p}.hl.${feat.key}`)}
                   </h3>

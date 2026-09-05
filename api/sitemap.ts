@@ -12,6 +12,7 @@ import {
 } from './_lib/seo-routing.js';
 import { evaluatePublicPageSeo } from '../src/lib/publicPage.js';
 import { BLOG_SCHEMA_LOCALES, isSeoPublished, seoLocalesForPath } from '../src/lib/i18n/localeRelease.js';
+import { COMPARE_HUB_PATH, COMPARISON_PAGE_IDS, comparePagePath } from '../src/lib/comparisonPages.js';
 
 function getSupabase() {
   const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -21,7 +22,7 @@ function getSupabase() {
 }
 
 /** Bump when marketing copy meaningfully changes — emitted as <lastmod>. */
-const STATIC_LASTMOD = '2026-08-10';
+const STATIC_LASTMOD = '2026-09-05';
 
 interface SitemapPage {
   urlFor: (locale: Locale) => string;
@@ -35,6 +36,8 @@ function plainPage(path: string, changefreq: string, priority: string): SitemapP
 
 export const STATIC_PAGES: SitemapPage[] = [
   plainPage('/', 'weekly', '1.0'),
+  // Solo-tutor landing; `/` is the agency/school landing.
+  plainPage('/for-tutors', 'weekly', '0.9'),
   plainPage('/pricing', 'monthly', '0.8'),
   { urlFor: (l) => buildCanonicalUrl(localizedPagePath('about', l), l), changefreq: 'monthly', priority: '0.7' },
   { urlFor: (l) => buildCanonicalUrl(localizedPagePath('contacts', l), l), changefreq: 'monthly', priority: '0.6' },
@@ -48,6 +51,10 @@ export const STATIC_PAGES: SitemapPage[] = [
   plainPage('/features/reminders', 'monthly', '0.7'),
   plainPage('/features/cancellation', 'monthly', '0.7'),
   plainPage('/features/comments', 'monthly', '0.7'),
+  // Comparison pages are published only in the three domain languages; the
+  // alternates cluster follows the compare SEO surface automatically.
+  plainPage(COMPARE_HUB_PATH, 'monthly', '0.7'),
+  ...COMPARISON_PAGE_IDS.map((id) => plainPage(comparePagePath(id), 'monthly', '0.6')),
   plainPage('/privacy-policy', 'yearly', '0.3'),
   plainPage('/terms', 'yearly', '0.3'),
   plainPage('/dpa', 'yearly', '0.2'),

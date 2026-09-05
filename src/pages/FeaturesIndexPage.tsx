@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import LandingNavbar from '@/components/LandingNavbar';
 import LandingFooter from '@/components/LandingFooter';
+import FeatureIcon from '@/components/landing/FeatureIcon';
 import { useTranslation, buildLocalizedPath } from '@/lib/i18n';
 import { applyPageDocumentMeta } from '@/lib/documentMeta';
 import {
@@ -100,9 +101,7 @@ export default function FeaturesIndexPage() {
                       {t(cfg.badgeKey)}
                     </span>
                   ) : null}
-                  <div className="w-10 h-10 rounded-xl bg-[#4f46e5]/10 flex items-center justify-center mb-4 group-hover:bg-[#4f46e5]/15 transition-colors">
-                    <Icon className="w-5 h-5 text-[#4f46e5]" />
-                  </div>
+                  <FeatureIcon icon={Icon} className="mb-4 transition-colors duration-200 group-hover:border-zinc-300" />
                   <h3 className="text-[15px] font-bold text-gray-900 mb-2 group-hover:text-[#4f46e5] transition-colors">
                     {t(cfg.titleKey)}
                   </h3>
@@ -130,9 +129,7 @@ export default function FeaturesIndexPage() {
                 const deepPath = featureHubHighlightPath(key);
                 const card = (
                   <>
-                    <div className="w-10 h-10 rounded-xl bg-[#4f46e5]/10 flex items-center justify-center mb-4">
-                      <Icon className="w-5 h-5 text-[#4f46e5]" />
-                    </div>
+                    <FeatureIcon icon={Icon} className="mb-4" />
                     <h3 className="font-semibold text-gray-900 text-[14px] mb-1.5">{t(`landing.hl.${key}`)}</h3>
                     <p className="text-[12px] sm:text-[13px] text-gray-500 leading-relaxed">{t(`landing.hl.${key}Desc`)}</p>
                   </>

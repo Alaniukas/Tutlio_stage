@@ -37,7 +37,7 @@ function LanguageSelectorInner() {
         ref={triggerRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors"
         aria-label={t('common.selectLanguage')}
         aria-expanded={open}
       >
@@ -70,13 +70,13 @@ function LanguageSelectorInner() {
               }}
               className={`w-full flex items-center gap-3 px-3 py-2 text-sm transition-colors ${
                 loc === locale
-                  ? 'bg-indigo-50 text-indigo-700 font-semibold'
+                  ? 'bg-gray-100 text-gray-900 font-semibold'
                   : 'text-gray-700 hover:bg-gray-50'
               }`}
             >
               <span className="font-mono text-xs min-w-12 shrink-0">{LOCALE_LABELS[loc]}</span>
               <span className="flex-1 text-start"><bdi>{LOCALE_NAMES[loc]}</bdi></span>
-              {loc === locale && <Check className="w-4 h-4 text-indigo-600" />}
+              {loc === locale && <Check className="w-4 h-4 text-gray-900" />}
             </button>
           ))}
         </div>

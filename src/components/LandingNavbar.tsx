@@ -1,9 +1,10 @@
 import { Link } from 'react-router-dom';
 import { ChevronDown, Menu, X } from 'lucide-react';
-import { useTranslation, buildLocalizedPath, localizedPagePath } from '@/lib/i18n';
+import { useTranslation, buildLocalizedPath, localizedPagePath, defaultLocaleForHost } from '@/lib/i18n';
+import type { Locale } from '@/lib/i18n';
 import LanguageSelector from '@/components/LanguageSelector';
 import { usePlatform } from '@/contexts/PlatformContext';
-import type { MarketingAudience } from '@/lib/marketingAudience';
+import { landingPathForAudience, type MarketingAudience } from '@/lib/marketingAudience';
 import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 
 interface LandingNavbarProps {
@@ -30,10 +31,38 @@ function NavbarAudienceCta({
   );
 }
 
-function navigateToPlatform(platform: 'tutors' | 'schools', locale: string) {
-  const localeSegment = locale === 'lt' ? '' : `/${locale}`;
-  const prefix = platform === 'tutors' ? '' : `/${platform}`;
-  window.location.href = `${prefix}${localeSegment}` || '/';
+interface SolutionLinkItem {
+  key: string;
+  href: string;
+  label: string;
+  /** Same router basename: client-side navigation is safe. */
+  samePlatform: boolean;
+}
+
+/**
+ * The solo, agency and comparison pages live on the default platform;
+ * `/schools` nests the locale after its prefix and runs under a different
+ * router basename, so crossing platforms needs a full page load.
+ */
+function schoolsLandingHref(locale: Locale): string {
+  const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+  const localeSegment = locale === defaultLocaleForHost(host) ? '' : `/${locale}`;
+  return `/schools${localeSegment}`;
+}
+
+function SolutionLink({
+  link,
+  className,
+  onNavigate,
+}: {
+  link: SolutionLinkItem;
+  className: string;
+  onNavigate?: () => void;
+}) {
+  if (link.samePlatform) {
+    return <Link to={link.href} onClick={onNavigate} className={className}>{link.label}</Link>;
+  }
+  return <a href={link.href} onClick={onNavigate} className={className}>{link.label}</a>;
 }
 
 /** Horizontal space inside the shrunken pill that isn't nav content. */
@@ -151,7 +180,12 @@ export default function LandingNavbar({
   const isSchools = platform === 'schools' || platform === 'teachers';
   const orgAdminLoginHref = buildLocalizedPath('/login', locale);
   const brandName = isSchools ? t('nav.brandSchools') : 'Tutlio';
-  const dropdownLabel = isSchools ? t('nav.forSchools') : t('nav.forTutors');
+  const dropdownLabel = t('landing.footerSolutions');
+  const solutionLinks: SolutionLinkItem[] = [
+    { key: 'tutors', href: buildLocalizedPath(landingPathForAudience('solo'), locale), label: t('nav.forTutors'), samePlatform: !isSchools },
+    { key: 'agencies', href: buildLocalizedPath(landingPathForAudience('biz'), locale), label: t('nav.forAgencies'), samePlatform: !isSchools },
+    { key: 'schools', href: isSchools ? buildLocalizedPath('/', locale) : schoolsLandingHref(locale), label: t('nav.forSchools'), samePlatform: isSchools },
+  ];
   const isAgency = audience === 'agency';
   const pricingHref = `${buildLocalizedPath('/pricing', locale)}?audience=${audience}`;
   const primaryCtaLabel = t(isAgency ? 'pricing.bookDemo' : 'landing.startFree');
@@ -212,13 +246,15 @@ export default function LandingNavbar({
                 <ChevronDown className={`w-3 h-3 transition-transform ${platformOpen ? 'rotate-180' : ''}`} />
               </button>
               {platformOpen && (
-                <div className="absolute start-0 top-full mt-2 w-44 bg-white rounded-xl shadow-lg border border-gray-100 py-1 z-50">
-                  <button type="button" onClick={() => { setPlatformOpen(false); navigateToPlatform('tutors', locale); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 text-gray-700">
-                    {t('nav.forTutors')}
-                  </button>
-                  <button type="button" onClick={() => { setPlatformOpen(false); navigateToPlatform('schools', locale); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 text-gray-700">
-                    {t('nav.forSchools')}
-                  </button>
+                <div className="absolute start-0 top-full mt-2 w-48 bg-white rounded-xl shadow-lg border border-gray-100 py-1 z-50">
+                  {solutionLinks.map((link) => (
+                    <SolutionLink
+                      key={link.key}
+                      link={link}
+                      onNavigate={() => setPlatformOpen(false)}
+                      className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-50 text-gray-700"
+                    />
+                  ))}
                 </div>
               )}
             </div>
@@ -302,21 +338,15 @@ export default function LandingNavbar({
           </div>
 
           <div className="mt-4 pt-4 border-t border-gray-100">
-            <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">{t('nav.platform')}</p>
-            <button
-              type="button"
-              onClick={() => { setMobileOpen(false); navigateToPlatform('tutors', locale); }}
-              className="block w-full text-left py-2.5 text-[14px] text-gray-600 hover:text-gray-900 transition-colors"
-            >
-              {t('nav.forTutors')}
-            </button>
-            <button
-              type="button"
-              onClick={() => { setMobileOpen(false); navigateToPlatform('schools', locale); }}
-              className="block w-full text-left py-2.5 text-[14px] text-gray-600 hover:text-gray-900 transition-colors"
-            >
-              {t('nav.forSchools')}
-            </button>
+            <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">{dropdownLabel}</p>
+            {solutionLinks.map((link) => (
+              <SolutionLink
+                key={link.key}
+                link={link}
+                onNavigate={() => setMobileOpen(false)}
+                className="block w-full text-left py-2.5 text-[14px] text-gray-600 hover:text-gray-900 transition-colors"
+              />
+            ))}
           </div>
 
           <div className="mt-4 pt-4 border-t border-gray-100">

@@ -26,6 +26,12 @@ operational work below after a production deployment.
    way Vercel does and imports each one under Node ESM; it must print
    "All API functions resolve their imports" before you deploy.
 
+6. Before deploying any change to `src/lib/localeCurrency.ts` or the checkout,
+   make sure the live EUR Stripe prices carry the USD option:
+   `npm run stripe:setup-usd` (idempotent; `npm run stripe:setup-usd-test` for
+   the test account). Checkout passes `currency=usd` for USD locales and
+   Stripe rejects the session if the price has no USD option.
+
 ## 2. Automated production verification
 
 Run after every production deploy:
@@ -65,9 +71,16 @@ After this deployment:
 
 1. Submit each domain's own `/sitemap.xml` again.
 2. Inspect the canonical money pages and request indexing:
-   - `.lt`: `/`, `/pricing`, `/schools`, `/features`, `/apie-mus`, `/kontaktai`
-   - `.pl`: `/`, `/pricing`, `/schools`, `/features`, `/about`, `/contacts`
-   - `.com`: `/`, `/pricing`, `/schools`, `/features`, `/about`, `/contacts`
+   - `.lt`: `/`, `/for-tutors`, `/pricing`, `/schools`, `/features`, `/compare`, `/apie-mus`, `/kontaktai`
+   - `.pl`: `/`, `/for-tutors`, `/pricing`, `/schools`, `/features`, `/compare`, `/about`, `/contacts`
+   - `.com`: `/`, `/for-tutors`, `/pricing`, `/schools`, `/features`, `/compare`, `/about`, `/contacts`
+   - the four comparison pages under `/compare/` on each domain (indexable in
+     en/lt/pl only; other locales are deliberately noindex)
+
+   `/` is the agency/school landing and `/for-tutors` the solo-tutor landing.
+   Solo queries that used to land on the homepage will move to `/for-tutors`
+   over a few weeks; watch both URLs in the Performance report and do not
+   redirect one to the other.
 3. Inspect every `.com` locale home and its pricing page:
    - `/lv`, `/ee`, `/fr`, `/es`, `/de`, `/se`, `/dk`, `/fi`, `/no`, `/nl`
    - the matching `/{locale}/pricing` URL

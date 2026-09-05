@@ -61,7 +61,8 @@ describe('plan pricing has a single source of truth', () => {
       const content = readFileSync(path.join(ROOT, file), 'utf8');
       expect(/€\d/.test(content), `${file} contains a hardcoded € price`).toBe(false);
       const pricingImport = file === 'src/lib/pricingDisplay.ts' ? "from './pricing'" : 'lib/pricing';
-      expect(content.includes(pricingImport), `${file} should import from the pricing constants`).toBe(true);
+      const importsPricing = content.includes(pricingImport) || content.includes(pricingImport.replace(/'$/, ".js'"));
+      expect(importsPricing, `${file} should import from the pricing constants`).toBe(true);
     }
 
     const pricingPage = readFileSync(path.join(ROOT, 'src/pages/Pricing.tsx'), 'utf8');

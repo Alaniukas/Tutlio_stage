@@ -416,7 +416,7 @@ const SOCIAL_PROOF: Record<Locale, LocalizedSocialProof> = withEnglishLocaleFall
         { value: '2.4×', label: 'greitesnis sąskaitų siuntimas' },
       ],
       quote: [
-        { text: 'Anksčiau kiekvieną penktadienį skaičiuodavome, kas sumokėjo, o kas — ne. Dabar ' },
+        { text: 'Anksčiau kiekvieną penktadienį skaičiuodavome, kas sumokėjo, o kas - ne. Dabar ' },
         { text: 'statistika ir tėvų paskyros matosi iš karto', emphasis: true },
         { text: ', o korepetitoriai patys žymi pamokas. Administravimo sumažėjo bent perpus.' },
       ],

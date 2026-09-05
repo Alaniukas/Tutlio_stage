@@ -106,14 +106,14 @@ function PaymentsPreview() {
                 <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
                 <span className="text-[6px] text-zinc-600">{label}</span>
               </div>
-              <span className="text-[6px] font-medium text-zinc-700">{amount}</span>
+              <span dir="ltr" className="text-[6px] font-medium text-zinc-700">{amount}</span>
             </div>
           ))}
         </div>
       </div>
       <div className="flex items-center justify-between bg-emerald-50/60 px-2 py-1.5">
         <span className="text-[7px] font-medium text-emerald-700">{t('common.total')}</span>
-        <span className="text-[10px] font-bold text-emerald-700">495 €</span>
+        <span dir="ltr" className="text-[10px] font-bold text-emerald-700">495 €</span>
       </div>
     </div>
   );
@@ -168,7 +168,7 @@ const PILLARS = [
     titleKey: 'landing.insideStudents',
     subKey: 'landing.v2.pillar.studentsSub',
     icon: GraduationCap,
-    iconBg: 'bg-violet-600',
+    iconBg: 'bg-zinc-900',
     panelBg: 'bg-violet-50/60',
     path: '/features',
     Preview: StudentsPreview,
@@ -177,7 +177,7 @@ const PILLARS = [
     titleKey: 'landing.feature.calendar',
     subKey: 'landing.v2.pillar.calendarSub',
     icon: CalendarDays,
-    iconBg: 'bg-blue-600',
+    iconBg: 'bg-zinc-900',
     panelBg: 'bg-blue-50/60',
     path: FEATURE_PAGES.calendar.path,
     Preview: CalendarPreview,
@@ -186,7 +186,7 @@ const PILLARS = [
     titleKey: 'landing.feature.payments',
     subKey: 'landing.v2.pillar.paymentsSub',
     icon: CreditCard,
-    iconBg: 'bg-emerald-600',
+    iconBg: 'bg-zinc-900',
     panelBg: 'bg-emerald-50/60',
     path: FEATURE_PAGES.payments.path,
     Preview: PaymentsPreview,
@@ -195,7 +195,7 @@ const PILLARS = [
     titleKey: 'landing.feature.waitlist',
     subKey: 'landing.v2.pillar.waitlistSub',
     icon: Clock,
-    iconBg: 'bg-amber-600',
+    iconBg: 'bg-zinc-900',
     panelBg: 'bg-amber-50/60',
     path: FEATURE_PAGES.waitlist.path,
     Preview: WaitlistPreview,

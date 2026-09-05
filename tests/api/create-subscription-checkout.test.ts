@@ -442,4 +442,46 @@ describe('POST /api/create-subscription-checkout (default 7-day trial)', () => {
     expect(stripePriceRetrieve).toHaveBeenCalledWith('price_monthly_pln');
     expect(stripeSessionCreate.mock.calls[0][0].line_items[0].price).toBe('price_monthly_pln');
   });
+
+  it('bills a locale without a supported local currency in USD through the same EUR price', async () => {
+    const handler = await loadHandler();
+    const res = mockRes();
+    await handler(mockReq('POST', { plan: 'monthly', locale: 'tr' }, { host: 'www.tutlio.com' }) as any, res as any);
+
+    expect(res.getResult().statusCode).toBe(200);
+    const params = stripeSessionCreate.mock.calls[0][0];
+    expect(params.currency).toBe('usd');
+    expect(params.line_items).toEqual([{ price: 'price_monthly_test', quantity: 1 }]);
+  });
+
+  it('bills the legacy one-time yearly plan in USD for a USD locale', async () => {
+    stripePriceRetrieve.mockResolvedValue({ id: 'price_yearly_test', type: 'one_time' });
+    const handler = await loadHandler();
+    const res = mockRes();
+    await handler(mockReq('POST', { plan: 'yearly', locale: 'ja' }, { host: 'www.tutlio.com' }) as any, res as any);
+
+    expect(res.getResult().statusCode).toBe(200);
+    const params = stripeSessionCreate.mock.calls[0][0];
+    expect(params.mode).toBe('payment');
+    expect(params.currency).toBe('usd');
+  });
+
+  it('leaves euro-area locales on the EUR price and Poland on PLN', async () => {
+    const handler = await loadHandler();
+    const italian = mockRes();
+    await handler(mockReq('POST', { plan: 'monthly', locale: 'it' }, { host: 'www.tutlio.com' }) as any, italian as any);
+    expect(italian.getResult().statusCode).toBe(200);
+    expect(stripeSessionCreate.mock.calls[0][0].currency).toBeUndefined();
+
+    process.env.STRIPE_MONTHLY_PRICE_ID_PLN = 'price_monthly_pln';
+    stripePriceRetrieve.mockResolvedValue({ id: 'price_monthly_pln', type: 'recurring', recurring: { interval: 'month' } });
+    const polish = mockRes();
+    await handler(
+      mockReq('POST', { plan: 'monthly', locale: 'tr' }, { host: 'www.tutlio.pl', 'x-forwarded-host': 'www.tutlio.pl' }) as any,
+      polish as any,
+    );
+    expect(polish.getResult().statusCode).toBe(200);
+    expect(stripeSessionCreate.mock.calls[1][0].currency).toBeUndefined();
+    expect(stripeSessionCreate.mock.calls[1][0].line_items[0].price).toBe('price_monthly_pln');
+  });
 });

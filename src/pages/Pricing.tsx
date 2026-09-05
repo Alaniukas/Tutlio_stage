@@ -20,6 +20,7 @@ import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
 import { usePlatform } from '@/contexts/PlatformContext';
 import LandingNavbar from '@/components/LandingNavbar';
 import LandingFooter from '@/components/LandingFooter';
+import FeatureIcon from '@/components/landing/FeatureIcon';
 import EnterpriseContactModal from '@/components/EnterpriseContactModal';
 import EnterprisePlanCard from '@/components/pricing/EnterprisePlanCard';
 import TutorPlanCards, { TutorBillingToggle } from '@/components/pricing/TutorPlanCards';
@@ -178,9 +179,7 @@ export default function Pricing() {
                     to={feature.href}
                     className="group flex items-center gap-4 rounded-xl border border-violet-200 bg-gradient-to-r from-violet-50 to-white p-5 transition hover:border-violet-300 hover:shadow-md"
                   >
-                    <div className="w-10 h-10 rounded-lg bg-violet-600 flex items-center justify-center shrink-0 shadow-sm">
-                      <feature.icon className="w-5 h-5 text-white" />
-                    </div>
+                    <FeatureIcon icon={feature.icon} variant="dark" />
                     <p className="text-gray-800 text-[13px] font-semibold">{feature.text}</p>
                     {feature.badge ? (
                       <span className="ml-auto rounded-full bg-violet-600 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.1em] text-white">
@@ -191,9 +190,7 @@ export default function Pricing() {
                   </Link>
                 ) : (
                   <div key={`${feature.text}-${index}`} className="flex items-center gap-4 bg-white border border-gray-100 rounded-xl p-5">
-                    <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center shrink-0">
-                      <feature.icon className="w-5 h-5 text-[#4f46e5]" />
-                    </div>
+                    <FeatureIcon icon={feature.icon} />
                     <p className="text-gray-700 text-[13px] font-medium">{feature.text}</p>
                     <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0 ml-auto" />
                   </div>

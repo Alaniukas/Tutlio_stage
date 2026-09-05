@@ -113,6 +113,10 @@ Maršrutai apibrėžti `src/App.tsx`.
 **Lokalūs UI preview (ne produkcija):** `/preview/assign-student-modal`, `/preview/complimentary-lesson` — SPA maršrutai tik `import.meta.env.DEV`. Fake duomenys, be auth. Atskiri `preview-*.html` entry **nebėra** — `vite.config.ts` prod buildina tik `index.html`.
 
 **Vieši marketingo maršrutai:**
+- `/` — **agentūrų / mokyklų (B2B)** landing (`Landing.tsx` → `NewLanding audience="biz"`), su „Didysis skirtumas“ sekcija (`CustomizationSection.tsx`, anonimizuoti klientų pavyzdžiai). Hero **be** auditorijos pasirinkimo ir be badge
+- `/for-tutors` — **individualių korepetitorių (B2C)** landing (`NewLanding audience="solo"`). Auditorijos susietos tik per navbar/footer „Sprendimai“ (Korepetitoriai / Korepetitorių agentūros / Internetinės mokyklos); „Palyginimas“ nuoroda yra tik footer'yje. Botams: `api/page-render.ts` (`page=landing` / `page=for-tutors`); SEO meta `seoMeta.ts` (`landing` / `forTutors`). Kalendoriaus kortelė naudoja `CalendarMockup.tsx`, ne screenshot'ą
+- Marketingo tekstuose **nenaudojami em-dash** (—), tik „-“ (`tests/lib/marketing-copy-style.test.ts`)
+- `/compare`, `/compare/:competitor` — konkurentų palyginimai (TutorBird, TutorCruncher, Teachworks, Oases Online). Konfigūracija `src/lib/comparisonPages.ts`, SPA `ComparePage.tsx` / `CompareIndexPage.tsx`, botams `api/compare-render.ts`. Indeksuojama tik en/lt/pl (`SEO_LOCALES_BY_SURFACE.compare`); konkurentų faktai iš viešų svetainių, data `COMPARE_REVIEWED_ON`
 - `/quiz`, `/quiz/:audience/:step` (+ `/:locale/quiz/…`) — tutor quiz funnel (`QuizFunnel.tsx`)
 - Prenumeratos checkout puslapyje `/pricing` — įterptas Stripe Embedded Checkout (`EmbeddedSubscriptionCheckoutDialog.tsx`)
 - Viešas **AI support** widget (apatinis dešinys kampas) — `SupportWidget.tsx`, API `/api/support-chat` + `/api/support-contact`. Rodomas tik **neprisijungusiems** (landing, blog, kainos, login…). Prisijungusiems tutor/mokinys/tėvas/org admin — paslėptas, net jei jie atidaro marketingo puslapį.
@@ -656,7 +660,7 @@ Webhook: `api/stripe-webhook.ts` — apdoroja subscriptions, checkout, Connect, 
 
 **AR juodraštis:** `src/lib/i18n/ar.ts` turi 5 051 individualių korepetitorių / įmonių ir susijusių mokinių / tėvų srautų vertimą. Pridėtas bazinis kalendorių, bendrų valdiklių ir el. laiškų RTL palaikymas; datos lieka Grigaliaus kalendoriaus. UI įjungtas paruoštame kode, SEO nepublikuojamas; ribos ir QA: `docs/ARABIC_LOCALIZATION_REVIEW.md`.
 
-**UI įjungti, bet SEO nepublikuojami locale (vertimų juodraščiai / English fallback atskiruose paviršiuose):** it, pt, ro, cs, el, hu, bg, hr, sk, sl, hi, ko, ja, id, ar, pt-br, es-mx, fil, he, uk, zh-hk, tr, th. Registras: `src/lib/i18n/locales.ts`; vertimo eiga ir ribos: `docs/INTERNATIONAL_LOCALES.md`. Šie locale dar neįtraukiami į sitemap / hreflang / blog DB laukus.
+**Visi 36 locale SEO publikuojami marketing, schools ir publicPage paviršiuose (nuo 2026-09-05):** it, pt, ro, cs, el, hu, bg, hr, sk, sl, hi, ko, ja, id, ar, pt-br, es-mx, fil, he, uk, zh-hk, tr, th gauna `index, follow`, sitemap ir hreflang. Legal ir blog paviršiai lieka 13 legacy (angliškas legal tekstas ir blog DB stulpelių nėra). Paritetą tikrina `tests/api/seo-locale-parity.test.ts` ir `scripts/seo-locale-readiness.ts`. Valiuta pagal locale: `src/lib/localeCurrency.ts` (USD ne euro zonos naujiems locale, PLN `.pl`, EUR kitur); Stripe USD per `currency_options` (`npm run stripe:setup-usd`).
 
 **SL juodraštis:** `src/lib/i18n/sl.ts` turi 5 051 individualių korepetitorių / įmonių ir susijusių mokinių / tėvų srautų vertimą. Slovėnijos šalis `SI`, kalbos locale `sl`, formatavimas `sl-SI`, telefono pavyzdžiai `+386`. UI įjungtas paruoštame kode, SEO nepublikuojamas; QA ir ribos: `docs/SLOVENIAN_LOCALIZATION_REVIEW.md`.
 

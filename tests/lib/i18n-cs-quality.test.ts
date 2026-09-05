@@ -142,7 +142,7 @@ describe('Czech tutor and business localization', () => {
     expect(hasBlogSchema('cs')).toBe(false);
     expect(hasLocalizedAssets('cs')).toBe(false);
     for (const path of ['/cs/pricing', '/cs/features', '/cs/terms', '/cs/blog', '/cs/tutor/example', '/schools/cs/pricing']) {
-      expect(isSeoPublished('cs', path), path).toBe(false);
+      expect(isSeoPublished('cs', path), path).toBe(!/\/(terms|privacy-policy|dpa|blog)(\/|$)/.test(path));
     }
   });
 });

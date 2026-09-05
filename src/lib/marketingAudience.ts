@@ -2,6 +2,18 @@ export type MarketingAudience = 'solo' | 'agency';
 
 const STORAGE_KEY = 'tutlio-marketing-audience';
 
+/**
+ * Each audience has its own landing URL so the B2C and B2B pitches never
+ * share a page: `/` speaks to tutoring agencies and schools, `/for-tutors`
+ * to solo tutors. Paths are locale-less; wrap with buildLocalizedPath().
+ */
+export const SOLO_LANDING_PATH = '/for-tutors';
+export const AGENCY_LANDING_PATH = '/';
+
+export function landingPathForAudience(audience: MarketingAudience | 'solo' | 'biz'): string {
+  return audience === 'solo' ? SOLO_LANDING_PATH : AGENCY_LANDING_PATH;
+}
+
 export function marketingAudienceFromLanding(audience: 'solo' | 'biz'): MarketingAudience {
   return audience === 'biz' ? 'agency' : 'solo';
 }

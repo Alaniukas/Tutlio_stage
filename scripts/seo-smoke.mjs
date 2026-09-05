@@ -78,6 +78,25 @@ async function checkDomain(origin) {
   const schools = await get(`${origin}/schools`, GOOGLEBOT);
   check('schools SSR for bots (200, indexable)', schools.status === 200 && schools.body.includes('rel="canonical"') && !schools.body.includes('noindex'), `status ${schools.status}`);
 
+  // The solo landing and the competitor comparisons are separate indexable
+  // pages; the homepage itself is the agency/school pitch.
+  const forTutors = await get(`${origin}/for-tutors`, GOOGLEBOT);
+  check(
+    'for-tutors SSR for bots (200, self-canonical, indexable)',
+    forTutors.status === 200 && forTutors.body.includes(`rel="canonical" href="${origin}/for-tutors"`) && !forTutors.body.includes('noindex'),
+    `status ${forTutors.status}`,
+  );
+
+  const compare = await get(`${origin}/compare/tutorbird`, GOOGLEBOT);
+  check(
+    'compare/tutorbird SSR for bots (200, self-canonical, FAQ schema)',
+    compare.status === 200 && compare.body.includes(`rel="canonical" href="${origin}/compare/tutorbird"`) && compare.body.includes('FAQPage') && !compare.body.includes('noindex'),
+    `status ${compare.status}`,
+  );
+
+  const compareUnknown = await get(`${origin}/compare/not-a-vendor`, GOOGLEBOT);
+  check('unknown comparison slug is a hard 404 for bots', compareUnknown.status === 404, `status ${compareUnknown.status}`);
+
   const missing = await get(`${origin}/this-page-never-existed-${Date.now()}`, GOOGLEBOT);
   check('unknown URL is a hard 404 for bots', missing.status === 404, `status ${missing.status}`);
 
@@ -142,7 +161,7 @@ async function checkDomain(origin) {
  * SEO_LOCALES_BY_SURFACE.marketing in src/lib/i18n/localeRelease.ts
  * (tests/api/seo-locale-parity.test.ts checks the same matrix offline).
  */
-const COM_LOCALES = { lv: 'lv', ee: 'et', fr: 'fr', es: 'es', de: 'de', se: 'sv', dk: 'da', fi: 'fi', no: 'no', nl: 'nl' };
+const COM_LOCALES = { lv: 'lv', ee: 'et', fr: 'fr', es: 'es', de: 'de', se: 'sv', dk: 'da', fi: 'fi', no: 'no', nl: 'nl', it: 'it', pt: 'pt', ro: 'ro', cs: 'cs', el: 'el', hu: 'hu', bg: 'bg', hr: 'hr', sk: 'sk', sl: 'sl', hi: 'hi', ko: 'ko', ja: 'ja', id: 'id', ar: 'ar', 'pt-br': 'pt-BR', 'es-mx': 'es-MX', fil: 'fil', he: 'he', uk: 'uk', 'zh-hk': 'zh-HK', tr: 'tr', th: 'th' };
 
 function meta(body, name) {
   const m = body.match(new RegExp(`<(?:meta name|meta property)="${name}" content="([^"]*)"`));

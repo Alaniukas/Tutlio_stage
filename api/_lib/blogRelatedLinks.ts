@@ -75,15 +75,15 @@ export function relatedPostsForLocale(
 const ABOUT_BLOCK: Record<BlogSchemaLocale, string> = {
   lt:
     '\n\n---\n\n## Apie Tutlio\n\n' +
-    'Tutlio — korepetitorių ir korepetavimo mokyklų valdymo platforma: pamokų tvarkaraštis, mokinių laukimo eilė, Stripe mokėjimai ir automatizuoti priminimai vienoje vietoje. ' +
+    'Tutlio - korepetitorių ir korepetavimo mokyklų valdymo platforma: pamokų tvarkaraštis, mokinių laukimo eilė, Stripe mokėjimai ir automatizuoti priminimai vienoje vietoje. ' +
     '[Sužinokite daugiau apie kainas](/pricing) arba [peržiūrėkite kitus straipsnius](/blog).',
   en:
     '\n\n---\n\n## About Tutlio\n\n' +
-    'Tutlio is tutoring management software for private tutors and tutoring schools — lesson scheduling, student waitlist, Stripe payments, and automated reminders in one place. ' +
+    'Tutlio is tutoring management software for private tutors and tutoring schools - lesson scheduling, student waitlist, Stripe payments, and automated reminders in one place. ' +
     '[See pricing](/pricing) or [browse more articles](/blog).',
   pl:
     '\n\n---\n\n## O Tutlio\n\n' +
-    'Tutlio to oprogramowanie do zarządzania korepetycjami dla prywatnych korepetytorów i szkół — harmonogram lekcji, lista oczekujących, płatności Stripe i automatyczne przypomnienia w jednym miejscu. ' +
+    'Tutlio to oprogramowanie do zarządzania korepetycjami dla prywatnych korepetytorów i szkół - harmonogram lekcji, lista oczekujących, płatności Stripe i automatyczne przypomnienia w jednym miejscu. ' +
     '[Zobacz cennik](/pricing) lub [przeglądaj więcej artykułów](/blog).',
   lv:
     '\n\n---\n\n## Par Tutlio\n\n' +
@@ -214,19 +214,19 @@ export function renderAboutTutlioHtml(locale: Locale, pricingUrl: string, blogUr
     tr: { title: 'Tutlio hakkında', body: 'Tutlio, bağımsız özel ders öğretmenleri ve özel ders kurumları için yönetim yazılımıdır. Ders planlama, öğrenci bekleme listesi, Stripe ödemeleri ve otomatik hatırlatmalar tek yerde.', pricing: 'Fiyatları inceleyin', blog: 'diğer yazılara göz atın' },
     lt: {
       title: 'Apie Tutlio',
-      body: 'Tutlio — korepetitorių ir korepetavimo mokyklų valdymo platforma: pamokų tvarkaraštis, mokinių laukimo eilė, Stripe mokėjimai ir automatizuoti priminimai vienoje vietoje.',
+      body: 'Tutlio - korepetitorių ir korepetavimo mokyklų valdymo platforma: pamokų tvarkaraštis, mokinių laukimo eilė, Stripe mokėjimai ir automatizuoti priminimai vienoje vietoje.',
       pricing: 'Sužinokite daugiau apie kainas',
       blog: 'peržiūrėkite kitus straipsnius',
     },
     en: {
       title: 'About Tutlio',
-      body: 'Tutlio is tutoring management software for private tutors and tutoring schools — lesson scheduling, student waitlist, Stripe payments, and automated reminders in one place.',
+      body: 'Tutlio is tutoring management software for private tutors and tutoring schools - lesson scheduling, student waitlist, Stripe payments, and automated reminders in one place.',
       pricing: 'See pricing',
       blog: 'browse more articles',
     },
     pl: {
       title: 'O Tutlio',
-      body: 'Tutlio to oprogramowanie do zarządzania korepetycjami — harmonogram lekcji, lista oczekujących, płatności Stripe i automatyczne przypomnienia w jednym miejscu.',
+      body: 'Tutlio to oprogramowanie do zarządzania korepetycjami - harmonogram lekcji, lista oczekujących, płatności Stripe i automatyczne przypomnienia w jednym miejscu.',
       pricing: 'Zobacz cennik',
       blog: 'przeglądaj więcej artykułów',
     },

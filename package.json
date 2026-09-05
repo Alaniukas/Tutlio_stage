@@ -32,6 +32,8 @@
     "stripe:setup-pln": "tsx scripts/setup-stripe-pln-products.ts",
     "stripe:setup-enterprise": "tsx scripts/setup-stripe-enterprise.ts",
     "stripe:setup-pln-enterprise": "tsx scripts/setup-stripe-pln-enterprise.ts",
+    "stripe:setup-usd": "tsx scripts/setup-stripe-usd-currency-options.ts",
+    "stripe:setup-usd-test": "tsx scripts/setup-stripe-usd-currency-options.ts --test",
     "stripe:setup-test": "tsx scripts/setup-stripe-test-products.ts",
     "stripe:verify-test": "tsx scripts/verify-stripe-test-checkouts.ts",
     "stripe:setup-no-commission-yearly": "tsx scripts/setup-stripe-no-commission-yearly.ts",

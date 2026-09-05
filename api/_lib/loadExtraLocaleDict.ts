@@ -4,102 +4,90 @@ import type { Locale } from './seo-routing.js';
 const requireDict = createRequire(import.meta.url);
 const extraCache: Partial<Record<Locale, Record<string, string>>> = {};
 
-function pick(
-  js: () => Record<string, string>,
-  ts: () => Record<string, string>,
-): Record<string, string> | undefined {
+/**
+ * Extra UI dictionaries (everything beyond the 13 legacy locales) are loaded on
+ * first use rather than imported statically: importing all 36 at module load
+ * blew the Vercel cold-start memory limit on the email and invite functions.
+ *
+ * Two loaders share one cache:
+ * - `preloadExtraLocaleDict` uses real dynamic `import()` with literal paths
+ *   (traced by Vercel, resolved to .ts by Vite/vitest/tsx). Server renderers
+ *   await it through `preloadSsrLocales` before rendering.
+ * - `loadExtraLocaleDict` is the synchronous fallback for callers that cannot
+ *   await (email copy). It uses `require`, which works on Vercel's compiled
+ *   output and under tsx but not under vitest, so tests must preload first.
+ */
+type DictModule = Record<string, Record<string, string>>;
+
+const IMPORTERS: Partial<Record<Locale, () => Promise<DictModule>>> = {
+  it: () => import('../../src/lib/i18n/it.js') as Promise<DictModule>,
+  fil: () => import('../../src/lib/i18n/fil.js') as Promise<DictModule>,
+  th: () => import('../../src/lib/i18n/th.js') as Promise<DictModule>,
+  tr: () => import('../../src/lib/i18n/tr.js') as Promise<DictModule>,
+  'zh-hk': () => import('../../src/lib/i18n/zh-hk.js') as Promise<DictModule>,
+  pt: () => import('../../src/lib/i18n/pt.js') as Promise<DictModule>,
+  ro: () => import('../../src/lib/i18n/ro.js') as Promise<DictModule>,
+  cs: () => import('../../src/lib/i18n/cs.js') as Promise<DictModule>,
+  el: () => import('../../src/lib/i18n/el.js') as Promise<DictModule>,
+  hu: () => import('../../src/lib/i18n/hu.js') as Promise<DictModule>,
+  bg: () => import('../../src/lib/i18n/bg.js') as Promise<DictModule>,
+  hr: () => import('../../src/lib/i18n/hr.js') as Promise<DictModule>,
+  sk: () => import('../../src/lib/i18n/sk.js') as Promise<DictModule>,
+  sl: () => import('../../src/lib/i18n/sl.js') as Promise<DictModule>,
+  hi: () => import('../../src/lib/i18n/hi.js') as Promise<DictModule>,
+  ko: () => import('../../src/lib/i18n/ko.js') as Promise<DictModule>,
+  ja: () => import('../../src/lib/i18n/ja.js') as Promise<DictModule>,
+  id: () => import('../../src/lib/i18n/id.js') as Promise<DictModule>,
+  ar: () => import('../../src/lib/i18n/ar.js') as Promise<DictModule>,
+  he: () => import('../../src/lib/i18n/he.js') as Promise<DictModule>,
+  uk: () => import('../../src/lib/i18n/uk.js') as Promise<DictModule>,
+  'pt-br': () => import('../../src/lib/i18n/pt-br.js') as Promise<DictModule>,
+  'es-mx': () => import('../../src/lib/i18n/es-mx.js') as Promise<DictModule>,
+};
+
+/** Dictionary export name: `zh-hk` → `zhHk`, `pt-br` → `ptBr`, otherwise the code itself. */
+function exportName(locale: Locale): string {
+  return locale.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+}
+
+function pickExport(locale: Locale, mod: DictModule | undefined): Record<string, string> | undefined {
+  if (!mod) return undefined;
+  const dict = mod[exportName(locale)] ?? mod[locale] ?? mod.default;
+  return dict && typeof dict === 'object' ? dict : undefined;
+}
+
+export async function preloadExtraLocaleDict(locale: Locale): Promise<Record<string, string> | undefined> {
+  if (extraCache[locale]) return extraCache[locale];
+  const importer = IMPORTERS[locale];
+  if (!importer) return undefined;
   try {
-    return js();
+    const dict = pickExport(locale, await importer());
+    if (dict) extraCache[locale] = dict;
+    return dict;
   } catch {
-    try {
-      return ts();
-    } catch {
-      return undefined;
-    }
+    return undefined;
   }
 }
 
-/**
- * Load one extra UI dictionary on first use.
- * Paths are static so Vercel file tracing still copies the files, but Node
- * does not evaluate them on cold start (unlike `import { ar } from '.../ar.js'`).
- */
+function requireEither(locale: Locale): Record<string, string> | undefined {
+  const name = exportName(locale);
+  for (const ext of ['js', 'ts']) {
+    try {
+      const mod = requireDict(`../../src/lib/i18n/${locale}.${ext}`) as DictModule;
+      const dict = mod[name] ?? mod[locale] ?? mod.default;
+      if (dict && typeof dict === 'object') return dict;
+    } catch {
+      /* try the next extension */
+    }
+  }
+  return undefined;
+}
+
+/** Synchronous access; returns undefined until the dictionary is loaded. */
 export function loadExtraLocaleDict(locale: Locale): Record<string, string> | undefined {
   if (extraCache[locale]) return extraCache[locale];
-  let dict: Record<string, string> | undefined;
-  switch (locale) {
-    case 'it':
-      dict = pick(() => requireDict('../../src/lib/i18n/it.js').it, () => requireDict('../../src/lib/i18n/it.ts').it);
-      break;
-    case 'fil':
-      dict = pick(() => requireDict('../../src/lib/i18n/fil.js').fil, () => requireDict('../../src/lib/i18n/fil.ts').fil);
-      break;
-    case 'th':
-      dict = pick(() => requireDict('../../src/lib/i18n/th.js').th, () => requireDict('../../src/lib/i18n/th.ts').th);
-      break;
-    case 'tr':
-      dict = pick(() => requireDict('../../src/lib/i18n/tr.js').tr, () => requireDict('../../src/lib/i18n/tr.ts').tr);
-      break;
-    case 'zh-hk':
-      dict = pick(() => requireDict('../../src/lib/i18n/zh-hk.js').zhHk, () => requireDict('../../src/lib/i18n/zh-hk.ts').zhHk);
-      break;
-    case 'pt':
-      dict = pick(() => requireDict('../../src/lib/i18n/pt.js').pt, () => requireDict('../../src/lib/i18n/pt.ts').pt);
-      break;
-    case 'ro':
-      dict = pick(() => requireDict('../../src/lib/i18n/ro.js').ro, () => requireDict('../../src/lib/i18n/ro.ts').ro);
-      break;
-    case 'cs':
-      dict = pick(() => requireDict('../../src/lib/i18n/cs.js').cs, () => requireDict('../../src/lib/i18n/cs.ts').cs);
-      break;
-    case 'el':
-      dict = pick(() => requireDict('../../src/lib/i18n/el.js').el, () => requireDict('../../src/lib/i18n/el.ts').el);
-      break;
-    case 'hu':
-      dict = pick(() => requireDict('../../src/lib/i18n/hu.js').hu, () => requireDict('../../src/lib/i18n/hu.ts').hu);
-      break;
-    case 'bg':
-      dict = pick(() => requireDict('../../src/lib/i18n/bg.js').bg, () => requireDict('../../src/lib/i18n/bg.ts').bg);
-      break;
-    case 'hr':
-      dict = pick(() => requireDict('../../src/lib/i18n/hr.js').hr, () => requireDict('../../src/lib/i18n/hr.ts').hr);
-      break;
-    case 'sk':
-      dict = pick(() => requireDict('../../src/lib/i18n/sk.js').sk, () => requireDict('../../src/lib/i18n/sk.ts').sk);
-      break;
-    case 'sl':
-      dict = pick(() => requireDict('../../src/lib/i18n/sl.js').sl, () => requireDict('../../src/lib/i18n/sl.ts').sl);
-      break;
-    case 'hi':
-      dict = pick(() => requireDict('../../src/lib/i18n/hi.js').hi, () => requireDict('../../src/lib/i18n/hi.ts').hi);
-      break;
-    case 'ko':
-      dict = pick(() => requireDict('../../src/lib/i18n/ko.js').ko, () => requireDict('../../src/lib/i18n/ko.ts').ko);
-      break;
-    case 'ja':
-      dict = pick(() => requireDict('../../src/lib/i18n/ja.js').ja, () => requireDict('../../src/lib/i18n/ja.ts').ja);
-      break;
-    case 'id':
-      dict = pick(() => requireDict('../../src/lib/i18n/id.js').id, () => requireDict('../../src/lib/i18n/id.ts').id);
-      break;
-    case 'ar':
-      dict = pick(() => requireDict('../../src/lib/i18n/ar.js').ar, () => requireDict('../../src/lib/i18n/ar.ts').ar);
-      break;
-    case 'he':
-      dict = pick(() => requireDict('../../src/lib/i18n/he.js').he, () => requireDict('../../src/lib/i18n/he.ts').he);
-      break;
-    case 'uk':
-      dict = pick(() => requireDict('../../src/lib/i18n/uk.js').uk, () => requireDict('../../src/lib/i18n/uk.ts').uk);
-      break;
-    case 'pt-br':
-      dict = pick(() => requireDict('../../src/lib/i18n/pt-br.js').ptBr, () => requireDict('../../src/lib/i18n/pt-br.ts').ptBr);
-      break;
-    case 'es-mx':
-      dict = pick(() => requireDict('../../src/lib/i18n/es-mx.js').esMx, () => requireDict('../../src/lib/i18n/es-mx.ts').esMx);
-      break;
-    default:
-      return undefined;
-  }
+  if (!IMPORTERS[locale]) return undefined;
+  const dict = requireEither(locale);
   if (dict) extraCache[locale] = dict;
   return dict;
 }
