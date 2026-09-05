@@ -52,7 +52,7 @@ export default function Messages() {
       <div className="max-w-screen-xl mx-auto px-4 xl:px-6 py-6">
         <h1 className="text-2xl font-bold text-gray-900 mb-4">{t('chat.title')}</h1>
 
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm flex isolate" style={{ height: 'calc(100vh - 180px)' }}>
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm flex isolate" style={{ height: 'calc(100dvh - 180px)' }}>
           {/* Conversation list - hidden on mobile when chat is open */}
           <div className={`w-full lg:w-80 xl:w-96 border-r border-gray-100 flex-shrink-0 ${mobileShowChat ? 'hidden lg:flex lg:flex-col' : 'flex flex-col'}`}>
             <ConversationList

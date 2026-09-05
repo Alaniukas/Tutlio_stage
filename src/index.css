@@ -732,6 +732,17 @@
 /* ==============================
    GLOBAL MOBILE UTILITIES
    ============================== */
+
+/* iOS Safari zooms the whole page when a focused field renders under 16px.
+   Most inputs use Tailwind's text-sm (14px), so on touch devices force a
+   16px floor. Unlayered on purpose so it beats the @layer utilities classes. */
+@media (hover: none) and (pointer: coarse) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']),
+  select,
+  textarea {
+    font-size: max(16px, 1em);
+  }
+}
 @media (max-width: 640px) {
   .blog-content h1 { font-size: 1.5rem; }
   .blog-content h2 { font-size: 1.25rem; }

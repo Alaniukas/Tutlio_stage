@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import JoinLessonButton from '@/components/JoinLessonButton';
 import { supabase } from '@/lib/supabase';
 import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
 import { getCached, setCache } from '@/lib/dataCache';
@@ -31,8 +32,7 @@ import ParentLayout from '@/components/ParentLayout';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { orgFeeProfile } from '@/lib/marketMoney';
 import { format, isAfter } from 'date-fns';
-import { cn, normalizeUrl } from '@/lib/utils';
-import { recordJoinClick } from '@/lib/joinTracking';
+import { cn } from '@/lib/utils';
 type ChildTutorPolicy = ParentTutorContactPolicy;
 
 interface ChildSession {
@@ -702,18 +702,14 @@ function ChildBlock({
                     </div>
                   </div>
                   {next.meeting_link && (
-                    <a
-                      href={normalizeUrl(next.meeting_link) || undefined}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        recordJoinClick(next as any, 'student');
-                      }}
+                    <JoinLessonButton
+                      session={next as any}
+                      showHint={false}
+                      stopPropagation
                       className="w-10 h-10 rounded-full bg-white text-violet-600 flex items-center justify-center hover:scale-105 transition-transform shadow-lg"
                     >
                       <Play className="w-4 h-4 ml-0.5 fill-current" />
-                    </a>
+                    </JoinLessonButton>
                   )}
                 </div>
               </div>

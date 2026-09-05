@@ -1,5 +1,7 @@
 import { interpolateTranslation } from './interpolate.js';
 import { resolvePlatformTranslation } from './platformOverrides';
+import { applySchoolTerminology } from './schoolTerminology';
+import { getSchoolTerminology, getSchoolTerminologyVersion } from './terminologyStore';
 import { type Platform, DEFAULT_PLATFORM } from '@/lib/platform';
 import { SUPPORTED_LOCALES, type Locale } from './locales';
 
@@ -122,6 +124,10 @@ function escapeHtmlParam(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
+/** Memo for the school wording pass — `t()` runs on every render, the regex pass is not free. */
+const terminologyMemo = new Map<string, string>();
+const TERMINOLOGY_MEMO_LIMIT = 6000;
+
 function resolveTemplate(locale: Locale, key: string, platform: Platform): string {
   let text = translations[locale]?.[key]
     ?? translations.en?.[key]
@@ -130,7 +136,24 @@ function resolveTemplate(locale: Locale, key: string, platform: Platform): strin
     text = Object.values(translations).find((dict) => dict?.[key])?.[key] ?? key;
   }
   if (platform !== DEFAULT_PLATFORM) {
-    return resolvePlatformTranslation(platform, locale, key, text);
+    text = resolvePlatformTranslation(platform, locale, key, text);
+  }
+  const terminology = getSchoolTerminology();
+  if (terminology.staff || terminology.activity) {
+    // Platform routes (/school/*) already swapped staff wording; only the missing part runs.
+    const mode = {
+      staff: terminology.staff && platform === DEFAULT_PLATFORM,
+      activity: terminology.activity,
+    };
+    if (mode.staff || mode.activity) {
+      const memoKey = `${getSchoolTerminologyVersion()}|${locale}|${platform}|${mode.staff ? 1 : 0}${mode.activity ? 1 : 0}|${key}`;
+      const cached = terminologyMemo.get(memoKey);
+      if (cached !== undefined) return cached;
+      const out = applySchoolTerminology(text, locale, mode, key);
+      if (terminologyMemo.size >= TERMINOLOGY_MEMO_LIMIT) terminologyMemo.clear();
+      terminologyMemo.set(memoKey, out);
+      return out;
+    }
   }
   return text;
 }

@@ -16,6 +16,8 @@ import { clearStudentPolicyCache, useStudentPolicy } from '@/contexts/StudentPol
 import { useTranslation } from '@/lib/i18n';
 import { useTotalChatUnread } from '@/hooks/useChat';
 import { usePushSubscription } from '@/hooks/usePushSubscription';
+import { useOrgTerminologyMode } from '@/hooks/useOrgTerminologyMode';
+import { useSchoolTerminology } from '@/hooks/useSchoolTerminology';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
 import { isWaitlistHiddenForOrg, isInstructionsHiddenForOrg } from '@/lib/marketMoney';
 
@@ -62,6 +64,8 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
 
     /** Org portal flags — resolved pre-mount by StudentPolicyProvider, so the nav is correct on first paint. */
     const { resolved, bookingDisabled, paymentsPageEnabled, organizationId, waitlistHidden } = useStudentPolicy();
+    // Students of a school org read "mokytojas" / "užsiėmimas" like their parents and teachers.
+    useSchoolTerminology(useOrgTerminologyMode(organizationId));
 
     /**
      * Tutor selector shows one entry per distinct tutor. Detach + re-add can

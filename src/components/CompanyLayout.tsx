@@ -35,6 +35,7 @@ import { useTotalChatUnread } from '@/hooks/useChat';
 import { OrgEntityProvider, type OrgEntityType } from '@/contexts/OrgEntityContext';
 import { useUser } from '@/contexts/UserContext';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { useSchoolTerminology } from '@/hooks/useSchoolTerminology';
 import { showDynamicPricingNav } from '@/lib/orgIntakeMode';
 import { isInstructionsHiddenForOrg } from '@/lib/marketMoney';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
@@ -105,7 +106,7 @@ export default function CompanyLayout() {
   const { t } = useTranslation();
   const { user: ctxUser } = useUser();
   const { can, membership } = useOrgAdminAccess();
-  const chatUnreadTotal = useTotalChatUnread();
+  const chatUnreadTotal = useTotalChatUnread({ enabled: can('messages.view') });
   const location = useLocation();
   const ENTITY_KEY = 'tutlio_entity_type';
   const dashCache = getCached<any>('company_dashboard');
@@ -124,6 +125,11 @@ export default function CompanyLayout() {
 
   const isSchool = entityType === 'school';
   const { loading: orgFeaturesLoading, hasFeature, organizationId } = useOrgFeatures();
+  // Admin UI of a school says "mokytojas" / "užsiėmimas" (org flags can switch each off).
+  useSchoolTerminology(orgFeaturesLoading ? null : {
+    staff: isSchool || hasFeature('school_teacher_labels'),
+    activity: isSchool && hasFeature('school_activity_labels'),
+  });
   const showDynamicPricing =
     !orgFeaturesLoading && showDynamicPricingNav(organizationId, entityType);
   /** Public "vizitinė kortelė" is solo-tutor only for now. */
@@ -228,7 +234,8 @@ export default function CompanyLayout() {
                       to={item.href}
                       onClick={() => setMobileOpen(false)}
                       className={cn(
-                        'relative flex items-center gap-3 px-3 py-1.5 rounded-lg text-[13px] font-medium transition-colors',
+                        'relative flex items-center gap-3 px-3 rounded-lg font-medium transition-colors',
+                        mobile ? 'min-h-[44px] py-2 text-sm touch-manipulation' : 'py-1.5 text-[13px]',
                         isActive(item)
                           ? 'bg-white/15 text-white'
                           : cn(inactiveText, 'hover:text-white hover:bg-white/10'),

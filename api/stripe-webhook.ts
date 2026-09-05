@@ -16,6 +16,7 @@ import { isSubscriptionOnlyPriceId } from './_lib/stripe-subscription-env.js';
 import { summarizeStripeOnboarding } from './_lib/stripeAccountOnboarding.js';
 import { sendTrialReservationConfirmedNotifications } from './_lib/trialReservation.js';
 import { applyMonthlyPackageExpiry } from './_lib/packageMonth.js';
+import { markSchoolMonthlyInvoicePaid } from './_lib/schoolMonthlyInvoiceEmail.js';
 
 const getStripe = () => {
     const key = process.env.STRIPE_SECRET_KEY;
@@ -754,6 +755,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 } else {
                     console.log(`[stripe-webhook] School installment ${installmentId} was already paid, skipping`);
                 }
+            }
+            // Monthly extra-lessons invoice paid from the emailed "Apmokėti" link
+            else if (session.payment_status === 'paid' && session.metadata?.tutlio_school_monthly_invoice_id) {
+                const invoiceId = session.metadata.tutlio_school_monthly_invoice_id;
+                const result = await markSchoolMonthlyInvoicePaid(supabase, invoiceId, {
+                    paidVia: 'stripe',
+                    stripePaymentIntentId: typeof (session as any).payment_intent === 'string' ? (session as any).payment_intent : null,
+                });
+                if (result.ok === false) console.error('[stripe-webhook] school monthly invoice update failed:', invoiceId, result.error);
+                else console.log(`[stripe-webhook] School monthly invoice ${invoiceId} ${result.alreadyPaid ? 'already paid' : 'marked as paid'}`);
             }
             // Handle lesson payment — update DB and send emails directly (same pattern as packages)
             // Do NOT call /api/confirm-stripe-payment here: StripeSuccess page also calls that endpoint,

@@ -20,13 +20,63 @@ export type SchoolClassGroupDraft = {
 
 export type SchoolClassGroupMember = {
   student_id: string;
-  student?: { full_name: string } | null;
+  student?: { full_name: string; grade?: string | null; email?: string | null } | null;
 };
 
 export type SchoolClassGroupRecord = SchoolClassGroupDraft & {
   id: string;
   members?: SchoolClassGroupMember[];
+  /** Embedded by /api/school-class-groups so the list can show the teacher without a second lookup. */
+  tutor?: { full_name?: string | null } | null;
 };
+
+export function classGroupTutorName(group: SchoolClassGroupRecord, fallback: string): string {
+  return String(group.tutor?.full_name || '').trim() || fallback;
+}
+
+/** Case-insensitive match on group name, teacher name, member names and the schedule label. */
+export function classGroupMatchesQuery(
+  group: SchoolClassGroupRecord,
+  query: string,
+  tutorName?: string | null,
+): boolean {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return true;
+  const hay = [
+    group.name,
+    tutorName || classGroupTutorName(group, ''),
+    ...(group.members || []).map((member) => member.student?.full_name || ''),
+    scheduleLabelFromGroupSlots(group.slots || []),
+    group.platform || '',
+  ].join(' ').toLowerCase();
+  return q.split(/\s+/).every((term) => hay.includes(term));
+}
+
+export type ClassGroupTutorSection = {
+  tutorId: string;
+  tutorName: string;
+  groups: SchoolClassGroupRecord[];
+};
+
+/** Groups split per teacher (sections sorted by teacher name, groups by name) — one pile per teacher, not one big pile. */
+export function groupClassGroupsByTutor(
+  groups: SchoolClassGroupRecord[],
+  tutorName: (tutorId: string) => string,
+): ClassGroupTutorSection[] {
+  const byTutor = new Map<string, SchoolClassGroupRecord[]>();
+  for (const group of groups) {
+    const list = byTutor.get(group.tutor_id) || [];
+    list.push(group);
+    byTutor.set(group.tutor_id, list);
+  }
+  return [...byTutor.entries()]
+    .map(([tutorId, list]) => ({
+      tutorId,
+      tutorName: tutorName(tutorId),
+      groups: [...list].sort((a, b) => String(a.name).localeCompare(String(b.name), 'lt')),
+    }))
+    .sort((a, b) => a.tutorName.localeCompare(b.tutorName, 'lt'));
+}
 
 export type SchoolClassGroupWrite = SchoolClassGroupDraft & {
   student_ids: string[] | null;

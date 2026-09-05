@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { X } from 'lucide-react';
+import { Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -75,11 +75,35 @@ export default function ClassGroupFormDialog(props: {
   students: ClassGroupStudentOption[];
   tutors: ClassGroupTutorOption[];
   canEditMembers: boolean;
+  /** Org admins may delete a group (its future lessons go with it). */
+  canDelete?: boolean;
   defaultTutorId: string;
   onSaved: () => void;
+  /** Resolves true when the group is gone; the dialog closes itself. */
+  onDelete?: (group: SchoolClassGroupRecord) => Promise<boolean>;
 }) {
   const { t } = useTranslation();
   const { staff } = useStaffLabels();
+  const [deleting, setDeleting] = useState(false);
+
+  const remove = async () => {
+    if (!props.group || !props.onDelete) return;
+    if (!window.confirm(t('school.groups.deleteConfirm', { name: props.group.name }))) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      const ok = await props.onDelete(props.group);
+      if (!ok) {
+        setError(t('school.groups.deleteFailed'));
+        setDeleting(false);
+        return;
+      }
+      props.onOpenChange(false);
+    } catch {
+      setError(t('school.groups.deleteFailed'));
+    }
+    setDeleting(false);
+  };
   const [name, setName] = useState('');
   const [tutorId, setTutorId] = useState('');
   const [yearStart, setYearStart] = useState('');
@@ -344,13 +368,27 @@ export default function ClassGroupFormDialog(props: {
             )}
           </div>
         </div>
-        <DialogFooter>
-          <Button variant="outline" className="rounded-xl" onClick={() => props.onOpenChange(false)}>
-            {t('common.cancel')}
-          </Button>
-          <Button className="bg-emerald-600 hover:bg-emerald-700 rounded-xl" disabled={busy} onClick={() => void save()}>
-            {busy ? '…' : props.mode === 'edit' ? t('common.save') : t('school.groups.create')}
-          </Button>
+        <DialogFooter className="sm:justify-between gap-2">
+          {props.mode === 'edit' && props.group && props.canDelete && props.onDelete ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-xl border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 sm:mr-auto"
+              disabled={busy || deleting}
+              onClick={() => void remove()}
+            >
+              <Trash2 className="w-4 h-4 mr-1" />
+              {deleting ? '…' : t('common.delete')}
+            </Button>
+          ) : <span className="hidden sm:block" />}
+          <div className="flex gap-2 justify-end">
+            <Button variant="outline" className="rounded-xl" onClick={() => props.onOpenChange(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button className="bg-emerald-600 hover:bg-emerald-700 rounded-xl" disabled={busy || deleting} onClick={() => void save()}>
+              {busy ? '…' : props.mode === 'edit' ? t('common.save') : t('school.groups.create')}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

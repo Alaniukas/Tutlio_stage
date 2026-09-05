@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import JoinLessonButton from '@/components/JoinLessonButton';
 import StudentLayout from '@/components/StudentLayout';
 import StatusBadge from '@/components/StatusBadge';
 import SessionFiles from '@/components/SessionFiles';
@@ -20,7 +21,6 @@ import { format, isAfter, isBefore } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 import { CalendarDays, Clock, Zap, BookOpen, Settings, Play, XCircle, CheckCircle, RefreshCw, CreditCard, Loader2, Package, Users, ChevronDown, ChevronUp, Landmark } from 'lucide-react';
 import { cn, normalizeUrl } from '@/lib/utils';
-import { recordJoinClick } from '@/lib/joinTracking';
 import { useStudentPaymentBlock } from '@/hooks/useStudentPaymentBlock';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
 import { formatLessonStripeChargeEur, formatMarketAmount, orgFeeProfile, type OrgFeeProfile } from '@/lib/stripeLessonPricing';
@@ -832,15 +832,12 @@ export default function StudentDashboard() {
                         )}
 
                         {selectedSession?.meeting_link && selectedSession.status !== 'cancelled' && (
-                            <a
-                                href={normalizeUrl(selectedSession.meeting_link) || undefined}
-                                target="_blank"
-                                rel="noreferrer"
-                                onClick={() => recordJoinClick(selectedSession as any, 'student')}
+                            <JoinLessonButton
+                                session={selectedSession as any}
                                 className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-indigo-50 text-indigo-600 font-bold hover:bg-indigo-100 transition-colors border border-indigo-100 mt-2"
                             >
                                 {t('studentDash.joinMeeting')}
-                            </a>
+                            </JoinLessonButton>
                         )}
 
                         <WhiteboardButton

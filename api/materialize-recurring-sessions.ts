@@ -10,12 +10,11 @@ import {
 import { findActivePackageForBooking } from '../src/lib/lessonPackageBooking.js';
 import { defaultSessionPaymentStatusForStudent } from '../src/lib/studentPaymentModel.js';
 import {
-  EXTRA_LESSONS_CONTRACT_KIND,
-  extraLessonsServiceStartYmd,
-  type ExtraLessonsOrderSnapshot,
-  type StartWithin14Status,
-} from '../src/lib/extraLessonsContract.js';
-import { snapshotFromRow } from './_lib/extraLessonsContractShared.js';
+  loadClassGroupsForOrg,
+  loadExtraLessonsStartGates,
+  materializationWindow,
+  reconcileClassGroupSessions,
+} from './_lib/schoolClassGroupMaterialize.js';
 
 const HORIZON_DAYS = 60;
 export const MATERIALIZER_BATCH_SIZE = 100;
@@ -238,93 +237,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   } // end templates.length > 0
 
-  // School class groups: materialize base sessions for enrolled members.
+  // School class groups: reconcile base sessions for enrolled members.
+  // Bulk + idempotent — see api/_lib/schoolClassGroupMaterialize.ts. The same
+  // routine runs synchronously on group save, so this pass only heals drift and
+  // rolls the 60-day horizon forward.
   let groupCreated = 0;
+  let groupDeleted = 0;
+  let groupUpdated = 0;
+  let groupErrors = 0;
+  const groupWindow = materializationWindow(now);
   const { data: orgsWithGroups } = await supabase
     .from('organizations')
     .select('id, features')
     .contains('features', { school_class_groups: true });
-  const extraStartByStudent = new Map<string, string>();
-  const { data: extraContracts } = await supabase
-    .from('school_contracts')
-    .select('student_id, class_group_id, accepted_at, start_within_14_status, start_within_14_days, order_snapshot, withdrawal_requested_at')
-    .eq('kind', EXTRA_LESSONS_CONTRACT_KIND)
-    .eq('signing_status', 'signed')
-    .not('accepted_at', 'is', null);
-  for (const row of extraContracts || []) {
-    if (row.withdrawal_requested_at) continue;
-    const order = snapshotFromRow(row) as ExtraLessonsOrderSnapshot | null;
-    if (!order || !row.accepted_at || !row.student_id) continue;
-    const ymd = extraLessonsServiceStartYmd({
-      status: (row.start_within_14_status || (row.start_within_14_days ? 'yes' : 'no')) as StartWithin14Status,
-      acceptedAtIso: row.accepted_at,
-      order,
-    });
-    const key = `${row.student_id}:${row.class_group_id || order.group_id || ''}`;
-    extraStartByStudent.set(key, ymd);
-  }
-
+  const extraGates = await loadExtraLessonsStartGates(supabase);
   for (const org of orgsWithGroups || []) {
-    const { data: groups } = await supabase
-      .from('school_class_groups')
-      .select('id, tutor_id, subject_id, meeting_link, duration_minutes, school_year_start, school_year_end, slots:school_class_group_slots(*), members:school_class_group_members(student_id)')
-      .eq('organization_id', org.id)
-      .lte('school_year_start', windowEndYmd)
-      .gte('school_year_end', windowStartYmd);
-    for (const group of groups || []) {
-      const slots = group.slots || [];
-      const members = group.members || [];
-      if (!slots.length || !members.length) continue;
-      for (const slot of slots) {
-        // Align template start to the first matching weekday on/after school_year_start.
-        const anchor = new Date(`${group.school_year_start}T12:00:00Z`);
-        const want = Number(slot.weekday);
-        while (anchor.getUTCDay() !== want) {
-          anchor.setUTCDate(anchor.getUTCDate() + 1);
-        }
-        const alignedStart = anchor.toISOString().slice(0, 10);
-        const dates = buildRollingOccurrenceDates(
-          {
-            start_date: alignedStart,
-            end_date: group.school_year_end,
-            start_time: String(slot.start_time).slice(0, 5),
-            end_time: String(slot.end_time).slice(0, 5),
-            frequency: 'weekly',
-          },
-          windowStartYmd,
-          windowEndYmd,
-        );
-        for (const ymd of dates.slice(0, 8)) {
-          for (const member of members) {
-            const startUtc = wallClockToUtc(ymd, String(slot.start_time).slice(0, 5));
-            const endUtc = wallClockToUtc(ymd, String(slot.end_time).slice(0, 5));
-            if (!startUtc || !endUtc) continue;
-            const { data: existing } = await supabase
-              .from('sessions')
-              .select('id')
-              .eq('tutor_id', group.tutor_id)
-              .eq('student_id', member.student_id)
-              .eq('start_time', startUtc.toISOString())
-              .maybeSingle();
-            if (existing) continue;
-            const startYmd = ymd;
-            const extraGate = extraStartByStudent.get(`${member.student_id}:${group.id}`);
-            if (extraGate && startYmd < extraGate) continue;
-            const { error: insErr } = await supabase.from('sessions').insert({
-              tutor_id: group.tutor_id,
-              student_id: member.student_id,
-              subject_id: group.subject_id,
-              start_time: startUtc.toISOString(),
-              end_time: endUtc.toISOString(),
-              status: 'active',
-              meeting_link: group.meeting_link,
-              price: 0,
-              school_billing_kind: 'base',
-              class_group_id: group.id,
-            });
-            if (!insErr) groupCreated += 1;
-          }
-        }
+    const groups = await loadClassGroupsForOrg(supabase, org.id, groupWindow);
+    for (const group of groups) {
+      try {
+        const outcome = await reconcileClassGroupSessions(supabase, group, { window: groupWindow, extraGates });
+        groupCreated += outcome.created;
+        groupDeleted += outcome.deleted;
+        groupUpdated += outcome.updated + outcome.adopted;
+      } catch (e) {
+        groupErrors += 1;
+        console.error('[materialize-recurring-sessions] class group reconcile failed', group.id, (e as Error)?.message);
       }
     }
   }
@@ -333,6 +270,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     success: true,
     created,
     groupCreated,
+    groupDeleted,
+    groupUpdated,
+    groupErrors,
     skipped,
     templates: templates.length,
     batchSize: MATERIALIZER_BATCH_SIZE,

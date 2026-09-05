@@ -736,7 +736,7 @@ export function parentStudentLinksDeduped(userId: string) {
     supabase
       .from('parent_students')
       .select(
-        'student_id, students(id, full_name, tutor_id, linked_user_id, profiles:tutor_id(full_name))',
+        'student_id, students(id, full_name, tutor_id, linked_user_id, organization_id, profiles:tutor_id(full_name))',
       ),
   );
 }

@@ -14,6 +14,7 @@ import {
 } from '../src/lib/extraLessonsContract.js';
 import { renderAndStoreExtraLessonsPdf, signSchoolContractPdf } from './_lib/extraLessonsPdf.js';
 import { verifyRequestAuth } from './_lib/auth.js';
+import { sendFirstLessonInvite } from './_lib/extraLessonsFirstLessonInvite.js';
 import {
   extraLessonsPayloadForContract,
   extraLessonsTemplateSource,
@@ -313,6 +314,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }).catch((err) => console.error('[extra-lessons-contract-accept] email', err));
   }
 
+  // Schema step 2: the confirmed contract comes back → invite to the nearest
+  // lesson (join link + homework page), still without any account.
+  let firstLessonInvite: Awaited<ReturnType<typeof sendFirstLessonInvite>> | null = null;
+  try {
+    firstLessonInvite = await sendFirstLessonInvite(supabase, req, {
+      contractId: contract.id,
+      contractNumber: contract.contract_number || null,
+      organizationId: contract.organization_id,
+      schoolName: org.name || null,
+      studentId: String(st.id || contract.student_id),
+      studentName: st.full_name || null,
+      parentName: st.payer_name || null,
+      payerEmail: st.payer_email || null,
+      order,
+      acceptedAtIso: acceptedAt.toISOString(),
+      startWithin14Status: resolved14.status,
+      classGroupId: contract.class_group_id || null,
+    });
+  } catch (err) {
+    console.error('[extra-lessons-contract-accept] first lesson invite', err);
+  }
+
   const signedPdfUrl = pdfPath ? await signSchoolContractPdf(supabase, pdfPath) : null;
 
   return res.status(200).json({
@@ -321,5 +344,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     document_sha256: documentSha256,
     accepted_at: acceptedAt.toISOString(),
     pdfUrl: signedPdfUrl,
+    firstLessonInvite,
   });
 }

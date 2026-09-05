@@ -1917,7 +1917,7 @@ export default function CompanyContracts() {
       <div className="max-w-5xl mx-auto space-y-6">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <h1 className="text-2xl font-bold text-gray-900">{tr('school.contractsTitle')}</h1>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="bg-gray-100 rounded-lg p-1 flex gap-1">
               <button onClick={() => setTab('contracts')} className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === 'contracts' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>
                 {tr('school.tabContracts')}
@@ -1927,7 +1927,7 @@ export default function CompanyContracts() {
               </button>
             </div>
             {tab === 'contracts' ? (
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 {Boolean(orgFeatures.school_extra_lessons_contract) && (
                   <Button
                     variant="outline"
@@ -2844,7 +2844,7 @@ export default function CompanyContracts() {
                 />
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="space-y-2">
                 <Label>{isSchoolView ? 'Tėvų tel. nr.' : tr('compStu.parentPhoneRequired')}</Label>
                 <Input

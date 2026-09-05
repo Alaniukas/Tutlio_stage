@@ -97,7 +97,10 @@ describe('CompanyClassGroups edit modal', () => {
     expect(dialog.className).toMatch(/56rem/);
     expect(screen.getByDisplayValue('QA Legal Matematika')).toBeTruthy();
     expect(screen.getByDisplayValue('https://meet.google.com/abc-defg-hij')).toBeTruthy();
-    expect(screen.getByLabelText('Pašalinti mokinį')).toBeTruthy();
+    // Member chips render once the dialog effect has copied the roster into state.
+    await waitFor(() => {
+      expect(screen.getByLabelText('Pašalinti mokinį')).toBeTruthy();
+    });
 
     fireEvent.click(screen.getByLabelText('Pašalinti mokinį'));
     fireEvent.click(screen.getByText('Eglė Kazlauskaitė').closest('label')!.querySelector('input')!);
@@ -113,6 +116,41 @@ describe('CompanyClassGroups edit modal', () => {
       expect(body.student_ids).toEqual(['s2']);
       expect(body.slots).toEqual([{ weekday: 2, start_time: '16:00', end_time: '16:45' }]);
     });
+  });
+
+  it('lets an admin delete the group from the edit dialog after confirming', async () => {
+    render(
+      <OrgEntityProvider value="school">
+        <MemoryRouter initialEntries={['/school/groups']}>
+          <CompanyClassGroups />
+        </MemoryRouter>
+      </OrgEntityProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('QA Legal Matematika')).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /QA Legal Matematika/ }));
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: 'Redaguoti grupę' })).toBeTruthy();
+    });
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    fetchMock.mockClear();
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, groups: [] }) });
+    fireEvent.click(screen.getByRole('button', { name: 'Ištrinti' }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/school-class-groups?id=g1',
+        expect.objectContaining({ method: 'DELETE' }),
+      );
+    });
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('QA Legal Matematika'));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Redaguoti grupę' })).toBeNull();
+    });
+    confirmSpy.mockRestore();
   });
 
   it('shows every weekly slot and saves independent start times', async () => {

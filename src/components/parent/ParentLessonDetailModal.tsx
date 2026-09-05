@@ -27,8 +27,7 @@ import {
 } from '@/components/ui/dialog';
 import StatusBadge from '@/components/StatusBadge';
 import WhiteboardButton from '@/components/WhiteboardButton';
-import { normalizeUrl } from '@/lib/utils';
-import { recordJoinClick } from '@/lib/joinTracking';
+import JoinLessonButton from '@/components/JoinLessonButton';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import type { OrgFeeProfile } from '@/lib/marketMoney';
 /** Tutor contact + payment / cancellation rules (from profiles). */
@@ -293,16 +292,13 @@ export function ParentLessonDetailModal({
           )}
 
           {session.meeting_link && session.status !== 'cancelled' && (
-            <a
-              href={normalizeUrl(session.meeting_link) || undefined}
-              target="_blank"
-              rel="noreferrer"
-              onClick={() => recordJoinClick(session as any, 'student')}
+            <JoinLessonButton
+              session={session}
               className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-indigo-50 text-indigo-600 font-bold hover:bg-indigo-100 transition-colors border border-indigo-100"
             >
               <Play className="w-4 h-4" />
               {t('studentDash.joinMeeting')}
-            </a>
+            </JoinLessonButton>
           )}
 
           <WhiteboardButton

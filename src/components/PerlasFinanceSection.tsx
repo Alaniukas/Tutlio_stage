@@ -151,7 +151,7 @@ export default function PerlasFinanceSection({ entityType, entityId }: Props) {
             <RefreshCw className="w-4 h-4" />
           </button>
         </div>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <span className="text-xs text-gray-500">{t('perlasFinance.pending')}</span>
             <p className="text-2xl font-bold text-gray-900">{`€${pendingNet.toFixed(2)}`}</p>

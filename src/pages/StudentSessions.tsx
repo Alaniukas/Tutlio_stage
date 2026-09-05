@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import JoinLessonButton from '@/components/JoinLessonButton';
 import StudentLayout from '@/components/StudentLayout';
 import ParentLayout from '@/components/ParentLayout';
 import StatusBadge from '@/components/StatusBadge';
@@ -19,7 +20,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { DateInput } from '@/components/ui/date-input';
 import { Label } from '@/components/ui/label';
 import { cn, normalizeUrl } from '@/lib/utils';
-import { recordJoinClick } from '@/lib/joinTracking';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
@@ -850,6 +850,9 @@ export default function StudentSessions() {
         });
         const currentStudentIdForFetch = st.id;
         setSessions(fetchedSessions);
+        // A school class-group member has lessons under the group teacher even
+        // without a personal tutor — only warn when there is truly nothing to show.
+        if (!st.tutor_id) setNoTutorAssigned(fetchedSessions.length === 0);
         if (sessionsLoadedStudentIdRef.current !== currentStudentIdForFetch) {
             setWaitlistEntries([]);
             setActivePackages([]);
@@ -1657,7 +1660,7 @@ export default function StudentSessions() {
                             const statusCfg = STATUS_CONFIG[s.status as keyof typeof STATUS_CONFIG] || STATUS_CONFIG.active;
                             const isPast = !isAfter(new Date(s.end_time), now);
                             return (
-                                <div key={s.id} onClick={() => { setSelectedSession(s); setIsModalOpen(true); }} className={cn("bg-white rounded-[2rem] p-5 shadow-sm border border-gray-100 flex items-center gap-5 transition-all cursor-pointer", isPast ? "opacity-75" : "hover:shadow-md")}>
+                                <div key={s.id} onClick={() => { setSelectedSession(s); setIsModalOpen(true); }} className={cn("bg-white rounded-[2rem] p-4 sm:p-5 shadow-sm border border-gray-100 flex items-center gap-3 sm:gap-5 min-w-0 transition-all cursor-pointer", isPast ? "opacity-75" : "hover:shadow-md")}>
                                     {/* Date block */}
                                     <div className={cn("w-16 h-16 rounded-2xl flex flex-col items-center justify-center flex-shrink-0 border", isPast ? 'bg-gray-50 border-gray-100 text-gray-400' : 'bg-violet-50 border-violet-100 text-violet-600')}>
                                         <span className="text-xs font-bold uppercase tracking-widest">
@@ -1670,7 +1673,7 @@ export default function StudentSessions() {
 
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2 mb-1">
-                                            <p className="text-lg font-black text-gray-900 truncate">{s.topic || t('stuSess.selfStudy')}</p>
+                                            <p className="text-base sm:text-lg font-black text-gray-900 truncate">{s.topic || t('stuSess.selfStudy')}</p>
                                             {s.subjects?.is_group && (
                                                 <span className="bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-xs font-bold flex items-center gap-1 flex-shrink-0">
                                                     <Users className="w-3 h-3" />
@@ -1683,20 +1686,25 @@ export default function StudentSessions() {
                                                 </span>
                                             )}
                                         </div>
-                                        <div className="flex items-center gap-2 mt-0.5 text-gray-500">
+                                        <div className="flex flex-wrap items-center gap-2 mt-0.5 text-gray-500">
                                             <Clock className="w-4 h-4" />
                                             <span className="text-sm font-semibold">
                                                 {format(new Date(s.start_time), 'HH:mm')} – {format(new Date(s.end_time), 'HH:mm')}
                                             </span>
                                             {s.meeting_link && !isPast && (
-                                                <a href={normalizeUrl(s.meeting_link) || undefined} target="_blank" rel="noreferrer" onClick={() => recordJoinClick(s as any, 'student')} className="ml-2 bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors">
+                                                <JoinLessonButton
+                                                    session={s as any}
+                                                    showHint={false}
+                                                    stopPropagation
+                                                    className="ml-2 bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors"
+                                                >
                                                     {t('stuSess.joinLesson')}
-                                                </a>
+                                                </JoinLessonButton>
                                             )}
                                         </div>
                                     </div>
 
-                                    <div className="text-right flex-shrink-0 flex flex-col items-end justify-center gap-1.5 min-w-[6.5rem]">
+                                    <div className="text-right flex-shrink-0 flex flex-col items-end justify-center gap-1.5 min-w-0 sm:min-w-[6.5rem]">
                                         <span className={cn("text-xs font-bold px-3 py-1 rounded-full border whitespace-nowrap", statusCfg.color)}>
                                             {t(statusCfg.labelKey)}
                                         </span>
@@ -1831,15 +1839,12 @@ export default function StudentSessions() {
                         {/* Meeting link */}
                         {selectedSession?.status !== 'cancelled' && (
                             selectedSession?.meeting_link ? (
-                                <a
-                                    href={normalizeUrl(selectedSession.meeting_link) || undefined}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    onClick={() => recordJoinClick(selectedSession as any, 'student')}
+                                <JoinLessonButton
+                                    session={selectedSession as any}
                                     className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-indigo-50 text-indigo-600 font-bold hover:bg-indigo-100 transition-colors border border-indigo-100"
                                 >
                                     <Video className="w-4 h-4" /> {t('studentDash.joinMeeting')}
-                                </a>
+                                </JoinLessonButton>
                             ) : (
                                 <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-100 text-gray-500 text-sm">
                                     <Video className="w-4 h-4 shrink-0" />

@@ -507,6 +507,19 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     pricingTier: 'basic',
   },
 
+  school_activity_labels: {
+    id: 'school_activity_labels',
+    name: 'Terminologija „užsiėmimas“ vietoj „pamoka“',
+    nameEn: 'Activity / session wording instead of lesson',
+    description:
+      'Mokyklos portaluose (administracija, mokytojai, mokiniai, tėvai) ir laiškuose vietoj „pamoka“ rodoma „užsiėmimas“. Mokykloms įjungta pagal nutylėjimą — išjunkite, jei mokykla nori palikti „pamoka“. Company org tekstams įtakos neturi.',
+    descriptionEn:
+      'School portals (admin, teachers, students, parents) and emails say “session” instead of “lesson”. On by default for schools — switch off if a school prefers “lesson”. Company org wording is unchanged.',
+    category: 'appearance',
+    defaultValue: true,
+    pricingTier: 'basic',
+  },
+
   school_lesson_recordings: {
     id: 'school_lesson_recordings',
     name: 'Pamokų įrašai (Drive) ir grupių prieiga',

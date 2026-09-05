@@ -206,10 +206,15 @@ export function useConversations() {
   return { conversations, loading, error, refetch: fetchConversations };
 }
 
-/** Sum of unread_count across inbox; shares realtime + RPC with useConversations via convListeners. */
-export function useTotalChatUnread() {
+/**
+ * Sum of unread_count across inbox; shares realtime + RPC with useConversations via convListeners.
+ * Pass `enabled: false` for org-admin seats without messages.view: the private inbox topic's RLS
+ * policy rejects them, and the Realtime client would retry the join every 10 s while the tab is open.
+ */
+export function useTotalChatUnread(options: { enabled?: boolean } = {}) {
+  const enabled = options.enabled ?? true;
   const { user } = useUser();
-  const userId = user?.id ?? null;
+  const userId = enabled ? (user?.id ?? null) : null;
   const [total, setTotal] = useState(0);
 
   useEffect(() => {
