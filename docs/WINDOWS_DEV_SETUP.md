@@ -37,6 +37,11 @@ npx.cmd supabase projects list   # must list cuhciqwmqfuajeeqjjbm (Korepkėms)
 
 If `alaniukas-projects` is missing, `vercel link` and `vercel deploy` will say "The specified scope does not exist" or "Your codebase isn't linked to a project" no matter what you type. Ask Alanas to add you to that team (Vercel → Team settings → Members) and to the Supabase organisation.
 
+## 3b. Two Vercel CLIs, two logins
+
+The project pins `vercel@53` as a devDependency, and `npm install -g vercel` puts a newer CLI (59 at the time of writing) on the PATH. They keep **separate** login stores. On 2026-09-05 the local v53 held an auto-approved login for the wrong account while the global v59 held the `alaniukas` login, so `npx vercel ...` (local) and `vercel.cmd ...` (global) reported different identities on the same machine. Check both with `vercel.cmd whoami` and `npx.cmd vercel whoami`, and use whichever shows the account that belongs to `alaniukas-projects`. When deploying with the global CLI, run `vercel.cmd link --yes --project tutlio --scope alaniukas-projects` followed by `vercel.cmd deploy --prod --yes` directly; `npm run vercel:deploy-prod` always uses the local one.
+
+The newer CLI also **overwrites `.env.local`** during `vercel link` with the project's development environment (the file then starts with `# Created by Vercel CLI`). Keep a copy of any local-only values before linking.
 ## 4. Day-to-day commands that work on Windows
 
 ```
