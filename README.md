@@ -2,6 +2,8 @@
 
 Standalone microservice for converting `DOCX -> PDF` with LibreOffice.
 
+Conversions are serialized inside each container and use an isolated LibreOffice profile per request. This prevents concurrent contract previews from sharing a locked profile or exhausting the container's process/thread allowance (`osl::Thread::create failed` on Railway).
+
 ## Fidelity notes (school contracts)
 
 - Installs **Times New Roman** (MS core fonts) + **Liberation Serif** fallback so LibreOffice does not substitute DejaVu (which reflows text and changes page count).

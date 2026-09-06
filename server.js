@@ -3,6 +3,7 @@ import express from 'express';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
+import { pathToFileURL } from 'url';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import PizZip from 'pizzip';
@@ -10,10 +11,10 @@ import PizZip from 'pizzip';
 const execFileAsync = promisify(execFile);
 const app = express();
 
-app.use(express.json({ limit: '20mb' }));
+app.use(express.json({ limit: '50mb' }));
 
-const LO_USER_PROFILE = path.join(os.tmpdir(), 'tutlio-lo-profile');
-const SERVICE_VERSION = '2.0.0';
+const SERVICE_VERSION = '2.1.0';
+let conversionQueue = Promise.resolve();
 
 /** Calibrated on Railway Linux LO vs Word Save-as-PDF for annex table "Dalykas" x=120. */
 const FLOATING_TABLE_TBL_IND = Number(process.env.FLOATING_TABLE_TBL_IND || -580);
@@ -218,8 +219,10 @@ function checkConvertApiKey(req) {
   return { allowed: true };
 }
 
-async function ensureLoProfile() {
-  await fs.mkdir(LO_USER_PROFILE, { recursive: true });
+function serializeConversion(task) {
+  const current = conversionQueue.then(task, task);
+  conversionQueue = current.then(() => undefined, () => undefined);
+  return current;
 }
 
 async function convertWithLibreOffice(docxBuffer) {
@@ -227,12 +230,11 @@ async function convertWithLibreOffice(docxBuffer) {
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tutlio-docx-'));
   const inputPath = path.join(workDir, 'contract.docx');
   const outputPath = path.join(workDir, 'contract.pdf');
+  const profilePath = path.join(workDir, 'libreoffice-profile');
   await fs.writeFile(inputPath, prepared);
-  await ensureLoProfile();
 
-  const profileUrl = `file://${LO_USER_PROFILE.replace(/\\/g, '/')}`;
   const convertArgs = [
-    `-env:UserInstallation=${profileUrl}`,
+    `-env:UserInstallation=${pathToFileURL(profilePath).href}`,
     '--headless',
     '--nologo',
     '--nodefault',
@@ -249,18 +251,36 @@ async function convertWithLibreOffice(docxBuffer) {
   let lastError = null;
   const tried = [];
   try {
-    for (const bin of sofficeCandidates()) {
-      tried.push(bin);
-      try {
-        await execFileAsync(bin, convertArgs, { timeout: 120000, windowsHide: true });
-        const pdf = await fs.readFile(outputPath);
-        if (pdf.length > 0) return { pdf, meta };
-      } catch (error) {
-        lastError = error;
+    // LibreOffice is process-heavy and its user profile cannot safely be shared by
+    // simultaneous conversions. Serialize them and isolate HOME/profile per request
+    // so one conversion cannot exhaust threads or lock/corrupt another conversion.
+    await serializeConversion(async () => {
+      for (const bin of sofficeCandidates()) {
+        tried.push(bin);
+        try {
+          await execFileAsync(bin, convertArgs, {
+            timeout: 120000,
+            windowsHide: true,
+            env: {
+              ...process.env,
+              HOME: workDir,
+              TMPDIR: workDir,
+              SAL_USE_VCLPLUGIN: 'gen',
+            },
+          });
+          const pdf = await fs.readFile(outputPath);
+          if (pdf.length > 0) return;
+        } catch (error) {
+          lastError = error;
+        }
       }
-    }
-    const lastMessage = lastError instanceof Error ? lastError.message : 'LibreOffice conversion failed';
-    throw new Error(`LibreOffice not available (tried: ${tried.join(', ')}). Last error: ${lastMessage}`);
+      const lastMessage = lastError instanceof Error ? lastError.message : 'LibreOffice conversion failed';
+      throw new Error(`LibreOffice not available (tried: ${tried.join(', ')}). Last error: ${lastMessage}`);
+    });
+
+    const pdf = await fs.readFile(outputPath);
+    if (pdf.length > 0) return { pdf, meta };
+    throw new Error('LibreOffice produced an empty PDF');
   } finally {
     await fs.rm(workDir, { recursive: true, force: true });
   }
