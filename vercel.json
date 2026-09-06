@@ -98,14 +98,15 @@
         },
         "api/extra-lessons-contract-offer.ts": {
             "maxDuration": 60,
-            "includeFiles": "{api/_lib/templates/extra-lessons-laisvi-vaikai.docx,src/lib/**}"
+            "includeFiles": "api/_lib/templates/**"
         },
         "api/extra-lessons-contract-accept.ts": {
             "maxDuration": 60,
-            "includeFiles": "{api/_lib/templates/extra-lessons-laisvi-vaikai.docx,src/lib/**}"
+            "includeFiles": "api/_lib/templates/**"
         },
         "api/extra-lessons-contract-withdraw.ts": {
-            "includeFiles": "src/lib/**"
+            "maxDuration": 60,
+            "includeFiles": "api/_lib/templates/**"
         },
         "api/bill-school-extra-lessons.ts": {
             "includeFiles": "src/lib/**"

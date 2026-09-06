@@ -81,7 +81,7 @@ export default function SchoolExtraLessonsAccept() {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [startWithin14, setStartWithin14] = useState(true);
-  const [recordingConsent, setRecordingConsent] = useState<boolean | null>(null);
+  const [recordingConsent, setRecordingConsent] = useState<boolean | null>(true);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState<{ sha256: string; acceptedAt?: string } | null>(null);
   const [withdrawn, setWithdrawn] = useState(false);
@@ -109,7 +109,10 @@ export default function SchoolExtraLessonsAccept() {
     setEndDate(o?.end_date || '');
     setBaseLessons(o?.base_lessons_per_month ? String(o.base_lessons_per_month) : '');
     setSlots(Array.isArray(o?.schedule_slots) ? o.schedule_slots : []);
-    if (!data.alreadyAccepted) setStartWithin14(data.startWithin14Default !== false);
+    if (!data.alreadyAccepted) {
+      setStartWithin14(data.startWithin14Default !== false);
+      if (data.recordingsEnabled) setRecordingConsent(true);
+    }
     if (data.alreadyAccepted) setDone({ sha256: '', acceptedAt: data.acceptedAt || undefined });
     if (data.withdrawn) {
       setWithdrawn(true);
