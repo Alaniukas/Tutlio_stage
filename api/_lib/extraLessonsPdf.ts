@@ -112,35 +112,37 @@ export async function renderAndStoreExtraLessonsPdf(
       const templateBytes = readFileSync(resolveExtraLessonsBundledDocxPath());
       pdfBytes = new Uint8Array(await withTimeout(
         renderDocxTemplateBufferToPdfBuffer({ templateBytes, payload }),
-        20000,
+        35000,
       ));
     } catch (e) {
-      console.error('[extra-lessons] bundled docx pdf fallback to text', (e as Error).message);
-      pdfBytes = null;
+      const detail = e instanceof Error ? e.message : 'nežinoma DOCX konvertavimo klaida';
+      throw new Error(`Nepavyko suformuoti papildomų užsiėmimų PDF pagal DOCX šabloną: ${detail}`, { cause: e });
     }
   } else if (params.contract.template_id) {
-    const { data: tpl } = await supabase
+    const { data: tpl, error: templateErr } = await supabase
       .from('school_contract_templates')
       .select('pdf_url, name')
       .eq('id', params.contract.template_id)
       .maybeSingle();
+    if (templateErr) {
+      throw new Error(`Nepavyko įkelti papildomų užsiėmimų sutarties šablono: ${templateErr.message}`);
+    }
     const templatePath = tpl?.pdf_url ? extractSchoolContractStoragePath(String(tpl.pdf_url)) : '';
-    const name = String(tpl?.name || '').toLowerCase();
-    const looksExtra = name.includes('papildom') || name.includes('extra');
-    if (looksExtra && templatePath.toLowerCase().endsWith('.docx')) {
+    if (templatePath.toLowerCase().endsWith('.docx')) {
       try {
         const { data: signedData, error: signErr } = await supabase.storage
           .from(BUCKET)
           .createSignedUrl(templatePath, 300);
-        if (!signErr && signedData?.signedUrl) {
-          pdfBytes = await withTimeout(
-            createDocxTemplatePdf({ fetchUrl: signedData.signedUrl, payload }),
-            12000,
-          );
+        if (signErr || !signedData?.signedUrl) {
+          throw new Error(`nepavyko pasiekti DOCX šablono${signErr?.message ? `: ${signErr.message}` : ''}`);
         }
+        pdfBytes = await withTimeout(
+          createDocxTemplatePdf({ fetchUrl: signedData.signedUrl, payload }),
+          35000,
+        );
       } catch (e) {
-        console.error('[extra-lessons] org docx pdf fallback to text', (e as Error).message);
-        pdfBytes = null;
+        const detail = e instanceof Error ? e.message : 'nežinoma DOCX konvertavimo klaida';
+        throw new Error(`Nepavyko suformuoti papildomų užsiėmimų PDF pagal DOCX šabloną: ${detail}`, { cause: e });
       }
     }
   }
@@ -173,8 +175,7 @@ export async function renderAndStoreExtraLessonsPdf(
     contentType: 'application/pdf',
   });
   if (uploadErr) {
-    console.error('[extra-lessons] pdf upload', uploadErr.message);
-    return { uploadedPath: null };
+    throw new Error(`Nepavyko išsaugoti papildomų užsiėmimų sutarties PDF: ${uploadErr.message}`);
   }
   return { uploadedPath: path, pdfBase64: Buffer.from(pdfBytes).toString('base64') };
 }

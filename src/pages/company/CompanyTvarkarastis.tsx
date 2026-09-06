@@ -654,10 +654,17 @@ export default function CompanyTvarkarastis() {
       const tutorIds = filteredTutors.map((t: any) => t.id);
       setOrgTutors(filteredTutors as OrgTutor[]);
 
-      // Select all tutors by default
-      if (filteredTutors.length > 0 && selectedTutorIds.length === 0) {
-        setSelectedTutorIds(tutorIds);
-      }
+      // Keep "all teachers" selected when a newly invited teacher first appears.
+      // A cached calendar otherwise keeps only the old IDs and silently filters out
+      // lessons created by the new teacher until the whole app cache is cleared.
+      setSelectedTutorIds((previous) => {
+        const previousTutorIds = orgTutors.map((tutor) => tutor.id);
+        const hadAllPreviousTutors = previousTutorIds.length === 0
+          || previousTutorIds.every((id) => previous.includes(id));
+        if (hadAllPreviousTutors) return tutorIds;
+        const currentTutorIds = new Set(tutorIds);
+        return previous.filter((id) => currentTutorIds.has(id));
+      });
 
       // Fetch sessions for org tutors
       const schedulePast = addDays(new Date(), -90).toISOString();
@@ -801,6 +808,24 @@ export default function CompanyTvarkarastis() {
       setLoading(false);
     }
   };
+
+  // The teacher and administrator commonly keep their calendars open in separate
+  // tabs. Refresh as soon as the administrator returns to this tab so a lesson
+  // created in the teacher account becomes visible without a manual page reload.
+  useEffect(() => {
+    if (featuresLoading || !organizationId) return;
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void fetchData();
+    };
+    window.addEventListener('focus', refreshWhenVisible);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      window.removeEventListener('focus', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+    // `fetchData` intentionally uses the latest filter state from the render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [featuresLoading, organizationId]);
 
   // Filter data based on selected filters
   const filteredSessions = useMemo(() => {

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Pencil, Plus, Search } from 'lucide-react';
+import { CalendarClock, Pencil, Plus, Search } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { authHeaders } from '@/lib/apiHelpers';
@@ -30,6 +31,56 @@ function formatLtDate(iso: string): string {
   return `${day}.${m}.${y}`;
 }
 
+type IndividualSessionRecord = {
+  id: string;
+  tutor_id: string;
+  student_id: string;
+  start_time: string;
+  end_time: string;
+  topic?: string | null;
+  student?: { full_name?: string | null; grade?: string | null } | null;
+  subject?: { name?: string | null } | null;
+};
+
+function relatedRow<T>(value: T | T[] | null | undefined): T | null {
+  return Array.isArray(value) ? value[0] ?? null : value ?? null;
+}
+
+function individualSessionMatchesQuery(
+  session: IndividualSessionRecord,
+  query: string,
+  tutorName?: string,
+): boolean {
+  const needle = query.trim().toLocaleLowerCase('lt');
+  if (!needle) return true;
+  return [
+    session.topic,
+    session.student?.full_name,
+    session.student?.grade,
+    session.subject?.name,
+    tutorName,
+  ].some((value) => String(value || '').toLocaleLowerCase('lt').includes(needle));
+}
+
+function formatIndividualSessionTime(startIso: string, endIso: string, locale: string): string {
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return '—';
+  const date = new Intl.DateTimeFormat(locale, {
+    timeZone: 'Europe/Vilnius',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(start);
+  const time = new Intl.DateTimeFormat(locale, {
+    timeZone: 'Europe/Vilnius',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  return `${date} · ${time.format(start)}–${time.format(end)}`;
+}
+
 /** Calendars cache their session lists; a saved group must show up on the next open, not in 5 minutes. */
 function dropCalendarCaches() {
   invalidateCache('company_tvarkarastis');
@@ -39,10 +90,11 @@ function dropCalendarCaches() {
 }
 
 export default function CompanyClassGroups() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const { hasFeature } = useOrgFeatures();
   const { staff } = useStaffLabels();
   const [groups, setGroups] = useState<SchoolClassGroupRecord[]>([]);
+  const [individualSessions, setIndividualSessions] = useState<IndividualSessionRecord[]>([]);
   const [students, setStudents] = useState<ClassGroupStudentOption[]>([]);
   const [tutors, setTutors] = useState<ClassGroupTutorOption[]>([]);
   const [isOrgAdmin, setIsOrgAdmin] = useState(false);
@@ -94,18 +146,45 @@ export default function CompanyClassGroups() {
         .order('full_name');
       setStudents((studentRows || []) as ClassGroupStudentOption[]);
 
+      let visibleTutors: ClassGroupTutorOption[] = [];
       if (admin) {
         const tutorFields = usesLaisviStyleExtraLessonsPrefill(orgIdResolved)
           ? 'id, full_name, personal_meeting_link'
           : 'id, full_name';
         const visible = await getOrgVisibleTutors(supabase as never, orgIdResolved, tutorFields);
-        setTutors(visible.map((row) => ({
+        visibleTutors = visible.map((row) => ({
           id: row.id,
           full_name: row.full_name || row.id,
           personal_meeting_link: (row as { personal_meeting_link?: string | null }).personal_meeting_link ?? null,
-        })));
+        }));
+        setTutors(visibleTutors);
       } else if (profile) {
-        setTutors([{ id: profile.id, full_name: profile.full_name || profile.id }]);
+        visibleTutors = [{ id: profile.id, full_name: profile.full_name || profile.id }];
+        setTutors(visibleTutors);
+      }
+
+      const tutorIds = visibleTutors.map((tutor) => tutor.id);
+      if (tutorIds.length > 0) {
+        const from = new Date();
+        from.setHours(0, 0, 0, 0);
+        const until = new Date(from);
+        until.setDate(until.getDate() + 180);
+        const { data: sessionRows } = await supabase
+          .from('sessions')
+          .select('id, tutor_id, student_id, start_time, end_time, topic, student:students(full_name, grade), subject:subjects(name)')
+          .in('tutor_id', tutorIds)
+          .is('class_group_id', null)
+          .neq('status', 'cancelled')
+          .not('hidden_from_calendar', 'eq', true)
+          .gte('start_time', from.toISOString())
+          .lte('start_time', until.toISOString())
+          .order('start_time', { ascending: true })
+          .limit(200);
+        setIndividualSessions(((sessionRows || []) as Array<Record<string, unknown>>).map((row) => ({
+          ...(row as unknown as IndividualSessionRecord),
+          student: relatedRow(row.student as IndividualSessionRecord['student'] | Array<NonNullable<IndividualSessionRecord['student']>>),
+          subject: relatedRow(row.subject as IndividualSessionRecord['subject'] | Array<NonNullable<IndividualSessionRecord['subject']>>),
+        })));
       }
     })();
   }, []);
@@ -119,13 +198,16 @@ export default function CompanyClassGroups() {
     return map;
   }, [tutors, groups, staff]);
 
-  /** Only teachers that actually own a group — the point is to split a long list, not to list staff. */
+  /** Only teachers that own a group or an upcoming individual lesson. */
   const tutorFilterOptions = useMemo(() => {
-    const ids = [...new Set(groups.map((group) => group.tutor_id))];
+    const ids = [...new Set([
+      ...groups.map((group) => group.tutor_id),
+      ...individualSessions.map((session) => session.tutor_id),
+    ])];
     return ids
       .map((id) => ({ id, full_name: tutorNameById.get(id) || staff }))
       .sort((a, b) => a.full_name.localeCompare(b.full_name, 'lt'));
-  }, [groups, tutorNameById, staff]);
+  }, [groups, individualSessions, tutorNameById, staff]);
 
   const filteredGroups = useMemo(
     () => groups.filter((group) =>
@@ -139,8 +221,15 @@ export default function CompanyClassGroups() {
     [filteredGroups, tutorNameById, staff],
   );
 
+  const filteredIndividualSessions = useMemo(
+    () => individualSessions.filter((session) =>
+      (tutorFilter === 'all' || session.tutor_id === tutorFilter)
+      && individualSessionMatchesQuery(session, query, tutorNameById.get(session.tutor_id))),
+    [individualSessions, tutorFilter, query, tutorNameById],
+  );
+
   const showTutorTools = isOrgAdmin && tutorFilterOptions.length > 1;
-  const showSearch = groups.length > 3 || query.length > 0;
+  const showSearch = groups.length + individualSessions.length > 3 || query.length > 0;
 
   if (!hasFeature('school_class_groups')) {
     return <p className="text-sm text-gray-500">{t('school.groups.disabled')}</p>;
@@ -273,6 +362,42 @@ export default function CompanyClassGroups() {
           <div className="space-y-3">{filteredGroups.map(renderCard)}</div>
         )}
       </div>
+
+      {filteredIndividualSessions.length > 0 && (
+        <section className="space-y-3" aria-labelledby="individual-lessons-title">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 id="individual-lessons-title" className="text-base font-semibold text-gray-900 flex items-center gap-2">
+              <CalendarClock className="h-4 w-4 text-emerald-700" />
+              <span>{t('orgFinance.individualLessons')}</span>
+              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+                {filteredIndividualSessions.length}
+              </span>
+            </h2>
+            <Link to="/school/schedule" className="text-sm font-medium text-emerald-700 hover:text-emerald-800 hover:underline">
+              {t('companyNav.schedule')}
+            </Link>
+          </div>
+          <div className="space-y-2">
+            {filteredIndividualSessions.map((session) => (
+              <div key={session.id} className="rounded-xl border bg-white px-4 py-3">
+                <div className="font-medium text-gray-900">
+                  {session.student?.full_name || t('cal.unknown')}
+                  {session.student?.grade ? ` · ${session.student.grade}` : ''}
+                </div>
+                <div className="mt-0.5 text-sm text-gray-600">
+                  {session.subject?.name || session.topic || '—'}
+                </div>
+                <div className="mt-1 text-sm text-gray-500">
+                  {formatIndividualSessionTime(session.start_time, session.end_time, locale)}
+                  {isOrgAdmin && tutorFilter === 'all'
+                    ? ` · ${staff}: ${tutorNameById.get(session.tutor_id) || '—'}`
+                    : ''}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <ClassGroupFormDialog
         open={modalOpen}

@@ -61,13 +61,29 @@ describe('CompanyClassGroups edit modal', () => {
           { id: 's1', full_name: 'Jonas Petraitis', grade: '5 klasė', enrollment_status: 'active' },
           { id: 's2', full_name: 'Eglė Kazlauskaitė', grade: '5 klasė', enrollment_status: 'active' },
         ] }
+        : table === 'sessions' ? { data: [{
+          id: 'individual-1',
+          tutor_id: 't1',
+          student_id: 's2',
+          start_time: '2026-09-07T08:00:00.000Z',
+          end_time: '2026-09-07T09:00:00.000Z',
+          topic: 'Lietuvių kalba 6 klasė',
+          student: { full_name: 'Eglė Kazlauskaitė', grade: '6 klasė' },
+          subject: null,
+        }] }
         : { data: null };
       const query: Record<string, unknown> = {};
       const self = () => query;
       query.select = self;
       query.eq = self;
       query.is = self;
-      query.order = () => Promise.resolve(result);
+      query.in = self;
+      query.neq = self;
+      query.not = self;
+      query.gte = self;
+      query.lte = self;
+      query.order = () => table === 'sessions' ? query : Promise.resolve(result);
+      query.limit = () => Promise.resolve(result);
       query.maybeSingle = () => Promise.resolve(result);
       return query;
     });
@@ -88,6 +104,23 @@ describe('CompanyClassGroups edit modal', () => {
     expect(screen.getByText('Redaguoti')).toBeTruthy();
     expect(screen.queryByText('common.edit')).toBeNull();
     expect(screen.queryByText('school.groups.edit')).toBeNull();
+  });
+
+  it('shows an upcoming teacher-created individual lesson separately from class groups', async () => {
+    render(
+      <OrgEntityProvider value="school">
+        <MemoryRouter initialEntries={['/school/groups']}>
+          <CompanyClassGroups />
+        </MemoryRouter>
+      </OrgEntityProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /Individualios pamokos/ })).toBeTruthy();
+      expect(screen.getByText('Eglė Kazlauskaitė · 6 klasė')).toBeTruthy();
+      expect(screen.getByText('Lietuvių kalba 6 klasė')).toBeTruthy();
+      expect(screen.getByRole('link', { name: 'Tvarkaraštis' }).getAttribute('href')).toBe('/school/schedule');
+    });
   });
 
   it('opens a wide edit modal from the group card with members to add or remove', async () => {

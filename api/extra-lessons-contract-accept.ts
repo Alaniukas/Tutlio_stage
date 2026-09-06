@@ -49,6 +49,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     organizationId: contract.organization_id,
     storedBody: contract.filled_body,
   });
+  const defaultStartWithin14 = contract.accepted_at
+    ? contract.start_within_14_status === 'yes'
+      || (!contract.start_within_14_status && contract.start_within_14_days === true)
+    : true;
 
   async function renderPreviewPdf(payload: Record<string, string>, filled: string): Promise<string | null> {
     try {
@@ -83,7 +87,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       schoolName: String(org.name || ''),
     });
     const incomplete = validateExtraLessonsOrder(order);
-    const start14 = resolveStartWithin14Status({ order, acceptedAt: new Date(), parentChecked: false });
+    const start14 = resolveStartWithin14Status({
+      order,
+      acceptedAt: contract.accepted_at ? new Date(contract.accepted_at) : new Date(),
+      parentChecked: defaultStartWithin14,
+    });
     const orgFeatures = (org.features || {}) as Record<string, unknown>;
     const recordingsEnabled = orgFeatures.school_lesson_recordings === true;
     payload.start_within_14_label = startWithin14Label(start14.status);
@@ -127,6 +135,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       summary: payload,
       body: filled,
       startWithin14Applies: start14.applies,
+      startWithin14Default: defaultStartWithin14,
       firstLessonDate: start14.firstLessonYmd,
       termsCheckboxText: EXTRA_LESSONS_FULL_TERMS_CHECKBOX_TEXT,
       startWithin14CheckboxText: START_WITHIN_14_CHECKBOX_TEXT,
@@ -152,7 +161,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         userId: String(st.id || contract.student_id || ''),
         schoolName: String(org.name || ''),
       });
-      const start14 = resolveStartWithin14Status({ order, acceptedAt: new Date(), parentChecked: false });
+      const start14 = resolveStartWithin14Status({
+        order,
+        acceptedAt: contract.accepted_at ? new Date(contract.accepted_at) : new Date(),
+        parentChecked: defaultStartWithin14,
+      });
       const orgFeatures = (org.features || {}) as Record<string, unknown>;
       const recordingsEnabled = orgFeatures.school_lesson_recordings === true;
       payload.start_within_14_label = startWithin14Label(start14.status);
@@ -230,7 +243,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const resolved14 = resolveStartWithin14Status({
     order,
     acceptedAt,
-    parentChecked: body.start_within_14_days === true,
+    parentChecked: body.start_within_14_days !== false,
   });
   const startWithin14 = resolved14.status === 'yes';
   if (!canClickWrapAccept({ accepted_terms: acceptedTerms, start_within_14_days: startWithin14, recording_consent: recordingConsent })) {
@@ -286,21 +299,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     confirmationSentLabel: payload.el_pastas_ir_issiuntimo_data_laikas,
   });
 
-  let pdfPath: string | null = contract.pdf_url || null;
-  let pdfBase64: string | null = null;
+  let rendered: Awaited<ReturnType<typeof renderAndStoreExtraLessonsPdf>>;
   try {
-    const rendered = await renderAndStoreExtraLessonsPdf(supabase, {
+    rendered = await renderAndStoreExtraLessonsPdf(supabase, {
       contract,
       student: st,
       filledBody: frozenBody,
       indicativeMonthlyEur: order.indicative_monthly_eur,
       extraLessonsPayload: payload,
     });
-    if (rendered.uploadedPath) pdfPath = rendered.uploadedPath;
-    if (rendered.pdfBase64) pdfBase64 = rendered.pdfBase64;
   } catch (e) {
     console.error('[extra-lessons-contract-accept] pdf', (e as Error).message);
+    return res.status(503).json({
+      error: 'Nepavyko suformuoti sutarties pagal įkeltą DOCX šabloną. Sutartis dar nepatvirtinta - bandykite dar kartą.',
+      code: 'contract_pdf_generation_failed',
+    });
   }
+  if (!rendered.uploadedPath || !rendered.pdfBase64) {
+    return res.status(503).json({
+      error: 'Nepavyko išsaugoti galutinio sutarties PDF. Sutartis dar nepatvirtinta - bandykite dar kartą.',
+      code: 'contract_pdf_generation_failed',
+    });
+  }
+  const pdfPath = rendered.uploadedPath;
+  const pdfBase64 = rendered.pdfBase64;
 
   const { error: updErr } = await supabase.from('school_contracts').update({
     accepted_at: acceptedAt.toISOString(),

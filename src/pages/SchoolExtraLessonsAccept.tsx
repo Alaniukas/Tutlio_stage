@@ -36,6 +36,7 @@ type Preview = {
   parentEditableFields?: string[];
   body: string;
   startWithin14Applies?: boolean;
+  startWithin14Default?: boolean;
   firstLessonDate?: string;
   termsCheckboxText?: string;
   startWithin14CheckboxText?: string;
@@ -79,7 +80,7 @@ export default function SchoolExtraLessonsAccept() {
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
-  const [startWithin14, setStartWithin14] = useState(false);
+  const [startWithin14, setStartWithin14] = useState(true);
   const [recordingConsent, setRecordingConsent] = useState<boolean | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState<{ sha256: string; acceptedAt?: string } | null>(null);
@@ -108,6 +109,7 @@ export default function SchoolExtraLessonsAccept() {
     setEndDate(o?.end_date || '');
     setBaseLessons(o?.base_lessons_per_month ? String(o.base_lessons_per_month) : '');
     setSlots(Array.isArray(o?.schedule_slots) ? o.schedule_slots : []);
+    if (!data.alreadyAccepted) setStartWithin14(data.startWithin14Default !== false);
     if (data.alreadyAccepted) setDone({ sha256: '', acceptedAt: data.acceptedAt || undefined });
     if (data.withdrawn) {
       setWithdrawn(true);

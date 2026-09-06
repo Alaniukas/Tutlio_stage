@@ -78,6 +78,8 @@ describe('SchoolExtraLessonsAccept', () => {
     expect(screen.getByRole('button', { name: 'Atidaryti visą PDF' })).toBeTruthy();
     expect(screen.getByText('Sutinku pradėti iš karto')).toBeTruthy();
     expect(screen.getByText('Palaukti')).toBeTruthy();
+    expect((screen.getByRole('radio', { name: 'Sutinku pradėti iš karto' }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('radio', { name: 'Palaukti' }) as HTMLInputElement).checked).toBe(false);
     expect(screen.getByText('Sutinku')).toBeTruthy();
     expect(screen.getByText('Nesutinku')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Patvirtinti sutartį' })).toBeTruthy();

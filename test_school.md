@@ -17,7 +17,7 @@ Dokumentas skirtas eiti visą school modulį ant `alano-local` (extra-lessons, 1
 1. `git fetch` ir `git checkout alano-local`. Šiame PC turi būti ir **DOCX šablonas** (`docs/legal/extra-lessons-laisvi-vaikai.docx`). Jei failo nėra — tai sena kopija; be jo tėvas vėl matys tekstinį dump’ą.
 2. 14 d. atsisakymas / **Atsisakyti vs Nutraukti** jau yra `alano-local` (nebesitikėk atskirų nekomituotų failų). Migracija `20260827120000_extra_lessons_start_within_14.sql` stage turi būti uždėta. Jei accept/withdraw krenta dėl stulpelio — trūksta `start_within_14_status`.
 3. `.env.local` iš stage raktų (URL turi būti `cuhciqwmqfuajeeqjjbm.supabase.co`). **Nenaudok** senojo `xklzjhfztjxltrdkplog`. Windows: jei OS env turi seną `SUPABASE_URL`, vis tiek turi laimėti `.env.local` / `.env` failas.
-4. **DOCX→PDF converter** turi veikti, kitaip iframe’e bus Times-Roman tekstas, ne 7 psl. Word maketas. Lokaliai: `DOCX_CONVERTER_URL` + `DOCX_CONVERTER_API_KEY` (Railway) **arba** LibreOffice `soffice` PATH. API log’e ieškok `[extra-lessons] bundled docx`.
+4. **DOCX→PDF converter** turi veikti. Jei konverteris neveikia, sutartis nepatvirtinama ir rodoma pakartotino bandymo klaida - sistema nebegali pakeisti įkelto šablono Times-Roman tekstiniu PDF. Lokaliai: `DOCX_CONVERTER_URL` + `DOCX_CONVERTER_API_KEY` (Railway) **arba** LibreOffice `soffice` PATH. API log’e ieškok `[extra-lessons-contract-accept] pdf`.
 5. `npm install` tada `npm run dev` (PowerShell: komandas skirk `;`, ne `&&`).
 6. Seed (jei nėra QA mokinių / nori šviežių extra sutarčių):
 
@@ -323,7 +323,7 @@ Seed: `node scripts/seed-school-extra-lessons-legal-qa.mjs` (PowerShell: `ENV_FI
 Tekstai (turi sutapti su DOCX 3.2 ir 6.4):
 
 - Teisinis: *Perskaičiau Sutartį, susipažinau su jos priedais ir privatumo pranešimu…*
-- 14 d. (tik jei pirma pamoka **per 14 kalendorinių dienų, Europe/Vilnius**): *Prašau pradėti teikti paslaugas nepasibaigus 14 dienų sutarties atsisakymo terminui…* — radio **Sutinku pradėti iš karto** / **Palaukti**, pagal nutylėjimą ne „iš karto“.
+- 14 d. (tik jei pirma pamoka **per 14 kalendorinių dienų, Europe/Vilnius**): *Prašau pradėti teikti paslaugas nepasibaigus 14 dienų sutarties atsisakymo terminui…* — radio **Sutinku pradėti iš karto** / **Palaukti**, pagal nutylėjimą pasirinkta „Sutinku pradėti iš karto“.
 - Mygtukas: **Patvirtinti sutartį**. Po sėkmės **nėra** atsisakymo mygtuko.
 - Nuoroda į `/legal/extra-lessons-withdrawal-form.html`.
 - PDF: §3b checklist (7 psl., užpildyti laukai).
@@ -331,7 +331,7 @@ Tekstai (turi sutapti su DOCX 3.2 ir 6.4):
 
 | Sutartis            | Checkbox 14 d.                             | Po accept `start_within_14_status` |
 | ------------------- | ------------------------------------------ | ---------------------------------- |
-| `PP-LEGAL-WITHIN14` | matomas                                    | be varnelės `no`; su varnele `yes` |
+| `PP-LEGAL-WITHIN14` | matomas, „Sutinku pradėti iš karto“ pasirinkta | nepakeitus `yes`; pasirinkus „Palaukti“ `no` |
 | `PP-LEGAL-AFTER14`  | nėra                                       | `na`, shown text tuščias           |
 | `PP-LEGAL-SPARSE`   | tėvas pildo tipą, trukmę, grafiką, datas, kiekį | SHA nuo **sujungto** order         |
 
@@ -404,7 +404,7 @@ Sąrašas eina per `parent_profiles.user_id` → `parent_students` **ir** `stude
 | `100.00` įmokose                  | placeholder, ne suma                                                                     |
 | Sutikimas „jau yra“ filtre        | žiūrėk sutarties `media_publicity_consent`, ne sibling mokinį                            |
 | Extra pamoka ir metinė GoSign     | skirtingi `kind`; extra be GoSign                                                        |
-| PDF = Times Roman santrauka       | converter neveikia (`DOCX_CONVERTER_*` / LibreOffice) arba sena šaka be `docs/legal/*.docx` |
+| PDF = Times Roman santrauka       | sena sugadinta sutartis arba sena šaka; naujas srautas tokio PDF nebeišsaugo, o prašo bandyti dar kartą |
 | PDF rodo `{{sutarties_nr}}`       | payload neužsipildė — perkrauk accept; jei vis dar — bug, ne „normalu“                   |
 | Iframe tuščias, tekstas `<details>` | nėra pasirašyto PDF URL; žiūrėk API log `[extra-lessons]`                                |
 | Pro Klasė legal / pending package | kitas agentas; čia netestuoti nebent atskirai                                            |
