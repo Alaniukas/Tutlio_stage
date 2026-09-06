@@ -15,6 +15,7 @@ import ClassGroupFormDialog, {
 } from '@/components/company/ClassGroupFormDialog';
 import { usesLaisviStyleExtraLessonsPrefill } from '@/lib/laisviVaikaiExtraLessonsDefaults';
 import {
+  classGroupCalendarLabel,
   classGroupMatchesQuery,
   classGroupTutorName,
   groupClassGroupsByTutor,
@@ -178,6 +179,9 @@ export default function CompanyClassGroups() {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="font-semibold text-gray-900">{g.name}</div>
+          {g.calendar_name && classGroupCalendarLabel(g) !== g.name && (
+            <div className="text-sm text-gray-500">{t('school.groups.calendarName')}: {classGroupCalendarLabel(g)}</div>
+          )}
           <div className="text-sm text-gray-600">
             {formatLtDate(g.school_year_start)} – {formatLtDate(g.school_year_end)} · {g.platform} · {g.duration_minutes} min.
           </div>

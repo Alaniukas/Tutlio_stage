@@ -10,6 +10,7 @@ import { isOrgTutor } from './_lib/isOrgTutor.js';
 import { requireCronAuth } from './_lib/cronAuth.js';
 import { dedupeReminderRecipients, type ReminderRecipient } from './_lib/reminderRecipients.js';
 import { loadReminderOptOuts } from './_lib/reminderOptOut.js';
+import { parseEmailOptOutList, isEmailOptedOut } from './_lib/emailNotificationOptOut.js';
 import { isMissingPostgrestRpc } from './_lib/postgrestRpc.js';
 import { moksloVaisiaiRoutesLessonCommsToPayer } from './_lib/moksloVaisiaiLessonComms.js';
 import { buildSchoolHomeworkUrl, publicAppOrigin } from './_lib/publicLinkToken.js';
@@ -64,7 +65,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           id, start_time, end_time, topic, price, meeting_link,
           reminder_student_sent, reminder_tutor_sent, reminder_payer_sent,
           student:students(id, full_name, email, payment_payer, payer_email, payer_name, parent_secondary_email, parent_secondary_name, organization_id, linked_user_id),
-          tutor:profiles(id, full_name, email, phone, reminder_student_hours, reminder_tutor_hours, organization_id)
+          tutor:profiles(id, full_name, email, phone, reminder_student_hours, reminder_tutor_hours, organization_id, email_notification_opt_out)
         `;
     const { data: dueSessionRows, error: dueSessionError } = await supabase.rpc(
       'get_due_session_reminder_ids',
@@ -269,6 +270,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         if (reminderTutorHours > 0 && !session.reminder_tutor_sent && diffHours <= reminderTutorHours && diffHours >= 0 && tutor?.email && emailAttempts < SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT) {
+          const tutorOptOut = parseEmailOptOutList(tutor?.email_notification_opt_out);
+          if (isEmailOptedOut(tutorOptOut, 'lesson_reminder_tutor')) {
+            await supabase.from('sessions').update({ reminder_tutor_sent: true }).eq('id', session.id);
+          } else {
           try {
             emailAttempts += 1;
             const tutorReminderCore = {
@@ -303,6 +308,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
           } catch (e) {
             console.error('[send-reminders] tutor email error:', e);
+          }
           }
         }
       }

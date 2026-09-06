@@ -9,14 +9,14 @@ const testState = vi.hoisted(() => ({
   cache: {
     orgId: '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17',
     orgName: 'VšĮ Laisvi vaikai',
-    orgEmail: 'irminta@laisvivaikai.lt',
+    orgEmail: 'tutlio@laisvivaikai.lt',
     orgFeatures: { school_extra_lessons_contract: true, school_contract_esign: false },
     eSignEnabled: false,
     signingSettings: {
-      email: 'irminta@laisvivaikai.lt',
+      email: 'tutlio@laisvivaikai.lt',
       reason: 'Ugdymo sutarties pasirašymas',
       location: 'Vilnius',
-      contact: 'irminta@laisvivaikai.lt',
+      contact: 'tutlio@laisvivaikai.lt',
     },
     templates: [],
     students: [{ id: 's1', full_name: 'Emilija Bar', payer_email: 'parent@test.lt' }],

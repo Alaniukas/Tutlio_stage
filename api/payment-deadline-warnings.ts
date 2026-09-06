@@ -19,6 +19,8 @@ import {
 } from './_lib/soloManualStudentPayments.js';
 import { requireCronAuth } from './_lib/cronAuth.js';
 import { isReminderOptedOut } from './_lib/reminderOptOut.js';
+import { shouldSkipPerLessonPaymentReminders } from './_lib/schoolSessionBilling.js';
+import { orgAdminEmailOptOut, isEmailOptedOut, parseEmailOptOutList } from './_lib/emailNotificationOptOut.js';
 import { hasOrgAdminPermission } from '../src/lib/orgAdminPermissions.js';
 import type { OrgAdminRole } from '../src/lib/orgAdminPermissions.js';
 
@@ -119,6 +121,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         end_time,
         price,
         paid,
+        class_group_id,
+        school_billing_kind,
         payment_deadline_warning_sent,
         student:students!inner(
           id,
@@ -140,6 +144,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           cancellation_hours,
           payment_timing,
           payment_deadline_hours,
+          email_notification_opt_out,
           subscription_plan,
           manual_subscription_exempt,
           enable_manual_student_payments,
@@ -161,26 +166,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const warned: string[] = [];
         const skipped: string[] = [];
+        const silenced: string[] = [];
 
-        const orgIdsForPerlas = [...new Set(
+        const orgIdsForLookup = [...new Set(
             (sessions || [])
                 .map((s: any) => (s.tutor as any)?.organization_id)
                 .filter((id: any) => typeof id === 'string' && id.length > 0) as string[]
         )];
         const orgPerlasMap = new Map<string, boolean>();
-        if (orgIdsForPerlas.length > 0) {
+        const orgEntityTypeMap = new Map<string, string>();
+        const orgAdminOptOutMap = new Map<string, ReturnType<typeof orgAdminEmailOptOut>>();
+        if (orgIdsForLookup.length > 0) {
             const { data: orgs } = await supabase
                 .from('organizations')
-                .select('id, perlas_finance_enabled')
-                .in('id', orgIdsForPerlas);
+                .select('id, perlas_finance_enabled, entity_type, features')
+                .in('id', orgIdsForLookup);
             for (const o of orgs ?? []) {
                 orgPerlasMap.set(o.id, !!(o as any).perlas_finance_enabled);
+                orgEntityTypeMap.set(o.id, String((o as any).entity_type || ''));
+                orgAdminOptOutMap.set(o.id, orgAdminEmailOptOut((o as any).features));
             }
         }
 
         for (const session of sessions || []) {
             const tutor = session.tutor as any;
             const student = session.student as any;
+            const orgId = tutor?.organization_id as string | undefined;
+            const orgEntityType = orgId ? orgEntityTypeMap.get(orgId) : undefined;
+
+            if (shouldSkipPerLessonPaymentReminders(session as any, orgEntityType)) {
+                silenced.push(session.id);
+                continue;
+            }
+
             const studentPaymentModelRaw = String(student?.payment_model || '').trim();
 
             // Per-student payment override: monthly/package students must not get per-lesson payment reminders.
@@ -249,6 +267,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     } else {
                         let allSent = true;
                         for (const admin of admins) {
+                            const adminOptOut = orgId ? orgAdminOptOutMap.get(orgId) : undefined;
+                            if (adminOptOut && isEmailOptedOut(adminOptOut, 'payment_deadline_warning')) {
+                                continue;
+                            }
                             const ok = await sendWarningEmail({
                                 type: 'payment_deadline_warning_org_admin',
                                 to: admin.email,
@@ -271,6 +293,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         tutorStepOk = allSent;
                     }
                 } else {
+                    const tutorOptOut = parseEmailOptOutList(tutor?.email_notification_opt_out);
+                    if (isEmailOptedOut(tutorOptOut, 'payment_deadline_warning')) {
+                        tutorStepOk = true;
+                    } else {
                     tutorStepOk = await sendWarningEmail({
                         type: 'payment_deadline_warning_tutor',
                         to: tutor.email,
@@ -287,6 +313,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                             ...(tutor.organization_id ? { organizationId: tutor.organization_id } : {}),
                         },
                     });
+                    }
                 }
 
                 if (tutorStepOk) {
@@ -358,11 +385,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
         }
 
-        if (warned.length > 0) {
+        if (warned.length > 0 || silenced.length > 0) {
             await supabase
                 .from('sessions')
                 .update({ payment_deadline_warning_sent: true })
-                .in('id', warned);
+                .in('id', [...warned, ...silenced]);
         }
 
         return res.status(200).json({
@@ -370,6 +397,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             checkedAt: now.toISOString(),
             warned: warned.length,
             skipped: skipped.length,
+            silenced: silenced.length,
             warnedIds: warned,
         });
     } catch (err: any) {

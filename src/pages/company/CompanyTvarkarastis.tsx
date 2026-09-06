@@ -61,8 +61,12 @@ import {
   classGroupParticipantsForModal,
   isMergedClassGroupSession,
   mergeSchoolClassGroupSessions,
+  orgScheduleSessionTitle,
   type MergedClassGroupSession,
 } from '@/lib/schoolClassGroupSessions';
+import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
+import { formatStudentPickerLabel, pickStudentsForOrgTutorPicker } from '@/lib/orgStudentIdentity';
+import { displayStudentGrade } from '@/lib/studentGrade';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -163,7 +167,7 @@ async function emailOrgTutorAvailabilityNotice(
 /** Same shape as fetchData sessions query — reused when refreshing one row for the lesson modal. */
 const TVARKARASTIS_SESSION_SELECT = `
   *,
-  student:students(full_name, email, admin_comment, admin_comment_visible_to_tutor),
+  student:students(full_name, email, admin_comment, admin_comment_visible_to_tutor, grade),
   tutor:profiles!sessions_tutor_id_fkey(full_name)
 `;
 
@@ -209,6 +213,7 @@ interface Session {
     email?: string;
     admin_comment?: string | null;
     admin_comment_visible_to_tutor?: boolean | null;
+    grade?: string | null;
   };
   tutor?: {
     full_name: string;
@@ -306,11 +311,13 @@ interface Subject {
 interface Student {
   id: string;
   full_name: string;
-  tutor_id: string;
+  tutor_id: string | null;
   email?: string;
   personal_meeting_link?: string | null;
   grade?: string | null;
   pricing_lessons_per_week?: number | null;
+  linked_user_id?: string | null;
+  organization_id?: string | null;
 }
 
 export default function CompanyTvarkarastis() {
@@ -692,19 +699,47 @@ export default function CompanyTvarkarastis() {
 
       setSubjects(subjectsData || []);
 
-      // Visi org mokiniai (kad admin galėtų užimti laiką pas bet kurį korepetitorių)
-      let studentsQuery = supabase
-        .from('students')
-        .select('id, full_name, tutor_id, email, personal_meeting_link, grade, pricing_lessons_per_week')
-        .is('detached_at', null);
-      if (organizationId) {
-        studentsQuery = studentsQuery.eq('organization_id', organizationId);
+      // Visi org mokiniai (legacy rows may lack organization_id but have tutor_id in org)
+      const studentSelect =
+        'id, full_name, tutor_id, email, personal_meeting_link, grade, pricing_lessons_per_week, linked_user_id, organization_id';
+      let studentsData: Student[] = [];
+      if (organizationId && tutorIds.length > 0) {
+        const [byTutorRes, byOrgRes] = await Promise.all([
+          supabase
+            .from('students')
+            .select(studentSelect)
+            .in('tutor_id', tutorIds)
+            .is('detached_at', null),
+          supabase
+            .from('students')
+            .select(studentSelect)
+            .eq('organization_id', organizationId)
+            .is('detached_at', null),
+        ]);
+        const merged = [...(byTutorRes.data || []), ...(byOrgRes.data || [])] as Student[];
+        const seen = new Set<string>();
+        studentsData = merged.filter((s) => {
+          if (seen.has(s.id)) return false;
+          seen.add(s.id);
+          return true;
+        });
+      } else if (organizationId) {
+        const { data } = await supabase
+          .from('students')
+          .select(studentSelect)
+          .eq('organization_id', organizationId)
+          .is('detached_at', null);
+        studentsData = (data || []) as Student[];
       } else {
-        studentsQuery = studentsQuery.in('tutor_id', tutorIds);
+        const { data } = await supabase
+          .from('students')
+          .select(studentSelect)
+          .in('tutor_id', tutorIds)
+          .is('detached_at', null);
+        studentsData = (data || []) as Student[];
       }
-      const { data: studentsData } = await studentsQuery;
 
-      setStudents(studentsData || []);
+      setStudents(studentsData);
 
       const { data: pricingData } = await supabase
         .from('student_individual_pricing')
@@ -879,7 +914,10 @@ export default function CompanyTvarkarastis() {
           isMakeup: isProKlase && session.is_makeup === true,
           cancellationReasonCode: isProKlase ? session.cancellation_reason_code : undefined,
           status: session.status,
-        })}${calendarTitleForSession(session, t('cal.unknown'))} - ${session.tutor?.full_name || 'Tutorius'}${!session.meeting_link && session.status !== 'cancelled' ? ` · ${t('compSch.noMeetingLink')}` : ''}`,
+        })}${orgScheduleSessionTitle(session, t('cal.unknown'), {
+          isSchoolOrg: isSchoolOrgView,
+          tutorFallback: 'Tutorius',
+        })}${!session.meeting_link && session.status !== 'cancelled' ? ` · ${t('compSch.noMeetingLink')}` : ''}`,
         start: session.start_time,
         end: session.end_time,
         resource: {
@@ -1448,7 +1486,7 @@ export default function CompanyTvarkarastis() {
       isMakeup: isProKlase && session.is_makeup === true,
       cancellationReasonCode: isProKlase ? session.cancellation_reason_code : undefined,
       isMovedLesson,
-      isOrgTutor: false,
+      isOrgTutor: isSchoolOrgView || isSchoolBilledSession(session),
     });
 
     return {
@@ -2973,11 +3011,11 @@ export default function CompanyTvarkarastis() {
               const maxSt = createClassGroupId
                 ? Math.max(selSubj?.max_students || 1, createStudentIds.length, 1)
                 : (selSubj?.max_students || 1);
-              const list = sortStudentsByFullName(students.filter(s =>
-                (createClassGroupId && createStudentIds.includes(s.id))
-                || !createTutorId
-                || s.tutor_id === createTutorId
-              ));
+              const list = sortStudentsByFullName(
+                createClassGroupId
+                  ? students.filter((s) => createStudentIds.includes(s.id))
+                  : pickStudentsForOrgTutorPicker(students, createTutorId),
+              );
               if (isGrp) {
                 return (
                   <div className="space-y-2">
@@ -3003,7 +3041,7 @@ export default function CompanyTvarkarastis() {
                               disabled={!createStudentIds.includes(student.id) && createStudentIds.length >= maxSt}
                               className="rounded border-gray-300 text-indigo-600"
                             />
-                            <span className="text-sm">{student.full_name}</span>
+                            <span className="text-sm">{formatStudentPickerLabel(student.full_name, student.grade)}</span>
                           </label>
                         ))
                       )}
@@ -3032,7 +3070,9 @@ export default function CompanyTvarkarastis() {
                         ? list.filter((s) => (s.full_name || '').toLowerCase().includes(createStudentSearch.trim().toLowerCase()))
                         : list
                       ).map(student => (
-                        <SelectItem key={student.id} value={student.id}>{student.full_name}</SelectItem>
+                        <SelectItem key={student.id} value={student.id}>
+                          {formatStudentPickerLabel(student.full_name, student.grade)}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -3402,7 +3442,7 @@ export default function CompanyTvarkarastis() {
                     {(isClassGroupSession ? classGroupParticipants : selectedGroupSessions.map((session) => ({
                       student_id: session.student_id,
                       full_name: session.student?.full_name || '—',
-                      grade: undefined,
+                      grade: session.student?.grade ?? null,
                       session,
                     }))).map((participant) => (
                       <div key={participant.student_id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
@@ -3411,6 +3451,9 @@ export default function CompanyTvarkarastis() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-gray-900">{participant.full_name}</p>
+                          {participant.grade && (
+                            <p className="text-xs text-emerald-600 font-medium">{displayStudentGrade(participant.grade)}</p>
+                          )}
                           {participant.session?.status && (
                             <p className="text-xs text-gray-500">{participant.session.status}</p>
                           )}
@@ -3429,6 +3472,11 @@ export default function CompanyTvarkarastis() {
                 <div>
                   <Label className="text-xs text-gray-500">{t('compSess.labelStudent')}</Label>
                   <p className="font-medium text-sm mt-1">{selectedEvent.student?.full_name || '–'}</p>
+                  {selectedEvent.student?.grade && (
+                    <p className="text-xs text-emerald-600 font-medium mt-0.5">
+                      {displayStudentGrade(selectedEvent.student.grade)}
+                    </p>
+                  )}
                 </div>
                 )}
               </div>
@@ -3634,7 +3682,7 @@ export default function CompanyTvarkarastis() {
                 </div>
               )}
 
-              {canView && selectedEvent.status !== 'cancelled' && !cancelConfirmOpen && (
+              {canView && selectedEvent.status !== 'cancelled' && !cancelConfirmOpen && !isSchoolOrgView && !isSchoolBilledSession(selectedEvent) && (
                 <div className="space-y-2 pt-1">
                   <Button
                     variant="outline"
@@ -3872,9 +3920,11 @@ export default function CompanyTvarkarastis() {
                       <SelectValue placeholder={t('compSch.selectPlaceholder')} />
                     </SelectTrigger>
                     <SelectContent>
-                      {sortStudentsByFullName(students.filter(s => !editTutorId || s.tutor_id === editTutorId)).map(
+                      {sortStudentsByFullName(pickStudentsForOrgTutorPicker(students, editTutorId)).map(
                         (s) => (
-                          <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
+                          <SelectItem key={s.id} value={s.id}>
+                            {formatStudentPickerLabel(s.full_name, s.grade)}
+                          </SelectItem>
                         ),
                       )}
                     </SelectContent>
@@ -4127,7 +4177,7 @@ export default function CompanyTvarkarastis() {
                         <Label className="text-xs">{t('compSch.studentsGroup')}</Label>
                         <div className="border border-indigo-200 rounded-lg bg-white p-2 max-h-36 overflow-y-auto space-y-1.5">
                           {sortStudentsByFullName(
-                            students.filter(s => s.tutor_id === editingAvailability?.tutor_id),
+                            pickStudentsForOrgTutorPicker(students, editingAvailability?.tutor_id),
                           ).map(s => (
                               <label key={s.id} className="flex items-center gap-2 text-sm cursor-pointer">
                                 <Checkbox
@@ -4138,7 +4188,7 @@ export default function CompanyTvarkarastis() {
                                     else setCreateFromAvailStudentIds(prev => prev.filter(id => id !== s.id));
                                   }}
                                 />
-                                <span>{s.full_name}</span>
+                                <span>{formatStudentPickerLabel(s.full_name, s.grade)}</span>
                               </label>
                             ))}
                         </div>
@@ -4152,9 +4202,11 @@ export default function CompanyTvarkarastis() {
                           </SelectTrigger>
                           <SelectContent>
                             {sortStudentsByFullName(
-                              students.filter(s => s.tutor_id === editingAvailability?.tutor_id),
+                              pickStudentsForOrgTutorPicker(students, editingAvailability?.tutor_id),
                             ).map(s => (
-                                <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
+                                <SelectItem key={s.id} value={s.id}>
+                                  {formatStudentPickerLabel(s.full_name, s.grade)}
+                                </SelectItem>
                               ))}
                           </SelectContent>
                         </Select>

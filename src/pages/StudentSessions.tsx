@@ -36,6 +36,7 @@ import {
     isMonthlyBillingOnlyStudent,
     shouldShowPerLessonPaymentUi,
 } from '@/lib/studentPaymentModel';
+import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
 import { useStudentPolicy } from '@/contexts/StudentPolicyContext';
 
 interface Session {
@@ -46,6 +47,7 @@ interface Session {
     paid: boolean;
     price: number | null;
     topic: string | null;
+    class_group_id?: string | null;
     meeting_link?: string | null;
     payment_status?: string;
     tutor_comment?: string | null;
@@ -734,7 +736,7 @@ export default function StudentSessions() {
 
         /** Narrow columns + no nested embed — `*, subjects(...)` pegged Postgres/RLS (statement timeouts). */
         const SESSION_LIST_COLUMNS =
-            'id,start_time,end_time,status,paid,price,topic,meeting_link,whiteboard_room_id,payment_status,tutor_comment,show_comment_to_student,subject_id,lesson_package_id,is_late_cancelled,cancellation_penalty_amount,penalty_resolution,cancelled_by,no_show_when,reschedule_reason';
+            'id,start_time,end_time,status,paid,price,topic,class_group_id,meeting_link,whiteboard_room_id,payment_status,tutor_comment,show_comment_to_student,subject_id,lesson_package_id,is_late_cancelled,cancellation_penalty_amount,penalty_resolution,cancelled_by,no_show_when,reschedule_reason';
 
         const secondaryGen = ++sessionsSecondaryGenRef.current;
 
@@ -1208,6 +1210,8 @@ export default function StudentSessions() {
         studentPaymentOverrideActive,
         tutorPaymentFlags,
     );
+    const perLessonPayAllowedForSession = (session: Session) =>
+        showPerLessonStripeButton && !tutorOrgIsSchool && !isSchoolBilledSession(session);
     const isMonthlyBillingOnly = isMonthlyBillingOnlyStudent(studentPaymentModel);
 
     const getSessionPaymentType = (session: Session): 'package' | 'monthly' | 'per_lesson' => {
@@ -1265,7 +1269,7 @@ export default function StudentSessions() {
             if (filter === 'past') return !isAfter(new Date(s.end_time), now) && s.status !== 'cancelled';
             if (filter === 'paid') return s.paid === true && s.status === 'active';
             if (filter === 'unpaid') {
-                if (!showPerLessonStripeButton) return false;
+                if (!perLessonPayAllowedForSession(s)) return false;
                 return s.paid === false && s.status === 'active';
             }
             if (filter === 'cancelled') return s.status === 'cancelled';
@@ -1781,7 +1785,7 @@ export default function StudentSessions() {
                                 <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
                                     <p className="text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">{t('stuSess.price')}</p>
                                     <p className="font-bold text-gray-900">{fmt(selectedSession?.price)}</p>
-                                    {selectedSession?.status === 'active' && !selectedSession.paid && selectedSession.price != null && showPerLessonStripeButton && !manualPaymentsOnly && (
+                                    {selectedSession?.status === 'active' && !selectedSession.paid && selectedSession.price != null && perLessonPayAllowedForSession(selectedSession) && !manualPaymentsOnly && (
                                         <p className="text-[11px] text-gray-500 mt-1 leading-snug">
                                             {t('stuSess.stripeChargeNote', { amount: formatLessonCharge(selectedSession.price, tutorOrgIsSchool, tutorOrgFeeProfile) })}
                                         </p>
@@ -1796,7 +1800,7 @@ export default function StudentSessions() {
                                     paid={selectedSession?.paid}
                                     isTrial={selectedSession?.subjects?.is_trial === true}
                                     endTime={selectedSession?.end_time}
-                                    treatUnpaidAsReserved={!showPerLessonStripeButton}
+                                    treatUnpaidAsReserved={selectedSession ? !perLessonPayAllowedForSession(selectedSession) : !showPerLessonStripeButton}
                                 />
                             </div>
                             {!seesPaymentAmounts && paymentPayer === 'parent' && (
@@ -1871,7 +1875,7 @@ export default function StudentSessions() {
 
                         {/* Credit balance + payment buttons for unpaid sessions (only for self-payers, not monthly billing).
                             Stripe checkout is unavailable for manual-payment tutors (server rejects it), but Perlas bank payments stay available. */}
-                        {selectedSession?.status === 'active' && !selectedSession.paid && canPayLessons && showPerLessonStripeButton && (!manualPaymentsOnly || tutorPerlasEnabled) && (
+                        {selectedSession?.status === 'active' && !selectedSession.paid && canPayLessons && perLessonPayAllowedForSession(selectedSession) && (!manualPaymentsOnly || tutorPerlasEnabled) && (
                             <div className="space-y-2">
                                 {!manualPaymentsOnly && (
                                     <>

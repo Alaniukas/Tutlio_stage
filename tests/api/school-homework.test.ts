@@ -34,6 +34,10 @@ vi.mock('@supabase/supabase-js', () => {
         }
         if (table === 'profiles') return resolve({ data: [{ id: 't1', full_name: 'Demo Mokytoja Ana' }], error: null });
         if (table === 'school_class_groups') return resolve({ data: [{ id: 'g1', name: 'QA Legal Matematika' }], error: null });
+        if (table === 'school_class_group_members') {
+          const sid = filters.find(([c]) => c === 'student_id')?.[1];
+          return resolve({ data: sid === STUDENT ? [{ group_id: 'g1' }] : [], error: null });
+        }
         return resolve({ data: [], error: null });
       },
     };
@@ -78,7 +82,10 @@ beforeEach(() => {
     { id: 'sess-2', student_id: 'other', start_time: inFuture, end_time: inFuture, status: 'active', meeting_link: 'https://meet.google.com/abc', tutor_id: 't1', class_group_id: 'g1', subject_id: null, topic: null },
   ];
   state.files = {
-    'sess-2': [{ name: 'uzduotys.pdf', metadata: { size: 1200 } }],
+    'sess-2': [
+      { name: 'uzduotys.pdf', metadata: { size: 1200 } },
+      { name: 'nd-klasemate-svetimas.pdf', metadata: { size: 400 } },
+    ],
     'sess-1': [{ name: 'nd-austeja-mockute-atsakymai.pdf', metadata: { size: 800 } }],
   };
   state.uploadPaths = [];
@@ -98,6 +105,13 @@ describe('helpers', () => {
     const all = state.sessions as any;
     expect(siblingFolders(all[0], all)).toEqual(['sess-1', 'sess-2']);
     expect(siblingFolders({ ...all[0], class_group_id: null }, all)).toEqual(['sess-1']);
+  });
+
+  it('does not merge folders from a different class group at the same time', () => {
+    const sameTime = new Date().toISOString();
+    const mine = { id: 'mine', class_group_id: 'g1', start_time: sameTime };
+    const other = { id: 'other', class_group_id: 'g2', start_time: sameTime };
+    expect(siblingFolders(mine as any, [mine, other] as any)).toEqual(['mine']);
   });
 });
 
@@ -132,7 +146,19 @@ describe('GET /api/school-homework', () => {
       ['nd-austeja-mockute-atsakymai.pdf', true, true],
       ['uzduotys.pdf', false, false],
     ]));
+    expect(s.files.map((f: any) => f.name)).not.toContain('nd-klasemate-svetimas.pdf');
     expect(s.files.find((f: any) => f.name === 'uzduotys.pdf').url).toBe('https://signed/sess-2/uzduotys.pdf');
+  });
+
+  it('hides sessions for groups the child is not enrolled in', async () => {
+    state.sessions = [
+      { id: 'sess-1', student_id: STUDENT, start_time: new Date(Date.now() + 3 * 86_400_000).toISOString(), end_time: new Date(Date.now() + 3 * 86_400_000).toISOString(), status: 'active', meeting_link: null, tutor_id: 't1', class_group_id: 'g1', subject_id: null, topic: null },
+      { id: 'sess-bad', student_id: STUDENT, start_time: new Date(Date.now() + 4 * 86_400_000).toISOString(), end_time: new Date(Date.now() + 4 * 86_400_000).toISOString(), status: 'active', meeting_link: null, tutor_id: 't1', class_group_id: 'g2', subject_id: null, topic: null },
+    ];
+    const res = mockRes();
+    await handler({ method: 'GET', query: { student: STUDENT, t: token() }, headers: { host: 'tutlio.lt' } } as any, res as any);
+    expect(res.getResult().body.sessions).toHaveLength(1);
+    expect(res.getResult().body.sessions[0].id).toBe('sess-1');
   });
 });
 

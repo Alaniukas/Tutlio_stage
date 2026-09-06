@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Paperclip, Upload, Trash2, Download, Loader2 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
+import { studentMaySeeGroupFile } from '@/lib/sessionFileVisibility';
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
@@ -38,11 +39,24 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
       try {
         const { data: sess } = await supabase
           .from('sessions')
-          .select('start_time, end_time, subject_id, tutor_id, subjects(is_group)')
+          .select('start_time, end_time, subject_id, tutor_id, class_group_id, subjects(is_group)')
           .eq('id', sessionId)
           .single();
         if (cancelled) return;
         if (!sess) { setResolvedGroupIds([sessionId]); return; }
+        const classGroupId = (sess as { class_group_id?: string | null }).class_group_id;
+        if (classGroupId) {
+          const { data: siblings } = await supabase
+            .from('sessions')
+            .select('id')
+            .eq('class_group_id', classGroupId)
+            .eq('start_time', sess.start_time)
+            .eq('end_time', sess.end_time);
+          if (cancelled) return;
+          const ids = (siblings ?? []).map((s: { id: string }) => s.id as string);
+          setResolvedGroupIds(ids.length > 0 ? ids : [sessionId]);
+          return;
+        }
         const isGroup = (sess.subjects as any)?.is_group === true;
         if (!isGroup) { setResolvedGroupIds([sessionId]); return; }
         const { data: siblings } = await supabase
@@ -76,6 +90,7 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
       const folderId = allIds[i];
       const { data } = results[i];
       for (const f of data ?? []) {
+        if (role === 'student' && !studentMaySeeGroupFile(f.name, folderId, sessionId)) continue;
         if (seen.has(f.name)) continue;
         seen.add(f.name);
         merged.push({

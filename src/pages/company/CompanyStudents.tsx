@@ -112,7 +112,7 @@ import {
   type SchoolClassGroupRecord,
 } from '@/lib/schoolClassGroups';
 import { findOrgTutorEmailConflict } from '@/lib/orgStudentTutorGuards';
-import { reassignOpenLessonsToTutor, removeOrgStudentTutorPairing } from '@/lib/reassignStudentTutorLessons';
+import { removeOrgStudentTutorPairing } from '@/lib/reassignStudentTutorLessons';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { useUser } from '@/contexts/UserContext';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
@@ -126,7 +126,9 @@ import {
 } from '@/lib/organizationDynamicPricing';
 import { formatLocalYmd, monthlyPackagePeriodFrom } from '@/lib/monthlyPackagePlan';
 import { canEditPendingPackage } from '@/lib/pendingPackageEdit';
-import { normalizeStudentGrade1to12, proKlaseGradeSelectValue } from '@/lib/studentGrade';
+import { displayStudentGrade, normalizeStudentGrade1to12, proKlaseGradeSelectValue } from '@/lib/studentGrade';
+import { ensureStudentPairedWithTutor } from '@/lib/orgStudentPairing';
+import { orgStudentIdentityGroupKey } from '@/lib/orgStudentIdentity';
 
 interface Student {
   id: string;
@@ -535,7 +537,6 @@ export default function CompanyStudents() {
   const [trialTutorId, setTrialTutorId] = useState<string | null>(null);
   const [selectedStudentGroup, setSelectedStudentGroup] = useState<Student[]>([]);
   const [selectedStudentSessionCount, setSelectedStudentSessionCount] = useState<number | null>(null);
-  const [editTutorsOpen, setEditTutorsOpen] = useState(false);
   const [addingTutorId, setAddingTutorId] = useState('');
   const [addingTutorSearch, setAddingTutorSearch] = useState('');
   const [tutorsSaving, setTutorsSaving] = useState(false);
@@ -671,11 +672,11 @@ export default function CompanyStudents() {
 
   const normalizedSearch = studentSearch.trim().toLowerCase();
   const groupedStudents = useMemo(() => {
-    // Group by linked_user_id (multi-tutor). If student isn't linked yet, treat each row as a separate group.
+    // Group by linked_user_id (multi-tutor), else org+student email, else single row.
     const groups = new Map<string, Student[]>();
     const order: string[] = [];
     for (const s of students) {
-      const key = s.linked_user_id ? `u:${s.linked_user_id}` : `s:${s.id}`;
+      const key = orgStudentIdentityGroupKey(s);
       if (!groups.has(key)) {
         groups.set(key, []);
         order.push(key);
@@ -2295,14 +2296,20 @@ export default function CompanyStudents() {
       student_city: showSchoolContractFields ? (studentEditDraft.student_city.trim() || null) : null,
       child_birth_date: showSchoolContractFields ? (studentEditDraft.child_birth_date || null) : null,
       payment_payer: studentEditDraft.payment_payer,
-      ...(isSchoolView
+      ...(!isSchoolView
         ? {
+            grade: (() => {
+              const raw = studentEditDraft.grade?.trim();
+              if (!raw) return null;
+              return normalizeStudentGrade1to12(raw) ?? raw;
+            })(),
+          }
+        : {
             grade: studentEditDraft.grade || null,
             school_year: studentEditDraft.school_year || null,
             enrollment_status: studentEditDraft.enrollment_status,
             municipality: studentEditDraft.municipality || null,
-          }
-        : {}),
+          }),
     };
 
     // Contact data describes the student identity — keep every duplicate row
@@ -2951,7 +2958,6 @@ export default function CompanyStudents() {
                       className="rounded-xl"
                     />
                   </div>
-                  {(isSchoolView || proKlaseAdminUi) && (
                   <div className="space-y-2 sm:col-span-2">
                     <Label>{t('studentSettings.grade')}</Label>
                     <Select
@@ -2977,7 +2983,6 @@ export default function CompanyStudents() {
                       </SelectContent>
                     </Select>
                   </div>
-                  )}
                   {isSchoolView && (
                     <div className="grid sm:grid-cols-3 gap-4 sm:col-span-2">
                       <div className="space-y-2">
@@ -3737,9 +3742,16 @@ export default function CompanyStudents() {
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-2">
-                          <p className="font-semibold text-gray-900 truncate">
-                            <span className="text-gray-400 font-normal tabular-nums">{groupIdx + 1}.</span> {student.full_name}
-                          </p>
+                          <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                            <p className="font-semibold text-gray-900 truncate">
+                              <span className="text-gray-400 font-normal tabular-nums">{groupIdx + 1}.</span> {student.full_name}
+                            </p>
+                            {displayStudentGrade(student.grade) && (
+                              <span className="inline-flex items-center text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-lg border border-indigo-200 font-semibold flex-shrink-0">
+                                {displayStudentGrade(student.grade)}
+                              </span>
+                            )}
+                          </div>
                           {student.linked_user_id ? (
                             <span className="text-[11px] text-green-700 bg-green-50 border border-green-200 rounded-md px-1.5 py-0.5 flex-shrink-0">
                               {t('compStu.connected')}
@@ -3872,9 +3884,16 @@ export default function CompanyStudents() {
                               {initials || '?'}
                             </div>
                             <div className="min-w-0 flex-1">
-                              <p className="font-semibold text-gray-900 truncate">
-                                <span className="text-gray-400 font-normal tabular-nums">{groupIdx + 1}.</span> {student.full_name}
-                              </p>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="font-semibold text-gray-900 truncate">
+                                  <span className="text-gray-400 font-normal tabular-nums">{groupIdx + 1}.</span> {student.full_name}
+                                </p>
+                                {displayStudentGrade(student.grade) && (
+                                  <span className="inline-flex items-center text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-lg border border-indigo-200 font-semibold">
+                                    {displayStudentGrade(student.grade)}
+                                  </span>
+                                )}
+                              </div>
                               <div className="mt-1 flex flex-wrap items-center gap-1">
                                 {student.linked_user_id ? (
                                   <span className="text-[11px] text-green-700 bg-green-50 border border-green-200 rounded-md px-2 py-0.5">{t('compStu.connected')}</span>
@@ -4198,6 +4217,29 @@ export default function CompanyStudents() {
                           </ul>
                         )}
                       </div>
+                    )}
+                    {!isSchoolView && !proKlaseAdminUi && (
+                    <div className="mt-3 w-full max-w-xs space-y-1.5">
+                      <Label className="text-xs text-gray-500">{t('studentSettings.grade')}</Label>
+                      <Select
+                        value={proKlaseGradeSelectValue(selectedStudent.grade)}
+                        onValueChange={(value) => void handleUpdateStudentGrade(value)}
+                      >
+                        <SelectTrigger className="h-9 rounded-xl bg-white">
+                          <SelectValue placeholder={t('dynamicPricing.gradeUnset')} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="unset">{t('dynamicPricing.gradeUnset')}</SelectItem>
+                          {Array.from({ length: 12 }, (_, index) => (
+                            <SelectItem key={index + 1} value={`${index + 1} klasė`}>
+                              {t('onboard.gradeN', { n: index + 1 })}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value="Studentas">{t('lessonSet.gradeUniversity')}</SelectItem>
+                          <SelectItem value="Kita">{t('onboard.gradeOther')}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                     )}
                     {proKlaseAdminUi && (
                     <div className="mt-3 w-full space-y-1.5">
@@ -4523,13 +4565,6 @@ export default function CompanyStudents() {
                           <XCircle className="w-3.5 h-3.5" /> {t('compStu.notConnected')}
                         </span>
                       )}
-                      <button
-                        type="button"
-                        onClick={() => setEditTutorsOpen((v) => !v)}
-                        className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors border-gray-200 text-gray-700 bg-white hover:bg-gray-50"
-                      >
-                        {t('compStu.editTutors')}
-                      </button>
                     </div>
                   </div>
 
@@ -4552,8 +4587,7 @@ export default function CompanyStudents() {
                   ) : null}
                 </div>
 
-                {editTutorsOpen && (
-                  <div className="p-4 rounded-2xl border border-gray-100 bg-white space-y-3">
+                <div className="p-4 rounded-2xl border border-gray-100 bg-white space-y-3">
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('compStu.tutorsSection')}</p>
                     <div className="space-y-2">
                       {selectedStudentGroup.map((row) => (
@@ -4659,85 +4693,61 @@ export default function CompanyStudents() {
                           className="rounded-xl h-9"
                           disabled={!addingTutorId || tutorsSaving}
                           onClick={async () => {
-                            if (!selectedStudent) return;
+                            if (!selectedStudent || !addingTutorId) return;
                             setTutorsSaving(true);
-
-                            const nullTutorRow = selectedStudentGroup.find((r) => !r.tutor_id);
-                            let error: any = null;
-                            let data: any = null;
-
-                            if (nullTutorRow) {
-                              const res = await supabase
+                            try {
+                              const pairedId = await ensureStudentPairedWithTutor(
+                                supabase,
+                                selectedStudent.id,
+                                addingTutorId,
+                              );
+                              const { data, error } = await supabase
                                 .from('students')
-                                .update({ tutor_id: addingTutorId })
-                                .eq('id', nullTutorRow.id)
                                 .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
+                                .eq('id', pairedId)
                                 .single();
-                              error = res.error;
-                              data = res.data;
-                              if (!error && data) {
-                                try {
-                                  await reassignOpenLessonsToTutor(supabase, nullTutorRow.id, {
-                                    studentId: nullTutorRow.id,
-                                    tutorId: addingTutorId,
-                                  });
-                                } catch (reassignErr: any) {
-                                  error = reassignErr;
-                                }
-                              }
-                            } else {
-                              const inviteCode = generateInviteCode();
-                              const res = await supabase
-                                .from('students')
-                                .insert({
-                                  tutor_id: addingTutorId,
-                                  full_name: selectedStudent.full_name,
-                                  email: selectedStudent.email,
-                                  phone: (selectedStudent.phone || '').trim() || null,
-                                  payer_name: selectedStudent.payer_name || null,
-                                  payer_email: selectedStudent.payer_email || null,
-                                  payer_phone: selectedStudent.payer_phone || null,
-                                  child_birth_date: selectedStudent.child_birth_date || null,
-                                  linked_user_id: selectedStudent.linked_user_id || null,
-                                  invite_code: inviteCode,
-                                })
-                                .select('*, linked_user_id, tutor:profiles!students_tutor_id_fkey(full_name)')
-                                .single();
-                              error = res.error;
-                              data = res.data;
-                            }
-
-                            if (error || !data) {
-                              setToastMessage({ message: t('compStu.tutorAddFailed'), type: 'error' });
-                            } else {
-                              setToastMessage({ message: t('compStu.tutorAdded'), type: 'success' });
-                              const normalized = { ...(data as any), tutor: Array.isArray((data as any).tutor) ? (data as any).tutor[0] : (data as any).tutor };
-                              if (nullTutorRow) {
-                                setSelectedStudentGroup((prev) => prev.map((r) => r.id === nullTutorRow.id ? normalized : r));
-                                setSelectedStudent(normalized);
+                              if (error || !data) {
+                                setToastMessage({ message: t('compStu.tutorAddFailed'), type: 'error' });
                               } else {
-                                setSelectedStudentGroup((prev) => [...prev, normalized]);
-                              }
-                              setAddingTutorId('');
-                              fetchData();
+                                setToastMessage({ message: t('compStu.tutorAdded'), type: 'success' });
+                                const normalized = {
+                                  ...(data as Student),
+                                  tutor: Array.isArray((data as any).tutor)
+                                    ? (data as any).tutor[0]
+                                    : (data as any).tutor,
+                                };
+                                setSelectedStudentGroup((prev) => {
+                                  const exists = prev.some((r) => r.id === normalized.id);
+                                  return exists
+                                    ? prev.map((r) => (r.id === normalized.id ? normalized : r))
+                                    : [...prev, normalized];
+                                });
+                                if (selectedStudent.id === normalized.id || !selectedStudentGroup.some((r) => r.id === normalized.id)) {
+                                  setSelectedStudent(normalized);
+                                  setTrialTutorId(normalized.tutor_id);
+                                }
+                                setAddingTutorId('');
+                                fetchData();
 
-                              // Notify tutor about assigned student if org setting is enabled
-                              if (orgId && addingTutorId) {
-                                const { data: orgRow } = await supabase.from('organizations').select('features').eq('id', orgId).single();
-                                const feat = orgRow?.features as Record<string, unknown> | null;
-                                if (feat?.notify_tutors_on_student_assign) {
-                                  const contactPayload = pickStudentContactsForTutorEmail(selectedStudent, feat);
-                                  const { data: tutorProfile } = await supabase.from('profiles').select('email, full_name').eq('id', addingTutorId).single();
-                                  if (tutorProfile?.email) {
-                                    void sendEmail({
-                                      type: 'tutor_student_assigned',
-                                      to: tutorProfile.email,
-                                      locale,
-                                      data: { tutorName: tutorProfile.full_name, studentName: selectedStudent.full_name, ...contactPayload, ...(orgId ? { organizationId: orgId } : {}) },
-                                    });
+                                if (orgId && addingTutorId) {
+                                  const { data: orgRow } = await supabase.from('organizations').select('features').eq('id', orgId).single();
+                                  const feat = orgRow?.features as Record<string, unknown> | null;
+                                  if (feat?.notify_tutors_on_student_assign) {
+                                    const contactPayload = pickStudentContactsForTutorEmail(selectedStudent, feat);
+                                    const { data: tutorProfile } = await supabase.from('profiles').select('email, full_name').eq('id', addingTutorId).single();
+                                    if (tutorProfile?.email) {
+                                      void sendEmail({
+                                        type: 'tutor_student_assigned',
+                                        to: tutorProfile.email,
+                                        locale,
+                                        data: { tutorName: tutorProfile.full_name, studentName: selectedStudent.full_name, ...contactPayload, ...(orgId ? { organizationId: orgId } : {}) },
+                                      });
+                                    }
                                   }
                                 }
                               }
+                            } catch {
+                              setToastMessage({ message: t('compStu.tutorAddFailed'), type: 'error' });
                             }
                             setTutorsSaving(false);
                           }}
@@ -4753,8 +4763,7 @@ export default function CompanyStudents() {
                             : t('compStu.addTutorHintExtraPending')}
                       </p>
                     </div>
-                  </div>
-                )}
+                </div>
 
                 {/* Admin comment */}
                 {selectedStudent && (

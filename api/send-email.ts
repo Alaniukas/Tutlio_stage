@@ -2350,7 +2350,7 @@ function schoolContractExtraOffer(d: any, locale: Locale) {
         <p class="greeting">Sveiki, ${esc(d.parentName || d.studentName || '')},</p>
         <p style="color:#4b5563; font-size:14px; line-height:1.6;">
           ${esc(d.schoolName || 'Mokykla')} parengė nuotolinių papildomų užsiėmimų sutartį mokiniui
-          <strong>${esc(d.studentName)}</strong>. Atidarykite nuorodą, peržiūrėkite dokumentą ir, jei viskas tinka, patvirtinkite sutartį.
+          <strong>${esc(d.studentName)}</strong>. Atidarykite nuorodą, peržiūrėkite dokumentą ir patvirtinkite sutartį.
         </p>
         ${rows ? `<div class="info-card"><table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${rows}</table></div>` : ''}
         ${acceptUrl ? `<div style="text-align:center; margin:24px 0 10px;">${outlookEmailButton(acceptUrl, 'Peržiūrėti ir patvirtinti sutartį', '#059669', { fontWeight: '600', fontSize: '16px', padding: '14px 36px' })}</div>` : ''}
@@ -3360,7 +3360,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             if (schoolQuestionsEmail) (data as any).contactEmail = schoolQuestionsEmail;
             if (String(type).startsWith('school_contract') && type !== 'school_contract_fee_due') {
               (data as any).esignFlow = features.school_contract_esign === true;
-              if (contractSigningEmail) {
+              if (contractSigningEmail && contractSigningEmail.toLowerCase() !== schoolQuestionsEmail.toLowerCase()) {
                 (data as any).schoolEmail = contractSigningEmail;
               }
             }

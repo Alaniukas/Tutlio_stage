@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildClassGroupMetaMap,
+  calendarSessionTopicSuffix,
   calendarTitleForSession,
   classGroupDisplayName,
   classGroupParticipantsForModal,
@@ -27,6 +28,36 @@ describe('schoolClassGroupSessions', () => {
       ],
     },
   ];
+
+  it('uses calendar_name in merged row when set', () => {
+    const groups = [
+      {
+        id: 'g1',
+        name: 'Alina 5 kl. 1 grupė – nuotoliniai papildomi užsiėmimai',
+        calendar_name: 'Alina 5 kl. 1 grupė',
+        tutor_id: 't1',
+        school_year_start: '2026-09-01',
+        school_year_end: '2027-06-15',
+        slots: [{ weekday: 2, start_time: '11:00', end_time: '11:45' }],
+        members: [{ student_id: 's1', student: { full_name: 'Jonas' } }],
+      },
+    ];
+    const meta = buildClassGroupMetaMap(groups);
+    const merged = mergeSchoolClassGroupSessions(
+      [{
+        id: 'a',
+        student_id: 's1',
+        class_group_id: 'g1',
+        start_time: start,
+        end_time: end,
+        status: 'active',
+      }],
+      meta,
+    )[0];
+    expect((merged as MergedClassGroupSession<{ id: string }>)._classGroupName).toBe('Alina 5 kl. 1 grupė');
+    expect((merged as { topic?: string | null }).topic).toBeNull();
+    expect(calendarSessionTopicSuffix('Alina 5 kl. 1 grupė', 'Alina 5 kl. 1 grupė')).toBe('');
+  });
 
   it('merges same class group + time into one calendar row with group name', () => {
     const meta = buildClassGroupMetaMap(groups);
@@ -155,5 +186,21 @@ describe('schoolClassGroupSessions', () => {
     ]);
     expect(classGroupDisplayName('g1', meta)).toBe('LT 5 kl.');
     expect(classGroupDisplayName('missing', meta)).toBeNull();
+  });
+
+  it('includes grade in 1:1 calendar title when student grade is set', () => {
+    expect(
+      calendarTitleForSession(
+        {
+          id: 'x',
+          student_id: 's1',
+          start_time: start,
+          end_time: end,
+          status: 'active',
+          student: { full_name: 'Jonas', grade: '5 klasė' },
+        },
+        'Unknown',
+      ),
+    ).toBe('Jonas · 5 klasė');
   });
 });

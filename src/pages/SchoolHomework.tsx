@@ -203,7 +203,7 @@ export default function SchoolHomework() {
 
   const renderSession = (s: HomeworkSession, isUpcoming: boolean) => {
     const materials = s.files.filter((f) => !f.submission);
-    const submissions = s.files.filter((f) => f.submission);
+    const submissions = s.files.filter((f) => f.submission && f.own);
     const joinActive = Boolean(s.joinUrl) && isWithinJoinClickWindow(now, s.start, s.end);
     const title = s.group || s.subject || s.topic || tx('child');
     const busy = busySession === s.id;

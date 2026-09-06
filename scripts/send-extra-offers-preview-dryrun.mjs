@@ -29,8 +29,8 @@ const { default: handler } = await import('../api/send-email.ts');
 
 const sample = {
   schoolName: 'VšĮ „Laisvi vaikai"',
-  schoolEmail: 'irminta@laisvivaikai.lt',
-  contactEmail: 'irminta@laisvivaikai.lt',
+  schoolEmail: 'tutlio@laisvivaikai.lt',
+  contactEmail: 'tutlio@laisvivaikai.lt',
   studentName: 'QA Peržiūra Extra',
   parentName: 'QA Tėvas Peržiūrai',
   contractNumber: 'PP-PREVIEW-TEST',
@@ -88,7 +88,7 @@ if (status !== 200 || !result.html) {
 writeFileSync('tmp/extra-offer-preview.html', result.html, 'utf8');
 console.log('Subject:', result.subject);
 console.log('HTML saved to tmp/extra-offer-preview.html');
-const mailCount = (result.html.match(/irminta@laisvivaikai\.lt/gi) || []).length;
+const mailCount = (result.html.match(/tutlio@laisvivaikai\.lt/gi) || []).length;
 console.log('School email occurrences:', mailCount);
 
 if (process.argv.includes('--send')) {

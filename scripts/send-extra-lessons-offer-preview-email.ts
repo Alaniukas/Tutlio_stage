@@ -36,8 +36,8 @@ const LAISVI_ORG = '2dd745fc-20e7-4bc1-a5cd-a89cfe22ec17';
 
 const sample = {
   schoolName: 'VšĮ „Laisvi vaikai"',
-  schoolEmail: 'irminta@laisvivaikai.lt',
-  contactEmail: 'irminta@laisvivaikai.lt',
+  schoolEmail: 'tutlio@laisvivaikai.lt',
+  contactEmail: 'tutlio@laisvivaikai.lt',
   studentName: 'QA Peržiūra Extra',
   parentName: 'QA Tėvas Peržiūrai',
   contractNumber: 'PP-PREVIEW-TEST',

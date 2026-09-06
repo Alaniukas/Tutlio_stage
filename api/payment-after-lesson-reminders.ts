@@ -13,6 +13,7 @@ import {
 import { isOrgTutor } from './_lib/isOrgTutor.js';
 import { requireCronAuth } from './_lib/cronAuth.js';
 import { isReminderOptedOut } from './_lib/reminderOptOut.js';
+import { shouldSkipPerLessonPaymentReminders } from './_lib/schoolSessionBilling.js';
 
 const supabase = createClient(
     process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL!,
@@ -63,6 +64,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 end_time,
                 price,
                 topic,
+                class_group_id,
+                school_billing_kind,
                 payment_after_lesson_reminder_sent,
                 student:students!inner(
                     full_name,
@@ -101,26 +104,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const sent: string[] = [];
         const skipped: string[] = [];
+        const silenced: string[] = [];
 
-        const orgIdsForPerlas = [...new Set(
+        const orgIdsForLookup = [...new Set(
             (sessions || [])
                 .map((s: any) => s.tutor?.organization_id)
                 .filter((id: any) => typeof id === 'string' && id.length > 0) as string[]
         )];
         const orgPerlasMap = new Map<string, boolean>();
-        if (orgIdsForPerlas.length > 0) {
+        const orgEntityTypeMap = new Map<string, string>();
+        if (orgIdsForLookup.length > 0) {
             const { data: orgs } = await supabase
                 .from('organizations')
-                .select('id, perlas_finance_enabled')
-                .in('id', orgIdsForPerlas);
+                .select('id, perlas_finance_enabled, entity_type')
+                .in('id', orgIdsForLookup);
             for (const o of orgs ?? []) {
                 orgPerlasMap.set(o.id, !!(o as any).perlas_finance_enabled);
+                orgEntityTypeMap.set(o.id, String((o as any).entity_type || ''));
             }
         }
 
         for (const session of sessions || []) {
             const tutor = session.tutor as any;
             const student = session.student as any;
+            const orgId = tutor?.organization_id as string | undefined;
+            const orgEntityType = orgId ? orgEntityTypeMap.get(orgId) : undefined;
+
+            if (shouldSkipPerLessonPaymentReminders(session as any, orgEntityType)) {
+                silenced.push(session.id);
+                continue;
+            }
+
             const studentPaymentModelRaw = String(student?.payment_model || '').trim();
             if (studentPaymentModelRaw && !hasPerLessonModel(studentPaymentModelRaw)) {
                 skipped.push(session.id);
@@ -229,11 +243,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
         }
 
+        if (silenced.length > 0) {
+            await supabase
+                .from('sessions')
+                .update({ payment_after_lesson_reminder_sent: true })
+                .in('id', silenced);
+        }
+
         return res.status(200).json({
             success: true,
             checkedAt: new Date().toISOString(),
             sent: sent.length,
             skipped: skipped.length,
+            silenced: silenced.length,
             sentIds: sent,
         });
     } catch (err: any) {

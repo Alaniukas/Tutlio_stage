@@ -108,6 +108,7 @@ export default function ClassGroupFormDialog(props: {
     setDeleting(false);
   };
   const [name, setName] = useState('');
+  const [calendarName, setCalendarName] = useState('');
   const [tutorId, setTutorId] = useState('');
   const [yearStart, setYearStart] = useState('');
   const [yearEnd, setYearEnd] = useState('');
@@ -129,6 +130,7 @@ export default function ClassGroupFormDialog(props: {
     if (props.mode === 'edit' && props.group) {
       const draft = groupToWriteDraft(props.group);
       setName(draft.name);
+      setCalendarName(draft.calendar_name || '');
       setTutorId(draft.tutor_id);
       setYearStart(draft.school_year_start);
       setYearEnd(draft.school_year_end);
@@ -141,6 +143,7 @@ export default function ClassGroupFormDialog(props: {
     }
     const blank = emptyDraft(props.defaultTutorId);
     setName(blank.name);
+    setCalendarName('');
     setTutorId(blank.tutor_id);
     setYearStart(blank.school_year_start);
     setYearEnd(blank.school_year_end);
@@ -200,6 +203,7 @@ export default function ClassGroupFormDialog(props: {
   const save = async () => {
     const draft = {
       name,
+      calendar_name: calendarName.trim() || null,
       tutor_id: tutorId,
       school_year_start: yearStart,
       school_year_end: yearEnd,
@@ -254,13 +258,23 @@ export default function ClassGroupFormDialog(props: {
         <div className="grid grid-cols-1 min-[42rem]:grid-cols-[minmax(0,1.45fr)_minmax(18rem,1fr)] gap-5 min-[42rem]:gap-6 items-stretch">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-0 content-start">
             <div className="sm:col-span-2">
-              <Label>{t('school.groups.name')}</Label>
+              <Label>{t('school.groups.contractName')}</Label>
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="pvz. Matematika 5 kl."
+                placeholder={t('school.groups.contractNamePlaceholder')}
                 className="rounded-xl"
               />
+            </div>
+            <div className="sm:col-span-2">
+              <Label>{t('school.groups.calendarName')}</Label>
+              <Input
+                value={calendarName}
+                onChange={(e) => setCalendarName(e.target.value)}
+                placeholder={t('school.groups.calendarNamePlaceholder')}
+                className="rounded-xl"
+              />
+              <p className="text-xs text-muted-foreground mt-1">{t('school.groups.calendarNameHint')}</p>
             </div>
             <div>
               <Label>{staff}</Label>

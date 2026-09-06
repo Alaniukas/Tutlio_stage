@@ -16,11 +16,16 @@ import { verifyPublicLinkToken } from './_lib/publicLinkToken.js';
 import { buildTrackedJoinUrl } from './_lib/joinLink.js';
 import { publicOriginFromRequest } from './_lib/public-origin.js';
 import { schoolTerminologyForOrg } from '../src/lib/i18n/schoolTerminology.js';
+import {
+  HOMEWORK_FILE_PREFIX,
+  isHomeworkSubmissionFile,
+  studentMaySeeGroupFile,
+} from '../src/lib/sessionFileVisibility.js';
 
 const BUCKET = 'session-files';
 export const HOMEWORK_MAX_BYTES = 10 * 1024 * 1024;
 export const HOMEWORK_ALLOWED_EXT = ['.pdf', '.png', '.jpg', '.jpeg', '.doc', '.docx', '.xlsx', '.txt'];
-export const HOMEWORK_PREFIX = 'nd-';
+export const HOMEWORK_PREFIX = HOMEWORK_FILE_PREFIX;
 const PAST_DAYS = 60;
 const FUTURE_DAYS = 45;
 const FILE_SCAN_PAST_DAYS = 21;
@@ -128,6 +133,22 @@ async function authorize(
   };
 }
 
+async function loadMemberGroupIds(
+  supabase: SupabaseClient,
+  studentId: string,
+): Promise<Set<string>> {
+  const { data } = await supabase
+    .from('school_class_group_members')
+    .select('group_id')
+    .eq('student_id', studentId);
+  return new Set((data || []).map((row: { group_id: string }) => row.group_id).filter(Boolean));
+}
+
+function sessionAllowedForStudent(session: SessionRow, memberGroupIds: Set<string>): boolean {
+  if (!session.class_group_id) return true;
+  return memberGroupIds.has(session.class_group_id);
+}
+
 /** Group lessons are one row per member — teacher materials may sit in any sibling folder. */
 export function siblingFolders(session: SessionRow, all: SessionRow[]): string[] {
   if (!session.class_group_id) return [session.id];
@@ -160,7 +181,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .lte('start_time', to.toISOString())
       .order('start_time', { ascending: true })
       .limit(200);
-    const sessions = (own || []) as SessionRow[];
+    const memberGroupIds = await loadMemberGroupIds(supabase, studentId);
+    const sessions = ((own || []) as SessionRow[]).filter((row) => sessionAllowedForStudent(row, memberGroupIds));
 
     // Parallel group rows (other members) that share a folder set with these lessons.
     const groupIds = [...new Set(sessions.map((s) => s.class_group_id).filter(Boolean))] as string[];
@@ -216,9 +238,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const files: Array<{ name: string; folderId: string; size: number | null; url: string | null; submission: boolean; own: boolean }> = [];
       for (const folder of folders) {
         for (const f of filesByFolder.get(folder) || []) {
+          if (!studentMaySeeGroupFile(f.name, folder, s.id)) continue;
           if (seen.has(f.name)) continue;
           seen.add(f.name);
-          const submission = f.name.startsWith(HOMEWORK_PREFIX);
+          const submission = isHomeworkSubmissionFile(f.name);
           files.push({
             name: f.name,
             folderId: folder,
@@ -271,11 +294,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!sessionId) return res.status(400).json({ error: 'Missing sessionId' });
     const { data: session } = await supabase
       .from('sessions')
-      .select('id, student_id, status')
+      .select('id, student_id, status, class_group_id')
       .eq('id', sessionId)
       .eq('student_id', studentId)
       .maybeSingle();
     if (!session) return res.status(404).json({ error: 'Pamoka nerasta' });
+    const memberGroupIds = await loadMemberGroupIds(supabase, studentId);
+    if (!sessionAllowedForStudent(session as SessionRow, memberGroupIds)) {
+      return res.status(403).json({ error: 'Nuoroda negalioja' });
+    }
 
     if (action === 'upload-url') {
       const fileName = String(body.fileName || '').trim();
