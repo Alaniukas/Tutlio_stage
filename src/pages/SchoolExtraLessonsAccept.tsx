@@ -8,6 +8,8 @@ import {
   EXTRA_LESSONS_FULL_TERMS_CHECKBOX_TEXT,
   EXTRA_LESSONS_GROUP_MONTHLY_BILLING_NOTE,
   START_WITHIN_14_CHECKBOX_TEXT,
+  extraLessonsStandaloneWithdrawalFormBody,
+  extraLessonsWithdrawalFormHref,
   formatScheduleLabel,
   parseExtraLessonsServiceType,
   resolveStartWithin14Status,
@@ -302,6 +304,43 @@ export default function SchoolExtraLessonsAccept() {
   }
   if (!preview) return null;
 
+  const viewAnnex = params.get('view') === 'annex';
+  if (viewAnnex) {
+    const annex = extraLessonsStandaloneWithdrawalFormBody(preview.body);
+    return (
+      <PageShell>
+        <Card className="space-y-5">
+          <BrandMark />
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 mb-2">Sutarties atsisakymo forma</h1>
+            <p className="text-gray-600 text-sm">
+              Tai yra šios sutarties 1 priedas. Čia nėra viso sutarties teksto.
+            </p>
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700 space-y-1">
+            {preview.schoolName && <p><span className="font-semibold">Mokykla:</span> {preview.schoolName}</p>}
+            {preview.studentName && <p><span className="font-semibold">Mokinys:</span> {preview.studentName}</p>}
+            {preview.contractNumber && <p><span className="font-semibold">Sutarties Nr.:</span> {preview.contractNumber}</p>}
+          </div>
+          <div className="whitespace-pre-wrap rounded-xl border bg-white p-5 text-sm text-gray-800 leading-relaxed">
+            {annex || 'Priedas šioje sutartyje nerastas.'}
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Button type="button" variant="outline" className="rounded-xl" onClick={() => window.print()}>
+              Spausdinti / įrašyti PDF
+            </Button>
+            <a
+              className="inline-flex items-center text-sm font-semibold text-indigo-700 hover:underline"
+              href={`/school-extra-lessons-accept?token=${encodeURIComponent(token)}`}
+            >
+              Grįžti prie sutarties
+            </a>
+          </div>
+        </Card>
+      </PageShell>
+    );
+  }
+
   if (done) {
     return (
       <PageShell centered>
@@ -337,7 +376,7 @@ export default function SchoolExtraLessonsAccept() {
   const o = preview.order;
   const termsText = preview.termsCheckboxText || EXTRA_LESSONS_FULL_TERMS_CHECKBOX_TEXT;
   const start14Text = preview.startWithin14CheckboxText || START_WITHIN_14_CHECKBOX_TEXT;
-  const withdrawalHref = preview.legalLinks?.withdrawalForm || '/legal/extra-lessons-withdrawal-form.html';
+  const withdrawalHref = extraLessonsWithdrawalFormHref(token);
   const pdfLooksHttp = Boolean(preview.pdfUrl && /^https?:\/\//i.test(preview.pdfUrl));
   const recordingReady = !preview.recordingsEnabled || recordingConsent !== null;
 
@@ -473,19 +512,16 @@ export default function SchoolExtraLessonsAccept() {
         )}
 
         <div className="text-sm space-y-1">
-          <p className="font-semibold text-gray-900">Priedai ir kontaktai</p>
-          <ul className="list-disc pl-5 text-gray-700 space-y-1">
-            <li>
-              {preview.legalLinks?.privacyMailto
-                ? <a className="text-indigo-700 underline" href={preview.legalLinks.privacyMailto}>Privatumo pranešimas (mokyklos kontaktai)</a>
-                : <span>Privatumo pranešimas — kreipkitės {preview.schoolEmail || preview.schoolPhone || 'į mokyklą'}</span>}
-            </li>
-            <li>
-              <a className="text-indigo-700 underline" href={withdrawalHref} target="_blank" rel="noreferrer">
-                Sutarties atsisakymo formos šablonas
-              </a>
-            </li>
-          </ul>
+          <p className="font-semibold text-gray-900">Sutarties priedas</p>
+          <a
+            className="text-indigo-700 underline"
+            href={withdrawalHref}
+            target="_blank"
+            rel="noreferrer"
+            download
+          >
+            Sutarties atsisakymo forma
+          </a>
         </div>
 
         <form onSubmit={submit} className="space-y-4 border-t pt-4">

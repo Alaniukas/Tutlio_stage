@@ -3196,6 +3196,8 @@ export const ee: Record<string, string> = {
   'files.downloadFailed': 'Faili allalaadimine ebaõnnestus',
   'files.tooLarge': 'Fail on liiga suur (max 10 MB).',
   'files.noFilesTutor': 'Õpetaja pole veel ühtegi faili üles laadinud.',
+  'files.homework': 'Kodutööd',
+  'files.lessonMaterials': 'Tunni materjalid',
   'layout.tutlioCompany': 'Tutlio Ettevõte',
   'layout.tutlioSchool': 'Tutlio Kool',
   'legal.downloadPdf': 'Laadi alla PDF',

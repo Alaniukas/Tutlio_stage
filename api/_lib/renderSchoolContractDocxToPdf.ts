@@ -10,11 +10,11 @@ const DOCX_OPTS = {
   nullGetter: () => '',
 } as const;
 
-/** Fill a DOCX buffer with {{placeholders}} and convert to PDF. */
-export async function renderDocxTemplateBufferToPdfBuffer(params: {
+/** Fill a DOCX buffer with {{placeholders}}; does not convert to PDF. */
+export function fillDocxTemplateBuffer(params: {
   templateBytes: ArrayBuffer | Uint8Array | Buffer;
   payload: Record<string, string | number | boolean | null>;
-}): Promise<Buffer> {
+}): Buffer {
   let doc: Docxtemplater;
   try {
     const zip = new PizZip(params.templateBytes);
@@ -23,7 +23,15 @@ export async function renderDocxTemplateBufferToPdfBuffer(params: {
   } catch (error) {
     throw new Error(formatDocxTemplateError(error), { cause: error });
   }
-  const renderedDocx = Buffer.from(doc.getZip().generate({ type: 'uint8array' }));
+  return Buffer.from(doc.getZip().generate({ type: 'uint8array' }));
+}
+
+/** Fill a DOCX buffer with {{placeholders}} and convert to PDF. */
+export async function renderDocxTemplateBufferToPdfBuffer(params: {
+  templateBytes: ArrayBuffer | Uint8Array | Buffer;
+  payload: Record<string, string | number | boolean | null>;
+}): Promise<Buffer> {
+  const renderedDocx = fillDocxTemplateBuffer(params);
   return await convertDocxBufferToPdfWithFallbacks(renderedDocx);
 }
 

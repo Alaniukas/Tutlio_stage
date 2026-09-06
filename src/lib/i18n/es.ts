@@ -2408,6 +2408,8 @@ export const es: Record<string, string> = {
   'misc.refundNote': 'Esta clase fue pagada ({price} €). Para un reembolso, contacte info@tutlio.lt.',
   'misc.studentFallback': 'Alumno',
   'files.noFilesTutor': 'El tutor aún no ha subido archivos.',
+  'files.homework': 'Tareas',
+  'files.lessonMaterials': 'Materiales de la sesión',
   'contact.description': 'Para garantizar la mejor experiencia, no dude en contactarnos - responderemos a todas sus preguntas sobre la plataforma Tutlio.',
   'company_commission_percent': 'Comisión empresa (%)',
   'payment_batch_id': 'Lote de pagos',

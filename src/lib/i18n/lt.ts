@@ -2594,6 +2594,8 @@ export const lt: Record<string, string> = {
   'files.tooLarge': 'Failas per didelis (maks. 10 MB).',
   'files.noFiles': 'Failų nėra.',
   'files.noFilesTutor': 'Korepetitorius dar neįkėlė failų.',
+  'files.homework': 'Namų darbai',
+  'files.lessonMaterials': 'Užsiėmimo medžiaga',
   'finance.afterLesson': 'Po pamokos',
   'finance.afterLessonDesc': 'Mokinys moka po pamokos per nurodytą laiką',
   'finance.beforeLesson': 'Prieš pamoką',

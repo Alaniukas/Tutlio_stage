@@ -2352,6 +2352,8 @@ export const de: Record<string, string> = {
   'misc.refundNote': 'Diese Stunde wurde bezahlt ({price} €). Für eine Rückerstattung kontaktieren Sie info@tutlio.lt.',
   'misc.studentFallback': 'Schüler',
   'files.noFilesTutor': 'Der Lehrer hat noch keine Dateien hochgeladen.',
+  'files.homework': 'Hausaufgaben',
+  'files.lessonMaterials': 'Stundenmaterial',
   'contact.description': 'Damit Sie Tutlio optimal nutzen können, beantworten wir gerne alle Ihre Fragen zur Plattform – kontaktieren Sie uns einfach.',
   'company_commission_percent': 'Unternehmensprovision (%)',
   'payment_batch_id': 'Zahlungsstapel',

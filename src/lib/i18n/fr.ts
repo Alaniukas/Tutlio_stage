@@ -1398,6 +1398,8 @@ export const fr: Record<string, string> = {
   'files.tooLarge': 'Le fichier est trop volumineux (10 Mo max.).',
   'files.noFiles': 'Aucun fichier.',
   'files.noFilesTutor': 'Le tuteur n\'a pas encore téléversé de fichiers.',
+  'files.homework': 'Devoirs',
+  'files.lessonMaterials': 'Supports de séance',
   'time.date': 'Date',
   'time.doubleClickToType': 'Double-cliquez pour saisir manuellement',
   'time.hours': 'h',

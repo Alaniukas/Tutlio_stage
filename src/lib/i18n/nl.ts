@@ -2562,6 +2562,8 @@ export const nl: Record<string, string> = {
   "files.tooLarge": "Bestand is te groot (max. 10 MB).",
   "files.noFiles": "Geen bestanden.",
   "files.noFilesTutor": "Docent heeft nog geen bestanden geüpload.",
+  "files.homework": "Huiswerk",
+  "files.lessonMaterials": "Sessiemateriaal",
   "finance.afterLesson": "Na de les",
   "finance.afterLessonDesc": "Leerling betaalt na de les binnen de aangegeven tijd",
   "finance.beforeLesson": "Vóór de les",

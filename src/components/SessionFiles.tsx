@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Paperclip, Upload, Trash2, Download, Loader2 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
-import { studentMaySeeGroupFile } from '@/lib/sessionFileVisibility';
+import { homeworkSubmissionDisplayName, isHomeworkSubmissionFile, studentMaySeeGroupFile } from '@/lib/sessionFileVisibility';
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
@@ -11,6 +11,7 @@ interface StorageFile {
   name: string;
   folderId: string;
   metadata: { size: number } | null;
+  studentName?: string | null;
 }
 
 interface SessionFilesProps {
@@ -28,6 +29,7 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [resolvedGroupIds, setResolvedGroupIds] = useState<string[]>([]);
+  const [studentNameBySessionId, setStudentNameBySessionId] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (groupSessionIds && groupSessionIds.length > 0) {
@@ -91,8 +93,8 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
       const { data } = results[i];
       for (const f of data ?? []) {
         if (role === 'student' && !studentMaySeeGroupFile(f.name, folderId, sessionId)) continue;
-        if (seen.has(f.name)) continue;
-        seen.add(f.name);
+        if (seen.has(`${folderId}/${f.name}`)) continue;
+        seen.add(`${folderId}/${f.name}`);
         merged.push({
           name: f.name,
           folderId,
@@ -107,6 +109,32 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
   useEffect(() => {
     if (resolvedGroupIds.length > 0) fetchFiles();
   }, [resolvedGroupIds]);
+
+  useEffect(() => {
+    if (role !== 'tutor' || resolvedGroupIds.length === 0) {
+      setStudentNameBySessionId({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data: rows } = await supabase
+        .from('sessions')
+        .select('id, student_id')
+        .in('id', resolvedGroupIds);
+      const studentIds = [...new Set((rows || []).map((r: { student_id?: string | null }) => r.student_id).filter(Boolean))] as string[];
+      if (!studentIds.length) return;
+      const { data: kids } = await supabase.from('students').select('id, full_name').in('id', studentIds);
+      const nameByStudent = Object.fromEntries((kids || []).map((k: { id: string; full_name: string | null }) => [k.id, String(k.full_name || '').trim()]));
+      const map: Record<string, string> = {};
+      for (const row of rows || []) {
+        const sid = (row as { id: string; student_id?: string | null }).student_id;
+        const name = sid ? nameByStudent[sid] : '';
+        if (name) map[(row as { id: string }).id] = name;
+      }
+      if (!cancelled) setStudentNameBySessionId(map);
+    })();
+    return () => { cancelled = true; };
+  }, [role, resolvedGroupIds]);
 
   useEffect(() => {
     if (role !== 'student' || resolvedGroupIds.length === 0) return;
@@ -232,10 +260,28 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
         </p>
       ) : (
         <ul className="space-y-1.5">
-          {files.map((f) => (
-            <li key={f.name} className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2 text-xs">
+          {files.map((f) => {
+            const homework = role === 'tutor' && isHomeworkSubmissionFile(f.name);
+            const childName = homework ? studentNameBySessionId[f.folderId] : '';
+            const fileLabel = homework ? homeworkSubmissionDisplayName(f.name) : f.name;
+            return (
+            <li key={`${f.folderId}/${f.name}`} className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2 text-xs">
               <Paperclip className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-              <span className="flex-1 truncate text-gray-800">{f.name}</span>
+              <span className="flex-1 min-w-0">
+                {homework && (
+                  <span className="mr-1.5 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
+                    {t('files.homework')}
+                  </span>
+                )}
+                {childName ? (
+                  <span className="text-gray-800">
+                    <span className="font-semibold">{childName}</span>
+                    <span className="text-gray-500"> · {fileLabel}</span>
+                  </span>
+                ) : (
+                  <span className="truncate text-gray-800">{fileLabel}</span>
+                )}
+              </span>
               {f.metadata?.size != null && (
                 <span className="text-gray-400 flex-shrink-0">{formatBytes(f.metadata.size)}</span>
               )}
@@ -256,7 +302,8 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
                 </button>
               )}
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
 

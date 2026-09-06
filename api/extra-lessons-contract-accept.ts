@@ -3,6 +3,7 @@ import {
   EXTRA_LESSONS_FULL_TERMS_CHECKBOX_TEXT,
   START_WITHIN_14_CHECKBOX_TEXT,
   canClickWrapAccept,
+  extraLessonsWithdrawalFormHref,
   freezeDocumentSource,
   mergeExtraLessonsOrderPatch,
   recordingConsentLabel,
@@ -12,7 +13,7 @@ import {
   validateExtraLessonsOrder,
   type ExtraLessonsOrderSnapshot,
 } from '../src/lib/extraLessonsContract.js';
-import { renderAndStoreExtraLessonsPdf, signSchoolContractPdf } from './_lib/extraLessonsPdf.js';
+import { renderAndStoreExtraLessonsPdf, renderExtraLessonsAnnexPdf, signSchoolContractPdf } from './_lib/extraLessonsPdf.js';
 import { verifyRequestAuth } from './_lib/auth.js';
 import { sendFirstLessonInvite } from './_lib/extraLessonsFirstLessonInvite.js';
 import {
@@ -131,13 +132,57 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       startWithin14CheckboxText: START_WITHIN_14_CHECKBOX_TEXT,
       recordingsEnabled,
       legalLinks: {
-        withdrawalForm: '/legal/extra-lessons-withdrawal-form.html',
+        withdrawalForm: extraLessonsWithdrawalFormHref(token),
         privacyMailto: org.email ? `mailto:${org.email}` : null,
       },
     };
   }
 
   if (req.method === 'GET') {
+    const format = String(Array.isArray(req.query?.format) ? req.query.format[0] : (req.query?.format || '')).trim();
+    if (format === 'annex-pdf') {
+      const payload = extraLessonsPayloadForContract({
+        contractNumber: String(contract.contract_number || ''),
+        order,
+        parentName: String(st.payer_name || ''),
+        parentEmail: String(st.payer_email || ''),
+        parentPhone: String(st.payer_phone || ''),
+        studentName: String(st.full_name || ''),
+        studentGrade: String(st.grade || ''),
+        userId: String(st.id || contract.student_id || ''),
+        schoolName: String(org.name || ''),
+      });
+      const start14 = resolveStartWithin14Status({ order, acceptedAt: new Date(), parentChecked: false });
+      const orgFeatures = (org.features || {}) as Record<string, unknown>;
+      const recordingsEnabled = orgFeatures.school_lesson_recordings === true;
+      payload.start_within_14_label = startWithin14Label(start14.status);
+      payload.recording_consent_label = recordingsEnabled ? '—' : 'NETAIKOMA';
+      payload.sutikimo_su_salygomis_busena = contract.accepted_at ? 'TAIP' : '—';
+      const filled = fillExtraLessonsBody({
+        templateBody,
+        organizationId: contract.organization_id,
+        payload,
+        startWithin14Label: payload.start_within_14_label,
+        recordingConsentLabel: payload.recording_consent_label,
+        termsAcceptedLabel: payload.sutikimo_su_salygomis_busena,
+      });
+      try {
+        const pdf = await renderExtraLessonsAnnexPdf(supabase, {
+          contract,
+          student: st,
+          filledBody: filled,
+          indicativeMonthlyEur: order.indicative_monthly_eur,
+          extraLessonsPayload: payload,
+        });
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', 'inline; filename="Sutarties-atsisakymo-forma.pdf"');
+        res.setHeader('Cache-Control', 'private, max-age=60');
+        return res.status(200).send(Buffer.from(pdf));
+      } catch (e) {
+        console.error('[extra-lessons-contract-accept] annex pdf', (e as Error).message);
+        return res.status(500).json({ error: 'Nepavyko paruošti priedo PDF' });
+      }
+    }
     return res.status(200).json(await jsonPreview());
   }
 

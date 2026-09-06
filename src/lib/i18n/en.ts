@@ -2596,6 +2596,8 @@ export const en: Record<string, string> = {
   'files.tooLarge': 'File is too large (max 10 MB).',
   'files.noFiles': 'No files.',
   'files.noFilesTutor': 'Tutor hasn\'t uploaded any files yet.',
+  'files.homework': 'Homework',
+  'files.lessonMaterials': 'Session materials',
   'finance.afterLesson': 'After the lesson',
   'finance.afterLessonDesc': 'Student pays after the lesson within the specified time',
   'finance.beforeLesson': 'Before the lesson',

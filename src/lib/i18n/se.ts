@@ -1113,6 +1113,8 @@ export const se: Record<string, string> = {
   'files.tooLarge': 'Filen är för stor (max 10 MB).',
   'files.noFiles': 'Inga filer.',
   'files.noFilesTutor': 'Läraren har inte laddat upp några filer ännu.',
+  'files.homework': 'Läxor',
+  'files.lessonMaterials': 'Lektionsmaterial',
   'finance.connectStripe': 'Anslut Stripe',
   'finance.continueStripe': 'Fortsätt konfigurera Stripe',
   'finance.lessonPackages': 'Lektionspaket',

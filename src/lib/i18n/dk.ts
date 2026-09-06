@@ -1128,6 +1128,8 @@ export const dk: Record<string, string> = {
   'files.tooLarge': 'Filen er for stor (maks. 10 MB).',
   'files.noFiles': 'Ingen filer.',
   'files.noFilesTutor': 'Tutoren har ikke uploadet filer endnu.',
+  'files.homework': 'Lektier',
+  'files.lessonMaterials': 'Lektionsmateriale',
   'finance.connectStripe': 'Tilslut Stripe',
   'finance.continueStripe': 'Fortsæt Stripe-opsætning',
   'finance.lessonPackages': 'Lektionspakker',

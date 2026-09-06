@@ -5,6 +5,13 @@ export function isHomeworkSubmissionFile(name: string): boolean {
   return String(name || '').startsWith(HOMEWORK_FILE_PREFIX);
 }
 
+/** `nd-austeja-mockute-Atsakymai.pdf` → `austeja-mockute-Atsakymai.pdf` for the teacher list. */
+export function homeworkSubmissionDisplayName(fileName: string): string {
+  const raw = String(fileName || '');
+  if (!raw.toLowerCase().startsWith(HOMEWORK_FILE_PREFIX)) return raw;
+  return raw.slice(HOMEWORK_FILE_PREFIX.length) || raw;
+}
+
 /**
  * Teacher materials (no `nd-` prefix) are shared across parallel group-lesson folders.
  * Homework submissions live in the submitting child's session folder and must not

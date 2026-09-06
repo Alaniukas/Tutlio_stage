@@ -1762,6 +1762,8 @@ export const pl: Record<string, string> = {
   'files.tooLarge': 'Plik jest za duży (maks. 10 MB).',
   'files.noFiles': 'Brak plików.',
   'files.noFilesTutor': 'Korepetytor nie przesłał jeszcze żadnych plików.',
+  'files.homework': 'Prace domowe',
+  'files.lessonMaterials': 'Materiały zajęć',
   'features': 'Funkcje',
   'full_name': 'Imię i nazwisko',
   'hidden_from_calendar': 'Ukryte z kalendarza',

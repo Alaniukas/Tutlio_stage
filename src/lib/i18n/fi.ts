@@ -1124,6 +1124,8 @@ export const fi: Record<string, string> = {
   'files.tooLarge': 'Tiedosto on liian suuri (enintään 10 Mt).',
   'files.noFiles': 'Ei tiedostoja.',
   'files.noFilesTutor': 'Tutor ei ole ladannut tiedostoja vielä.',
+  'files.homework': 'Kotitehtävät',
+  'files.lessonMaterials': 'Tuntiaineisto',
   'finance.connectStripe': 'Yhdistä Stripe',
   'finance.continueStripe': 'Jatka Stripe-asetuksia',
   'finance.lessonPackages': 'Tuntipaketit',

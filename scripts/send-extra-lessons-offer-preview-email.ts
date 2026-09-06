@@ -3,6 +3,7 @@
  * Usage: npx tsx scripts/send-extra-lessons-offer-preview-email.ts
  */
 import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
 import handler from '../api/send-email.ts';
 
 function loadEnvFile(file: string) {
@@ -92,7 +93,57 @@ async function sendOne() {
   console.log(`Sent extra-lessons offer preview to ${TO}`);
 }
 
-sendOne().catch((err) => {
+async function sendAnnexPdf() {
+  const pdfPath = join(process.cwd(), 'tmp/annex-preview.pdf');
+  if (!existsSync(pdfPath)) {
+    console.error('Missing tmp/annex-preview.pdf — generate it first');
+    process.exit(1);
+  }
+  const pdfB64 = readFileSync(pdfPath).toString('base64');
+  let statusCode = 500;
+  let body: unknown = null;
+  const res = {
+    status(code: number) {
+      statusCode = code;
+      return this;
+    },
+    json(payload: unknown) {
+      body = payload;
+      return this;
+    },
+    setHeader() {
+      return this;
+    },
+  };
+  await handler(
+    {
+      method: 'POST',
+      body: {
+        type: 'school_contract_extra_offer',
+        to: TO,
+        locale: 'lt',
+        data: {
+          ...sample,
+          acceptUrl: 'http://localhost:3000/school-extra-lessons-accept?token=legalqawithin14aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        },
+        attachments: [{ filename: 'Sutarties-atsisakymo-forma.pdf', content: pdfB64 }],
+      },
+      headers: {
+        'content-type': 'application/json',
+        'x-internal-key': serviceKey,
+      },
+      query: {},
+    } as never,
+    res as never,
+    undefined as never,
+  );
+  console.log('Status:', statusCode, body);
+  if (statusCode !== 200) process.exit(1);
+  console.log(`Sent blank withdrawal form PDF to ${TO}`);
+}
+
+const run = process.argv.includes('--annex-pdf') ? sendAnnexPdf : sendOne;
+run().catch((err) => {
   console.error(err);
   process.exit(1);
 });

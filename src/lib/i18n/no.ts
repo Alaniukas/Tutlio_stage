@@ -958,6 +958,8 @@ export const no: Record<string, string> = {
   'files.tooLarge': 'Filen er for stor (maks. 10 MB).',
   'files.noFiles': 'Ingen filer.',
   'files.noFilesTutor': 'Privatlæreren har ikke lastet opp filer ennå.',
+  'files.homework': 'Lekser',
+  'files.lessonMaterials': 'Øktmateriell',
   'finance.connectStripe': 'Koble til Stripe',
   'finance.continueStripe': 'Fortsett Stripe-oppsett',
   'finance.lessonPackages': 'Timepakker',
