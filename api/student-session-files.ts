@@ -120,7 +120,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!sessionId) return res.status(400).json({ error: 'Missing sessionId' });
 
   const access = await resolveSessionAccess(supabase, auth.userId, sessionId);
-  if (!access.ok) return res.status(access.status).json({ error: access.error });
+  if (access.ok === false) return res.status(access.status).json({ error: access.error });
 
   const { student } = access;
   const mySlug = studentSlug(student.full_name);
@@ -145,7 +145,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       siblings = (data || []) as SessionRow[];
     }
 
-    const folders = siblingFolders(session as SessionRow, siblings);
+    const folders = siblingFolders(
+      session as unknown as Parameters<typeof siblingFolders>[0],
+      siblings as unknown as Parameters<typeof siblingFolders>[1],
+    );
     const seen = new Set<string>();
     const merged: Array<{
       name: string;
