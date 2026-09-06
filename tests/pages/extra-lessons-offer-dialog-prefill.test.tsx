@@ -27,6 +27,7 @@ describe('ExtraLessonsOfferDialog Laisvi vaikai prefill', () => {
     await waitFor(() => {
       expect(screen.getByDisplayValue('Google Meet')).toBeTruthy();
       expect(screen.getByDisplayValue('6.00')).toBeTruthy();
+      expect(screen.getByText('2027-06-11')).toBeTruthy();
     });
     expect((screen.getByPlaceholderText('45') as HTMLInputElement).value).toBe('45');
   });
@@ -46,6 +47,7 @@ describe('ExtraLessonsOfferDialog Laisvi vaikai prefill', () => {
     await waitFor(() => {
       expect(screen.getByDisplayValue('Google Meet')).toBeTruthy();
       expect(screen.getByDisplayValue('6.00')).toBeTruthy();
+      expect(screen.getByText('2027-06-11')).toBeTruthy();
     });
     expect((screen.getByPlaceholderText('45') as HTMLInputElement).value).toBe('45');
     expect(screen.getByText('Papildomų užsiėmimų sutartis')).toBeTruthy();
@@ -79,5 +81,27 @@ describe('ExtraLessonsOfferDialog Laisvi vaikai prefill', () => {
     });
     const nameInput = screen.getByPlaceholderText('nebūtina, jei pasirinkta grupė');
     expect((nameInput as HTMLInputElement).value).toBe('lietuvių kalba');
+  });
+
+  it('filters students by search query', async () => {
+    render(
+      <ExtraLessonsOfferDialog
+        open
+        onOpenChange={() => {}}
+        organizationId={LAISVI_VAIKIAI_ORG_ID}
+        students={[
+          { id: 's1', full_name: 'Emilija Bar', payer_email: 'a@test.lt' },
+          { id: 's2', full_name: 'Adomaitis Kajus', payer_email: 'b@test.lt' },
+        ]}
+        groups={[]}
+        onCreated={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole('combobox')[0]);
+    const search = screen.getByPlaceholderText('Ieškoti mokinio…');
+    fireEvent.change(search, { target: { value: 'Emilija' } });
+    expect(screen.getByText('Emilija Bar')).toBeTruthy();
+    expect(screen.queryByText('Adomaitis Kajus')).toBeNull();
   });
 });

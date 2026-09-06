@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { authHeaders } from '@/lib/apiHelpers';
 import {
   buildExtraLessonsOrderSnapshot,
@@ -13,10 +14,12 @@ import {
 import { countExtraLessonsInFirstMonth } from '@/lib/extraLessonsMonthlyCount';
 import {
   laisviVaikaiExtraUnitPriceEur,
+  LAISVI_VAIKIAI_EXTRA_DEFAULT_END_DATE,
   LAISVI_VAIKIAI_EXTRA_DURATION_MINUTES,
   LAISVI_VAIKIAI_EXTRA_PLATFORM,
   usesLaisviStyleExtraLessonsPrefill,
 } from '@/lib/laisviVaikaiExtraLessonsDefaults';
+import { formatStudentPickerLabel } from '@/lib/orgStudentIdentity';
 import { DateRangeFields, ScheduleSlotPicker } from '@/components/company/ScheduleSlotPicker';
 
 type Student = { id: string; full_name: string; payer_email?: string | null; grade?: string | null };
@@ -118,6 +121,7 @@ export default function ExtraLessonsOfferDialog(props: {
   const [baseLessons, setBaseLessons] = useState('');
   const [slots, setSlots] = useState<ExtraLessonsScheduleSlot[]>([]);
   const [groupId, setGroupId] = useState('');
+  const [studentSearch, setStudentSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const baseLessonsManual = useRef(false);
@@ -127,12 +131,13 @@ export default function ExtraLessonsOfferDialog(props: {
     if (!props.open) return;
     const lv = laisviOpenDefaults(props.organizationId);
     setStudentId('');
+    setStudentSearch('');
     setServiceName('');
     setServiceType('');
     setPlatform(lv.platform);
     setDuration(lv.duration);
     setStartDate('');
-    setEndDate('');
+    setEndDate(styledPrefill ? LAISVI_VAIKIAI_EXTRA_DEFAULT_END_DATE : '');
     setUnitPrice(lv.unitPrice);
     setBaseLessons('');
     setSlots([]);
@@ -140,7 +145,21 @@ export default function ExtraLessonsOfferDialog(props: {
     setError(null);
     baseLessonsManual.current = false;
     unitPriceManual.current = false;
-  }, [props.open, props.organizationId]);
+  }, [props.open, props.organizationId, styledPrefill]);
+
+  const sortedStudents = useMemo(
+    () => [...props.students].sort((a, b) => (a.full_name || '').localeCompare(b.full_name || '', 'lt')),
+    [props.students],
+  );
+
+  const filteredStudents = useMemo(() => {
+    const q = studentSearch.trim().toLowerCase();
+    if (!q) return sortedStudents;
+    return sortedStudents.filter((s) => {
+      const label = formatStudentPickerLabel(s.full_name, s.grade).toLowerCase();
+      return label.includes(q) || (s.full_name || '').toLowerCase().includes(q);
+    });
+  }, [sortedStudents, studentSearch]);
 
   const selectedGroup = props.groups.find((g) => g.id === groupId);
 
@@ -261,12 +280,31 @@ export default function ExtraLessonsOfferDialog(props: {
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div>
             <Label>Mokinys *</Label>
-            <select className="w-full border rounded-md h-9 px-2 text-sm" value={studentId} onChange={(e) => setStudentId(e.target.value)}>
-              <option value="">Pasirinkite…</option>
-              {props.students.map((s) => (
-                <option key={s.id} value={s.id}>{s.full_name}</option>
-              ))}
-            </select>
+            <Select value={studentId} onValueChange={setStudentId}>
+              <SelectTrigger className="w-full rounded-md h-9">
+                <SelectValue placeholder="Pasirinkite…" />
+              </SelectTrigger>
+              <SelectContent className="max-h-72 overflow-y-auto">
+                <div className="sticky top-0 z-10 bg-white p-2 border-b border-gray-100">
+                  <Input
+                    value={studentSearch}
+                    onChange={(e) => setStudentSearch(e.target.value)}
+                    placeholder="Ieškoti mokinio…"
+                    className="h-9 rounded-xl"
+                    onKeyDown={(e) => e.stopPropagation()}
+                  />
+                </div>
+                {filteredStudents.length === 0 ? (
+                  <p className="px-3 py-4 text-sm text-gray-500 text-center">Nerasta</p>
+                ) : (
+                  filteredStudents.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {formatStudentPickerLabel(s.full_name, s.grade)}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
           </div>
           <div>
             <Label>Paslaugos pavadinimas</Label>

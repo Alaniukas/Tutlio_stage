@@ -14,6 +14,9 @@ export const LAISVI_VAIKIAI_EXTRA_INDIVIDUAL_UNIT_EUR = 20;
 export const LAISVI_VAIKIAI_EXTRA_PLATFORM = 'Google Meet';
 export const LAISVI_VAIKIAI_EXTRA_DURATION_MINUTES = 45;
 
+/** Default „Pabaigos data“ when Laisvi vaikai (and Demo) send extra-lessons offers. */
+export const LAISVI_VAIKIAI_EXTRA_DEFAULT_END_DATE = '2027-06-11';
+
 export function isLaisviVaikaiOrg(organizationId: string | null | undefined): boolean {
   return organizationId === LAISVI_VAIKIAI_ORG_ID;
 }
