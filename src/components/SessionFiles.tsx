@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { authHeaders } from '@/lib/apiHelpers';
 import { Button } from '@/components/ui/button';
 import { Paperclip, Upload, Trash2, Download, Loader2 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
-import { homeworkSubmissionDisplayName, isHomeworkSubmissionFile, studentMaySeeGroupFile } from '@/lib/sessionFileVisibility';
+import { homeworkSubmissionDisplayName, isHomeworkSubmissionFile } from '@/lib/sessionFileVisibility';
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
@@ -12,6 +13,8 @@ interface StorageFile {
   folderId: string;
   metadata: { size: number } | null;
   studentName?: string | null;
+  signedUrl?: string | null;
+  ownSubmission?: boolean;
 }
 
 interface SessionFilesProps {
@@ -80,35 +83,72 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
 
   async function fetchFiles(silent = false) {
     if (!silent) setLoading(true);
-    const allIds = resolvedGroupIds.length > 0 ? resolvedGroupIds : [sessionId];
-    const results = await Promise.all(
-      allIds.map((id) =>
-        supabase.storage.from('session-files').list(id, { sortBy: { column: 'created_at', order: 'asc' } })
-      ),
-    );
-    const seen = new Set<string>();
-    const merged: StorageFile[] = [];
-    for (let i = 0; i < results.length; i++) {
-      const folderId = allIds[i];
-      const { data } = results[i];
-      for (const f of data ?? []) {
-        if (role === 'student' && !studentMaySeeGroupFile(f.name, folderId, sessionId)) continue;
-        if (seen.has(`${folderId}/${f.name}`)) continue;
-        seen.add(`${folderId}/${f.name}`);
-        merged.push({
-          name: f.name,
-          folderId,
-          metadata: f.metadata?.size != null ? { size: Number(f.metadata.size) } : null,
+    try {
+      if (role === 'student') {
+        const resp = await fetch('/api/student-session-files', {
+          method: 'POST',
+          headers: await authHeaders(),
+          body: JSON.stringify({ action: 'list', sessionId }),
         });
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          setError(typeof json.error === 'string' ? json.error : t('files.downloadFailed'));
+          setFiles([]);
+          return;
+        }
+        const rows = Array.isArray(json.files) ? json.files : [];
+        setFiles(
+          rows.map((f: {
+            name: string;
+            folderId: string;
+            size: number | null;
+            signedUrl?: string | null;
+            own?: boolean;
+          }) => ({
+            name: f.name,
+            folderId: f.folderId,
+            metadata: f.size != null ? { size: Number(f.size) } : null,
+            signedUrl: f.signedUrl ?? null,
+            ownSubmission: !!f.own,
+          })),
+        );
+        return;
       }
+
+      const allIds = resolvedGroupIds.length > 0 ? resolvedGroupIds : [sessionId];
+      const results = await Promise.all(
+        allIds.map((id) =>
+          supabase.storage.from('session-files').list(id, { sortBy: { column: 'created_at', order: 'asc' } })
+        ),
+      );
+      const seen = new Set<string>();
+      const merged: StorageFile[] = [];
+      for (let i = 0; i < results.length; i++) {
+        const folderId = allIds[i];
+        const { data } = results[i];
+        for (const f of data ?? []) {
+          if (seen.has(`${folderId}/${f.name}`)) continue;
+          seen.add(`${folderId}/${f.name}`);
+          merged.push({
+            name: f.name,
+            folderId,
+            metadata: f.metadata?.size != null ? { size: Number(f.metadata.size) } : null,
+          });
+        }
+      }
+      setFiles(merged);
+    } finally {
+      if (!silent) setLoading(false);
     }
-    setFiles(merged);
-    if (!silent) setLoading(false);
   }
 
   useEffect(() => {
+    if (role === 'student') {
+      void fetchFiles();
+      return;
+    }
     if (resolvedGroupIds.length > 0) fetchFiles();
-  }, [resolvedGroupIds]);
+  }, [resolvedGroupIds, role, sessionId]);
 
   useEffect(() => {
     if (role !== 'tutor' || resolvedGroupIds.length === 0) {
@@ -181,24 +221,58 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
     }
     setUploading(true);
     setError(null);
-    const safeName = safeObjectName(file.name);
-    const buf = await file.arrayBuffer();
-    const { error } = await supabase.storage
-      .from('session-files')
-      .upload(`${sessionId}/${safeName}`, buf, { upsert: true, contentType: file.type });
-    if (error) setError(error.message);
-    else await fetchFiles();
-    setUploading(false);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+    try {
+      if (role === 'student') {
+        const prep = await fetch('/api/student-session-files', {
+          method: 'POST',
+          headers: await authHeaders(),
+          body: JSON.stringify({
+            action: 'upload-url',
+            sessionId,
+            fileName: file.name,
+            size: file.size,
+          }),
+        });
+        const json = await prep.json().catch(() => ({}));
+        if (!prep.ok || !json.path || !json.token) {
+          setError(typeof json.error === 'string' ? json.error : t('files.downloadFailed'));
+          return;
+        }
+        const { error: uploadErr } = await supabase.storage
+          .from('session-files')
+          .uploadToSignedUrl(json.path, json.token, file, {
+            contentType: file.type || undefined,
+            upsert: true,
+          });
+        if (uploadErr) setError(uploadErr.message);
+        else await fetchFiles();
+        return;
+      }
+
+      const safeName = safeObjectName(file.name);
+      const buf = await file.arrayBuffer();
+      const { error } = await supabase.storage
+        .from('session-files')
+        .upload(`${sessionId}/${safeName}`, buf, { upsert: true, contentType: file.type });
+      if (error) setError(error.message);
+      else await fetchFiles();
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   }
 
   async function handleDownload(file: StorageFile) {
-    const { data, error } = await supabase.storage
-      .from('session-files')
-      .createSignedUrl(`${file.folderId}/${file.name}`, 60);
-    if (error || !data) { setError(t('files.downloadFailed')); return; }
+    let signedUrl = file.signedUrl ?? null;
+    if (!signedUrl) {
+      const { data, error } = await supabase.storage
+        .from('session-files')
+        .createSignedUrl(`${file.folderId}/${file.name}`, 60);
+      if (error || !data) { setError(t('files.downloadFailed')); return; }
+      signedUrl = data.signedUrl;
+    }
     const a = document.createElement('a');
-    a.href = data.signedUrl;
+    a.href = signedUrl;
     a.download = file.name;
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
@@ -206,6 +280,20 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
   }
 
   async function handleDelete(fileName: string) {
+    if (role === 'student') {
+      const resp = await fetch('/api/student-session-files', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ action: 'delete', sessionId, fileName }),
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        setError(typeof json.error === 'string' ? json.error : t('files.downloadFailed'));
+        return;
+      }
+      await fetchFiles();
+      return;
+    }
     const allIds = resolvedGroupIds.length > 0 ? resolvedGroupIds : [sessionId];
     const paths = allIds.map((id) => `${id}/${fileName}`);
     const { error } = await supabase.storage.from('session-files').remove(paths);
@@ -225,29 +313,25 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
         <p className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
           <Paperclip className="w-4 h-4" /> {t('common.files')}
         </p>
-        {role === 'tutor' && (
-          <>
-            <input
-              ref={fileInputRef}
-              type="file"
-              className="hidden"
-              accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xlsx,.txt"
-              onChange={handleUpload}
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              className="rounded-xl h-7 px-2.5 text-xs"
-            >
-              {uploading
-                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                : <Upload className="w-3.5 h-3.5 mr-1" />}
-              {uploading ? t('common.uploading') : t('common.upload')}
-            </Button>
-          </>
-        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xlsx,.txt"
+          onChange={handleUpload}
+        />
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          className="rounded-xl h-7 px-2.5 text-xs"
+        >
+          {uploading
+            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            : <Upload className="w-3.5 h-3.5 mr-1" />}
+          {uploading ? t('common.uploading') : t('common.upload')}
+        </Button>
       </div>
 
       {loading ? (
@@ -261,8 +345,8 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
       ) : (
         <ul className="space-y-1.5">
           {files.map((f) => {
-            const homework = role === 'tutor' && isHomeworkSubmissionFile(f.name);
-            const childName = homework ? studentNameBySessionId[f.folderId] : '';
+            const homework = isHomeworkSubmissionFile(f.name);
+            const childName = role === 'tutor' && homework ? studentNameBySessionId[f.folderId] : '';
             const fileLabel = homework ? homeworkSubmissionDisplayName(f.name) : f.name;
             return (
             <li key={`${f.folderId}/${f.name}`} className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2 text-xs">
@@ -292,7 +376,7 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
               >
                 <Download className="w-3.5 h-3.5" />
               </button>
-              {role === 'tutor' && (
+              {(role === 'tutor' || (role === 'student' && f.ownSubmission)) && (
                 <button
                   onClick={() => handleDelete(f.name)}
                   className="text-red-400 hover:text-red-600 flex-shrink-0"

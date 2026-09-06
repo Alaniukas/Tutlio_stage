@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button';
 import { cn, normalizeUrl } from '@/lib/utils';
 import WhiteboardButton from '@/components/WhiteboardButton';
+import SessionFiles from '@/components/SessionFiles';
 import { useSearchParams, useNavigate, useMatch } from 'react-router-dom';
 import { sendEmail } from '@/lib/email';
 import { useStudentPaymentBlock } from '@/hooks/useStudentPaymentBlock';
@@ -729,9 +730,15 @@ export default function StudentSchedule() {
         setStudentName(st.full_name || '');
         setCreditBalance(Number((st as any).credit_balance || 0));
 
-        // OPTIMIZED: Initial load with 30 days past + 7 days future to show recent sessions
+        // OPTIMIZED: Initial load with 30 days past + short future for solo tutors.
+        // School class-group kids often have tutor_id set for legacy reasons but their
+        // weekly group lessons are materialized months ahead — match the no-tutor path.
         const past = addDays(new Date(), -30).toISOString();
-        const future = addDays(new Date(), 7).toISOString();
+        const isSchoolStudent =
+            String((st as { tutor_organization_entity_type?: string }).tutor_organization_entity_type ?? '')
+                .trim() === 'school';
+        const futureDaysAhead = isSchoolStudent ? 60 : 7;
+        const future = addDays(new Date(), futureDaysAhead).toISOString();
 
         const studentGrade = parseStudentGrade(st.grade);
 
@@ -935,17 +942,17 @@ export default function StudentSchedule() {
         setExistingSessions(mySessionsData);
         setOccupiedSlots([]);
 
-        // Mark initial range as loaded (30 days ago to 7 days ahead)
+        // Mark initial range as loaded
         const initialRangeStart = addDays(new Date(), -30);
-        const initialRangeEnd = addDays(new Date(), 7);
+        const initialRangeEnd = addDays(new Date(), futureDaysAhead);
         setLoadedRanges([{ start: initialRangeStart, end: initialRangeEnd }]);
         await refetchBookingBlock();
 
-        // OPTIMIZATION: Pre-fetch current month in background for smooth navigation
+        // Pre-fetch current month in background (pass ids — setTimeout runs before studentId state commits).
         setTimeout(() => {
             const monthStart = startOfMonth(new Date());
             const monthEnd = endOfMonth(new Date());
-            fetchDateRange(monthStart, monthEnd);
+            void fetchDateRange(monthStart, monthEnd, { studentId: st.id, tutorId: st.tutor_id });
         }, 500);
 
         // Defer occupied-slots API so the calendar can paint before the extra round-trip.
@@ -970,7 +977,11 @@ export default function StudentSchedule() {
     };
 
     // OPTIMIZED: Fetch data for specific date range (used when user navigates calendar)
-    const fetchDateRange = async (startDate: Date, endDate: Date) => {
+    const fetchDateRange = async (
+        startDate: Date,
+        endDate: Date,
+        scope?: { studentId?: string; tutorId?: string },
+    ) => {
         // Don't fetch if already loaded
         if (isRangeLoaded(startDate, endDate)) {
             return;
@@ -978,7 +989,9 @@ export default function StudentSchedule() {
 
         setLoadingMore(true);
 
-        if (!studentId) {
+        const resolvedStudentId = scope?.studentId ?? studentId;
+        const resolvedTutorId = scope?.tutorId ?? tutorId;
+        if (!resolvedStudentId) {
             setLoadingMore(false);
             return;
         }
@@ -990,7 +1003,7 @@ export default function StudentSchedule() {
             const sessionsRes = await supabase
                 .from('sessions')
                 .select(PARENT_SCHEDULE_SESSION_COLS)
-                .eq('student_id', studentId)
+                .eq('student_id', resolvedStudentId)
                 .gte('start_time', past)
                 .lte('start_time', future)
                 .order('start_time', { ascending: true })
@@ -1007,11 +1020,11 @@ export default function StudentSchedule() {
             }
             // If tutor is frozen by org license, don't reveal their busy slots to the student.
             let tutorFrozenByLicense = false;
-            if (tutorId) try {
+            if (resolvedTutorId) try {
                 const { data: tutorProf } = await supabase
                     .from('profiles')
                     .select('organization_id, has_active_license')
-                    .eq('id', tutorId)
+                    .eq('id', resolvedTutorId)
                     .maybeSingle();
                 const orgId = (tutorProf as any)?.organization_id as string | null | undefined;
                 const hasActiveLicense = (tutorProf as any)?.has_active_license !== false;
@@ -1038,10 +1051,10 @@ export default function StudentSchedule() {
                 return merged;
             });
 
-            if (!tutorFrozenByLicense && tutorId) {
+            if (!tutorFrozenByLicense && resolvedTutorId) {
                 void fetchOccupiedSlotsDeduped({
-                    tutorId,
-                    studentId,
+                    tutorId: resolvedTutorId,
+                    studentId: resolvedStudentId,
                     startISO: past,
                     endISO: future,
                 }).then((otherNewSessions) => {
@@ -1104,7 +1117,7 @@ export default function StudentSchedule() {
 
         // Fetch data for this range if not already loaded
         await fetchDateRange(startDate, endDate);
-    }, [currentView, tutorId, locale]);
+    }, [currentView, tutorId, studentId, locale]);
 
 
     const handleSelectEvent = async (event: SlotEvent) => {
@@ -2426,6 +2439,10 @@ export default function StudentSchedule() {
                               sessionStatus={(mySessionData as any)?.status}
                               sessionEndTime={(mySessionData as any)?.end_time ?? null}
                             />
+
+                            {mySessionData?.id && (
+                                <SessionFiles sessionId={mySessionData.id} role="student" />
+                            )}
 
                             {/* Stripe checkout is unavailable for manual-payment tutors (server rejects it), but Perlas bank payments stay available. */}
                             {mySessionData?.status === 'active' && !mySessionData.paid && (studentPaymentPayer !== 'parent' || isParentRoute) && (

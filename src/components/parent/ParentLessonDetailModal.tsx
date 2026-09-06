@@ -28,6 +28,7 @@ import {
 import StatusBadge from '@/components/StatusBadge';
 import WhiteboardButton from '@/components/WhiteboardButton';
 import JoinLessonButton from '@/components/JoinLessonButton';
+import SessionFiles from '@/components/SessionFiles';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
 import type { OrgFeeProfile } from '@/lib/marketMoney';
 /** Tutor contact + payment / cancellation rules (from profiles). */
@@ -306,6 +307,8 @@ export function ParentLessonDetailModal({
             sessionStatus={session.status}
             sessionEndTime={(session as any)?.end_time ?? null}
           />
+
+          <SessionFiles sessionId={session.id} role="student" />
 
           {tutorPolicy && session.status === 'active' && (
             <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1.5">
