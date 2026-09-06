@@ -20,8 +20,9 @@ app.use((err, req, res, next) => {
   return next(err);
 });
 
-const SERVICE_VERSION = '2.1.3';
+const SERVICE_VERSION = '2.1.4';
 let conversionQueue = Promise.resolve();
+const LO_USER_PROFILE = path.join(os.tmpdir(), 'tutlio-lo-profile');
 
 /** Calibrated on Railway Linux LO vs Word Save-as-PDF for annex table "Dalykas" x=120. */
 const FLOATING_TABLE_TBL_IND = Number(process.env.FLOATING_TABLE_TBL_IND || -580);
@@ -260,7 +261,7 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitForPdf(outputPath, timeoutMs = 45000) {
+async function waitForPdf(outputPath, timeoutMs = 20000) {
   const started = Date.now();
   let lastErr = null;
   while (Date.now() - started < timeoutMs) {
@@ -279,12 +280,12 @@ async function runLibreOfficeOnce(docxBytes) {
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tutlio-docx-'));
   const inputPath = path.join(workDir, 'contract.docx');
   const outputPath = path.join(workDir, 'contract.pdf');
-  const profilePath = path.join(workDir, 'libreoffice-profile');
-  await fs.mkdir(profilePath, { recursive: true });
+  const profileUrl = pathToFileURL(LO_USER_PROFILE).href;
+  await fs.mkdir(LO_USER_PROFILE, { recursive: true });
   await fs.writeFile(inputPath, docxBytes);
 
   const convertArgs = [
-    `-env:UserInstallation=${pathToFileURL(profilePath).href}`,
+    `-env:UserInstallation=${profileUrl}`,
     '--headless',
     '--nologo',
     '--nodefault',
@@ -292,7 +293,7 @@ async function runLibreOfficeOnce(docxBytes) {
     '--nolockcheck',
     '--norestore',
     '--convert-to',
-    'pdf:writer_pdf_Export',
+    'pdf',
     '--outdir',
     workDir,
     inputPath,
@@ -306,14 +307,8 @@ async function runLibreOfficeOnce(docxBytes) {
         tried.push(bin);
         try {
           await execFileAsync(bin, convertArgs, {
-            timeout: 120000,
+            timeout: 90000,
             windowsHide: true,
-            env: {
-              ...process.env,
-              HOME: workDir,
-              TMPDIR: workDir,
-              SAL_USE_VCLPLUGIN: 'gen',
-            },
           });
           return await waitForPdf(outputPath);
         } catch (error) {
