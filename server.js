@@ -13,7 +13,7 @@ const app = express();
 
 app.use(express.json({ limit: '50mb' }));
 
-const SERVICE_VERSION = '2.1.0';
+const SERVICE_VERSION = '2.1.1';
 let conversionQueue = Promise.resolve();
 
 /** Calibrated on Railway Linux LO vs Word Save-as-PDF for annex table "Dalykas" x=120. */
@@ -45,7 +45,11 @@ function prepareDocxForLibreOffice(docxBuffer) {
   if (docFile) {
     let xml = docFile.asText();
 
-    xml = xml.replace(/<w:tbl>[\s\S]*?<\/w:tbl>/g, (tableXml) => {
+    xml = xml.replace(/<w:tbl\b[\s\S]*?<\/w:tbl>/g, (tableXml) => {
+      // Naive non-greedy match stops at the first nested </w:tbl> and would
+      // slice extra-lessons (and other nested-table) documents into invalid XML.
+      // LibreOffice then exits in <1s with HTTP 500.
+      if ((tableXml.match(/<w:tbl\b/g) || []).length > 1) return tableXml;
       if (!tableXml.includes('tblpPr')) return tableXml;
       meta.floatingTablesFixed += 1;
       let t = tableXml;
@@ -170,6 +174,26 @@ function prepareDocxForLibreOffice(docxBuffer) {
   return { buffer: zip.generate({ type: 'nodebuffer' }), meta };
 }
 
+function safePrepareDocxForLibreOffice(docxBuffer) {
+  try {
+    return prepareDocxForLibreOffice(docxBuffer);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('[docx-converter] prepareDocx skipped, using original buffer:', message);
+    return {
+      buffer: Buffer.from(docxBuffer),
+      meta: { prepareSkipped: true, prepareError: message.slice(0, 300) },
+    };
+  }
+}
+
+function formatExecError(error) {
+  if (!(error instanceof Error)) return 'LibreOffice conversion failed';
+  const stderr = typeof error.stderr === 'string' ? error.stderr.trim().slice(0, 1500) : '';
+  const stdout = typeof error.stdout === 'string' ? error.stdout.trim().slice(0, 500) : '';
+  return [error.message, stderr, stdout].filter(Boolean).join(' | ');
+}
+
 function sofficeCandidates() {
   const fromEnv = process.env.LIBREOFFICE_PATH ? [process.env.LIBREOFFICE_PATH] : [];
   const linux = [
@@ -225,13 +249,13 @@ function serializeConversion(task) {
   return current;
 }
 
-async function convertWithLibreOffice(docxBuffer) {
-  const { buffer: prepared, meta } = prepareDocxForLibreOffice(docxBuffer);
+async function runLibreOfficeOnce(docxBytes) {
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tutlio-docx-'));
   const inputPath = path.join(workDir, 'contract.docx');
   const outputPath = path.join(workDir, 'contract.pdf');
   const profilePath = path.join(workDir, 'libreoffice-profile');
-  await fs.writeFile(inputPath, prepared);
+  await fs.mkdir(profilePath, { recursive: true });
+  await fs.writeFile(inputPath, docxBytes);
 
   const convertArgs = [
     `-env:UserInstallation=${pathToFileURL(profilePath).href}`,
@@ -251,9 +275,6 @@ async function convertWithLibreOffice(docxBuffer) {
   let lastError = null;
   const tried = [];
   try {
-    // LibreOffice is process-heavy and its user profile cannot safely be shared by
-    // simultaneous conversions. Serialize them and isolate HOME/profile per request
-    // so one conversion cannot exhaust threads or lock/corrupt another conversion.
     await serializeConversion(async () => {
       for (const bin of sofficeCandidates()) {
         tried.push(bin);
@@ -274,15 +295,33 @@ async function convertWithLibreOffice(docxBuffer) {
           lastError = error;
         }
       }
-      const lastMessage = lastError instanceof Error ? lastError.message : 'LibreOffice conversion failed';
-      throw new Error(`LibreOffice not available (tried: ${tried.join(', ')}). Last error: ${lastMessage}`);
+      throw new Error(
+        `LibreOffice not available (tried: ${tried.join(', ')}). Last error: ${formatExecError(lastError)}`,
+      );
     });
 
     const pdf = await fs.readFile(outputPath);
-    if (pdf.length > 0) return { pdf, meta };
+    if (pdf.length > 0) return pdf;
     throw new Error('LibreOffice produced an empty PDF');
   } finally {
     await fs.rm(workDir, { recursive: true, force: true });
+  }
+}
+
+async function convertWithLibreOffice(docxBuffer) {
+  const prepared = safePrepareDocxForLibreOffice(docxBuffer);
+  try {
+    const pdf = await runLibreOfficeOnce(prepared.buffer);
+    return { pdf, meta: prepared.meta };
+  } catch (firstError) {
+    const original = Buffer.from(docxBuffer);
+    if (original.equals(Buffer.from(prepared.buffer))) throw firstError;
+    console.error(
+      '[docx-converter] prepared DOCX failed, retrying original bytes:',
+      firstError instanceof Error ? firstError.message : firstError,
+    );
+    const pdf = await runLibreOfficeOnce(original);
+    return { pdf, meta: { ...prepared.meta, retriedOriginal: true } };
   }
 }
 
@@ -343,9 +382,9 @@ app.post('/convert-docx-to-pdf', async (req, res) => {
       },
     });
   } catch (error) {
-    return res.status(500).json({
-      error: error instanceof Error ? error.message : 'DOCX to PDF conversion failed',
-    });
+    const message = error instanceof Error ? error.message : 'DOCX to PDF conversion failed';
+    console.error('[docx-converter] convert failed:', message);
+    return res.status(500).json({ error: message });
   }
 });
 
