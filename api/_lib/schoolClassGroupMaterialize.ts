@@ -21,6 +21,7 @@ import {
   type StartWithin14Status,
 } from '../../src/lib/extraLessonsContract.js';
 import { snapshotFromRow } from './extraLessonsContractShared.js';
+import { extraLessonsAccessKey } from '../../src/lib/schoolClassGroupAccess.js';
 
 export const CLASS_GROUP_HORIZON_DAYS = 60;
 const INSERT_CHUNK = 400;
@@ -157,31 +158,44 @@ export function expectedClassGroupOccurrences(
   return out.sort((a, b) => a.startIso.localeCompare(b.startIso));
 }
 
-export async function loadExtraLessonsStartGates(
+export type ExtraLessonsMaterializeContext = {
+  gates: ExtraStartGateMap;
+  extraLessonsGroupIds: Set<string>;
+};
+
+export async function loadExtraLessonsMaterializeContext(
   supabase: SupabaseClient,
   organizationId?: string | null,
-): Promise<ExtraStartGateMap> {
+): Promise<ExtraLessonsMaterializeContext> {
   const gates: ExtraStartGateMap = new Map();
+  const extraLessonsGroupIds = new Set<string>();
   let query = supabase
     .from('school_contracts')
-    .select('student_id, class_group_id, accepted_at, start_within_14_status, start_within_14_days, order_snapshot, withdrawal_requested_at')
-    .eq('kind', EXTRA_LESSONS_CONTRACT_KIND)
-    .eq('signing_status', 'signed')
-    .not('accepted_at', 'is', null);
+    .select('student_id, class_group_id, signing_status, accepted_at, start_within_14_status, start_within_14_days, order_snapshot, withdrawal_requested_at')
+    .eq('kind', EXTRA_LESSONS_CONTRACT_KIND);
   if (organizationId) query = query.eq('organization_id', organizationId);
   const { data } = await query;
   for (const row of (data || []) as any[]) {
-    if (row.withdrawal_requested_at) continue;
     const order = snapshotFromRow(row) as ExtraLessonsOrderSnapshot | null;
-    if (!order || !row.accepted_at || !row.student_id) continue;
+    const groupId = String(row.class_group_id || order?.group_id || '').trim();
+    if (groupId) extraLessonsGroupIds.add(groupId);
+    if (row.withdrawal_requested_at) continue;
+    if (String(row.signing_status || '') !== 'signed' || !row.accepted_at || !row.student_id || !order) continue;
     const ymd = extraLessonsServiceStartYmd({
       status: (row.start_within_14_status || (row.start_within_14_days ? 'yes' : 'no')) as StartWithin14Status,
       acceptedAtIso: row.accepted_at,
       order,
     });
-    gates.set(`${row.student_id}:${row.class_group_id || order.group_id || ''}`, ymd);
+    gates.set(extraLessonsAccessKey(row.student_id, groupId), ymd);
   }
-  return gates;
+  return { gates, extraLessonsGroupIds };
+}
+
+export async function loadExtraLessonsStartGates(
+  supabase: SupabaseClient,
+  organizationId?: string | null,
+): Promise<ExtraStartGateMap> {
+  return (await loadExtraLessonsMaterializeContext(supabase, organizationId)).gates;
 }
 
 type ExistingRow = {
@@ -225,6 +239,8 @@ export async function reconcileClassGroupSessions(
   options: {
     window?: MaterializeWindow;
     extraGates?: ExtraStartGateMap;
+    /** Groups that have extra-lessons contracts: only signed members get live sessions. */
+    extraLessonsGroupIds?: Set<string>;
     /** Pre-resolved archived students (skips a query when the caller already knows). */
     detachedStudentIds?: Set<string>;
   } = {},
@@ -248,10 +264,15 @@ export async function reconcileClassGroupSessions(
   const activeMembers = memberIds.filter((id) => !detached?.has(id));
 
   const occurrences = expectedClassGroupOccurrences(group, window);
+  const extraLessonsGroup = Boolean(options.extraLessonsGroupIds?.has(group.id));
   const expected = new Map<string, { student_id: string; startIso: string; endIso: string }>();
   for (const occ of occurrences) {
     for (const studentId of activeMembers) {
-      const gate = options.extraGates?.get(`${studentId}:${group.id}`);
+      const gate = options.extraGates?.get(extraLessonsAccessKey(studentId, group.id));
+      if (extraLessonsGroup && !gate) {
+        result.skipped += 1;
+        continue;
+      }
       if (gate && occ.ymd < gate) {
         result.skipped += 1;
         continue;
@@ -378,8 +399,11 @@ export async function materializeClassGroupNow(
 ): Promise<ReconcileResult | null> {
   const group = await loadClassGroupForMaterialize(supabase, groupId);
   if (!group) return null;
-  const extraGates = await loadExtraLessonsStartGates(supabase, organizationId ?? group.organization_id ?? null);
-  return reconcileClassGroupSessions(supabase, group, { extraGates });
+  const extra = await loadExtraLessonsMaterializeContext(supabase, organizationId ?? group.organization_id ?? null);
+  return reconcileClassGroupSessions(supabase, group, {
+    extraGates: extra.gates,
+    extraLessonsGroupIds: extra.extraLessonsGroupIds,
+  });
 }
 
 /**

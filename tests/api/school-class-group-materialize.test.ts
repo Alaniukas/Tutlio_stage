@@ -190,6 +190,43 @@ describe('reconcileClassGroupSessions', () => {
     expect(result.created).toBe(2); // s1 from 2026-09-11 on, s2 archived
     expect(db.inserted.map((r) => r.start_time)).toEqual(['2026-09-11T16:00:00.000Z', '2026-09-18T16:00:00.000Z']);
   });
+
+  it('does not create extra-lessons group lessons until the child has a signed contract', async () => {
+    const db = fakeSupabase([]);
+    const window = materializationWindow(NOW, 14);
+    const result = await reconcileClassGroupSessions(db.client, group({ members: [{ student_id: 's1' }] }), {
+      window,
+      extraGates: new Map(),
+      extraLessonsGroupIds: new Set(['g1']),
+    });
+    expect(result.created).toBe(0);
+    expect(db.inserted).toEqual([]);
+  });
+
+  it('removes generated extra-lessons lessons when the contract was only offered, not signed', async () => {
+    const leftover = {
+      id: 'offer-only',
+      tutor_id: 't1',
+      student_id: 's1',
+      class_group_id: 'g1',
+      status: 'active',
+      start_time: '2026-09-11T16:00:00.000Z',
+      end_time: '2026-09-11T16:45:00.000Z',
+      student_joined_at: null,
+      tutor_joined_at: null,
+      subject_id: null,
+      meeting_link: 'https://meet.google.com/abc',
+    };
+    const db = fakeSupabase([leftover]);
+    const window = materializationWindow(NOW, 14);
+    const result = await reconcileClassGroupSessions(db.client, group({ members: [{ student_id: 's1' }] }), {
+      window,
+      extraGates: new Map(),
+      extraLessonsGroupIds: new Set(['g1']),
+    });
+    expect(result.deleted).toBe(1);
+    expect(db.deleted).toEqual(['offer-only']);
+  });
 });
 
 describe('removeFutureClassGroupSessions', () => {

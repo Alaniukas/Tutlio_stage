@@ -11,7 +11,7 @@ import { findActivePackageForBooking } from '../src/lib/lessonPackageBooking.js'
 import { defaultSessionPaymentStatusForStudent } from '../src/lib/studentPaymentModel.js';
 import {
   loadClassGroupsForOrg,
-  loadExtraLessonsStartGates,
+  loadExtraLessonsMaterializeContext,
   materializationWindow,
   reconcileClassGroupSessions,
 } from './_lib/schoolClassGroupMaterialize.js';
@@ -250,12 +250,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .from('organizations')
     .select('id, features')
     .contains('features', { school_class_groups: true });
-  const extraGates = await loadExtraLessonsStartGates(supabase);
+  const extra = await loadExtraLessonsMaterializeContext(supabase);
   for (const org of orgsWithGroups || []) {
     const groups = await loadClassGroupsForOrg(supabase, org.id, groupWindow);
     for (const group of groups) {
       try {
-        const outcome = await reconcileClassGroupSessions(supabase, group, { window: groupWindow, extraGates });
+        const outcome = await reconcileClassGroupSessions(supabase, group, {
+          window: groupWindow,
+          extraGates: extra.gates,
+          extraLessonsGroupIds: extra.extraLessonsGroupIds,
+        });
         groupCreated += outcome.created;
         groupDeleted += outcome.deleted;
         groupUpdated += outcome.updated + outcome.adopted;
