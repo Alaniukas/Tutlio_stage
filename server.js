@@ -20,7 +20,7 @@ app.use((err, req, res, next) => {
   return next(err);
 });
 
-const SERVICE_VERSION = '2.1.2';
+const SERVICE_VERSION = '2.1.3';
 let conversionQueue = Promise.resolve();
 
 /** Calibrated on Railway Linux LO vs Word Save-as-PDF for annex table "Dalykas" x=120. */
@@ -256,6 +256,25 @@ function serializeConversion(task) {
   return current;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForPdf(outputPath, timeoutMs = 45000) {
+  const started = Date.now();
+  let lastErr = null;
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const pdf = await fs.readFile(outputPath);
+      if (pdf.length > 0) return pdf;
+    } catch (error) {
+      lastErr = error;
+    }
+    await sleep(250);
+  }
+  throw lastErr || new Error(`Timed out waiting for ${outputPath}`);
+}
+
 async function runLibreOfficeOnce(docxBytes) {
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tutlio-docx-'));
   const inputPath = path.join(workDir, 'contract.docx');
@@ -273,7 +292,7 @@ async function runLibreOfficeOnce(docxBytes) {
     '--nolockcheck',
     '--norestore',
     '--convert-to',
-    'pdf',
+    'pdf:writer_pdf_Export',
     '--outdir',
     workDir,
     inputPath,
@@ -282,7 +301,7 @@ async function runLibreOfficeOnce(docxBytes) {
   let lastError = null;
   const tried = [];
   try {
-    await serializeConversion(async () => {
+    return await serializeConversion(async () => {
       for (const bin of sofficeCandidates()) {
         tried.push(bin);
         try {
@@ -296,20 +315,16 @@ async function runLibreOfficeOnce(docxBytes) {
               SAL_USE_VCLPLUGIN: 'gen',
             },
           });
-          const pdf = await fs.readFile(outputPath);
-          if (pdf.length > 0) return;
+          return await waitForPdf(outputPath);
         } catch (error) {
           lastError = error;
         }
       }
+      const listing = await fs.readdir(workDir).catch(() => []);
       throw new Error(
-        `LibreOffice not available (tried: ${tried.join(', ')}). Last error: ${formatExecError(lastError)}`,
+        `LibreOffice did not produce a PDF (tried: ${tried.join(', ')}; dir: ${listing.join(', ') || '(empty)'}). Last error: ${formatExecError(lastError)}`,
       );
     });
-
-    const pdf = await fs.readFile(outputPath);
-    if (pdf.length > 0) return pdf;
-    throw new Error('LibreOffice produced an empty PDF');
   } finally {
     await fs.rm(workDir, { recursive: true, force: true });
   }
