@@ -12,8 +12,15 @@ const execFileAsync = promisify(execFile);
 const app = express();
 
 app.use(express.json({ limit: '50mb' }));
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && 'body' in err) {
+    console.warn('[docx-converter] invalid JSON body');
+    return res.status(400).json({ error: 'Invalid JSON body' });
+  }
+  return next(err);
+});
 
-const SERVICE_VERSION = '2.1.1';
+const SERVICE_VERSION = '2.1.2';
 let conversionQueue = Promise.resolve();
 
 /** Calibrated on Railway Linux LO vs Word Save-as-PDF for annex table "Dalykas" x=120. */
