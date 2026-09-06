@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({
   student: null as Record<string, unknown> | null,
   org: null as Record<string, unknown> | null,
-  contracts: [] as Array<Record<string, unknown>>,
   sessions: [] as Array<Record<string, unknown>>,
   files: {} as Record<string, Array<{ name: string; metadata: { size: number } | null }>>,
   uploadPaths: [] as string[],
@@ -37,9 +36,8 @@ vi.mock('@supabase/supabase-js', () => {
         if (table === 'school_class_groups') return resolve({ data: [{ id: 'g1', name: 'QA Legal Matematika' }], error: null });
         if (table === 'school_class_group_members') {
           const sid = filters.find(([c]) => c === 'student_id')?.[1];
-          return resolve({ data: sid === STUDENT ? [{ group_id: 'g1' }, { group_id: 'g2' }] : [], error: null });
+          return resolve({ data: sid === STUDENT ? [{ group_id: 'g1' }] : [], error: null });
         }
-        if (table === 'school_contracts') return resolve({ data: state.contracts, error: null });
         return resolve({ data: [], error: null });
       },
     };
@@ -90,7 +88,6 @@ beforeEach(() => {
     ],
     'sess-1': [{ name: 'nd-austeja-mockute-atsakymai.pdf', metadata: { size: 800 } }],
   };
-  state.contracts = [];
   state.uploadPaths = [];
   state.removed = [];
 });
@@ -156,26 +153,12 @@ describe('GET /api/school-homework', () => {
   it('hides sessions for groups the child is not enrolled in', async () => {
     state.sessions = [
       { id: 'sess-1', student_id: STUDENT, start_time: new Date(Date.now() + 3 * 86_400_000).toISOString(), end_time: new Date(Date.now() + 3 * 86_400_000).toISOString(), status: 'active', meeting_link: null, tutor_id: 't1', class_group_id: 'g1', subject_id: null, topic: null },
-      { id: 'sess-bad', student_id: STUDENT, start_time: new Date(Date.now() + 4 * 86_400_000).toISOString(), end_time: new Date(Date.now() + 4 * 86_400_000).toISOString(), status: 'active', meeting_link: null, tutor_id: 't1', class_group_id: 'g3', subject_id: null, topic: null },
+      { id: 'sess-bad', student_id: STUDENT, start_time: new Date(Date.now() + 4 * 86_400_000).toISOString(), end_time: new Date(Date.now() + 4 * 86_400_000).toISOString(), status: 'active', meeting_link: null, tutor_id: 't1', class_group_id: 'g2', subject_id: null, topic: null },
     ];
     const res = mockRes();
     await handler({ method: 'GET', query: { student: STUDENT, t: token() }, headers: { host: 'tutlio.lt' } } as any, res as any);
     expect(res.getResult().body.sessions).toHaveLength(1);
     expect(res.getResult().body.sessions[0].id).toBe('sess-1');
-  });
-
-  it('hides extra-lessons group sessions until that group contract is signed', async () => {
-    state.contracts = [
-      { class_group_id: 'g1', signing_status: 'signed', accepted_at: '2026-09-01T10:00:00Z', withdrawal_requested_at: null, student_id: STUDENT },
-      { class_group_id: 'g2', signing_status: 'sent', accepted_at: null, withdrawal_requested_at: null, student_id: STUDENT },
-    ];
-    state.sessions = [
-      { id: 'sess-1', student_id: STUDENT, start_time: new Date(Date.now() + 3 * 86_400_000).toISOString(), end_time: new Date(Date.now() + 3 * 86_400_000).toISOString(), status: 'active', meeting_link: null, tutor_id: 't1', class_group_id: 'g1', subject_id: null, topic: null },
-      { id: 'sess-unsigned', student_id: STUDENT, start_time: new Date(Date.now() + 4 * 86_400_000).toISOString(), end_time: new Date(Date.now() + 4 * 86_400_000).toISOString(), status: 'active', meeting_link: null, tutor_id: 't1', class_group_id: 'g2', subject_id: null, topic: null },
-    ];
-    const res = mockRes();
-    await handler({ method: 'GET', query: { student: STUDENT, t: token() }, headers: { host: 'tutlio.lt' } } as any, res as any);
-    expect(res.getResult().body.sessions.map((s: { id: string }) => s.id)).toEqual(['sess-1']);
   });
 });
 

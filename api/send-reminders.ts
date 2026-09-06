@@ -14,8 +14,6 @@ import { parseEmailOptOutList, isEmailOptedOut } from './_lib/emailNotificationO
 import { isMissingPostgrestRpc } from './_lib/postgrestRpc.js';
 import { moksloVaisiaiRoutesLessonCommsToPayer } from './_lib/moksloVaisiaiLessonComms.js';
 import { buildSchoolHomeworkUrl, publicAppOrigin } from './_lib/publicLinkToken.js';
-import { extraLessonsAccessKey } from '../src/lib/schoolClassGroupAccess.js';
-import { loadExtraLessonsMaterializeContext } from './_lib/schoolClassGroupMaterialize.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -64,7 +62,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const now = new Date();
     const sessionSelect = `
-          id, start_time, end_time, topic, price, meeting_link, class_group_id,
+          id, start_time, end_time, topic, price, meeting_link,
           reminder_student_sent, reminder_tutor_sent, reminder_payer_sent,
           student:students(id, full_name, email, payment_payer, payer_email, payer_name, parent_secondary_email, parent_secondary_name, organization_id, linked_user_id),
           tutor:profiles(id, full_name, email, phone, reminder_student_hours, reminder_tutor_hours, organization_id, email_notification_opt_out)
@@ -99,7 +97,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .order('start_time', { ascending: true })
           .order('id', { ascending: true });
     const { data: sessions, error } = sessionResult;
-    const extraLessonsCtx = await loadExtraLessonsMaterializeContext(supabase);
 
     if (error) {
       console.error('[send-reminders] Session query error:', error);
@@ -112,20 +109,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const tutor = session.tutor as any;
         const student = session.student as any;
         if (!tutor || !student) continue;
-
-        const classGroupId = String((session as { class_group_id?: string | null }).class_group_id || '').trim();
-        if (
-          classGroupId
-          && extraLessonsCtx.extraLessonsGroupIds.has(classGroupId)
-          && !extraLessonsCtx.gates.has(extraLessonsAccessKey(student.id, classGroupId))
-        ) {
-          await supabase.from('sessions').update({
-            reminder_student_sent: true,
-            reminder_tutor_sent: true,
-            reminder_payer_sent: true,
-          }).eq('id', session.id);
-          continue;
-        }
 
         const reminderStudentHours = Number(tutor?.reminder_student_hours ?? 2);
         const reminderTutorHours = Number(tutor?.reminder_tutor_hours ?? 2);

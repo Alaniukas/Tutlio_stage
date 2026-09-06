@@ -21,8 +21,6 @@ import {
   isHomeworkSubmissionFile,
   studentMaySeeGroupFile,
 } from '../src/lib/sessionFileVisibility.js';
-import { studentMayUseClassGroup } from '../src/lib/schoolClassGroupAccess.js';
-import { EXTRA_LESSONS_CONTRACT_KIND } from '../src/lib/extraLessonsContract.js';
 
 const BUCKET = 'session-files';
 export const HOMEWORK_MAX_BYTES = 10 * 1024 * 1024;
@@ -146,52 +144,9 @@ async function loadMemberGroupIds(
   return new Set((data || []).map((row: { group_id: string }) => row.group_id).filter(Boolean));
 }
 
-async function loadExtraLessonsGroupAccess(
-  supabase: SupabaseClient,
-  orgId: string,
-  studentId: string,
-): Promise<{ extraLessonsGroupIds: Set<string>; signedExtraGroupIds: Set<string> }> {
-  const extraLessonsGroupIds = new Set<string>();
-  const signedExtraGroupIds = new Set<string>();
-  const { data } = await supabase
-    .from('school_contracts')
-    .select('student_id, class_group_id, signing_status, accepted_at, withdrawal_requested_at, order_snapshot')
-    .eq('organization_id', orgId)
-    .eq('kind', EXTRA_LESSONS_CONTRACT_KIND);
-  for (const row of (data || []) as Array<{
-    student_id?: string | null;
-    class_group_id?: string | null;
-    signing_status?: string | null;
-    accepted_at?: string | null;
-    withdrawal_requested_at?: string | null;
-    order_snapshot?: { group_id?: string | null } | null;
-  }>) {
-    const groupId = String(row.class_group_id || row.order_snapshot?.group_id || '').trim();
-    if (!groupId) continue;
-    extraLessonsGroupIds.add(groupId);
-    if (
-      row.student_id === studentId
-      && row.signing_status === 'signed'
-      && row.accepted_at
-      && !row.withdrawal_requested_at
-    ) {
-      signedExtraGroupIds.add(groupId);
-    }
-  }
-  return { extraLessonsGroupIds, signedExtraGroupIds };
-}
-
-function sessionAllowedForStudent(
-  session: SessionRow,
-  memberGroupIds: Set<string>,
-  extraLessonsGroupIds: Set<string>,
-  signedExtraGroupIds: Set<string>,
-): boolean {
-  return studentMayUseClassGroup(session.class_group_id, {
-    memberGroupIds,
-    extraLessonsGroupIds,
-    signedExtraGroupIds,
-  });
+function sessionAllowedForStudent(session: SessionRow, memberGroupIds: Set<string>): boolean {
+  if (!session.class_group_id) return true;
+  return memberGroupIds.has(session.class_group_id);
 }
 
 /** Group lessons are one row per member — teacher materials may sit in any sibling folder. */
@@ -227,13 +182,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .order('start_time', { ascending: true })
       .limit(200);
     const memberGroupIds = await loadMemberGroupIds(supabase, studentId);
-    const extraAccess = await loadExtraLessonsGroupAccess(supabase, auth.student.organization_id || '', studentId);
-    const sessions = ((own || []) as SessionRow[]).filter((row) => sessionAllowedForStudent(
-      row,
-      memberGroupIds,
-      extraAccess.extraLessonsGroupIds,
-      extraAccess.signedExtraGroupIds,
-    ));
+    const sessions = ((own || []) as SessionRow[]).filter((row) => sessionAllowedForStudent(row, memberGroupIds));
 
     // Parallel group rows (other members) that share a folder set with these lessons.
     const groupIds = [...new Set(sessions.map((s) => s.class_group_id).filter(Boolean))] as string[];
@@ -351,13 +300,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .maybeSingle();
     if (!session) return res.status(404).json({ error: 'Pamoka nerasta' });
     const memberGroupIds = await loadMemberGroupIds(supabase, studentId);
-    const extraAccess = await loadExtraLessonsGroupAccess(supabase, auth.student.organization_id || '', studentId);
-    if (!sessionAllowedForStudent(
-      session as SessionRow,
-      memberGroupIds,
-      extraAccess.extraLessonsGroupIds,
-      extraAccess.signedExtraGroupIds,
-    )) {
+    if (!sessionAllowedForStudent(session as SessionRow, memberGroupIds)) {
       return res.status(403).json({ error: 'Nuoroda negalioja' });
     }
 
