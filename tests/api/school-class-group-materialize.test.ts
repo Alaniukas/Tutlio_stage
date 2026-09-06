@@ -197,7 +197,7 @@ describe('reconcileClassGroupSessions', () => {
     const result = await reconcileClassGroupSessions(db.client, group({ members: [{ student_id: 's1' }] }), {
       window,
       extraGates: new Map(),
-      extraContractKeys: new Set(['s1:g1']),
+      extraLessonsGroupIds: new Set(['g1']),
     });
     expect(result.created).toBe(0);
     expect(db.inserted).toEqual([]);
@@ -222,26 +222,10 @@ describe('reconcileClassGroupSessions', () => {
     const result = await reconcileClassGroupSessions(db.client, group({ members: [{ student_id: 's1' }] }), {
       window,
       extraGates: new Map(),
-      extraContractKeys: new Set(['s1:g1']),
+      extraLessonsGroupIds: new Set(['g1']),
     });
     expect(result.deleted).toBe(1);
     expect(db.deleted).toEqual(['offer-only']);
-  });
-
-  it('still creates lessons for classmates who have no extra-lessons offer on the group', async () => {
-    const db = fakeSupabase([]);
-    const window = materializationWindow(NOW, 14);
-    const result = await reconcileClassGroupSessions(
-      db.client,
-      group({ members: [{ student_id: 's1' }, { student_id: 's2' }] }),
-      {
-        window,
-        extraGates: new Map(),
-        extraContractKeys: new Set(['s1:g1']),
-      },
-    );
-    expect(result.created).toBe(3);
-    expect(db.inserted.every((r) => r.student_id === 's2')).toBe(true);
   });
 });
 

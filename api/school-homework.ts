@@ -168,7 +168,7 @@ async function loadExtraLessonsGroupAccess(
   }>) {
     const groupId = String(row.class_group_id || row.order_snapshot?.group_id || '').trim();
     if (!groupId) continue;
-    if (row.student_id === studentId) extraLessonsGroupIds.add(groupId);
+    extraLessonsGroupIds.add(groupId);
     if (
       row.student_id === studentId
       && row.signing_status === 'signed'

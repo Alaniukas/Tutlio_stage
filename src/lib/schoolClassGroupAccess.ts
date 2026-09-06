@@ -5,10 +5,9 @@ export function extraLessonsAccessKey(studentId: string, groupId: string): strin
 }
 
 /**
- * Membership is enough for ordinary class groups. If this child already has an
- * extra-lessons offer or contract for the group, live lessons / homework / join
- * reminders wait until that same group is signed (offer-only membership is not enough).
- * Classmates without an extra-lessons contract for the group are unchanged.
+ * Membership is enough for ordinary class groups. Groups that have extra-lessons
+ * contracts must not notify or list homework until that child has a signed
+ * extra-lessons contract for the same group (offer-only membership is not enough).
  */
 export function studentMayUseClassGroup(
   classGroupId: string | null | undefined,

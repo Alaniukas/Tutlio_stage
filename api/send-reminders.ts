@@ -114,11 +114,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (!tutor || !student) continue;
 
         const classGroupId = String((session as { class_group_id?: string | null }).class_group_id || '').trim();
-        const extraKey = classGroupId ? extraLessonsAccessKey(student.id, classGroupId) : '';
         if (
-          extraKey
-          && extraLessonsCtx.extraContractKeys.has(extraKey)
-          && !extraLessonsCtx.gates.has(extraKey)
+          classGroupId
+          && extraLessonsCtx.extraLessonsGroupIds.has(classGroupId)
+          && !extraLessonsCtx.gates.has(extraLessonsAccessKey(student.id, classGroupId))
         ) {
           await supabase.from('sessions').update({
             reminder_student_sent: true,

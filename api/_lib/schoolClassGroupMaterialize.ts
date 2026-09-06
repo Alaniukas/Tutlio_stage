@@ -160,8 +160,7 @@ export function expectedClassGroupOccurrences(
 
 export type ExtraLessonsMaterializeContext = {
   gates: ExtraStartGateMap;
-  /** `${studentId}:${groupId}` for any extra-lessons offer/contract on that pair. */
-  extraContractKeys: Set<string>;
+  extraLessonsGroupIds: Set<string>;
 };
 
 export async function loadExtraLessonsMaterializeContext(
@@ -169,7 +168,7 @@ export async function loadExtraLessonsMaterializeContext(
   organizationId?: string | null,
 ): Promise<ExtraLessonsMaterializeContext> {
   const gates: ExtraStartGateMap = new Map();
-  const extraContractKeys = new Set<string>();
+  const extraLessonsGroupIds = new Set<string>();
   let query = supabase
     .from('school_contracts')
     .select('student_id, class_group_id, signing_status, accepted_at, start_within_14_status, start_within_14_days, order_snapshot, withdrawal_requested_at')
@@ -179,10 +178,9 @@ export async function loadExtraLessonsMaterializeContext(
   for (const row of (data || []) as any[]) {
     const order = snapshotFromRow(row) as ExtraLessonsOrderSnapshot | null;
     const groupId = String(row.class_group_id || order?.group_id || '').trim();
-    if (!groupId || !row.student_id) continue;
-    extraContractKeys.add(extraLessonsAccessKey(row.student_id, groupId));
+    if (groupId) extraLessonsGroupIds.add(groupId);
     if (row.withdrawal_requested_at) continue;
-    if (String(row.signing_status || '') !== 'signed' || !row.accepted_at || !order) continue;
+    if (String(row.signing_status || '') !== 'signed' || !row.accepted_at || !row.student_id || !order) continue;
     const ymd = extraLessonsServiceStartYmd({
       status: (row.start_within_14_status || (row.start_within_14_days ? 'yes' : 'no')) as StartWithin14Status,
       acceptedAtIso: row.accepted_at,
@@ -190,7 +188,7 @@ export async function loadExtraLessonsMaterializeContext(
     });
     gates.set(extraLessonsAccessKey(row.student_id, groupId), ymd);
   }
-  return { gates, extraContractKeys };
+  return { gates, extraLessonsGroupIds };
 }
 
 export async function loadExtraLessonsStartGates(
@@ -241,8 +239,8 @@ export async function reconcileClassGroupSessions(
   options: {
     window?: MaterializeWindow;
     extraGates?: ExtraStartGateMap;
-    /** Student+group pairs that have an extra-lessons offer: live rows only after signed. */
-    extraContractKeys?: Set<string>;
+    /** Groups that have extra-lessons contracts: only signed members get live sessions. */
+    extraLessonsGroupIds?: Set<string>;
     /** Pre-resolved archived students (skips a query when the caller already knows). */
     detachedStudentIds?: Set<string>;
   } = {},
@@ -266,12 +264,12 @@ export async function reconcileClassGroupSessions(
   const activeMembers = memberIds.filter((id) => !detached?.has(id));
 
   const occurrences = expectedClassGroupOccurrences(group, window);
+  const extraLessonsGroup = Boolean(options.extraLessonsGroupIds?.has(group.id));
   const expected = new Map<string, { student_id: string; startIso: string; endIso: string }>();
   for (const occ of occurrences) {
     for (const studentId of activeMembers) {
-      const extraKey = extraLessonsAccessKey(studentId, group.id);
-      const gate = options.extraGates?.get(extraKey);
-      if (options.extraContractKeys?.has(extraKey) && !gate) {
+      const gate = options.extraGates?.get(extraLessonsAccessKey(studentId, group.id));
+      if (extraLessonsGroup && !gate) {
         result.skipped += 1;
         continue;
       }
@@ -404,7 +402,7 @@ export async function materializeClassGroupNow(
   const extra = await loadExtraLessonsMaterializeContext(supabase, organizationId ?? group.organization_id ?? null);
   return reconcileClassGroupSessions(supabase, group, {
     extraGates: extra.gates,
-    extraContractKeys: extra.extraContractKeys,
+    extraLessonsGroupIds: extra.extraLessonsGroupIds,
   });
 }
 
