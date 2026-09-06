@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { studentMayUseClassGroup } from '../../src/lib/schoolClassGroupAccess';
 
 describe('studentMayUseClassGroup', () => {
-  it('allows ordinary class groups by membership only', () => {
+  it('allows ordinary class groups by membership even when classmates have extra-lessons offers', () => {
     expect(studentMayUseClassGroup('g1', {
       memberGroupIds: new Set(['g1']),
       extraLessonsGroupIds: new Set(),

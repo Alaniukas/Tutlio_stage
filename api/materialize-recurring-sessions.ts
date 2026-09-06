@@ -258,7 +258,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const outcome = await reconcileClassGroupSessions(supabase, group, {
           window: groupWindow,
           extraGates: extra.gates,
-          extraLessonsGroupIds: extra.extraLessonsGroupIds,
+          extraContractKeys: extra.extraContractKeys,
         });
         groupCreated += outcome.created;
         groupDeleted += outcome.deleted;
