@@ -29,7 +29,17 @@ interface StudentLayoutProps {
 
 const STUDENT_LAYOUT_CACHE_KEY = 'tutlio_student_layout_cache';
 
-function getCachedLayoutData(): { studentName: string; tutor: any; studentProfiles: Array<{ id: string; tutor_id: string | null; tutor_full_name: string | null; tutor_email: string | null }> } | null {
+function getCachedLayoutData(): {
+  studentName: string;
+  tutor: any;
+  studentProfiles: Array<{
+    id: string;
+    tutor_id: string | null;
+    tutor_full_name: string | null;
+    tutor_email: string | null;
+    full_name: string | null;
+  }>;
+} | null {
     try {
         const raw = sessionStorage.getItem(STUDENT_LAYOUT_CACHE_KEY);
         if (!raw) return null;
@@ -37,7 +47,17 @@ function getCachedLayoutData(): { studentName: string; tutor: any; studentProfil
     } catch { return null; }
 }
 
-function setCachedLayoutData(studentName: string, tutor: any, studentProfiles: Array<{ id: string; tutor_id: string | null; tutor_full_name: string | null; tutor_email: string | null }>) {
+function setCachedLayoutData(
+  studentName: string,
+  tutor: any,
+  studentProfiles: Array<{
+    id: string;
+    tutor_id: string | null;
+    tutor_full_name: string | null;
+    tutor_email: string | null;
+    full_name: string | null;
+  }>,
+) {
     try {
         sessionStorage.setItem(STUDENT_LAYOUT_CACHE_KEY, JSON.stringify({ studentName, tutor, studentProfiles }));
     } catch { /* ignore */ }
@@ -55,7 +75,13 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
     const [isTutorModalOpen, setIsTutorModalOpen] = useState(false);
     /** `null` = nerodyti badge (paketų nėra arba dar neįkelta) — nelieka 0/0. */
     const [packageCountLabel, setPackageCountLabel] = useState<string | null>(null);
-    const [studentProfiles, setStudentProfiles] = useState<Array<{ id: string; tutor_id: string | null; tutor_full_name: string | null; tutor_email: string | null }>>(cached?.studentProfiles || []);
+    const [studentProfiles, setStudentProfiles] = useState<Array<{
+        id: string;
+        tutor_id: string | null;
+        tutor_full_name: string | null;
+        tutor_email: string | null;
+        full_name: string | null;
+    }>>(cached?.studentProfiles || []);
     const ACTIVE_STUDENT_PROFILE_KEY = 'tutlio_active_student_profile_id';
     const activeStudentProfileId = useMemo(
         () => (typeof window !== 'undefined' ? localStorage.getItem(ACTIVE_STUDENT_PROFILE_KEY) : null),
@@ -68,18 +94,24 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
     useSchoolTerminology(useOrgTerminologyMode(organizationId));
 
     /**
-     * Tutor selector shows one entry per distinct tutor. Detach + re-add can
-     * leave two students rows for the same tutor; those must not render as
-     * two switchable "accounts". Prefer the active profile's row per tutor.
+     * One switcher row per child+tutor. Same child on two tutors still collapses
+     * duplicate rows; siblings who share a login stay separate even with the same teacher.
      */
     const distinctTutorProfiles = useMemo(() => {
-        const byTutor = new Map<string, (typeof studentProfiles)[number]>();
+        const byKey = new Map<string, (typeof studentProfiles)[number]>();
         for (const sp of studentProfiles) {
-            const key = sp.tutor_id || sp.id;
-            if (!byTutor.has(key) || sp.id === activeStudentProfileId) byTutor.set(key, sp);
+            const name = String(sp.full_name || '').trim().toLowerCase();
+            const key = `${sp.tutor_id || 'none'}:${name || sp.id}`;
+            if (!byKey.has(key) || sp.id === activeStudentProfileId) byKey.set(key, sp);
         }
-        return [...byTutor.values()];
+        return [...byKey.values()];
     }, [studentProfiles, activeStudentProfileId]);
+    const showChildNameInSwitcher = useMemo(() => {
+        const names = new Set(
+            distinctTutorProfiles.map((sp) => String(sp.full_name || '').trim().toLowerCase()).filter(Boolean),
+        );
+        return names.size > 1;
+    }, [distinctTutorProfiles]);
 
     const hideWaitlist =
       !resolved ||
@@ -125,6 +157,7 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                     tutor_id: row.tutor_id,
                     tutor_full_name: row.tutor_full_name,
                     tutor_email: row.tutor_email,
+                    full_name: row.full_name || null,
                 })));
                 const selectedStudentData =
                     rows.find((row: any) => row.id === activeStudentProfileId) ||
@@ -160,6 +193,7 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                         tutor_id: row.tutor_id,
                         tutor_full_name: row.tutor_full_name,
                         tutor_email: row.tutor_email,
+                        full_name: row.full_name || null,
                     }));
                     setCachedLayoutData(name, tutorData, profiles);
                 }
@@ -274,11 +308,18 @@ export default function StudentLayout({ children, embed }: StudentLayoutProps) {
                                     aria-label={t('studentLayout.chooseTutor')}
                                     className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white text-gray-700"
                                 >
-                                    {distinctTutorProfiles.map((sp) => (
-                                        <option key={sp.id} value={sp.id}>
-                                            {sp.tutor_full_name || t('common.tutor')}
-                                        </option>
-                                    ))}
+                                    {distinctTutorProfiles.map((sp) => {
+                                        const childName = String(sp.full_name || '').trim();
+                                        const tutorName = String(sp.tutor_full_name || '').trim();
+                                        const label = showChildNameInSwitcher
+                                            ? [childName, tutorName].filter(Boolean).join(' · ')
+                                            : tutorName || childName || t('common.tutor');
+                                        return (
+                                            <option key={sp.id} value={sp.id}>
+                                                {label}
+                                            </option>
+                                        );
+                                    })}
                                 </select>
                             )}
                         </div>

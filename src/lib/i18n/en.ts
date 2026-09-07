@@ -1,4 +1,7 @@
+import { familyCatalogTrialCopy } from './familyCatalogTrialCopy';
+
 export const en: Record<string, string> = {
+  ...familyCatalogTrialCopy.en,
   'common.reloadPage': "Reload page",
   'common.reloadPageWarning': "Reloading will discard unsaved changes. Continue?",
   'cal.rescheduleSameMonthOnly': 'Lessons can only be moved within the same calendar month.',

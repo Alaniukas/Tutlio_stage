@@ -11,15 +11,31 @@ export type OrgStudentIdentityRow = {
   grade?: string | null;
 };
 
-/** Group key for multi-tutor student rows in org admin lists. */
+function normalizeStudentIdentityName(fullName: string | null | undefined): string {
+  return String(fullName ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/**
+ * Group key for multi-tutor rows of the same child in org admin lists.
+ * Name is part of the key so siblings who share a parent login or payer email
+ * stay separate (Laisvi vaikai: Vitkutė Etmė vs Kajus, same linked_user_id).
+ */
 export function orgStudentIdentityGroupKey(student: OrgStudentIdentityRow): string {
-  if (student.linked_user_id) return `u:${student.linked_user_id}`;
+  const name = normalizeStudentIdentityName(student.full_name);
+  if (student.linked_user_id) return `u:${student.linked_user_id}:${name}`;
   const email = String(student.email ?? '').trim().toLowerCase();
   if (email) {
     const org = student.organization_id ?? 'no-org';
-    return `e:${org}:${email}`;
+    return `e:${org}:${email}:${name}`;
   }
   return `s:${student.id}`;
+}
+
+export function sameOrgStudentIdentity(
+  a: OrgStudentIdentityRow,
+  b: OrgStudentIdentityRow,
+): boolean {
+  return orgStudentIdentityGroupKey(a) === orgStudentIdentityGroupKey(b);
 }
 
 /**

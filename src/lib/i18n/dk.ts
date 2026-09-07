@@ -1,3 +1,4 @@
+import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
 import { schoolInstructionsTranslationsDk } from './schoolInstructionsTranslations.js';
 import { schoolTeacherContractTranslationsDk } from './schoolTeacherContractTranslations.js';
@@ -121,6 +122,7 @@ const DK_DPA_HTML = [
 export const dk: Record<string, string> = {
   'common.reloadPage': "Genindlæs siden",
   'common.reloadPageWarning': "Hvis du genindlæser siden, går ændringer, der ikke er gemt, tabt. Vil du fortsætte?",
+  ...familyCatalogTrialCopy.dk,
   ...sharedOrganizationWorkflowTranslations,
   ...schoolInstructionsTranslationsDk,
   ...schoolTeacherContractTranslationsDk,

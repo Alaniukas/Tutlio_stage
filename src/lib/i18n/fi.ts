@@ -1,3 +1,4 @@
+import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
 import { schoolInstructionsTranslationsFi } from './schoolInstructionsTranslations.js';
 import { schoolTeacherContractTranslationsFi } from './schoolTeacherContractTranslations.js';
@@ -6,6 +7,7 @@ import { supportTranslations } from './supportTranslations.js';
 export const fi: Record<string, string> = {
   'common.reloadPage': "Lataa sivu uudelleen",
   'common.reloadPageWarning': "Sivun lataaminen uudelleen poistaa tallentamattomat muutokset. Jatketaanko?",
+  ...familyCatalogTrialCopy.fi,
   ...sharedOrganizationWorkflowTranslations,
   ...schoolInstructionsTranslationsFi,
   ...schoolTeacherContractTranslationsFi,

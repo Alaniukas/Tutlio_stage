@@ -45,7 +45,12 @@ import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { isSchoolOrg, proKlaseOrgAdminContext, proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
-import { isProKlaseOrg } from '@/lib/marketMoney';
+import { isMoksloVaisiaiOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import {
+  parseOrgTrialPolicy,
+  shouldAutoMarkNextLessonTrial,
+  countTrialsFromHistory,
+} from '@/lib/orgTrialPolicy';
 import { setSessionComplimentary } from '@/lib/setSessionComplimentary';
 import { ORG_TUTOR_FILTER_SCROLL_CLASS, ORG_TUTOR_SELECT_SCROLL_CLASS } from '@/lib/orgUi';
 import { calendarSessionTitlePrefix, getCalendarSessionEventStyle } from '@/lib/calendarSessionEventStyle';
@@ -331,6 +336,7 @@ export default function CompanyTvarkarastis() {
   const orgEntityType = useOrgEntityType();
   const isSchoolOrgView = isSchoolOrg(orgEntityType);
   const isProKlase = isProKlaseOrg(organizationId);
+  const isMvOrg = isMoksloVaisiaiOrg(organizationId);
   const proKlaseAdminUi = proKlaseOrgAdminContext(organizationId, isSchoolOrgView ? 'school' : 'company', featuresLoading);
   const pkFeat = (flagId: string) =>
     proKlaseFeatureEnabled(organizationId, isSchoolOrgView ? 'school' : 'company', hasFeature, flagId, featuresLoading);
@@ -345,8 +351,9 @@ export default function CompanyTvarkarastis() {
   const showTrialToggleInCreate =
     !isSchoolOrgView &&
     !featuresLoading &&
-    proKlaseAdminUi &&
-    (hasFeature('trial_reservation_flow') || hasFeature('auto_trial_first_lesson'));
+    (isMvOrg ||
+      (proKlaseAdminUi &&
+        (hasFeature('trial_reservation_flow') || hasFeature('auto_trial_first_lesson'))));
   const hideAdminPrices = pkFeat('hide_admin_lesson_prices');
   const showClassGroupPicker = isSchoolOrgView && !featuresLoading && hasFeature('school_class_groups');
 
@@ -512,6 +519,7 @@ export default function CompanyTvarkarastis() {
     durationMinutes: 60,
     priceEur: 0,
   });
+  const [trialPolicy, setTrialPolicy] = useState(() => parseOrgTrialPolicy({}));
   /** Student whose empty history auto-enabled the trial toggle (org feature auto_trial_first_lesson). */
   const [autoTrialStudentId, setAutoTrialStudentId] = useState<string | null>(null);
   const [createPrice, setCreatePrice] = useState(0);
@@ -570,6 +578,7 @@ export default function CompanyTvarkarastis() {
       if (cancelled) return;
       const feat = (data as any)?.features;
       const featObj = feat && typeof feat === 'object' && !Array.isArray(feat) ? (feat as Record<string, unknown>) : {};
+      setTrialPolicy(parseOrgTrialPolicy(featObj));
       setTrialDefaults({
         topic: typeof featObj.trial_lesson_topic === 'string' && featObj.trial_lesson_topic.trim()
           ? featObj.trial_lesson_topic.trim()
@@ -606,16 +615,17 @@ export default function CompanyTvarkarastis() {
   // lesson defaults to a trial with the org trial topic/duration/price — all
   // still editable in the dialog before saving.
   useEffect(() => {
-    if (featuresLoading || !pkFeat('auto_trial_first_lesson')) return;
+    if (featuresLoading || isMvOrg || !pkFeat('auto_trial_first_lesson')) return;
     if (!createStudentId) return;
     let cancelled = false;
     (async () => {
-      const { count, error } = await supabase
+      const { data: historyRows, error } = await supabase
         .from('sessions')
-        .select('id', { count: 'exact', head: true })
+        .select('id, status, subjects(is_trial)')
         .eq('student_id', createStudentId);
       if (cancelled || error) return;
-      if ((count ?? 0) === 0) {
+      const { trialCount, regularCount } = countTrialsFromHistory(historyRows || []);
+      if (shouldAutoMarkNextLessonTrial({ trialCount, regularCount, policy: trialPolicy, enabled: !isMvOrg })) {
         setAutoTrialStudentId(createStudentId);
         setCreateIsTrial(true);
         setCreateIsRecurring(false);
@@ -639,7 +649,7 @@ export default function CompanyTvarkarastis() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [createStudentId, featuresLoading, trialDefaults]);
+  }, [createStudentId, featuresLoading, trialDefaults, trialPolicy]);
 
   const fetchData = async () => {
     if (!organizationId) return;
@@ -3087,18 +3097,28 @@ export default function CompanyTvarkarastis() {
                         <Input
                           value={createStudentSearch}
                           onChange={(e) => setCreateStudentSearch(e.target.value)}
+                          onKeyDown={(e) => e.stopPropagation()}
                           placeholder={t('common.search')}
                           className="h-9 rounded-xl"
                         />
                       </div>
-                      {(createStudentSearch
-                        ? list.filter((s) => (s.full_name || '').toLowerCase().includes(createStudentSearch.trim().toLowerCase()))
-                        : list
-                      ).map(student => (
-                        <SelectItem key={student.id} value={student.id}>
-                          {formatStudentPickerLabel(student.full_name, student.grade)}
-                        </SelectItem>
-                      ))}
+                      {(() => {
+                        const visible = createStudentSearch
+                          ? list.filter((s) =>
+                              (s.full_name || '').toLowerCase().includes(createStudentSearch.trim().toLowerCase()),
+                            )
+                          : list;
+                        if (visible.length === 0) {
+                          return (
+                            <p className="px-3 py-2 text-sm text-gray-400">{t('compSch.noStudents')}</p>
+                          );
+                        }
+                        return visible.map((student) => (
+                          <SelectItem key={student.id} value={student.id}>
+                            {formatStudentPickerLabel(student.full_name, student.grade)}
+                          </SelectItem>
+                        ));
+                      })()}
                     </SelectContent>
                   </Select>
                 </div>
@@ -3231,8 +3251,8 @@ export default function CompanyTvarkarastis() {
                     <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${createIsTrial ? 'translate-x-6' : 'translate-x-1'}`} />
                   </div>
                 </button>
-                {createIsTrial && autoTrialStudentId === createStudentId && (
-                  <p className="mt-2 text-xs text-amber-800">{t('compSch.firstLessonAutoTrial')}</p>
+                {createIsTrial && !isMvOrg && autoTrialStudentId === createStudentId && (
+                  <p className="mt-2 text-xs text-amber-800">{t('compSch.autoTrialHint')}</p>
                 )}
               </div>
             )}

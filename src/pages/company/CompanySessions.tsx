@@ -36,6 +36,7 @@ import { cn } from '@/lib/utils';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
 import { isAttendanceFlagged } from '@/lib/attendance';
 import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
+import { orgStudentIdentityGroupKey, pickStudentsForOrgTutorPicker } from '@/lib/orgStudentIdentity';
 import { DateRangeFilter } from '@/components/DateRangeFilter';
 import { DateTimeSpinner } from '@/components/TimeSpinner';
 import { useHideWaitlist } from '@/hooks/useHideWaitlist';
@@ -88,8 +89,10 @@ type OrgTutorRow = { id: string; full_name: string; personal_meeting_link?: stri
 type OrgStudentRow = {
   id: string;
   full_name: string;
-  tutor_id: string;
+  tutor_id: string | null;
   linked_user_id: string | null;
+  email?: string | null;
+  organization_id?: string | null;
   personal_meeting_link?: string | null;
   grade?: string | null;
   pricing_lessons_per_week?: number | null;
@@ -310,7 +313,7 @@ export default function CompanySessions() {
     const [studentsResult, subjectsResult, pricingResult, tspResult, dynamicResult] = await Promise.all([
       supabase
         .from('students')
-        .select('id, full_name, tutor_id, linked_user_id, personal_meeting_link, grade, pricing_lessons_per_week')
+        .select('id, full_name, tutor_id, linked_user_id, email, organization_id, personal_meeting_link, grade, pricing_lessons_per_week')
         .eq('organization_id', adminRow.organization_id)
         .order('full_name'),
       supabase
@@ -666,7 +669,7 @@ export default function CompanySessions() {
   const uniqueStudents = useMemo(() => {
     const seen = new Map<string, { id: string; full_name: string; ids: Set<string> }>();
     for (const s of students) {
-      const key = s.linked_user_id || `name:${s.full_name}`;
+      const key = orgStudentIdentityGroupKey(s);
       if (!seen.has(key)) {
         seen.set(key, { id: s.id, full_name: s.full_name, ids: new Set([s.id]) });
       } else {
@@ -1050,7 +1053,7 @@ export default function CompanySessions() {
                       <Select value={editStudentId} onValueChange={setEditStudentId}>
                         <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          {sortStudentsByFullName(students.filter(s => !editTutorId || s.tutor_id === editTutorId)).map(
+                          {sortStudentsByFullName(pickStudentsForOrgTutorPicker(students, editTutorId)).map(
                             (s) => (
                               <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
                             ),

@@ -15,7 +15,6 @@ import {
   Clock,
   MessageSquare,
   BookOpen,
-  FileText,
   Zap,
   Play,
   ChevronRight,
@@ -29,8 +28,16 @@ import {
 } from '@/components/parent/ParentLessonDetailModal';
 import StatusBadge from '@/components/StatusBadge';
 import ParentLayout from '@/components/ParentLayout';
+import ParentChildSwitcher from '@/components/parent/ParentChildSwitcher';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
-import { orgFeeProfile } from '@/lib/marketMoney';
+import { isMoksloVaisiaiOrg, orgFeeProfile } from '@/lib/marketMoney';
+import {
+  getParentActiveChildId,
+  hideParentAddChildPrompt,
+  isParentAddChildPromptHidden,
+  pickParentChildId,
+  setParentActiveChildId,
+} from '@/lib/parentActiveChild';
 import { format, isAfter } from 'date-fns';
 import { cn } from '@/lib/utils';
 type ChildTutorPolicy = ParentTutorContactPolicy;
@@ -97,6 +104,9 @@ export default function ParentDashboard() {
   const [modalOpen, setModalOpen] = useState(false);
   /** Org feature disable_student_booking, per child. */
   const [bookingDisabledMap, setBookingDisabledMap] = useState<Record<string, boolean>>({});
+  const [isMvParent, setIsMvParent] = useState(false);
+  const [activeChildId, setActiveChildId] = useState(() => getParentActiveChildId() ?? '');
+  const [hideAddPrompt, setHideAddPrompt] = useState(() => isParentAddChildPromptHidden());
   const now = useMemo(() => new Date(), []);
 
   useEffect(() => {
@@ -119,6 +129,7 @@ export default function ParentDashboard() {
         console.warn('[ParentDashboard] parent_students load failed:', linksErr);
         if (!cancelled) {
           setChildren([]);
+          setIsMvParent(false);
           setLoading(false);
           setCache('parent_dashboard', {
             parentName: resolvedParentName || null,
@@ -139,6 +150,7 @@ export default function ParentDashboard() {
       if (studentIds.length === 0) {
         if (!cancelled) {
           setChildren([]);
+          setIsMvParent(false);
           setLoading(false);
           setCache('parent_dashboard', {
             parentName: resolvedParentName || null,
@@ -328,7 +340,13 @@ export default function ParentDashboard() {
 
       if (!cancelled) {
         setParentName((prev) => resolvedParentName || prev);
+        setIsMvParent(studentsRaw.some((s: any) => isMoksloVaisiaiOrg(s.organization_id)));
         setChildren(kids);
+        const picked = pickParentChildId(kids.map((k) => k.studentId));
+        if (picked) {
+          setParentActiveChildId(picked);
+          setActiveChildId(picked);
+        }
         setLoading(false);
         setCache('parent_dashboard', {
           parentName: resolvedParentName || null,
@@ -404,8 +422,11 @@ export default function ParentDashboard() {
     );
   }
 
-  const totalUpcoming = children.reduce((sum, c) => sum + c.upcoming.length, 0);
-  const totalUnpaid = children.reduce((sum, c) => sum + c.unpaidPastCount, 0);
+  const selectedChild =
+    children.find((c) => c.studentId === activeChildId) ?? children[0] ?? null;
+  const totalUpcoming = selectedChild ? selectedChild.upcoming.length : 0;
+  const totalUnpaid = selectedChild ? selectedChild.unpaidPastCount : 0;
+  const childOptions = children.map((c) => ({ id: c.studentId, fullName: c.fullName }));
 
   return (
     <ParentLayout>
@@ -416,19 +437,35 @@ export default function ParentDashboard() {
             <h1 className="text-3xl font-black text-gray-900 leading-tight">
               {greetingName} 👋
             </h1>
-            {children.length > 0 && (
-              <p className="text-xs text-gray-500 font-semibold mt-1">
-                {t('parent.children')}:{' '}
-                <span className="text-gray-700">{children.length}</span>
-              </p>
-            )}
           </div>
-          {children.length > 0 && (
+          {selectedChild && (
             <div className="bg-violet-100/80 text-violet-700 px-3 py-1.5 rounded-2xl text-xs font-black shadow-sm border border-violet-200/50">
               {totalUpcoming} {t('parent.upcoming')}
             </div>
           )}
         </div>
+
+        {isMvParent && children.length > 0 && !hideAddPrompt && (
+          <div className="rounded-3xl border border-violet-100 bg-violet-50/80 px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <button
+              type="button"
+              onClick={() => navigate('/parent/settings')}
+              className="text-left text-sm text-violet-900 hover:underline"
+            >
+              {t('parent.dashboardAddSecondChild')}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                hideParentAddChildPrompt();
+                setHideAddPrompt(true);
+              }}
+              className="text-xs font-semibold text-violet-700 hover:text-violet-900 shrink-0 self-start sm:self-auto"
+            >
+              {t('parent.hideAddChildPrompt')}
+            </button>
+          </div>
+        )}
 
         {totalUnpaid > 0 && (
           <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -466,64 +503,38 @@ export default function ParentDashboard() {
             <p className="text-gray-500 text-sm font-medium">
               {t('parent.noChildrenHint')}
             </p>
+            {isMvParent && (
+              <button
+                type="button"
+                onClick={() => navigate('/parent/settings')}
+                className="mt-4 px-4 py-2.5 rounded-2xl bg-violet-600 text-white text-sm font-semibold hover:bg-violet-700"
+              >
+                {t('parent.noChildrenAddCta')}
+              </button>
+            )}
           </div>
-        ) : (
+        ) : selectedChild ? (
           <>
-            {/* Top-level quick actions (visible when more than one child too) */}
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-              <button
-                type="button"
-                onClick={() => navigate('/parent/calendar')}
-                className="bg-white hover:bg-violet-50 hover:border-violet-200 transition-all rounded-3xl py-5 px-4 min-h-[5.75rem] flex flex-col items-center justify-center gap-2 border border-gray-100 shadow-sm group"
-              >
-                <div className="w-12 h-12 rounded-full bg-violet-100 flex items-center justify-center group-hover:scale-110 transition-transform">
-                  <CalendarDays className="w-5 h-5 text-violet-600" />
-                </div>
-                <span className="text-xs font-bold text-gray-700">
-                  {t('nav.calendar')}
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate('/parent/messages')}
-                className="bg-white hover:bg-blue-50 hover:border-blue-200 transition-all rounded-3xl py-5 px-4 min-h-[5.75rem] flex flex-col items-center justify-center gap-2 border border-gray-100 shadow-sm group"
-              >
-                <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center group-hover:scale-110 transition-transform">
-                  <MessageSquare className="w-5 h-5 text-blue-600" />
-                </div>
-                <span className="text-xs font-bold text-gray-700">
-                  {t('parent.messages')}
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate('/parent/invoices')}
-                className="bg-white hover:bg-emerald-50 hover:border-emerald-200 transition-all rounded-3xl py-5 px-4 min-h-[5.75rem] flex flex-col items-center justify-center gap-2 border border-gray-100 shadow-sm group sm:aspect-auto col-span-2 sm:col-span-1"
-              >
-                <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center group-hover:scale-110 transition-transform">
-                  <FileText className="w-5 h-5 text-emerald-600" />
-                </div>
-                <span className="text-xs font-bold text-gray-700">
-                  {t('parent.invoices')}
-                </span>
-              </button>
-            </div>
-
-            {children.map((child) => (
-              <ChildBlock
-                key={child.studentId}
-                child={child}
-                t={t}
-                dateFnsLocale={dateFnsLocale}
-                onOpenSession={openSessionModal}
-                navigate={navigate}
-                formatCountdown={formatCountdown}
-                bookingDisabled={bookingDisabledMap[child.studentId] === true}
-              />
-            ))}
-
+            <ParentChildSwitcher
+              options={childOptions}
+              value={selectedChild.studentId}
+              onChange={(id) => {
+                setParentActiveChildId(id);
+                setActiveChildId(id);
+              }}
+            />
+            <ChildBlock
+              key={selectedChild.studentId}
+              child={selectedChild}
+              t={t}
+              dateFnsLocale={dateFnsLocale}
+              onOpenSession={openSessionModal}
+              navigate={navigate}
+              formatCountdown={formatCountdown}
+              bookingDisabled={bookingDisabledMap[selectedChild.studentId] === true}
+            />
           </>
-        )}
+        ) : null}
       </div>
 
       <ParentLessonDetailModal

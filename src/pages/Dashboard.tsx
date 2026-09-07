@@ -57,6 +57,7 @@ import {
 } from '@/lib/preload';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { isProKlaseOrg } from '@/lib/marketMoney';
+import { parseOrgTrialPolicy, sessionNeedsOrgTrialComment } from '@/lib/orgTrialPolicy';
 import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { formatContactForTutorView } from '@/lib/orgContactVisibility';
@@ -363,15 +364,44 @@ export default function DashboardPage() {
 
             const orgFeat = orgFeatRes.data?.features;
             const orgFeatObj = orgFeat && typeof orgFeat === 'object' && !Array.isArray(orgFeat) ? (orgFeat as Record<string, unknown>) : {};
-            const trialCommentRequired = orgFeatObj['trial_comment_required'] === true;
+            const trialPolicy = parseOrgTrialPolicy(orgFeatObj);
             const proKlaseCommentRequired = isProKlaseOrg(organizationId);
+
+            const trialsByStudent = new Map<string, Array<{ id: string; start_time?: string | null; status?: string | null }>>();
+            if (trialPolicy.commentRequired) {
+                const trialStudentIds = [...new Set(
+                    (sessionsData || [])
+                        .filter((s: any) => s.subjects?.is_trial === true && s.student_id)
+                        .map((s: any) => s.student_id as string),
+                )];
+                if (trialStudentIds.length > 0) {
+                    const { data: trialHistory } = await supabase
+                        .from('sessions')
+                        .select('id, student_id, start_time, status, subjects!inner(is_trial)')
+                        .eq('tutor_id', user.id)
+                        .in('student_id', trialStudentIds)
+                        .eq('subjects.is_trial', true)
+                        .order('start_time', { ascending: true });
+                    for (const row of trialHistory || []) {
+                        const sid = (row as { student_id: string }).student_id;
+                        const list = trialsByStudent.get(sid) ?? [];
+                        list.push(row as { id: string; start_time?: string | null; status?: string | null });
+                        trialsByStudent.set(sid, list);
+                    }
+                }
+            }
 
             const missingComments = (sessionsData || [])
                 .filter((s: any) => {
                     const needsComment = ['completed', 'no_show'].includes(String(s.status));
                     if (!needsComment || String(s.tutor_comment || '').trim()) return false;
                     if (proKlaseCommentRequired) return true;
-                    return trialCommentRequired && s.subjects?.is_trial === true;
+                    return sessionNeedsOrgTrialComment({
+                        policy: trialPolicy,
+                        isTrial: s.subjects?.is_trial === true,
+                        sessionId: s.id,
+                        studentTrials: trialsByStudent.get(s.student_id) ?? [{ id: s.id, start_time: s.start_time, status: s.status }],
+                    });
                 })
                 .slice(0, 5);
 

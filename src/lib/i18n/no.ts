@@ -1,3 +1,4 @@
+import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
 import { schoolInstructionsTranslationsNo } from './schoolInstructionsTranslations.js';
 import { schoolTeacherContractTranslationsNo } from './schoolTeacherContractTranslations.js';
@@ -6,6 +7,7 @@ import { supportTranslations } from './supportTranslations.js';
 export const no: Record<string, string> = {
   'common.reloadPage': "Last siden på nytt",
   'common.reloadPageWarning': "Hvis du laster siden på nytt, går ulagrede endringer tapt. Vil du fortsette?",
+  ...familyCatalogTrialCopy.no,
   ...sharedOrganizationWorkflowTranslations,
   ...schoolInstructionsTranslationsNo,
   ...schoolTeacherContractTranslationsNo,

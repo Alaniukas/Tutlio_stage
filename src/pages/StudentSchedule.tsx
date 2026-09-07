@@ -32,6 +32,12 @@ import { recurringAvailabilityAppliesOnDate } from '@/lib/availabilityRecurring'
 import { formatLessonStripeChargeEur, formatMarketAmount, orgFeeProfile, type OrgFeeProfile } from '@/lib/stripeLessonPricing';
 import { currentMarket } from '@/lib/market';
 import { ParentLessonDetailModal } from '@/components/parent/ParentLessonDetailModal';
+import ParentChildSwitcher from '@/components/parent/ParentChildSwitcher';
+import {
+    pickParentChildId,
+    setParentActiveChildId,
+    type ParentChildOption,
+} from '@/lib/parentActiveChild';
 import { fetchStudentActiveLessonPackagesDeduped } from '@/lib/studentLessonPackagesLight';
 import { rpcGetStudentProfilesDeduped } from '@/lib/preload';
 import { useUser } from '@/contexts/UserContext';
@@ -170,7 +176,7 @@ export default function StudentSchedule() {
     const fmt = (amount: number | null | undefined) => formatMarketAmount(amount, market);
     const { user: ctxUser } = useUser();
     const navigate = useNavigate();
-    const [searchParams] = useSearchParams();
+    const [searchParams, setSearchParams] = useSearchParams();
     // Parent context detection. Parents arrive either via the legacy
     // /parent/child/:studentId/schedule path OR the canonical /parent/calendar?studentId=…
     const legacyParentMatch = useMatch('/parent/child/:studentId/schedule');
@@ -189,6 +195,7 @@ export default function StudentSchedule() {
     const [availability, setAvailability] = useState<Availability[]>([]);
     const [existingSessions, setExistingSessions] = useState<ExistingSession[]>([]);
     const [studentId, setStudentId] = useState('');
+    const [parentChildOptions, setParentChildOptions] = useState<ParentChildOption[]>([]);
     const { blocked: bookingBlocked, loading: blockLoading, refetch: refetchBookingBlock } = useStudentPaymentBlock(studentId || null);
     const [tutorId, setTutorId] = useState('');
     const [tutorPersonalMeetingLink, setTutorPersonalMeetingLink] = useState('');
@@ -314,7 +321,7 @@ export default function StudentSchedule() {
         window.addEventListener('student-profile-changed', onProfileChange);
         return () => window.removeEventListener('student-profile-changed', onProfileChange);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [ctxUser?.id]);
+    }, [ctxUser?.id, isParentRoute, parentBookingStudentId]);
 
     const classGroupMeta = useMemo(() => buildClassGroupMetaMap(classGroups), [classGroups]);
     const showStudentClassGroups = tutorOrgIsSchool && schoolClassGroupsEnabled;
@@ -600,24 +607,43 @@ export default function StudentSchedule() {
                 return;
             }
 
-            if (!resolvedParentStudentId) {
-                const { data: links } = await supabase
-                    .from('parent_students')
-                    .select('student_id')
-                    .eq('parent_id', parentProfileId)
-                    .limit(1);
-                const firstChildId = links?.[0]?.student_id ?? null;
-                if (!firstChildId) {
-                    navigate('/parent', { replace: true });
-                    return;
-                }
-                resolvedParentStudentId = firstChildId;
-                if (typeof window !== 'undefined') {
-                    const url = new URL(window.location.href);
-                    url.searchParams.set('studentId', firstChildId);
-                    window.history.replaceState(null, '', url.toString());
-                }
+            const { data: links } = await supabase
+                .from('parent_students')
+                .select('student_id, students(full_name)')
+                .eq('parent_id', parentProfileId);
+            const options: ParentChildOption[] = (links ?? [])
+                .map((row: { student_id?: string; students?: { full_name?: string } | null }) => ({
+                    id: String(row.student_id ?? ''),
+                    fullName: String(row.students?.full_name ?? '').trim(),
+                }))
+                .filter((p) => p.id);
+            options.sort((a, b) => a.fullName.localeCompare(b.fullName, undefined, { sensitivity: 'base' }));
+            if (options.length === 0) {
+                navigate('/parent', { replace: true });
+                return;
             }
+            setParentChildOptions(options);
+            const picked = pickParentChildId(
+                options.map((o) => o.id),
+                resolvedParentStudentId || null,
+            );
+            if (!picked) {
+                navigate('/parent', { replace: true });
+                return;
+            }
+            setParentActiveChildId(picked);
+            if (picked !== resolvedParentStudentId) {
+                setSearchParams((prev) => {
+                    const next = new URLSearchParams(prev);
+                    next.set('studentId', picked);
+                    return next;
+                }, { replace: true });
+                return;
+            }
+            resolvedParentStudentId = picked;
+            setLoadedRanges([]);
+            setExistingSessions([]);
+            setOccupiedSlots([]);
         }
 
         if (resolvedParentStudentId) {
@@ -1868,6 +1894,17 @@ export default function StudentSchedule() {
                     <div className="mb-4">
                         <h1 className="text-2xl font-black text-gray-900 mb-1">{t('stuSched.bookLesson')}</h1>
                         <p className="text-gray-400 text-sm">{t('stuSched.selectFreeTime')}</p>
+                        {isParentRoute && (
+                            <ParentChildSwitcher
+                                className="mt-4"
+                                options={parentChildOptions}
+                                value={parentBookingStudentId || parentChildOptions[0]?.id || ''}
+                                onChange={(id) => {
+                                    setParentActiveChildId(id);
+                                    navigate(`/parent/calendar?studentId=${encodeURIComponent(id)}`);
+                                }}
+                            />
+                        )}
                     </div>
 
                     {creditBalance > 0 && (

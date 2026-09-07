@@ -1,4 +1,7 @@
+import { familyCatalogTrialCopy } from './familyCatalogTrialCopy';
+
 export const lt: Record<string, string> = {
+  ...familyCatalogTrialCopy.lt,
   'common.reloadPage': "Įkelti puslapį iš naujo",
   'common.reloadPageWarning': "Įkėlus puslapį iš naujo, neišsaugoti pakeitimai bus prarasti. Tęsti?",
   'cal.rescheduleSameMonthOnly': 'Pamokas galima perkelti tik tą patį kalendorinį mėnesį.',

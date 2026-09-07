@@ -1,3 +1,4 @@
+import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
 import { schoolInstructionsTranslationsDe } from './schoolInstructionsTranslations.js';
 import { schoolTeacherContractTranslationsDe } from './schoolTeacherContractTranslations.js';
@@ -6,6 +7,7 @@ import { supportTranslations } from './supportTranslations.js';
 export const de: Record<string, string> = {
   'common.reloadPage': "Seite neu laden",
   'common.reloadPageWarning': "Beim Neuladen gehen ungespeicherte Änderungen verloren. Fortfahren?",
+  ...familyCatalogTrialCopy.de,
   ...sharedOrganizationWorkflowTranslations,
   ...schoolInstructionsTranslationsDe,
   ...schoolTeacherContractTranslationsDe,

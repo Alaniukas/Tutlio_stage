@@ -1,3 +1,4 @@
+import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
 import { schoolInstructionsTranslationsNl } from './schoolInstructionsTranslations.js';
 import { schoolTeacherContractTranslationsNl } from './schoolTeacherContractTranslations.js';
@@ -7,6 +8,7 @@ import { nlQuiz } from './nlQuiz.js';
 export const nl: Record<string, string> = {
   'common.reloadPage': "Pagina opnieuw laden",
   'common.reloadPageWarning': "Als je de pagina opnieuw laadt, gaan niet-opgeslagen wijzigingen verloren. Doorgaan?",
+  ...familyCatalogTrialCopy.nl,
   ...sharedOrganizationWorkflowTranslations,
   ...schoolInstructionsTranslationsNl,
   ...schoolTeacherContractTranslationsNl,

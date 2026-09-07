@@ -128,7 +128,9 @@ import { resolveLessonMeetingLink } from '@/lib/meetingLink';
 import { recordJoinClick } from '@/lib/joinTracking';
 import { useOrgTutorPolicy } from '@/hooks/useOrgTutorPolicy';
 import { useMarketMoney } from '@/hooks/useMarketMoney';
-import { isProKlaseOrg } from '@/lib/marketMoney';
+import { isMoksloVaisiaiOrg, isProKlaseOrg } from '@/lib/marketMoney';
+import { resolveOrCreateTrialSubject } from '@/pages/company/orgAdminSessionCreate';
+import { parseOrgTrialPolicy, sessionNeedsOrgTrialComment } from '@/lib/orgTrialPolicy';
 import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import { calendarSessionTitlePrefix, getCalendarSessionEventStyle } from '@/lib/calendarSessionEventStyle';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
@@ -254,6 +256,7 @@ interface Subject {
   grade_max?: number | null;
   is_group?: boolean;
   max_students?: number | null;
+  is_trial?: boolean | null;
 }
 
 interface Availability {
@@ -310,6 +313,8 @@ export default function CalendarPage() {
   // Org feature: ended lessons are not auto-completed — the tutor must confirm the outcome.
   const requiresStatusConfirmation =
     hasOrgFeature('tutor_lesson_status_confirmation') || isProKlaseOrg(ctxProfile?.organization_id);
+  const showTutorTrialToggle =
+    orgPolicy.isOrgTutor && !orgFeaturesLoading && isMoksloVaisiaiOrg(organizationId);
   const hideProKlaseOrgTutorCancel = orgPolicy.isOrgTutor && isProKlaseOrg(ctxProfile?.organization_id);
   const hideProKlaseOrgTutorFreeTime = hideProKlaseOrgTutorCancel;
   const hideProKlaseOrgTutorDelete = hideProKlaseOrgTutorCancel;
@@ -466,11 +471,13 @@ export default function CalendarPage() {
 
   // View-mode comment (visible when opening session without "Redaguoti")
   const [viewCommentText, setViewCommentText] = useState('');
+  const [trialCommentHint, setTrialCommentHint] = useState<'none' | 'optional' | 'required'>('none');
   const [viewShowToStudent, setViewShowToStudent] = useState(false);
   const [forceTrialCommentVisibility, setForceTrialCommentVisibility] = useState(false);
   const [viewCommentSaving, setViewCommentSaving] = useState(false);
 
   // Recurring session
+  const [createIsTrial, setCreateIsTrial] = useState(false);
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurringEndDate, setRecurringEndDate] = useState('');
   const [recurringFrequency, setRecurringFrequency] = useState<'weekly' | 'biweekly' | 'monthly'>('weekly');
@@ -582,6 +589,7 @@ export default function CalendarPage() {
     setViewCommentText(selectedEvent.tutor_comment ?? '');
     setViewShowToStudent(selectedEvent.show_comment_to_student ?? false);
     setForceTrialCommentVisibility(false);
+    setTrialCommentHint('none');
 
     (async () => {
       const subjectId = (selectedEvent as any)?.subject_id as string | null | undefined;
@@ -591,16 +599,38 @@ export default function CalendarPage() {
       const { data: tutorProfile } = await tutorSidebarProfileDeduped(user.id);
       const orgId = tutorProfile?.organization_id as string | null | undefined;
       if (!orgId) return;
-      const [{ data: orgRow }, { data: subjRow }] = await Promise.all([
+      const [{ data: orgRow }, { data: subjRow }, { data: orgFeatRow }] = await Promise.all([
         orgSuspensionRowDeduped(orgId),
         supabase.from('subjects').select('is_trial').eq('id', subjectId).maybeSingle(),
+        supabase.from('organizations').select('features').eq('id', orgId).maybeSingle(),
       ]);
-      const feat = (orgRow as any)?.features;
+      const feat = (orgFeatRow as any)?.features ?? (orgRow as any)?.features;
       const featObj = feat && typeof feat === 'object' && !Array.isArray(feat) ? (feat as Record<string, unknown>) : {};
-      const shouldForce = featObj['trial_lesson_comment_mode'] === 'student_and_parent' && (subjRow as any)?.is_trial === true;
+      const isTrial = (subjRow as any)?.is_trial === true || selectedEvent.subjects?.is_trial === true;
+      const shouldForce = featObj['trial_lesson_comment_mode'] === 'student_and_parent' && isTrial;
       if (!cancelled && shouldForce) {
         setForceTrialCommentVisibility(true);
         setViewShowToStudent(true);
+      }
+      if (!cancelled && isTrial) {
+        const policy = parseOrgTrialPolicy(featObj);
+        if (policy.commentRequired) {
+          const { data: trialHistory } = selectedEvent.student_id
+            ? await supabase
+                .from('sessions')
+                .select('id, start_time, status, subjects!inner(is_trial)')
+                .eq('student_id', selectedEvent.student_id)
+                .eq('subjects.is_trial', true)
+                .order('start_time', { ascending: true })
+            : { data: [] };
+          const required = sessionNeedsOrgTrialComment({
+            policy,
+            isTrial: true,
+            sessionId: selectedEvent.id,
+            studentTrials: (trialHistory || []) as Array<{ id: string; start_time?: string | null; status?: string | null }>,
+          });
+          if (!cancelled) setTrialCommentHint(required ? 'required' : 'optional');
+        }
       }
     })();
 
@@ -762,24 +792,25 @@ export default function CalendarPage() {
 
   // Filter subjects based on selected student's grade
   const filteredSubjects = useMemo(() => {
-    if (!selectedStudentId || !subjects.length) {
-      return subjects;
+    const catalog = showTutorTrialToggle ? subjects.filter((s) => !s.is_trial) : subjects;
+    if (!selectedStudentId || !catalog.length) {
+      return catalog;
     }
 
     const selectedStudent = students.find(s => s.id === selectedStudentId);
     if (!selectedStudent || !selectedStudent.grade) {
-      return subjects;
+      return catalog;
     }
 
     const studentGrade = parseStudentGrade(selectedStudent.grade);
 
-    const filtered = subjects.filter(subject => {
+    const filtered = catalog.filter(subject => {
       if (!subject.grade_min || !subject.grade_max) return true;
       return studentGrade >= subject.grade_min && studentGrade <= subject.grade_max;
     });
 
     return filtered;
-  }, [selectedStudentId, students, subjects]);
+  }, [selectedStudentId, students, subjects, showTutorTrialToggle]);
 
   // Subjects available in "assign student to slot" flow
   const assignFilteredSubjects = useMemo(() => {
@@ -1184,6 +1215,7 @@ export default function CalendarPage() {
       setNewTutorComment('');
       setNewShowCommentToStudent(false);
       setIsRecurring(false);
+      setCreateIsTrial(false);
       setRecurringEndDate('');
       setIsCreateModalOpen(true);
       return;
@@ -1223,6 +1255,7 @@ export default function CalendarPage() {
     setNewTutorComment('');
     setNewShowCommentToStudent(false);
     setIsRecurring(false);
+    setCreateIsTrial(false);
     setRecurringEndDate('');
     setIsCreateModalOpen(true);
   };
@@ -1671,6 +1704,26 @@ export default function CalendarPage() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setSaving(false); return; }
 
+    let sessionSubjectId = selectedSubjectId;
+    let sessionPrice = price;
+    if (createIsTrial) {
+      if (isRecurring) {
+        alert(t('compSch.trialLessonDesc'));
+        setSaving(false);
+        return;
+      }
+      try {
+        const trialMeta = await resolveOrCreateTrialSubject(supabase, user.id, price);
+        sessionSubjectId = trialMeta.subject.id;
+        sessionPrice = trialMeta.price;
+      } catch (err) {
+        console.error(err);
+        alert(err instanceof Error ? err.message : t('cal.errorCreating'));
+        setSaving(false);
+        return;
+      }
+    }
+
     const startDate = new Date(startTime);
     const endDate = new Date(endTime);
     const durationMs = endDate.getTime() - startDate.getTime();
@@ -1703,7 +1756,7 @@ export default function CalendarPage() {
             .insert({
               tutor_id: user.id,
               student_id: studentId,
-              subject_id: selectedSubjectId || null,
+              subject_id: sessionSubjectId || null,
               day_of_week: dayOfWeek,
               start_time: timeStr,
               end_time: endTimeStr,
@@ -1711,7 +1764,7 @@ export default function CalendarPage() {
               end_date: recurringEndDate.trim() || null,
               meeting_link: meetingLink || null,
               topic: topic || null,
-              price,
+              price: sessionPrice,
               active: true,
               frequency: recurringFrequency,
             })
@@ -1735,10 +1788,10 @@ export default function CalendarPage() {
         item_available_lessons: number;
         item_reserved_lessons: number;
       }>();
-      if (!isPaid && selectedSubjectId) {
+      if (!createIsTrial && !isPaid && sessionSubjectId) {
         const uniqueStudentIds = [...new Set(recurringTemplates.map((t: any) => t.student_id))] as string[];
         for (const sid of uniqueStudentIds) {
-          const match = await findActivePackageForBooking(supabase, { studentId: sid, subjectId: selectedSubjectId });
+          const match = await findActivePackageForBooking(supabase, { studentId: sid, subjectId: sessionSubjectId });
           if (match) {
             packagesByStudent.set(sid, {
               id: match.pkg.id,
@@ -1798,13 +1851,13 @@ export default function CalendarPage() {
           sessions.push({
             tutor_id: user.id,
             student_id: template.student_id,
-            subject_id: selectedSubjectId || null,
+            subject_id: sessionSubjectId || null,
             start_time: current.toISOString(),
             end_time: sessionEnd.toISOString(),
             status: 'active',
             meeting_link: meetingLink || null,
             topic: topic || null,
-            price,
+            price: sessionPrice,
             paid: sessionPaid,
             payment_status: sessionPaymentStatus,
             lesson_package_id: lessonPackageId,
@@ -2146,8 +2199,8 @@ export default function CalendarPage() {
         });
         let lessonPackageId = null;
 
-        if (!isPaid && selectedSubjectId) {
-          const match = await findActivePackageForBooking(supabase, { studentId, subjectId: selectedSubjectId });
+        if (!createIsTrial && !isPaid && sessionSubjectId) {
+          const match = await findActivePackageForBooking(supabase, { studentId, subjectId: sessionSubjectId });
           if (match) {
             const { pkg, item } = match;
             lessonPackageId = pkg.id;
@@ -2174,13 +2227,13 @@ export default function CalendarPage() {
         sessionsToInsert.push({
           tutor_id: user.id,
           student_id: studentId,
-          subject_id: selectedSubjectId || null,
+          subject_id: sessionSubjectId || null,
           start_time: startDate.toISOString(),
           end_time: endDate.toISOString(),
           status: 'active',
           meeting_link: meetingLink || null,
           topic: topic || null,
-          price,
+          price: sessionPrice,
           paid: sessionPaid,
           payment_status: sessionPaymentStatus,
           lesson_package_id: lessonPackageId,
@@ -3610,7 +3663,22 @@ export default function CalendarPage() {
           const { data: orgRow } = await supabase.from('organizations').select('features').eq('id', orgId).maybeSingle();
           const feat = (orgRow as any)?.features;
           const featObj = feat && typeof feat === 'object' && !Array.isArray(feat) ? (feat as Record<string, unknown>) : {};
-          if (featObj['trial_comment_required'] === true && !viewCommentText.trim()) {
+          const trialPolicy = parseOrgTrialPolicy(featObj);
+          const { data: trialHistory } = selectedEvent.student_id
+            ? await supabase
+                .from('sessions')
+                .select('id, start_time, status, subjects!inner(is_trial)')
+                .eq('student_id', selectedEvent.student_id)
+                .eq('subjects.is_trial', true)
+                .order('start_time', { ascending: true })
+            : { data: [] as Array<{ id: string; start_time?: string | null; status?: string | null }> };
+          const needsTrialComment = sessionNeedsOrgTrialComment({
+            policy: trialPolicy,
+            isTrial: true,
+            sessionId: selectedEvent.id,
+            studentTrials: (trialHistory || []) as Array<{ id: string; start_time?: string | null; status?: string | null }>,
+          });
+          if (needsTrialComment && !viewCommentText.trim()) {
             setToastMessage({ message: t('cal.trialCommentReminder'), type: 'warning' });
             setSaving(false);
             fetchData({ silent: true });
@@ -4545,6 +4613,7 @@ export default function CalendarPage() {
         if (!open) {
           setNewSessionId(null);
           setSelectedStudentIds([]);
+          setCreateIsTrial(false);
         }
       }}>
         <DialogContent className="w-[95vw] sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
@@ -4757,6 +4826,53 @@ export default function CalendarPage() {
             </div>
             )}
 
+            {showTutorTrialToggle && !subjects.find((s) => s.id === selectedSubjectId)?.is_group && (
+              <div className="border border-amber-100 rounded-xl p-4 bg-amber-50/50">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void (async () => {
+                      const next = !createIsTrial;
+                      if (!next) {
+                        setCreateIsTrial(false);
+                        if (selectedSubjectId) handleSubjectChange(selectedSubjectId);
+                        return;
+                      }
+                      const { data: { user } } = await supabase.auth.getUser();
+                      if (!user) return;
+                      try {
+                        const trialMeta = await resolveOrCreateTrialSubject(supabase, user.id);
+                        setCreateIsTrial(true);
+                        setIsRecurring(false);
+                        setRecurringEndDate('');
+                        setSelectedWeekdays([]);
+                        setPrice(trialMeta.price);
+                        setTopic((prev) => (prev.trim() ? prev : trialMeta.topic));
+                        if (startTime) {
+                          const start = new Date(startTime);
+                          if (!Number.isNaN(start.getTime())) {
+                            setEndTime(format(new Date(start.getTime() + trialMeta.durationMinutes * 60000), "yyyy-MM-dd'T'HH:mm"));
+                            setCreateDurationTouched(true);
+                          }
+                        }
+                      } catch (err) {
+                        alert(err instanceof Error ? err.message : t('cal.errorCreating'));
+                      }
+                    })();
+                  }}
+                  className="flex items-center justify-between w-full text-left"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-amber-900">{t('compSch.trialLesson')}</p>
+                    <p className="text-xs text-amber-800/80 mt-0.5">{t('cal.tutorTrialToggleHint')}</p>
+                  </div>
+                  <div className={`relative inline-flex h-6 w-11 items-center rounded-full flex-shrink-0 ${createIsTrial ? 'bg-amber-500' : 'bg-gray-300'}`}>
+                    <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${createIsTrial ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </div>
+                </button>
+              </div>
+            )}
+
             {/* Comment */}
             <div className="space-y-2">
               <Label>{t('cal.commentOptional')}</Label>
@@ -4779,6 +4895,7 @@ export default function CalendarPage() {
             </div>
 
             {/* Recurring toggle */}
+            {!createIsTrial && (
             <RecurrenceFields
               enabled={isRecurring}
               onEnabledChange={setIsRecurring}
@@ -4791,6 +4908,7 @@ export default function CalendarPage() {
               startTime={startTime}
               showEstimate
             />
+            )}
           </div>
 
           {newSessionId ? (
@@ -4826,11 +4944,11 @@ export default function CalendarPage() {
 
       {/* === EVENT DETAILS MODAL === */}
       <Dialog open={isEventModalOpen} onOpenChange={handleEventModalOpenChange}>
-        <DialogContent className="w-[95vw] sm:max-w-[440px] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 pr-6">
+        <DialogContent className="w-[min(96vw,40rem)] max-w-[40rem] max-h-[90vh] min-w-0 overflow-y-auto overflow-x-hidden">
+          <DialogHeader className="min-w-0 pr-8">
+            <DialogTitle className="flex flex-wrap items-center gap-2 pr-2 min-w-0">
               <CalendarDays className="w-5 h-5 text-indigo-600 flex-shrink-0" />
-              <span className="flex-1 truncate">{t('cal.lessonInfo')}</span>
+              <span className="flex-1 min-w-0 truncate">{t('cal.lessonInfo')}</span>
               {!isEditingSession && (selectedEvent?.status === 'active' || selectedEvent?.status === 'completed') && (
                 <div className="flex items-center gap-1 flex-shrink-0">
                 {selectedEvent?.status === 'active' && (
@@ -4855,7 +4973,7 @@ export default function CalendarPage() {
           </DialogHeader>
 
           {isEditingSession ? (
-            <div className="space-y-4 py-2">
+            <div className="space-y-4 py-2 min-w-0">
               <div className="space-y-2">
                 <Label>{t('compSch.topicSubject')}</Label>
                 <Input value={editTopic} onChange={(e) => setEditTopic(e.target.value)} placeholder={t('cal.topicPlaceholder')} className="rounded-xl" />
@@ -4976,7 +5094,7 @@ export default function CalendarPage() {
               </div>
             </div>
           ) : (
-            <div className="space-y-3 py-2">
+            <div className="space-y-3 py-2 min-w-0">
               {/* Student name - Group or Individual */}
               {isGroupSession ? (
                 <div className="space-y-2">
@@ -5155,16 +5273,16 @@ export default function CalendarPage() {
                   </div>
                 </div>
               ) : (
-                <div className="bg-indigo-50 rounded-xl px-4 py-3 flex items-center gap-3">
+                <div className="bg-indigo-50 rounded-xl px-4 py-3 flex items-start gap-3 min-w-0">
                   <div className="w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
                     {selectedEvent?.student?.full_name?.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?'}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-gray-900">{selectedEvent?.student?.full_name}</p>
+                    <p className="font-semibold text-gray-900 break-words">{selectedEvent?.student?.full_name}</p>
                     {selectedEvent?.student?.grade && (
                       <p className="text-xs text-emerald-600 font-medium">🎓 {selectedEvent.student.grade}</p>
                     )}
-                    <p className="text-xs text-gray-500 truncate">
+                    <p className="text-xs text-gray-500 break-words">
                       {contactVisibility
                         ? formatContactForTutorView(
                           selectedEvent?.student?.email,
@@ -5173,7 +5291,7 @@ export default function CalendarPage() {
                         )
                         : (orgPolicy.isOrgTutor ? '—' : ((selectedEvent?.student?.email || '').trim() || '—'))}
                     </p>
-                    <p className="text-xs text-gray-500 truncate">
+                    <p className="text-xs text-gray-500 break-words">
                       {contactVisibility
                         ? formatContactForTutorView(
                           selectedEvent?.student?.phone,
@@ -5183,7 +5301,7 @@ export default function CalendarPage() {
                         : (orgPolicy.isOrgTutor ? '—' : ((selectedEvent?.student?.phone || '').trim() || '—'))}
                     </p>
                     {selectedEvent?.topic && (
-                      <p className="text-xs text-indigo-600 mt-0.5 font-medium">{selectedEvent.topic}</p>
+                      <p className="text-xs text-indigo-600 mt-0.5 font-medium break-words">{selectedEvent.topic}</p>
                     )}
                   </div>
                 </div>
@@ -5227,8 +5345,8 @@ export default function CalendarPage() {
 
               <div
                 className={cn(
-                  'grid gap-2 text-sm',
-                  orgPolicy.hideMoney ? 'grid-cols-1' : 'grid-cols-3',
+                  'grid gap-2 text-sm min-w-0',
+                  orgPolicy.hideMoney ? 'grid-cols-1' : 'grid-cols-2 sm:grid-cols-3',
                 )}
               >
                 {!orgPolicy.hideMoney && (
@@ -5275,14 +5393,20 @@ export default function CalendarPage() {
               {/* Comment – always visible and editable in view mode */}
               <div className="space-y-2 mt-3 pt-3 border-t border-gray-100">
                 <p className="text-sm font-semibold text-gray-700">{t('dash.commentLabel')}</p>
+                {trialCommentHint === 'optional' && (
+                  <p className="text-xs text-gray-500 break-words">{t('cal.trialCommentOptionalHint')}</p>
+                )}
+                {trialCommentHint === 'required' && (
+                  <p className="text-xs text-amber-800 break-words">{t('cal.trialCommentRequiredHint')}</p>
+                )}
                 <textarea
                   value={viewCommentText}
                   onChange={(e) => setViewCommentText(e.target.value)}
                   placeholder={t('cal.commentPlaceholder')}
-                  className="w-full p-3 rounded-xl border border-gray-200 text-sm resize-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 outline-none"
+                  className="w-full min-w-0 max-w-full box-border p-3 rounded-xl border border-gray-200 text-sm resize-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 outline-none"
                   rows={2}
                 />
-                <label className="flex items-center gap-2 cursor-pointer">
+                <label className="flex items-start gap-2 cursor-pointer min-w-0">
                   <input
                     type="checkbox"
                     checked={viewShowToStudent}
@@ -5291,9 +5415,9 @@ export default function CalendarPage() {
                       setViewShowToStudent(e.target.checked);
                     }}
                     disabled={forceTrialCommentVisibility}
-                    className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    className="mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 flex-shrink-0"
                   />
-                  <span className="text-sm text-gray-700">
+                  <span className="text-sm text-gray-700 min-w-0 break-words">
                     {forceTrialCommentVisibility
                       ? t('cal.orgCommentAutoSend')
                       : t('cal.showToStudentCheckbox')}

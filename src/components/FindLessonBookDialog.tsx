@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useMemo } from 'react';
+﻿import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -24,7 +24,8 @@ import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { proKlaseFeatureEnabled } from '@/lib/orgIntakeMode';
 import { authHeaders } from '@/lib/apiHelpers';
-import { runOrgAdminCreateSession } from '@/pages/company/orgAdminSessionCreate';
+import { parseOrgTrialPolicy, shouldAutoMarkNextLessonTrial, countTrialsFromHistory } from '@/lib/orgTrialPolicy';
+import { isMoksloVaisiaiOrg } from '@/lib/marketMoney';
 import { ASSIGN_STUDENT_FREE_SLOT_DIALOG_CONTENT_CLASS } from '@/components/AssignStudentFreeSlotDialog';
 import RecurrenceFields, { type RecurrenceFrequency } from '@/components/RecurrenceFields';
 
@@ -92,6 +93,7 @@ export default function FindLessonBookDialog({
   const orgEntityType = useOrgEntityType();
   const pkFeat = (flagId: string) =>
     proKlaseFeatureEnabled(organizationId, orgEntityType, hasFeature, flagId, orgFeaturesLoading);
+  const isMvOrg = isMoksloVaisiaiOrg(organizationId);
   const [subject, setSubject] = useState<SubjectRow | null>(null);
   const [overridePrice, setOverridePrice] = useState<number | null>(null);
   const [lessonStartIso, setLessonStartIso] = useState('');
@@ -103,6 +105,10 @@ export default function FindLessonBookDialog({
   const [createdIntervals, setCreatedIntervals] = useState<Array<{ start: number; end: number }>>([]);
   const [successMessage, setSuccessMessage] = useState('');
   const [sessionCount, setSessionCount] = useState<number | null>(null);
+  const [trialPolicy, setTrialPolicy] = useState(() => parseOrgTrialPolicy({}));
+  const [historyCounts, setHistoryCounts] = useState({ trialCount: 0, regularCount: 0 });
+  const [autoTrialOn, setAutoTrialOn] = useState(false);
+  const userClearedAutoTrialRef = useRef(false);
   const [trialDefaults, setTrialDefaults] = useState<TrialDefaults>({ topic: '', durationMinutes: 60, priceEur: 0 });
   const [isTrial, setIsTrial] = useState(false);
   const [firstLessonIsTrial, setFirstLessonIsTrial] = useState(false);
@@ -117,6 +123,8 @@ export default function FindLessonBookDialog({
       setOverridePrice(null);
       setSessionCount(null);
       setIsTrial(false);
+      setAutoTrialOn(false);
+      userClearedAutoTrialRef.current = false;
       setLessonStartIso('');
       setLessonEndIso('');
       return;
@@ -130,7 +138,7 @@ export default function FindLessonBookDialog({
     }
     let cancelled = false;
     (async () => {
-      const [{ data: subj }, { data: pricing }, countResult] = await Promise.all([
+      const [{ data: subj }, { data: pricing }, historyResult] = await Promise.all([
         supabase
           .from('subjects')
           .select('id, name, price, duration_minutes, is_group, max_students, meeting_link')
@@ -147,15 +155,16 @@ export default function FindLessonBookDialog({
         studentId
           ? supabase
               .from('sessions')
-              .select('id', { count: 'exact', head: true })
+              .select('id, status, subjects(is_trial)')
               .eq('student_id', studentId)
-          : Promise.resolve({ count: 0 }),
+          : Promise.resolve({ data: [] }),
       ]);
       if (cancelled) return;
       setSubject((subj as SubjectRow) ?? null);
       setOverridePrice(pricing ? Number((pricing as { price: number }).price) : null);
-      const count = (countResult as { count?: number | null }).count;
-      setSessionCount(typeof count === 'number' ? count : 0);
+      const counts = countTrialsFromHistory((historyResult as { data?: unknown[] }).data || []);
+      setHistoryCounts(counts);
+      setSessionCount(counts.trialCount + counts.regularCount);
       setTopic(pick.subjectName);
       setMeetingLink(String((subj as { meeting_link?: string | null } | null)?.meeting_link || ''));
       setIsPaid(false);
@@ -192,6 +201,7 @@ export default function FindLessonBookDialog({
       if (cancelled) return;
       const feat = (data as any)?.features;
       const featObj = feat && typeof feat === 'object' && !Array.isArray(feat) ? (feat as Record<string, unknown>) : {};
+      setTrialPolicy(parseOrgTrialPolicy(featObj));
       setTrialDefaults({
         topic: typeof featObj.trial_lesson_topic === 'string' && featObj.trial_lesson_topic.trim()
           ? featObj.trial_lesson_topic.trim()
@@ -210,7 +220,29 @@ export default function FindLessonBookDialog({
   }, [organizationId]);
 
   const showTrialToggle =
-    pkFeat('trial_reservation_flow') || pkFeat('auto_trial_first_lesson');
+    isMvOrg || pkFeat('trial_reservation_flow') || pkFeat('auto_trial_first_lesson');
+
+  useEffect(() => {
+    if (orgFeaturesLoading || isMvOrg || !pkFeat('auto_trial_first_lesson') || !studentId || !pick) {
+      setAutoTrialOn(false);
+      return;
+    }
+    if (userClearedAutoTrialRef.current) return;
+    const next = shouldAutoMarkNextLessonTrial({
+      trialCount: historyCounts.trialCount,
+      regularCount: historyCounts.regularCount,
+      policy: trialPolicy,
+      enabled: !isMvOrg,
+    });
+    setAutoTrialOn(next);
+    if (next) {
+      setIsTrial(true);
+      setIsRecurring(false);
+      setFirstLessonIsTrial(false);
+      setRecurringWeekdays([]);
+      setRecurringEndDate('');
+    }
+  }, [orgFeaturesLoading, studentId, pick, historyCounts, trialPolicy, isMvOrg]);
 
   const durationMin = isTrial ? trialDefaults.durationMinutes : (subject?.duration_minutes || 60);
 
@@ -346,6 +378,12 @@ export default function FindLessonBookDialog({
         ]);
       }
       if (sessionCount != null) setSessionCount(sessionCount + 1);
+      if (isTrial) {
+        setHistoryCounts((prev) => ({ ...prev, trialCount: prev.trialCount + 1 }));
+        userClearedAutoTrialRef.current = false;
+      } else {
+        setHistoryCounts((prev) => ({ ...prev, regularCount: prev.regularCount + 1 }));
+      }
       setIsTrial(false);
       onBooked({
         tutorId: pick.tutorId,
@@ -399,6 +437,10 @@ export default function FindLessonBookDialog({
                   onClick={() => {
                     const next = !isTrial;
                     setIsTrial(next);
+                    if (!next) {
+                      userClearedAutoTrialRef.current = true;
+                      setAutoTrialOn(false);
+                    }
                     if (next) {
                       setIsRecurring(false);
                       setFirstLessonIsTrial(false);
@@ -419,6 +461,9 @@ export default function FindLessonBookDialog({
                         price: trialDefaults.priceEur.toFixed(2),
                       })}
                     </p>
+                    {autoTrialOn && isTrial && !isMvOrg && (
+                      <p className="text-xs text-amber-800 mt-1">{t('compSch.autoTrialHint')}</p>
+                    )}
                   </div>
                   <div
                     className={`relative inline-flex h-6 w-11 items-center rounded-full flex-shrink-0 ${isTrial ? 'bg-amber-500' : 'bg-gray-300'}`}

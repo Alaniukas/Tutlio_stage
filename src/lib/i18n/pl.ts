@@ -1,3 +1,4 @@
+import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
 import { schoolInstructionsTranslationsPl } from './schoolInstructionsTranslations.js';
 import { schoolTeacherContractTranslationsPl } from './schoolTeacherContractTranslations.js';
@@ -5,6 +6,7 @@ import { schoolTeacherContractTranslationsPl } from './schoolTeacherContractTran
 export const pl: Record<string, string> = {
   'common.reloadPage': "Odśwież stronę",
   'common.reloadPageWarning': "Odświeżenie strony spowoduje utratę niezapisanych zmian. Kontynuować?",
+  ...familyCatalogTrialCopy.pl,
   ...sharedOrganizationWorkflowTranslations,
   ...schoolInstructionsTranslationsPl,
   ...schoolTeacherContractTranslationsPl,

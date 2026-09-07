@@ -104,6 +104,13 @@ const MV_FEATURES = {
   email_team_signature: 'Mokslo vaisių komanda',
   login_description:
     'Profesionalūs korepetitoriai nuotoliu. Individualus dėmesys kiekvienam mokiniui, patyrę mokytojai ir aiškus mokymosi planas.',
+  trial_comment_required: true,
+  trial_lessons_per_student: 2,
+  trial_comment_after_count: 2,
+  auto_trial_first_lesson: false,
+  trial_lesson_topic: 'Bandomoji pamoka',
+  trial_lesson_duration_minutes: 45,
+  trial_lesson_price_eur: 0,
 };
 
 function loadEnv() {

@@ -1,3 +1,4 @@
+import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
 import { schoolInstructionsTranslationsSe } from './schoolInstructionsTranslations.js';
 import { schoolTeacherContractTranslationsSe } from './schoolTeacherContractTranslations.js';
@@ -12,6 +13,7 @@ const seLegalTranslations: Record<string, string> = {
 export const se: Record<string, string> = {
   'common.reloadPage': "Ladda om sidan",
   'common.reloadPageWarning': "Om du laddar om sidan går osparade ändringar förlorade. Vill du fortsätta?",
+  ...familyCatalogTrialCopy.se,
   ...sharedOrganizationWorkflowTranslations,
   ...schoolInstructionsTranslationsSe,
   ...schoolTeacherContractTranslationsSe,

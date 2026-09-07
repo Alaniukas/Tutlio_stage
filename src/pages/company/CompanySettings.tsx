@@ -38,6 +38,7 @@ import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { isSchoolOrg } from '@/lib/orgIntakeMode';
 import { ORG_TUTOR_FILTER_SCROLL_CLASS } from '@/lib/orgUi';
 import { isProKlaseOrg } from '@/lib/marketMoney';
+import { parseOrgTrialPolicy } from '@/lib/orgTrialPolicy';
 import { Checkbox } from '@/components/ui/checkbox';
 import { parseEmailOptOutList, toggleEmailOptOut } from '@/lib/emailNotificationOptOut';
 
@@ -140,6 +141,8 @@ export default function CompanySettings() {
     sc?.trialCommentMode ?? 'internal_only'
   );
   const [trialCommentRequired, setTrialCommentRequired] = useState(sc?.trialCommentRequired ?? false);
+  const [trialLessonsPerStudent, setTrialLessonsPerStudent] = useState(sc?.trialLessonsPerStudent ?? 1);
+  const [trialCommentAfterCount, setTrialCommentAfterCount] = useState(sc?.trialCommentAfterCount ?? 1);
   // Reservation flow only: hours a held trial slot waits for payment before auto-release.
   const [trialReservationDeadlineHours, setTrialReservationDeadlineHours] = useState(sc?.trialReservationDeadlineHours ?? 24);
   // Package reservation flow only: hours before the first lesson a held package slot waits for payment.
@@ -194,6 +197,8 @@ export default function CompanySettings() {
     let nextTrialPriceEur = 0;
     let nextTrialCommentMode: TrialCommentMode = 'internal_only';
     let nextTrialCommentRequired = false;
+    let nextTrialLessonsPerStudent = 1;
+    let nextTrialCommentAfterCount = 1;
     let nextTrialReservationDeadlineHours = 24;
     let nextPackagePaymentDeadlineHours = 24;
     let nextContactEmail = '';
@@ -218,6 +223,9 @@ export default function CompanySettings() {
       if (fcm === 'student_and_parent' || fcm === 'internal_only') nextTrialCommentMode = fcm;
       const fcr = featObj['trial_comment_required'];
       nextTrialCommentRequired = fcr === true;
+      const trialPolicy = parseOrgTrialPolicy(featObj);
+      nextTrialLessonsPerStudent = trialPolicy.lessonsPerStudent;
+      nextTrialCommentAfterCount = trialPolicy.commentAfterCount;
       const frd = featObj['trial_reservation_deadline_hours'];
       if (typeof frd === 'number' && Number.isFinite(frd) && frd > 0) nextTrialReservationDeadlineHours = Math.round(frd);
       const fpd = featObj['package_payment_deadline_hours'];
@@ -253,6 +261,8 @@ export default function CompanySettings() {
       setTrialPriceEur(nextTrialPriceEur);
       setTrialCommentMode(nextTrialCommentMode);
       setTrialCommentRequired(nextTrialCommentRequired);
+      setTrialLessonsPerStudent(nextTrialLessonsPerStudent);
+      setTrialCommentAfterCount(nextTrialCommentAfterCount);
       setTrialReservationDeadlineHours(nextTrialReservationDeadlineHours);
       setPackagePaymentDeadlineHours(nextPackagePaymentDeadlineHours);
       setNotifyTutorsOnAssign(featObj['notify_tutors_on_student_assign'] === true);
@@ -351,6 +361,8 @@ export default function CompanySettings() {
         trialPriceEur: nextTrialPriceEur,
         trialCommentMode: nextTrialCommentMode,
         trialCommentRequired: nextTrialCommentRequired,
+        trialLessonsPerStudent: nextTrialLessonsPerStudent,
+        trialCommentAfterCount: nextTrialCommentAfterCount,
         trialReservationDeadlineHours: nextTrialReservationDeadlineHours,
         packagePaymentDeadlineHours: nextPackagePaymentDeadlineHours,
         contactEmail: nextContactEmail,
@@ -742,6 +754,11 @@ export default function CompanySettings() {
       trial_lesson_price_eur: Math.max(0, Number(trialPriceEur) || 0),
       trial_lesson_comment_mode: trialCommentMode,
       trial_comment_required: trialCommentRequired,
+      trial_lessons_per_student: Math.min(5, Math.max(1, Math.round(Number(trialLessonsPerStudent) || 1))),
+      trial_comment_after_count: Math.min(
+        Math.min(5, Math.max(1, Math.round(Number(trialLessonsPerStudent) || 1))),
+        Math.max(1, Math.round(Number(trialCommentAfterCount) || 1)),
+      ),
       trial_reservation_deadline_hours: Math.max(1, Math.round(Number(trialReservationDeadlineHours) || 24)),
       package_payment_deadline_hours: Math.max(1, Math.round(Number(packagePaymentDeadlineHours) || 24)),
       notify_tutors_on_student_assign: notifyTutorsOnAssign,
@@ -839,6 +856,8 @@ export default function CompanySettings() {
       trialPriceEur,
       trialCommentMode,
       trialCommentRequired,
+      trialLessonsPerStudent,
+      trialCommentAfterCount,
       trialReservationDeadlineHours,
       packagePaymentDeadlineHours,
       notifyTutorsOnAssign,
@@ -1106,7 +1125,41 @@ export default function CompanySettings() {
                   />
                   <span className="text-sm text-gray-700">{t('compSet.trialCommentRequired')}</span>
                 </label>
-                <p className="text-xs text-gray-400 ml-6">{t('compSet.trialCommentRequiredDesc')}</p>
+                <p className="text-xs text-gray-400 ml-6">{t('compSet.trialCommentRequiredHelp')}</p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 col-span-full">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">{t('compSet.trialLessonsPerStudent')}</Label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={5}
+                    step={1}
+                    value={trialLessonsPerStudent}
+                    onChange={(e) => {
+                      const n = Math.min(5, Math.max(1, Math.round(Number(e.target.value) || 1)));
+                      setTrialLessonsPerStudent(n);
+                      setTrialCommentAfterCount((prev: number) => Math.min(prev, n));
+                    }}
+                    className="w-28 rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                  />
+                  <p className="text-xs text-gray-400">{t('compSet.trialLessonsPerStudentDesc')}</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">{t('compSet.trialCommentAfterNth')}</Label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={trialLessonsPerStudent}
+                    step={1}
+                    value={trialCommentAfterCount}
+                    onChange={(e) => setTrialCommentAfterCount(
+                      Math.min(trialLessonsPerStudent, Math.max(1, Math.round(Number(e.target.value) || 1))),
+                    )}
+                    className="w-28 rounded-xl border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                  />
+                  <p className="text-xs text-gray-400">{t('compSet.trialCommentAfterNthDesc')}</p>
+                </div>
               </div>
               {orgFeaturesSnapshot['trial_reservation_flow'] === true && (
                 <div className="space-y-1.5 col-span-full border-t border-gray-100 pt-4">
@@ -1156,6 +1209,9 @@ export default function CompanySettings() {
                 <p className="text-xs text-gray-500 mt-0.5">
                   {t('compSet.subjectManagementDesc')}
                 </p>
+                <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">
+                  {t('compSet.subjectCatalogNote')}
+                </p>
               </div>
               <Button onClick={openAddSubjectDialog} size="sm" className="gap-2 rounded-xl">
                 <Plus className="w-4 h-4" /> {t('compSet.addSubject')}
@@ -1177,6 +1233,9 @@ export default function CompanySettings() {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium text-sm text-gray-900">{subject.name}</span>
+                          <span className="text-[10px] uppercase tracking-wide font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-full">
+                            {t('compTut.orgCatalogTitle')}
+                          </span>
                           {subject.is_group && (
                             <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200">
                               <Users className="w-3 h-3" /> {t('compSet.groupLesson', { count: String(subject.max_students) })}

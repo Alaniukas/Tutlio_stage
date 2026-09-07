@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import JoinLessonButton from '@/components/JoinLessonButton';
 import StudentLayout from '@/components/StudentLayout';
 import ParentLayout from '@/components/ParentLayout';
+import ParentChildSwitcher from '@/components/parent/ParentChildSwitcher';
 import StatusBadge from '@/components/StatusBadge';
 import { supabase } from '@/lib/supabase';
 import { PERLAS_FINANCE_ENABLED } from '@/lib/perlasFinance';
@@ -26,6 +27,7 @@ import { useMarketMoney } from '@/hooks/useMarketMoney';
 import { isWaitlistHiddenForOrg, orgFeeProfile, type OrgFeeProfile } from '@/lib/marketMoney';
 import { parseOrgContactVisibility, maskTutorContact } from '@/lib/orgContactVisibility';
 import { useUser } from '@/contexts/UserContext';
+import { pickParentChildId, setParentActiveChildId } from '@/lib/parentActiveChild';
 import { fetchStudentActiveLessonPackagesDeduped, fetchSubjectNamesByIds } from '@/lib/studentLessonPackagesLight';
 import { tutorUsesManualStudentPayments } from '@/lib/subscription';
 import {
@@ -642,10 +644,11 @@ export default function StudentSessions() {
 
             setParentChildOptions(pairs);
 
-            const picked =
-                urlParentStudentId && pairs.some((p) => p.id === urlParentStudentId)
-                    ? urlParentStudentId
-                    : pairs[0].id;
+            const picked = pickParentChildId(
+                pairs.map((p) => p.id),
+                urlParentStudentId,
+            ) ?? pairs[0].id;
+            setParentActiveChildId(picked);
 
             if (!urlParentStudentId || urlParentStudentId !== picked) {
                 parentUrlSyncStudentId = picked;
@@ -1323,23 +1326,16 @@ export default function StudentSessions() {
                 </h1>
                 <p className="text-gray-400 text-sm mb-3">{t('stuSess.allSessions')}</p>
 
-                {isParentLessonsRoute && parentChildOptions.length > 1 && (
-                    <div className="mb-5">
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                            {t('parent.children')}
-                        </p>
-                        <select
-                            value={urlParentStudentId ?? parentChildOptions[0]?.id ?? ''}
-                            onChange={(e) => navigate(`/parent/lessons?studentId=${e.target.value}`)}
-                            className="w-full h-11 rounded-xl border border-gray-200 bg-white px-3 text-sm font-medium text-gray-800"
-                        >
-                            {parentChildOptions.map((c) => (
-                                <option key={c.id} value={c.id}>
-                                    {c.fullName || c.id}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
+                {isParentLessonsRoute && (
+                    <ParentChildSwitcher
+                        className="mb-5"
+                        options={parentChildOptions}
+                        value={urlParentStudentId ?? parentChildOptions[0]?.id ?? ''}
+                        onChange={(id) => {
+                            setParentActiveChildId(id);
+                            navigate(`/parent/lessons?studentId=${encodeURIComponent(id)}`);
+                        }}
+                    />
                 )}
 
                 {noTutorAssigned && (

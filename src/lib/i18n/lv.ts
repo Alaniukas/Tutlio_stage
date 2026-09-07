@@ -1,3 +1,4 @@
+import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
 import { schoolInstructionsTranslationsLv } from './schoolInstructionsTranslations.js';
 import { schoolTeacherContractTranslationsLv } from './schoolTeacherContractTranslations.js';
@@ -6,6 +7,7 @@ import { supportTranslations } from './supportTranslations.js';
 export const lv: Record<string, string> = {
   'common.reloadPage': "Pārlādēt lapu",
   'common.reloadPageWarning': "Pārlādējot lapu, nesaglabātās izmaiņas tiks zaudētas. Vai turpināt?",
+  ...familyCatalogTrialCopy.lv,
   ...sharedOrganizationWorkflowTranslations,
   ...schoolInstructionsTranslationsLv,
   ...schoolTeacherContractTranslationsLv,

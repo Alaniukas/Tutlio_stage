@@ -672,7 +672,8 @@ export default function CompanyStudents() {
 
   const normalizedSearch = studentSearch.trim().toLowerCase();
   const groupedStudents = useMemo(() => {
-    // Group by linked_user_id (multi-tutor), else org+student email, else single row.
+    // Same child across tutors: linked_user_id/email + name. Siblings who share a
+    // parent login or payer email stay on separate cards.
     const groups = new Map<string, Student[]>();
     const order: string[] = [];
     for (const s of students) {
@@ -718,7 +719,9 @@ export default function CompanyStudents() {
       showTrashBin ? g.primary.detached_at : !g.primary.detached_at
     );
     if (normalizedSearch) {
-      groups = groups.filter((g) => String(g.primary.full_name || '').toLowerCase().includes(normalizedSearch));
+      groups = groups.filter((g) =>
+        g.rows.some((r) => String(r.full_name || '').toLowerCase().includes(normalizedSearch)),
+      );
     }
     if (gradeFilter !== 'all') {
       groups = groups.filter((g) => g.rows.some((r) => String(r.grade || '').trim() === gradeFilter));
@@ -2526,19 +2529,9 @@ export default function CompanyStudents() {
 
     const now = new Date().toISOString();
     const patch = { detached_at: now, tutor_id: null as string | null };
-
-    let error: { message: string } | null = null;
-    if (studentRow.linked_user_id && studentRow.organization_id) {
-      const { error: bulkErr } = await supabase
-        .from('students')
-        .update(patch)
-        .eq('organization_id', studentRow.organization_id)
-        .eq('linked_user_id', studentRow.linked_user_id);
-      error = bulkErr;
-    } else {
-      const { error: singleErr } = await supabase.from('students').update(patch).eq('id', id);
-      error = singleErr;
-    }
+    const group = groupedStudents.find((g) => g.rows.some((row) => row.id === id));
+    const ids = group ? group.rows.map((row) => row.id) : [id];
+    const { error } = await supabase.from('students').update(patch).in('id', ids);
 
     if (!error) {
       setToastMessage({ message: t('compStu.studentDetached'), type: 'success' });
@@ -2556,18 +2549,9 @@ export default function CompanyStudents() {
       .maybeSingle();
     if (!studentRow) return;
 
-    let error: { message: string } | null = null;
-    if (studentRow.linked_user_id && studentRow.organization_id) {
-      const { error: bulkErr } = await supabase
-        .from('students')
-        .update({ detached_at: null })
-        .eq('organization_id', studentRow.organization_id)
-        .eq('linked_user_id', studentRow.linked_user_id);
-      error = bulkErr;
-    } else {
-      const { error: singleErr } = await supabase.from('students').update({ detached_at: null }).eq('id', id);
-      error = singleErr;
-    }
+    const group = groupedStudents.find((g) => g.rows.some((row) => row.id === id));
+    const ids = group ? group.rows.map((row) => row.id) : [id];
+    const { error } = await supabase.from('students').update({ detached_at: null }).in('id', ids);
 
     if (!error) {
       setToastMessage({ message: t('compStu.studentRestored'), type: 'success' });

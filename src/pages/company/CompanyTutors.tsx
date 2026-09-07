@@ -273,9 +273,10 @@ function SubjectPresetList({
       {/* Inline add form */}
       {open && (
         <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 space-y-3">
-          {orgCatalog.length > 0 && (
+      {orgCatalog.length > 0 && (
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-gray-600">{t('compTut.fromCatalog')}</Label>
+              <p className="text-[11px] text-gray-500 leading-relaxed">{t('compTut.orgCatalogHint')}</p>
               {catalogAvailable.length > 0 ? (
                 <CatalogSubjectSelect
                   value={catalogPick}
@@ -514,6 +515,7 @@ export default function CompanyTutors() {
   const [newSubjectColor, setNewSubjectColor] = useState('#6366f1');
   const [addSubjectCatalogPick, setAddSubjectCatalogPick] = useState('');
   const [savingSubject, setSavingSubject] = useState(false);
+  const [assigningCatalogKey, setAssigningCatalogKey] = useState<string | null>(null);
   const [tutorSubjectPrices, setTutorSubjectPrices] = useState<{ id?: string; tutor_id: string; org_subject_template_id: string; price: number; duration_minutes: number }[]>([]);
   const [orgTemplates, setOrgTemplates] = useState<{ id: string; name: string; price: number; duration_minutes: number; color: string }[]>([]);
 
@@ -1214,7 +1216,9 @@ export default function CompanyTutors() {
       duration_minutes: newSubjectDuration, price: subjectPrice, color: newSubjectColor,
     }).select().single();
     if (data) {
-      if (orgId) {
+      // Keep org catalog rows when assigning from the catalog; only prune templates
+      // after a fully manual add that would otherwise duplicate Subject Management.
+      if (orgId && !addSubjectCatalogPick) {
         await removeOrgSubjectTemplatesMatchingPreset(orgId, {
           name: data.name,
           duration_minutes: data.duration_minutes,
@@ -1231,6 +1235,43 @@ export default function CompanyTutors() {
     setNewSubjectName(''); setNewSubjectDuration(60); setNewSubjectPrice(25); setNewSubjectColor('#6366f1');
     setShowAddSubject(false);
     setSavingSubject(false);
+  };
+
+  const handleAssignCatalogTemplate = async (tpl: {
+    id: string;
+    name: string;
+    price: number;
+    duration_minutes: number;
+    color: string;
+  }) => {
+    if (!selectedTutor) return;
+    if (
+      tutorSubjectsContainLessonDuplicate(selectedTutor.subjects, {
+        name: tpl.name,
+        duration_minutes: tpl.duration_minutes,
+        price: tpl.price,
+      })
+    ) {
+      alert(t('compSet.subjectDuplicateForTutor'));
+      return;
+    }
+    setAssigningCatalogKey(tpl.id);
+    const subjectPrice = isProKlaseAdmin ? 0 : tpl.price;
+    const { data } = await supabase.from('subjects').insert({
+      tutor_id: selectedTutor.id,
+      name: tpl.name,
+      duration_minutes: tpl.duration_minutes,
+      price: subjectPrice,
+      color: tpl.color || '#6366f1',
+    }).select().single();
+    if (data) {
+      setSelectedTutor({ ...selectedTutor, subjects: [...selectedTutor.subjects, data] });
+      if (isManoKorepetitoriusAdmin && data.id && !(data as Subject).is_trial) {
+        setEditSubjectPay((prev) => ({ ...prev, [data.id]: prev[data.id] ?? '' }));
+      }
+      await loadData({ silent: true });
+    }
+    setAssigningCatalogKey(null);
   };
 
   const handleDeleteSubject = async (subjectId: string) => {
@@ -1877,6 +1918,12 @@ export default function CompanyTutors() {
                   </div>
                 )}
 
+                {selectedTutor.subjects.length === 0 && !showAddSubject && (
+                  <p className="text-xs text-gray-400 italic mb-3">
+                    {orgTemplates.length > 0 ? t('compTut.assignedSubjectsEmpty') : t('compTut.noSubjects')}
+                  </p>
+                )}
+
                 {showAddSubject && (
                   <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 space-y-3">
                     <p className="text-xs font-semibold text-indigo-700">{t('compTut.newSubject')}</p>
@@ -1962,30 +2009,62 @@ export default function CompanyTutors() {
                   </div>
                 )}
 
-                {selectedTutor.subjects.length === 0 && orgTemplates.length === 0 && !showAddSubject && (
-                  <p className="text-xs text-gray-400 italic">{t('compTut.noSubjects')}</p>
-                )}
-
-              {orgTemplates.length > 0 && !isProKlaseAdmin && (
-                <div className="pt-3 border-t border-gray-100">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">{t('compTut.tutorPricing')}</p>
-                  <p className="text-[11px] text-gray-400 mb-3">{t('compTut.tutorPricingHint')}</p>
-                  <div className="space-y-2">
-                    {orgTemplates.map(tpl => {
-                      const existing = tutorSubjectPrices.find(p => p.org_subject_template_id === tpl.id);
-                      return (
-                        <TutorSubjectPriceRow
-                          key={tpl.id}
-                          template={tpl}
-                          existing={existing ? { price: existing.price, duration_minutes: existing.duration_minutes } : undefined}
-                          onSave={handleSaveTutorSubjectPrice}
-                          onDelete={handleDeleteTutorSubjectPrice}
-                        />
-                      );
-                    })}
+              {orgTemplates.length > 0 && !isProKlaseAdmin && (() => {
+                const assignedKeys = new Set(selectedTutor.subjects.map((s) => subjectPresetKey(s)));
+                const assignedTemplates = orgTemplates.filter((tpl) => assignedKeys.has(subjectPresetKey(tpl)));
+                const unassignedTemplates = orgTemplates.filter((tpl) => !assignedKeys.has(subjectPresetKey(tpl)));
+                return (
+                <div className="pt-3 border-t border-gray-100 space-y-4">
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">{t('compTut.orgCatalogTitle')}</p>
+                    <p className="text-[11px] text-gray-500 leading-relaxed">{t('compTut.orgCatalogHint')}</p>
                   </div>
+                  {unassignedTemplates.length > 0 && (
+                    <div className="space-y-2">
+                      {unassignedTemplates.map((tpl) => (
+                        <div key={tpl.id} className="flex items-center gap-3 bg-slate-50 border border-dashed border-slate-200 rounded-xl px-3 py-2.5">
+                          <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: tpl.color }} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-800 truncate">{tpl.name}</p>
+                            <p className="text-[11px] text-gray-400">{fmtMoney(tpl.price)} · {tpl.duration_minutes} min</p>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="rounded-lg shrink-0"
+                            disabled={assigningCatalogKey === tpl.id}
+                            onClick={() => void handleAssignCatalogTemplate(tpl)}
+                          >
+                            {assigningCatalogKey === tpl.id ? t('compTut.saving') : t('compTut.assignToTutor')}
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {assignedTemplates.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">{t('compTut.tutorPricing')}</p>
+                      <p className="text-[11px] text-gray-400 mb-3">{t('compTut.tutorPricingHint')}</p>
+                      <div className="space-y-2">
+                        {assignedTemplates.map(tpl => {
+                          const existing = tutorSubjectPrices.find(p => p.org_subject_template_id === tpl.id);
+                          return (
+                            <TutorSubjectPriceRow
+                              key={tpl.id}
+                              template={tpl}
+                              existing={existing ? { price: existing.price, duration_minutes: existing.duration_minutes } : undefined}
+                              onSave={handleSaveTutorSubjectPrice}
+                              onDelete={handleDeleteTutorSubjectPrice}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
+                );
+              })()}
               </div>
             </div>
           )}

@@ -47,7 +47,7 @@ type TrialSubjectMeta = {
 };
 
 /** Resolve org trial defaults and the tutor's trial subject (create if missing). */
-async function resolveOrCreateTrialSubject(
+export async function resolveOrCreateTrialSubject(
   supabase: SupabaseClient,
   tutorId: string,
   priceOverride?: number,

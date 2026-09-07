@@ -1,3 +1,4 @@
+import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
 import { schoolInstructionsTranslationsFr } from './schoolInstructionsTranslations.js';
 import { schoolTeacherContractTranslationsFr } from './schoolTeacherContractTranslations.js';
@@ -6,6 +7,7 @@ import { supportTranslations } from './supportTranslations.js';
 export const fr: Record<string, string> = {
   'common.reloadPage': "Recharger la page",
   'common.reloadPageWarning': "Le rechargement entraînera la perte des modifications non enregistrées. Continuer ?",
+  ...familyCatalogTrialCopy.fr,
   ...sharedOrganizationWorkflowTranslations,
   ...schoolInstructionsTranslationsFr,
   ...schoolTeacherContractTranslationsFr,

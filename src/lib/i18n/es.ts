@@ -1,3 +1,4 @@
+import { familyCatalogTrialCopy } from './familyCatalogTrialCopy.js';
 import { sharedOrganizationWorkflowTranslations } from './sharedOrganizationWorkflowTranslations.js';
 import { schoolInstructionsTranslationsEs } from './schoolInstructionsTranslations.js';
 import { schoolTeacherContractTranslationsEs } from './schoolTeacherContractTranslations.js';
@@ -6,6 +7,7 @@ import { supportTranslations } from './supportTranslations.js';
 export const es: Record<string, string> = {
   'common.reloadPage': "Recargar la página",
   'common.reloadPageWarning': "Al recargar se perderán los cambios sin guardar. ¿Continuar?",
+  ...familyCatalogTrialCopy.es,
   ...sharedOrganizationWorkflowTranslations,
   ...schoolInstructionsTranslationsEs,
   ...schoolTeacherContractTranslationsEs,

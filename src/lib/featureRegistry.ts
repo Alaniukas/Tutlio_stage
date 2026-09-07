@@ -313,9 +313,9 @@ export const FEATURE_REGISTRY: Record<string, FeatureDefinition> = {
     name: 'Pirmoji pamoka automatiškai bandomoji',
     nameEn: 'First lesson defaults to trial',
     description:
-      'Tvarkaraštyje kuriant pamoką mokiniui, kuris dar neturi nė vienos pamokos, ji automatiškai pažymima kaip bandomoji su org. bandomosios pamokos tema, trukme ir kaina. Administratorius gali viską pakoreguoti prieš išsaugant.',
+      'Tvarkaraštyje kuriant pamoką mokiniui, kuris dar neturi įprastų pamokų, ji automatiškai pažymima kaip bandomoji (iki org. nustatyto bandomųjų skaičiaus) su bandomosios tema, trukme ir kaina. Administratorius gali viską pakoreguoti prieš išsaugant.',
     descriptionEn:
-      'When creating a lesson in the schedule for a student with no lessons yet, it is automatically marked as a trial with the org trial topic, duration and price. The admin can adjust everything before saving.',
+      'When creating a lesson in the schedule for a student who still has no regular lessons, it is automatically marked as a trial (up to the org trial count) with the org trial topic, duration and price. The admin can adjust everything before saving.',
     category: 'automation',
     defaultValue: false,
     pricingTier: 'premium',
