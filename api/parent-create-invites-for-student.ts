@@ -138,7 +138,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return json(res, 200, { success: true, sent: 0, message: 'No parent emails on record' });
     }
 
-    const results: { email: string; ok: boolean; error?: string; code?: string }[] = [];
+    const results: { email: string; ok: boolean; error?: string; code?: string; skipped?: boolean; reason?: string }[] = [];
 
     const appOrigin = orgAwareOrigin(orgLocale, publicOriginFromRequest(req));
     const explicitLocale = typeof body.locale === 'string' ? body.locale : undefined;
@@ -165,7 +165,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if ('error' in r) {
         results.push({ email: t.email, ok: false, error: r.error });
       } else if ('skipped' in r) {
-        results.push({ email: t.email, ok: true });
+        results.push({ email: t.email, ok: true, skipped: true, reason: r.reason });
       } else if (!r.emailSent) {
         results.push({
           email: t.email,
@@ -186,7 +186,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return json(res, 200, {
       success: true,
-      sent: results.filter((x) => x.ok).length,
+      sent: results.filter((x) => x.ok && !x.skipped).length,
+      skipped: results.filter((x) => x.skipped).length,
       results,
     });
   } catch (e: unknown) {

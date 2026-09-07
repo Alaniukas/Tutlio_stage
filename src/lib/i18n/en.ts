@@ -1549,7 +1549,7 @@ export const en: Record<string, string> = {
   'compStu.sendingNow': 'Sending...',
   'compStu.inviteSentNowSuccess': 'Invite sent.',
   'compStu.inviteSentNowFailed': 'Failed to send invite.',
-  'compStu.inviteSkippedAlreadyRegistered': 'This account is already active. No registration email was sent — the user should sign in.',
+  'compStu.inviteSkippedAlreadyRegistered': "An account with this email address already exists. The invitation email was not sent.",
   'compStu.noInviteRecipient': 'No email available to send invite.',
   'compStu.inviteMissingCode': 'Invite code is missing for this student.',
   'compStu.inviteParent': 'Invite parent',
