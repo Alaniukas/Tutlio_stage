@@ -1,21 +1,24 @@
 import { Link } from 'react-router-dom';
-import { useTranslation, buildLocalizedPath, localizedPagePath } from '@/lib/i18n';
+import { useTranslation, buildLocalizedPath, localizedPagePath, defaultLocaleForHost } from '@/lib/i18n';
+import type { Locale } from '@/lib/i18n';
 import { usePlatform } from '@/contexts/PlatformContext';
 import { FEATURE_PAGES } from '@/lib/featurePages';
+import { COMPARE_HUB_PATH } from '@/lib/comparisonPages';
+import { landingPathForAudience } from '@/lib/marketingAudience';
 
 const HEADING_CLASS = 'text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500';
 const LIST_CLASS = 'mt-4 space-y-2.5 sm:mt-5 sm:space-y-3';
 const LINK_CLASS = 'text-[13px] text-zinc-300 transition-colors hover:text-white sm:text-[14px]';
 
 /**
- * Platform switches need a full page load — the platform is derived from the
- * `/schools` path prefix, so a client-side <Link> would keep the current one.
- * Mirrors navigateToPlatform in LandingNavbar.
+ * `/schools` nests the locale after its prefix and runs under a different
+ * router basename, so crossing platforms needs a full page load. Mirrors
+ * schoolsLandingHref in LandingNavbar.
  */
-function platformHref(target: 'tutors' | 'schools', locale: string): string {
-  const localeSegment = locale === 'lt' ? '' : `/${locale}`;
-  const prefix = target === 'tutors' ? '' : `/${target}`;
-  return `${prefix}${localeSegment}` || '/';
+function schoolsLandingHref(locale: Locale): string {
+  const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+  const localeSegment = locale === defaultLocaleForHost(host) ? '' : `/${locale}`;
+  return `/schools${localeSegment}`;
 }
 
 export default function LandingFooter() {
@@ -42,8 +45,10 @@ export default function LandingFooter() {
     {
       title: t('landing.footerSolutions'),
       links: [
-        { to: platformHref('tutors', locale), label: t('nav.forTutors'), external: true },
-        { to: platformHref('schools', locale), label: t('nav.forSchools'), external: true },
+        { to: lp(landingPathForAudience('solo')), label: t('nav.forTutors'), external: isSchools },
+        { to: lp(landingPathForAudience('biz')), label: t('nav.forAgencies'), external: isSchools },
+        { to: isSchools ? lp('/') : schoolsLandingHref(locale), label: t('nav.forSchools'), external: !isSchools },
+        { to: lp(COMPARE_HUB_PATH), label: t('nav.compare'), external: isSchools },
         { to: lp(FEATURE_PAGES.cancellation.path), label: t('landing.feature.cancellation') },
         { to: lp(FEATURE_PAGES.comments.path), label: t('landing.feature.comments') },
       ],
@@ -84,7 +89,7 @@ export default function LandingFooter() {
                 <h3 className={HEADING_CLASS}>{column.title}</h3>
                 <ul className={LIST_CLASS}>
                   {column.links.map((link) => (
-                    <li key={link.to}>
+                    <li key={`${link.label}:${link.to}`}>
                       {link.external ? (
                         <a href={link.to} className={LINK_CLASS}>{link.label}</a>
                       ) : (

@@ -441,7 +441,15 @@ async function main() {
     sparse: `${appUrl}/school-extra-lessons-accept?token=${tokenSparse}`,
   };
 
+  // Plain developer cheat-sheet, not a product template: say so loudly, because it
+  // lands in the same QA inbox as the real branded parent emails and has been
+  // mistaken for one.
   const html = `
+    <div style="background:#fef2f2;border:2px solid #dc2626;border-radius:10px;padding:12px 14px;margin:0 0 16px;font-family:sans-serif;">
+      <strong style="color:#b91c1c;">VIDINIS TESTUOTOJŲ LAIŠKAS (seed skriptas).</strong>
+      Tėvai ir mokytojai tokio laiško negauna — jiems eina tik Tutlio šablonai su mokyklos antrašte
+      (kvietimas į pirmą užsiėmimą, priminimai, sąskaitos, sutarties patvirtinimas).
+    </div>
     <p>QA papildomų pamokų sutarčių nuorodos (Demo Mokykla).</p>
     <ul>
       <li><a href="${urls.within14}">PP-LEGAL-WITHIN14</a> — 14 d. checkbox turi būti matomas (pradžia ${startWithin})</li>
@@ -452,7 +460,7 @@ async function main() {
     <p>Tėvas: ${PARENT_LOGIN} / TutlioQaDemo2026! — ${appUrl}/login</p>
     <p>Portale: PP-LEGAL-WITHDRAW (Atsisakyti) ir PP-LEGAL-TERMINATE (Nutraukti).</p>
   `;
-  await sendResend(env, { subject: 'Tutlio QA — papildomų pamokų sutarčių nuorodos', html });
+  await sendResend(env, { subject: '[VIDINIS QA – ne tėvams] Demo Mokykla: testinės sutarčių nuorodos', html });
 
   console.log('\n=== LEGAL QA READY ===');
   console.log('School admin:', 'demo-mokykla.demo.admin@tutlio.lt / TutlioQaDemo2026!');

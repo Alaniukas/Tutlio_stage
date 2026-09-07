@@ -49,11 +49,13 @@ describe('independent locale releases', () => {
     }
   });
 
-  it('keeps Italian UI release independent from search, blog schema and reviewed assets', () => {
-    SEO_LOCALES_BY_SURFACE.marketing = [...originalMarketing, 'it'];
+  it('publishes Italian marketing, schools and public pages while legal and blog stay on the legacy set', () => {
     expect(isSeoPublished('it', '/it/pricing')).toBe(true);
     expect(generateHreflangLinks('/pricing')).toContainEqual({ lang: 'it', href: 'https://www.tutlio.com/it/pricing' });
-    for (const path of ['/schools/it/pricing', '/it/terms', '/it/privacy-policy', '/it/dpa', '/it/blog', '/it/tutor/example']) {
+    for (const path of ['/schools/it/pricing', '/it/tutor/example', '/it/features/calendar']) {
+      expect(isSeoPublished('it', path), path).toBe(true);
+    }
+    for (const path of ['/it/terms', '/it/privacy-policy', '/it/dpa', '/it/blog']) {
       expect(isSeoPublished('it', path), path).toBe(false);
       expect(generateHreflangLinks(path).some((link) => link.lang === 'it')).toBe(false);
     }
@@ -65,6 +67,18 @@ describe('independent locale releases', () => {
     const shell = (path: string) => renderShell({ locale: 'it', domain: 'com', path, title: 'Test', description: 'Test', body: '<h1>Test</h1>' });
     expect(shell('/pricing')).toContain('content="index, follow, max-image-preview:large"');
     expect(shell('/terms')).toContain('content="noindex, follow"');
+  });
+
+  it('publishes competitor comparisons only in the three domain languages', () => {
+    expect([...seoLocalesForPath('/compare')]).toEqual(['en', 'lt', 'pl']);
+    expect([...seoLocalesForPath('/lt/compare/tutorbird')]).toEqual(['en', 'lt', 'pl']);
+    expect(isSeoPublished('en', '/compare/tutorbird')).toBe(true);
+    expect(isSeoPublished('pl', '/compare')).toBe(true);
+    expect(isSeoPublished('de', '/de/compare/tutorbird')).toBe(false);
+    const langs = generateHreflangLinks('/compare/tutorbird').map((l) => l.lang).sort();
+    expect(langs).toEqual(['en', 'lt', 'pl', 'x-default']);
+    // The solo landing is ordinary marketing copy and keeps the full cluster.
+    expect(seoLocalesForPath('/for-tutors')).toEqual(SEO_LOCALES_BY_SURFACE.marketing);
   });
 
   it('refuses blog publication when database columns are unavailable', () => {

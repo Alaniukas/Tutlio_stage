@@ -22,7 +22,13 @@ import { sharedOrganizationWorkflowTranslations } from '../../src/lib/i18n/share
  * locale must cover it fully to stay 100% translated (e.g. tutlio.pl in Polish).
  */
 const isQuizKey = (key: string) => key.startsWith('quiz.');
-const reference = [...new Set([...Object.keys(en), ...Object.keys(lt)])].filter((key) => !isQuizKey(key));
+/** Competitor comparisons (/compare) are hand-written market content that
+ * exists only in the languages search-published for that surface
+ * (SEO_LOCALES_BY_SURFACE.compare: en, lt, pl); other locales render them
+ * noindex. Their completeness in those three dictionaries is enforced by
+ * tests/lib/seo-visibility.test.ts, so they are not a fallback leak here. */
+const isCompareKey = (key: string) => key.startsWith('compare.');
+const reference = [...new Set([...Object.keys(en), ...Object.keys(lt)])].filter((key) => !isQuizKey(key) && !isCompareKey(key));
 const quizReference = [...new Set([...Object.keys(en), ...Object.keys(lt)])].filter(isQuizKey);
 
 const locales: Record<string, Record<string, string>> = { lt, en, pl, lv, ee, fr, es, de, se, dk, fi, no, nl };

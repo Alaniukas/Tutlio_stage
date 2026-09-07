@@ -33,6 +33,9 @@ import {
 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { sortStudentsByFullName } from '@/lib/sortStudentsByFullName';
+import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { ensureStudentPairedWithTutor } from '@/lib/orgStudentPairing';
+import { formatStudentPickerLabel, pickStudentsForOrgTutorPicker } from '@/lib/orgStudentIdentity';
 
 export type OrgTutorOption = {
   id: string;
@@ -62,7 +65,10 @@ interface StudentRow {
   id: string;
   full_name: string;
   email: string | null;
-  tutor_id: string;
+  tutor_id: string | null;
+  grade?: string | null;
+  linked_user_id?: string | null;
+  organization_id?: string | null;
 }
 
 interface SessionRow {
@@ -96,6 +102,7 @@ export default function CompanyOrgWaitlistPanel({
   variant?: 'embed' | 'page';
 }) {
   const { t, dateFnsLocale } = useTranslation();
+  const { organizationId } = useOrgFeatures();
   const tutorIds = useMemo(() => tutors.map((tu) => tu.id), [tutors]);
   const tutorName = useCallback(
     (id: string) => tutors.find((tu) => tu.id === id)?.full_name || '–',
@@ -157,17 +164,39 @@ export default function CompanyOrgWaitlistPanel({
   }, [tutorIds]);
 
   const loadStudents = useCallback(async () => {
-    if (tutorIds.length === 0) {
+    if (tutorIds.length === 0 && !organizationId) {
       setStudents([]);
       return;
     }
-    const { data } = await supabase
-      .from('students')
-      .select('id, full_name, email, tutor_id')
-      .in('tutor_id', tutorIds)
-      .order('full_name');
-    setStudents(data || []);
-  }, [tutorIds]);
+    const studentSelect = 'id, full_name, email, tutor_id, grade, linked_user_id, organization_id';
+    let rows: StudentRow[] = [];
+    if (organizationId && tutorIds.length > 0) {
+      const [byTutorRes, byOrgRes] = await Promise.all([
+        supabase.from('students').select(studentSelect).in('tutor_id', tutorIds).is('detached_at', null),
+        supabase
+          .from('students')
+          .select(studentSelect)
+          .eq('organization_id', organizationId)
+          .is('detached_at', null),
+      ]);
+      const merged = [...(byTutorRes.data || []), ...(byOrgRes.data || [])] as StudentRow[];
+      const seen = new Set<string>();
+      rows = merged.filter((s) => {
+        if (seen.has(s.id)) return false;
+        seen.add(s.id);
+        return true;
+      });
+    } else if (tutorIds.length > 0) {
+      const { data } = await supabase
+        .from('students')
+        .select(studentSelect)
+        .in('tutor_id', tutorIds)
+        .is('detached_at', null);
+      rows = (data || []) as StudentRow[];
+    }
+    rows.sort((a, b) => (a.full_name || '').localeCompare(b.full_name || '', 'lt'));
+    setStudents(rows);
+  }, [tutorIds, organizationId]);
 
   useEffect(() => {
     void loadEntries();
@@ -199,8 +228,8 @@ export default function CompanyOrgWaitlistPanel({
   }, [dialogOpen, newEntry.tutor_id]);
 
   const studentsForTutor = useMemo(
-    () => sortStudentsByFullName(students.filter((s) => s.tutor_id === newEntry.tutor_id)),
-    [students, newEntry.tutor_id]
+    () => sortStudentsByFullName(pickStudentsForOrgTutorPicker(students, newEntry.tutor_id)),
+    [students, newEntry.tutor_id],
   );
 
   const filteredEntries = useMemo(() => {
@@ -220,17 +249,22 @@ export default function CompanyOrgWaitlistPanel({
   const handleAdd = async () => {
     if (!newEntry.tutor_id || !newEntry.student_id) return;
     const st = students.find((s) => s.id === newEntry.student_id);
-    if (!st || st.tutor_id !== newEntry.tutor_id) {
-      alert(t('companyWait.studentMustBelong'));
+    if (!st) return;
+    setSaving(true);
+    let pairedStudentId = newEntry.student_id;
+    try {
+      pairedStudentId = await ensureStudentPairedWithTutor(supabase, newEntry.student_id, newEntry.tutor_id);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : t('companyWait.failedToAdd'));
+      setSaving(false);
       return;
     }
-    setSaving(true);
     const sessionId =
       newEntry.session_id && newEntry.session_id !== 'any' ? newEntry.session_id : null;
     const { error } = await supabase.from('waitlists').insert([
       {
         tutor_id: newEntry.tutor_id,
-        student_id: newEntry.student_id,
+        student_id: pairedStudentId,
         session_id: sessionId,
         notes: newEntry.notes.trim() || null,
         preferred_day: '',
@@ -348,7 +382,7 @@ export default function CompanyOrgWaitlistPanel({
             <SelectContent>
               {studentsForTutor.map((s) => (
                 <SelectItem key={s.id} value={s.id}>
-                  {s.full_name}
+                  {formatStudentPickerLabel(s.full_name, s.grade)}
                 </SelectItem>
               ))}
             </SelectContent>

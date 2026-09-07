@@ -7,8 +7,33 @@ import {
   parseClassGroupWriteBody,
   validateSchoolClassGroup,
 } from '../src/lib/schoolClassGroups.js';
+import {
+  materializeClassGroupNow,
+  removeFutureClassGroupSessions,
+  type ReconcileResult,
+} from './_lib/schoolClassGroupMaterialize.js';
 
-const GROUP_SELECT = '*, slots:school_class_group_slots(*), members:school_class_group_members(student_id, enrolled_at, student:students(full_name, email))';
+const GROUP_SELECT = '*, tutor:profiles!school_class_groups_tutor_id_fkey(full_name), slots:school_class_group_slots(*), members:school_class_group_members(student_id, enrolled_at, student:students(full_name, email, grade))';
+
+/**
+ * Lessons show up in every calendar right after save (the hourly cron used to
+ * be the only writer, so admins waited up to an hour). A materialize failure
+ * must not lose the saved group — it is reported and the cron heals it later.
+ */
+async function syncGroupSessions(
+  supabase: ReturnType<typeof serviceSupabase>,
+  groupId: string,
+  orgId: string,
+): Promise<{ materialized: ReconcileResult | null; materializeError?: string }> {
+  try {
+    const materialized = await materializeClassGroupNow(supabase, groupId, orgId);
+    return { materialized };
+  } catch (e) {
+    const message = (e as Error)?.message || 'materialize failed';
+    console.error('[school-class-groups] materialize failed', groupId, message);
+    return { materialized: null, materializeError: message };
+  }
+}
 
 async function resolveStudentIdsForPortal(
   supabase: ReturnType<typeof serviceSupabase>,
@@ -159,7 +184,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         );
       }
     }
-    return res.status(200).json({ ok: true, group });
+    const sync = await syncGroupSessions(supabase, group.id, orgId);
+    return res.status(200).json({ ok: true, group, ...sync });
   }
 
   if (req.method === 'PATCH') {
@@ -238,7 +264,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    return res.status(200).json({ ok: true });
+    const sync = await syncGroupSessions(supabase, groupId, orgId);
+    return res.status(200).json({ ok: true, ...sync });
   }
 
   if (req.method === 'DELETE') {
@@ -246,9 +273,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!editAdmin.ok) return res.status(403).json({ error: 'Admin only' });
     const id = String((req.query?.id || (req.body as { id?: string })?.id || '')).trim();
     if (!id) return res.status(400).json({ error: 'Missing id' });
+    const { data: target } = await supabase
+      .from('school_class_groups')
+      .select('id')
+      .eq('id', id)
+      .eq('organization_id', orgId)
+      .maybeSingle();
+    if (!target) return res.status(404).json({ error: 'Group not found' });
+    // The FK only nulls `sessions.class_group_id`; generated future lessons must go too.
+    let removedSessions = 0;
+    try {
+      removedSessions = await removeFutureClassGroupSessions(supabase, id);
+    } catch (e) {
+      return res.status(500).json({ error: (e as Error)?.message || 'Failed to remove group lessons' });
+    }
     const { error } = await supabase.from('school_class_groups').delete().eq('id', id).eq('organization_id', orgId);
     if (error) return res.status(500).json({ error: error.message });
-    return res.status(200).json({ ok: true });
+    return res.status(200).json({ ok: true, removedSessions });
   }
 
   return res.status(405).json({ error: 'Method not allowed' });

@@ -10,8 +10,10 @@ import { isOrgTutor } from './_lib/isOrgTutor.js';
 import { requireCronAuth } from './_lib/cronAuth.js';
 import { dedupeReminderRecipients, type ReminderRecipient } from './_lib/reminderRecipients.js';
 import { loadReminderOptOuts } from './_lib/reminderOptOut.js';
+import { parseEmailOptOutList, isEmailOptedOut } from './_lib/emailNotificationOptOut.js';
 import { isMissingPostgrestRpc } from './_lib/postgrestRpc.js';
 import { moksloVaisiaiRoutesLessonCommsToPayer } from './_lib/moksloVaisiaiLessonComms.js';
+import { buildSchoolHomeworkUrl, publicAppOrigin } from './_lib/publicLinkToken.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -38,15 +40,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Cache org features across the session loop (req 7: flexible_invitations gates
   // expanded parent reminder recipients, so other orgs' email volume is unchanged).
-  const orgFeaturesCache = new Map<string, Record<string, unknown> | null>();
-  const getOrgFeatures = async (orgId: string | null): Promise<Record<string, unknown> | null> => {
+  const orgRowCache = new Map<string, { features: Record<string, unknown> | null; entityType: string | null }>();
+  const getOrgRow = async (orgId: string | null) => {
     if (!orgId) return null;
-    if (orgFeaturesCache.has(orgId)) return orgFeaturesCache.get(orgId) ?? null;
-    const { data } = await supabase.from('organizations').select('features').eq('id', orgId).maybeSingle();
-    const feat = (data?.features as Record<string, unknown> | null) ?? null;
-    orgFeaturesCache.set(orgId, feat);
-    return feat;
+    const cached = orgRowCache.get(orgId);
+    if (cached) return cached;
+    const { data } = await supabase.from('organizations').select('features, entity_type').eq('id', orgId).maybeSingle();
+    const row = {
+      features: ((data as { features?: Record<string, unknown> | null } | null)?.features as Record<string, unknown> | null) ?? null,
+      entityType: ((data as { entity_type?: string | null } | null)?.entity_type as string | null) ?? null,
+    };
+    orgRowCache.set(orgId, row);
+    return row;
   };
+  const getOrgFeatures = async (orgId: string | null): Promise<Record<string, unknown> | null> =>
+    (await getOrgRow(orgId))?.features ?? null;
+  /** School parents get the lesson reminder with the join link even without a Tutlio account. */
+  const isSchoolOrg = async (orgId: string | null): Promise<boolean> =>
+    String((await getOrgRow(orgId))?.entityType || '').toLowerCase() === 'school';
 
   try {
     const now = new Date();
@@ -54,7 +65,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           id, start_time, end_time, topic, price, meeting_link,
           reminder_student_sent, reminder_tutor_sent, reminder_payer_sent,
           student:students(id, full_name, email, payment_payer, payer_email, payer_name, parent_secondary_email, parent_secondary_name, organization_id, linked_user_id),
-          tutor:profiles(id, full_name, email, phone, reminder_student_hours, reminder_tutor_hours, organization_id)
+          tutor:profiles(id, full_name, email, phone, reminder_student_hours, reminder_tutor_hours, organization_id, email_notification_opt_out)
         `;
     const { data: dueSessionRows, error: dueSessionError } = await supabase.rpc(
       'get_due_session_reminder_ids',
@@ -158,10 +169,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             linkedUserId: (student as any)?.linked_user_id,
           });
           const flexibleInvites = (await getOrgFeatures(orgId))?.flexible_invitations === true;
+          // School org: the payer email on the student row is the parent contact,
+          // whether or not that parent ever registered (schools run on emails only).
+          const studentOrgId = ((student as any)?.organization_id as string | null) ?? orgId;
+          const schoolFlow = await isSchoolOrg(studentOrgId);
 
           const candidates: ReminderRecipient[] = [];
 
-          if (flexibleInvites) {
+          if (schoolFlow && !flexibleInvites) {
+            if (payerEmail) candidates.push({ email: payerEmail, name: payerName });
+            const secEmail = (student as any)?.parent_secondary_email?.trim() || '';
+            if (secEmail) candidates.push({ email: secEmail, name: (student as any)?.parent_secondary_name || null });
+          } else if (flexibleInvites) {
             if (payerEmail) candidates.push({ email: payerEmail, name: payerName });
             const secEmail = (student as any)?.parent_secondary_email?.trim() || '';
             if (secEmail) candidates.push({ email: secEmail, name: (student as any)?.parent_secondary_name || null });
@@ -221,6 +240,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   to: r.email,
                   data: {
                     ...baseData,
+                    ...(schoolFlow && studentOrgId
+                      ? {
+                        organizationId: studentOrgId,
+                        schoolFlow: true,
+                        // Homework / materials page — the only "portal" a parent without an account has.
+                        homeworkUrl: student?.id ? buildSchoolHomeworkUrl(publicAppOrigin(), String(student.id)) : undefined,
+                      }
+                      : {}),
                     recipientName: r.name || undefined,
                     studentName: student?.full_name || 'Mokinys',
                     tutorName: tutor?.full_name || 'Korepetitorius',
@@ -243,6 +270,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         if (reminderTutorHours > 0 && !session.reminder_tutor_sent && diffHours <= reminderTutorHours && diffHours >= 0 && tutor?.email && emailAttempts < SESSION_REMINDER_EMAIL_ATTEMPT_LIMIT) {
+          const tutorOptOut = parseEmailOptOutList(tutor?.email_notification_opt_out);
+          if (isEmailOptedOut(tutorOptOut, 'lesson_reminder_tutor')) {
+            await supabase.from('sessions').update({ reminder_tutor_sent: true }).eq('id', session.id);
+          } else {
           try {
             emailAttempts += 1;
             const tutorReminderCore = {
@@ -277,6 +308,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
           } catch (e) {
             console.error('[send-reminders] tutor email error:', e);
+          }
           }
         }
       }

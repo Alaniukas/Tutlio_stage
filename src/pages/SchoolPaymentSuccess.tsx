@@ -11,6 +11,8 @@ export default function SchoolPaymentSuccess() {
   const cancelled = params.get('cancelled') === '1';
   const free = params.get('free') === '1';
   const installmentId = params.get('installment') || '';
+  /** Monthly extra-lessons invoice paid from the emailed link (no account). */
+  const monthlyInvoiceId = params.get('monthly') || '';
   const sessionId = params.get('session_id') || '';
 
   useEffect(() => {
@@ -23,7 +25,7 @@ export default function SchoolPaymentSuccess() {
       setErrorMsg('Mokėjimo būsena neaiški.');
       return;
     }
-    if (!installmentId) {
+    if (!installmentId && !monthlyInvoiceId) {
       setStatus('error');
       setErrorMsg('Trūksta mokėjimo identifikatorių.');
       return;
@@ -37,10 +39,16 @@ export default function SchoolPaymentSuccess() {
     let mounted = true;
     (async () => {
       try {
-        const resp = await fetch(free ? '/api/confirm-school-installment-free' : '/api/confirm-school-installment-payment', {
+        const endpoint = monthlyInvoiceId
+          ? '/api/confirm-school-monthly-invoice-payment'
+          : free ? '/api/confirm-school-installment-free' : '/api/confirm-school-installment-payment';
+        const payload = monthlyInvoiceId
+          ? { invoiceId: monthlyInvoiceId, sessionId }
+          : free ? { installmentId } : { installmentId, sessionId };
+        const resp = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(free ? { installmentId } : { installmentId, sessionId }),
+          body: JSON.stringify(payload),
         });
         const json = await resp.json().catch(() => ({}));
         if (!resp.ok || !json?.success) {
@@ -58,7 +66,7 @@ export default function SchoolPaymentSuccess() {
       }
     })();
     return () => { mounted = false; };
-  }, [cancelled, success, free, installmentId, sessionId]);
+  }, [cancelled, success, free, installmentId, monthlyInvoiceId, sessionId]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-violet-50 via-white to-emerald-50 flex items-center justify-center p-4">
@@ -85,13 +93,17 @@ export default function SchoolPaymentSuccess() {
           {status === 'loading' && (free ? 'Palaukite, patvirtiname registraciją...' : 'Palaukite, tikriname mokėjimo patvirtinimą...')}
           {status === 'success' && (free
             ? 'Ačiū! Registracija patvirtinta. Netrukus gausite el. laišką su prisijungimo informacija.'
-            : 'Ačiū! Įmoka gauta. Mokykla jau matys atnaujintą mokėjimo būseną.')}
+            : monthlyInvoiceId
+              ? 'Ačiū! Sąskaita apmokėta. Mokykla jau matys atnaujintą mokėjimo būseną — daugiau nieko daryti nereikia.'
+              : 'Ačiū! Įmoka gauta. Mokykla jau matys atnaujintą mokėjimo būseną.')}
           {status === 'cancelled' && 'Jei reikia, galite pakartoti apmokėjimą iš gautos nuorodos el. paštu.'}
           {status === 'error' && (errorMsg || 'Nepavyko patvirtinti mokėjimo. Susisiekite su mokykla.')}
         </p>
-        <Button asChild className="w-full rounded-2xl bg-violet-600 hover:bg-violet-700 font-bold h-12">
-          <Link to="/login">Grįžti į prisijungimą</Link>
-        </Button>
+        {!monthlyInvoiceId && (
+          <Button asChild className="w-full rounded-2xl bg-violet-600 hover:bg-violet-700 font-bold h-12">
+            <Link to="/login">Grįžti į prisijungimą</Link>
+          </Button>
+        )}
       </div>
     </div>
   );

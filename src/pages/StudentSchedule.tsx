@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useMemo, type ReactNode } from 'react';
+import JoinLessonButton from '@/components/JoinLessonButton';
 import StudentLayout from '@/components/StudentLayout';
 import ParentLayout from '@/components/ParentLayout';
 import StatusBadge from '@/components/StatusBadge';
@@ -16,8 +17,8 @@ import { ChevronLeft, ChevronRight, LayoutGrid, CalendarDays, List, Check, Calen
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { cn, normalizeUrl } from '@/lib/utils';
-import { recordJoinClick } from '@/lib/joinTracking';
 import WhiteboardButton from '@/components/WhiteboardButton';
+import SessionFiles from '@/components/SessionFiles';
 import { useSearchParams, useNavigate, useMatch } from 'react-router-dom';
 import { sendEmail } from '@/lib/email';
 import { useStudentPaymentBlock } from '@/hooks/useStudentPaymentBlock';
@@ -253,6 +254,10 @@ export default function StudentSchedule() {
     const [creditBalance, setCreditBalance] = useState(0);
     const [activePackages, setActivePackages] = useState<LessonPackageSummary[]>([]);
     const [tutorOrgIsSchool, setTutorOrgIsSchool] = useState(false);
+    const defaultStaffName = useMemo(
+        () => (tutorOrgIsSchool ? t('role.staffSchool') : t('role.staff')),
+        [tutorOrgIsSchool, t],
+    );
     const [schoolClassGroupsEnabled, setSchoolClassGroupsEnabled] = useState(false);
     const [classGroups, setClassGroups] = useState<SchoolClassGroupRecord[]>([]);
     /** Org feature `disable_student_reschedule_cancel`: students/parents cannot move or cancel lessons.
@@ -675,7 +680,43 @@ export default function StudentSchedule() {
         if (!st.tutor_id) {
             setStudentId(st.id);
             setStudentName(st.full_name || '');
-            setLoadError(t('stuSched.noTutorAssigned'));
+            setTutorId('');
+            // School class-group members often have no personal tutor. Their group
+            // lessons live in `sessions` under the group's teacher, so show them
+            // instead of the "no tutor yet" wall (the parent calendar was empty
+            // while /parent/lessons listed the very same lessons).
+            const orgId = (st as { organization_id?: string | null }).organization_id || null;
+            let orgIsSchool = false;
+            if (orgId) {
+                const { data: oe } = await supabase
+                    .from('organizations')
+                    .select('entity_type, features')
+                    .eq('id', orgId)
+                    .maybeSingle();
+                orgIsSchool = (oe as { entity_type?: string | null } | null)?.entity_type === 'school';
+                const orgFeatures = (oe as { features?: Record<string, unknown> | null } | null)?.features;
+                setSchoolClassGroupsEnabled(orgFeatures?.school_class_groups === true);
+                setStudentActionsDisabled(orgFeatures?.disable_student_reschedule_cancel === true);
+                setStudentBookingDisabled(orgFeatures?.disable_student_booking === true);
+            }
+            setTutorOrgIsSchool(orgIsSchool);
+            const rangeStart = addDays(new Date(), -30);
+            const rangeEnd = addDays(new Date(), 60);
+            const ownSessions = await supabase
+                .from('sessions')
+                .select(PARENT_SCHEDULE_SESSION_COLS)
+                .eq('student_id', st.id)
+                .gte('start_time', rangeStart.toISOString())
+                .lte('start_time', rangeEnd.toISOString())
+                .order('start_time', { ascending: true })
+                .limit(600);
+            const rows = ownSessions.error
+                ? []
+                : await enrichScheduleSessionsWithSubjects(supabase, (ownSessions.data || []) as Record<string, unknown>[]);
+            setExistingSessions(rows);
+            setOccupiedSlots([]);
+            setLoadedRanges([{ start: rangeStart, end: rangeEnd }]);
+            if (!orgIsSchool && rows.length === 0) setLoadError(t('stuSched.noTutorAssigned'));
             return;
         }
         setStudentId(st.id);
@@ -689,9 +730,15 @@ export default function StudentSchedule() {
         setStudentName(st.full_name || '');
         setCreditBalance(Number((st as any).credit_balance || 0));
 
-        // OPTIMIZED: Initial load with 30 days past + 7 days future to show recent sessions
+        // OPTIMIZED: Initial load with 30 days past + short future for solo tutors.
+        // School class-group kids often have tutor_id set for legacy reasons but their
+        // weekly group lessons are materialized months ahead — match the no-tutor path.
         const past = addDays(new Date(), -30).toISOString();
-        const future = addDays(new Date(), 7).toISOString();
+        const isSchoolStudent =
+            String((st as { tutor_organization_entity_type?: string }).tutor_organization_entity_type ?? '')
+                .trim() === 'school';
+        const futureDaysAhead = isSchoolStudent ? 60 : 7;
+        const future = addDays(new Date(), futureDaysAhead).toISOString();
 
         const studentGrade = parseStudentGrade(st.grade);
 
@@ -704,10 +751,11 @@ export default function StudentSchedule() {
                 .eq('student_id', st.id)
                 .eq('tutor_id', st.tutor_id),
             supabase.from('availability').select('*').eq('tutor_id', st.tutor_id),
+            // All of the student's own lessons, whichever teacher runs them
+            // (school class groups are taught by other teachers than the assigned one).
             supabase
                 .from('sessions')
                 .select(PARENT_SCHEDULE_SESSION_COLS)
-                .eq('tutor_id', st.tutor_id)
                 .eq('student_id', st.id)
                 .gte('start_time', past)
                 .lte('start_time', future)
@@ -894,17 +942,17 @@ export default function StudentSchedule() {
         setExistingSessions(mySessionsData);
         setOccupiedSlots([]);
 
-        // Mark initial range as loaded (30 days ago to 7 days ahead)
+        // Mark initial range as loaded
         const initialRangeStart = addDays(new Date(), -30);
-        const initialRangeEnd = addDays(new Date(), 7);
+        const initialRangeEnd = addDays(new Date(), futureDaysAhead);
         setLoadedRanges([{ start: initialRangeStart, end: initialRangeEnd }]);
         await refetchBookingBlock();
 
-        // OPTIMIZATION: Pre-fetch current month in background for smooth navigation
+        // Pre-fetch current month in background (pass ids — setTimeout runs before studentId state commits).
         setTimeout(() => {
             const monthStart = startOfMonth(new Date());
             const monthEnd = endOfMonth(new Date());
-            fetchDateRange(monthStart, monthEnd);
+            void fetchDateRange(monthStart, monthEnd, { studentId: st.id, tutorId: st.tutor_id });
         }, 500);
 
         // Defer occupied-slots API so the calendar can paint before the extra round-trip.
@@ -929,7 +977,11 @@ export default function StudentSchedule() {
     };
 
     // OPTIMIZED: Fetch data for specific date range (used when user navigates calendar)
-    const fetchDateRange = async (startDate: Date, endDate: Date) => {
+    const fetchDateRange = async (
+        startDate: Date,
+        endDate: Date,
+        scope?: { studentId?: string; tutorId?: string },
+    ) => {
         // Don't fetch if already loaded
         if (isRangeLoaded(startDate, endDate)) {
             return;
@@ -937,7 +989,9 @@ export default function StudentSchedule() {
 
         setLoadingMore(true);
 
-        if (!tutorId) {
+        const resolvedStudentId = scope?.studentId ?? studentId;
+        const resolvedTutorId = scope?.tutorId ?? tutorId;
+        if (!resolvedStudentId) {
             setLoadingMore(false);
             return;
         }
@@ -949,8 +1003,7 @@ export default function StudentSchedule() {
             const sessionsRes = await supabase
                 .from('sessions')
                 .select(PARENT_SCHEDULE_SESSION_COLS)
-                .eq('tutor_id', tutorId)
-                .eq('student_id', studentId)
+                .eq('student_id', resolvedStudentId)
                 .gte('start_time', past)
                 .lte('start_time', future)
                 .order('start_time', { ascending: true })
@@ -967,11 +1020,11 @@ export default function StudentSchedule() {
             }
             // If tutor is frozen by org license, don't reveal their busy slots to the student.
             let tutorFrozenByLicense = false;
-            try {
+            if (resolvedTutorId) try {
                 const { data: tutorProf } = await supabase
                     .from('profiles')
                     .select('organization_id, has_active_license')
-                    .eq('id', tutorId)
+                    .eq('id', resolvedTutorId)
                     .maybeSingle();
                 const orgId = (tutorProf as any)?.organization_id as string | null | undefined;
                 const hasActiveLicense = (tutorProf as any)?.has_active_license !== false;
@@ -998,10 +1051,10 @@ export default function StudentSchedule() {
                 return merged;
             });
 
-            if (!tutorFrozenByLicense) {
+            if (!tutorFrozenByLicense && resolvedTutorId) {
                 void fetchOccupiedSlotsDeduped({
-                    tutorId,
-                    studentId,
+                    tutorId: resolvedTutorId,
+                    studentId: resolvedStudentId,
                     startISO: past,
                     endISO: future,
                 }).then((otherNewSessions) => {
@@ -1064,7 +1117,7 @@ export default function StudentSchedule() {
 
         // Fetch data for this range if not already loaded
         await fetchDateRange(startDate, endDate);
-    }, [currentView, tutorId, locale]);
+    }, [currentView, tutorId, studentId, locale]);
 
 
     const handleSelectEvent = async (event: SlotEvent) => {
@@ -1409,7 +1462,7 @@ export default function StudentSchedule() {
                 end: endDT,
                 price: selectedSubject?.price ?? null,
                 deadline,
-                tutorName: tutorProfile?.full_name ?? 'Korepetitorius',
+                tutorName: tutorProfile?.full_name ?? defaultStaffName,
                 tutorSoloManual: bookingTutorManual,
             });
             setShowPaymentModal(!usesPackage && requiresImmediatePayment);
@@ -1468,7 +1521,7 @@ export default function StudentSchedule() {
                         data: {
                             sessionId: sessionData.id,
                             studentName: studentName || 'Mokinys',
-                            tutorName: tutorProfile?.full_name || 'Korepetitorius',
+                            tutorName: tutorProfile?.full_name || defaultStaffName,
                             date: format(selectedTime, 'yyyy-MM-dd'),
                             time: format(selectedTime, 'HH:mm'),
                             subject: selectedSubject?.name || '',
@@ -1510,7 +1563,7 @@ export default function StudentSchedule() {
                             forPayer: true,
                             bookedBy: 'student',
                             studentName: studentName || 'Mokinys',
-                            tutorName: tutorProfile?.full_name || 'Korepetitorius',
+                            tutorName: tutorProfile?.full_name || defaultStaffName,
                             date: format(selectedTime, 'yyyy-MM-dd'),
                             time: format(selectedTime, 'HH:mm'),
                             subject: selectedSubject?.name || '',
@@ -1556,7 +1609,7 @@ export default function StudentSchedule() {
                                     to: payerEmail,
                                     data: {
                                         studentName: studentName || 'Mokinys',
-                                        tutorName: tutorProfile?.full_name || 'Korepetitorius',
+                                        tutorName: tutorProfile?.full_name || defaultStaffName,
                                         date: format(selectedTime, 'yyyy-MM-dd'),
                                         time: format(selectedTime, 'HH:mm'),
                                         amount: selectedSubject?.price ?? null,
@@ -1576,7 +1629,7 @@ export default function StudentSchedule() {
                                     to: payerEmail,
                                     data: {
                                         studentName: studentName || 'Mokinys',
-                                        tutorName: tutorProfile?.full_name || 'Korepetitorius',
+                                        tutorName: tutorProfile?.full_name || defaultStaffName,
                                         date: format(selectedTime, 'yyyy-MM-dd'),
                                         time: format(selectedTime, 'HH:mm'),
                                         amount: selectedSubject?.price ?? null,
@@ -1810,7 +1863,7 @@ export default function StudentSchedule() {
                     "px-4 pt-6 pb-6 flex flex-col",
                     // In parent mode the layout uses flex flex-col, so we just
                     // grow to fill the remaining space (no double scrollbar).
-                    isParentRoute ? "flex-1 min-h-0" : "h-[calc(100vh-96px)]"
+                    isParentRoute ? "flex-1 min-h-0" : "h-[calc(100dvh-96px)]"
                 )}>
                     <div className="mb-4">
                         <h1 className="text-2xl font-black text-gray-900 mb-1">{t('stuSched.bookLesson')}</h1>
@@ -2373,15 +2426,12 @@ export default function StudentSchedule() {
                             )}
 
                             {mySessionData?.meeting_link && mySessionData.status !== 'cancelled' && (
-                                <a
-                                    href={normalizeUrl(mySessionData.meeting_link) || undefined}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    onClick={() => recordJoinClick(mySessionData as any, 'student')}
+                                <JoinLessonButton
+                                    session={mySessionData as any}
                                     className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-indigo-50 text-indigo-600 font-bold hover:bg-indigo-100 transition-colors border border-indigo-100"
                                 >
                                     {t('studentDash.joinMeeting')}
-                                </a>
+                                </JoinLessonButton>
                             )}
 
                             <WhiteboardButton
@@ -2389,6 +2439,10 @@ export default function StudentSchedule() {
                               sessionStatus={(mySessionData as any)?.status}
                               sessionEndTime={(mySessionData as any)?.end_time ?? null}
                             />
+
+                            {mySessionData?.id && (
+                                <SessionFiles sessionId={mySessionData.id} role="student" />
+                            )}
 
                             {/* Stripe checkout is unavailable for manual-payment tutors (server rejects it), but Perlas bank payments stay available. */}
                             {mySessionData?.status === 'active' && !mySessionData.paid && (studentPaymentPayer !== 'parent' || isParentRoute) && (

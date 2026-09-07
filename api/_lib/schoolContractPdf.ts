@@ -99,6 +99,7 @@ export async function createSimpleContractPdf(params: {
   body: string;
   title?: string;
   feeLabel?: string;
+  variant?: 'contract' | 'annex';
 }): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
   const font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
@@ -123,6 +124,22 @@ export async function createSimpleContractPdf(params: {
       y -= size + 4;
     }
   };
+
+  if (params.variant === 'annex') {
+    drawWrapped(params.title || 'Sutarties atsisakymo forma', 16, true, rgb(0.1, 0.1, 0.1));
+    y -= 6;
+    const rows = [
+      params.contractNumber ? `Sutarties Nr.: ${params.contractNumber}` : '',
+      params.studentName ? `Mokinys: ${params.studentName}` : '',
+      params.parentName ? `Tevai: ${params.parentName}` : '',
+    ].filter(Boolean);
+    for (const row of rows) drawWrapped(row, 11, false, rgb(0.2, 0.2, 0.2));
+    y -= 8;
+    for (const line of String(params.body || '').split(/\r?\n/)) {
+      drawWrapped(line, 11);
+    }
+    return pdfDoc.save();
+  }
 
   drawWrapped(params.title || 'Metinio mokesčio sutartis', 18, true, rgb(0.1, 0.1, 0.1));
   y -= 8;

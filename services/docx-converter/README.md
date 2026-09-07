@@ -2,6 +2,8 @@
 
 Linux LibreOffice microservice used by Tutlio school-contract flows.
 
+Conversions are serialized inside each container and use an isolated LibreOffice profile per request. This prevents concurrent contract previews from sharing a locked profile or exhausting the container's process/thread allowance.
+
 ## API
 
 - `GET /` — health (`{ ok, service, version }`)
@@ -20,9 +22,9 @@ DOCX_CONVERTER_URL=http://localhost:8080
 DOCX_CONVERTER_API_KEY=local-dev-key
 ```
 
-## Railway (production fix)
+## Railway deployment
 
-The current `tutliostage-production.up.railway.app` deployment is broken (Windows LibreOffice path). Redeploy from this folder:
+Redeploy from this folder when the converter version changes. Version `2.1.0` serializes conversions and isolates each LibreOffice profile to avoid the `osl::Thread::create failed` resource/profile failure seen in the previous deployment.
 
 1. Railway → New/Existing service → Deploy from repo subdirectory `services/docx-converter`
 2. Set env `DOCX_CONVERTER_API_KEY` to the same value as in Vercel

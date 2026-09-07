@@ -33,6 +33,7 @@ import { usePushSubscription } from '@/hooks/usePushSubscription';
 import { isWaitlistHiddenForOrg, isInstructionsHiddenForOrg } from '@/lib/marketMoney';
 import { useHideWaitlist } from '@/hooks/useHideWaitlist';
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
+import { useSchoolTerminology } from '@/hooks/useSchoolTerminology';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -47,7 +48,12 @@ export default function Layout({ children }: LayoutProps) {
   const { hideWaitlist: hideWaitlistFromFeatures } = useHideWaitlist({
     failClosedWhileLoading: isOrgTutor,
   });
-  const { hasFeature } = useOrgFeatures();
+  const { hasFeature, entityType: orgEntityType, loading: orgFeaturesLoading } = useOrgFeatures();
+  // Teachers of a school see "mokytojas" / "užsiėmimas" wording, same as the school admin.
+  useSchoolTerminology(orgFeaturesLoading ? null : {
+    staff: orgEntityType === 'school' || hasFeature('school_teacher_labels'),
+    activity: orgEntityType === 'school' && hasFeature('school_activity_labels'),
+  });
   const chatUnreadTotal = useTotalChatUnread();
   usePushSubscription();
   const [tutorName, setTutorName] = useState('');

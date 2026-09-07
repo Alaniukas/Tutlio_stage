@@ -61,15 +61,65 @@ describe('CompanyClassGroups edit modal', () => {
           { id: 's1', full_name: 'Jonas Petraitis', grade: '5 klasė', enrollment_status: 'active' },
           { id: 's2', full_name: 'Eglė Kazlauskaitė', grade: '5 klasė', enrollment_status: 'active' },
         ] }
+        : table === 'sessions' ? { data: [{
+          id: 'individual-1',
+          tutor_id: 't1',
+          student_id: 's2',
+          start_time: '2026-09-07T08:00:00.000Z',
+          end_time: '2026-09-07T09:00:00.000Z',
+          topic: 'Lietuvių kalba 6 klasė',
+          student: { full_name: 'Eglė Kazlauskaitė', grade: '6 klasė' },
+          subject: null,
+        }] }
         : { data: null };
       const query: Record<string, unknown> = {};
       const self = () => query;
       query.select = self;
       query.eq = self;
       query.is = self;
-      query.order = () => Promise.resolve(result);
+      query.in = self;
+      query.neq = self;
+      query.not = self;
+      query.gte = self;
+      query.lte = self;
+      query.order = () => table === 'sessions' ? query : Promise.resolve(result);
+      query.limit = () => Promise.resolve(result);
       query.maybeSingle = () => Promise.resolve(result);
       return query;
+    });
+  });
+
+  it('renders the groups page without raw i18n keys', async () => {
+    render(
+      <OrgEntityProvider value="school">
+        <MemoryRouter initialEntries={['/school/groups']}>
+          <CompanyClassGroups />
+        </MemoryRouter>
+      </OrgEntityProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('QA Legal Matematika')).toBeTruthy();
+    });
+    expect(screen.getByText('Redaguoti')).toBeTruthy();
+    expect(screen.queryByText('common.edit')).toBeNull();
+    expect(screen.queryByText('school.groups.edit')).toBeNull();
+  });
+
+  it('shows an upcoming teacher-created individual lesson separately from class groups', async () => {
+    render(
+      <OrgEntityProvider value="school">
+        <MemoryRouter initialEntries={['/school/groups']}>
+          <CompanyClassGroups />
+        </MemoryRouter>
+      </OrgEntityProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /Individualios pamokos/ })).toBeTruthy();
+      expect(screen.getByText('Eglė Kazlauskaitė · 6 klasė')).toBeTruthy();
+      expect(screen.getByText('Lietuvių kalba 6 klasė')).toBeTruthy();
+      expect(screen.getByRole('link', { name: 'Tvarkaraštis' }).getAttribute('href')).toBe('/school/schedule');
     });
   });
 
@@ -97,7 +147,10 @@ describe('CompanyClassGroups edit modal', () => {
     expect(dialog.className).toMatch(/56rem/);
     expect(screen.getByDisplayValue('QA Legal Matematika')).toBeTruthy();
     expect(screen.getByDisplayValue('https://meet.google.com/abc-defg-hij')).toBeTruthy();
-    expect(screen.getByLabelText('Pašalinti mokinį')).toBeTruthy();
+    // Member chips render once the dialog effect has copied the roster into state.
+    await waitFor(() => {
+      expect(screen.getByLabelText('Pašalinti mokinį')).toBeTruthy();
+    });
 
     fireEvent.click(screen.getByLabelText('Pašalinti mokinį'));
     fireEvent.click(screen.getByText('Eglė Kazlauskaitė').closest('label')!.querySelector('input')!);
@@ -113,6 +166,41 @@ describe('CompanyClassGroups edit modal', () => {
       expect(body.student_ids).toEqual(['s2']);
       expect(body.slots).toEqual([{ weekday: 2, start_time: '16:00', end_time: '16:45' }]);
     });
+  });
+
+  it('lets an admin delete the group from the edit dialog after confirming', async () => {
+    render(
+      <OrgEntityProvider value="school">
+        <MemoryRouter initialEntries={['/school/groups']}>
+          <CompanyClassGroups />
+        </MemoryRouter>
+      </OrgEntityProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('QA Legal Matematika')).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /QA Legal Matematika/ }));
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: 'Redaguoti grupę' })).toBeTruthy();
+    });
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    fetchMock.mockClear();
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, groups: [] }) });
+    fireEvent.click(screen.getByRole('button', { name: 'Ištrinti' }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/school-class-groups?id=g1',
+        expect.objectContaining({ method: 'DELETE' }),
+      );
+    });
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('QA Legal Matematika'));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Redaguoti grupę' })).toBeNull();
+    });
+    confirmSpy.mockRestore();
   });
 
   it('shows every weekly slot and saves independent start times', async () => {

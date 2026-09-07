@@ -104,8 +104,8 @@ describe('Croatian tutor and business localization', () => {
     const meta = getSeoMeta('hr', 'landing');
     const html = renderShell({ locale: 'hr', domain: 'com', path: '/', ...meta, body: '<h1>Instrukcije</h1>' });
     expect(html).toContain('<html lang="hr" dir="ltr">');
-    expect(html).toContain('content="noindex, follow"');
+    expect(html).toContain('content="index, follow, max-image-preview:large"');
     expect(html).toContain('>Za škole</a>');
-    expect(html).not.toContain('hreflang="hr"');
+    expect(html).toContain('hreflang="hr"');
   });
 });

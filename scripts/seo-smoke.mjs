@@ -78,6 +78,25 @@ async function checkDomain(origin) {
   const schools = await get(`${origin}/schools`, GOOGLEBOT);
   check('schools SSR for bots (200, indexable)', schools.status === 200 && schools.body.includes('rel="canonical"') && !schools.body.includes('noindex'), `status ${schools.status}`);
 
+  // The solo landing and the competitor comparisons are separate indexable
+  // pages; the homepage itself is the agency/school pitch.
+  const forTutors = await get(`${origin}/for-tutors`, GOOGLEBOT);
+  check(
+    'for-tutors SSR for bots (200, self-canonical, indexable)',
+    forTutors.status === 200 && forTutors.body.includes(`rel="canonical" href="${origin}/for-tutors"`) && !forTutors.body.includes('noindex'),
+    `status ${forTutors.status}`,
+  );
+
+  const compare = await get(`${origin}/compare/tutorbird`, GOOGLEBOT);
+  check(
+    'compare/tutorbird SSR for bots (200, self-canonical, FAQ schema)',
+    compare.status === 200 && compare.body.includes(`rel="canonical" href="${origin}/compare/tutorbird"`) && compare.body.includes('FAQPage') && !compare.body.includes('noindex'),
+    `status ${compare.status}`,
+  );
+
+  const compareUnknown = await get(`${origin}/compare/not-a-vendor`, GOOGLEBOT);
+  check('unknown comparison slug is a hard 404 for bots', compareUnknown.status === 404, `status ${compareUnknown.status}`);
+
   const missing = await get(`${origin}/this-page-never-existed-${Date.now()}`, GOOGLEBOT);
   check('unknown URL is a hard 404 for bots', missing.status === 404, `status ${missing.status}`);
 
@@ -136,9 +155,52 @@ async function checkDomain(origin) {
   check('llms.txt 200', llms.status === 200 && llms.body.startsWith('# Tutlio'), `status ${llms.status}`);
 }
 
+/**
+ * Every search-published locale on the international domain must get the
+ * same crawler contract as English. Keep in sync with the .com entries of
+ * SEO_LOCALES_BY_SURFACE.marketing in src/lib/i18n/localeRelease.ts
+ * (tests/api/seo-locale-parity.test.ts checks the same matrix offline).
+ */
+const COM_LOCALES = { lv: 'lv', ee: 'et', fr: 'fr', es: 'es', de: 'de', se: 'sv', dk: 'da', fi: 'fi', no: 'no', nl: 'nl', it: 'it', pt: 'pt', ro: 'ro', cs: 'cs', el: 'el', hu: 'hu', bg: 'bg', hr: 'hr', sk: 'sk', sl: 'sl', hi: 'hi', ko: 'ko', ja: 'ja', id: 'id', ar: 'ar', 'pt-br': 'pt-BR', 'es-mx': 'es-MX', fil: 'fil', he: 'he', uk: 'uk', 'zh-hk': 'zh-HK', tr: 'tr', th: 'th' };
+
+function meta(body, name) {
+  const m = body.match(new RegExp(`<(?:meta name|meta property)="${name}" content="([^"]*)"`));
+  return m ? m[1] : '';
+}
+
+async function checkComLocales(origin) {
+  results.push(`\n${origin} — locale parity with English`);
+  const enHome = await get(`${origin}/`, GOOGLEBOT);
+  const enPricing = await get(`${origin}/pricing`, GOOGLEBOT);
+  const enTitle = { home: (enHome.body.match(/<title>([^<]*)<\/title>/) || [])[1] || '', pricing: (enPricing.body.match(/<title>([^<]*)<\/title>/) || [])[1] || '' };
+  for (const [slug, lang] of Object.entries(COM_LOCALES)) {
+    for (const [page, path] of [['home', ''], ['pricing', '/pricing']]) {
+      const url = `${origin}/${slug}${path}`;
+      const r = await get(url, GOOGLEBOT);
+      const title = (r.body.match(/<title>([^<]*)<\/title>/) || [])[1] || '';
+      const hreflangs = (r.body.match(/rel="alternate" hreflang="/g) || []).length;
+      const ok =
+        r.status === 200 &&
+        r.body.includes(`<html lang="${lang}"`) &&
+        r.body.includes(`<link rel="canonical" href="${url}" />`) &&
+        meta(r.body, 'robots') === 'index, follow, max-image-preview:large' &&
+        hreflangs >= 14 &&
+        title.length > 12 &&
+        title !== enTitle[page] &&
+        meta(r.body, 'description').length > 30;
+      check(
+        `/${slug}${path} indexable, lang=${lang}, self-canonical, localized title, ${hreflangs} hreflang`,
+        ok,
+        `status ${r.status}, title "${title.slice(0, 60)}"`,
+      );
+    }
+  }
+}
+
 for (const origin of targets) {
   try {
     await checkDomain(origin);
+    if (new URL(origin).host === 'www.tutlio.com') await checkComLocales(origin);
   } catch (e) {
     failures += 1;
     results.push(`  ✗ FAIL ${origin} — ${e.message}`);

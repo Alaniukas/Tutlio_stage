@@ -13,11 +13,11 @@
  * whose public-page copy has not been translated yet.
  */
 
-import type { Locale } from './i18n/core';
-import { LOCALE_FORMAT_TAGS } from './i18n/locales';
-import { isSeoPublished } from './i18n/localeRelease';
-import { nlPublicPage } from './i18n/nlPublicPage';
-import { publicPageSlotDay, publicPageTimeZone } from './publicPageTime';
+import type { Locale } from './i18n/core.js';
+import { LOCALE_FORMAT_TAGS } from './i18n/locales.js';
+import { isSeoPublished } from './i18n/localeRelease.js';
+import { nlPublicPage } from './i18n/nlPublicPage.js';
+import { publicPageSlotDay, publicPageTimeZone } from './publicPageTime.js';
 
 /** Canonical domain for a locale — mirrors canonicalDomain() in api/_lib/seo-routing.ts. */
 type DomainKey = 'lt' | 'com' | 'pl';

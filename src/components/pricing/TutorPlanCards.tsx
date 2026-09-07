@@ -3,6 +3,7 @@ import { CheckCircle2, CircleHelp, Loader2 } from 'lucide-react';
 import { usePlatform } from '@/contexts/PlatformContext';
 import { useTranslation } from '@/lib/i18n';
 import { tutorPlanPriceLabels, showPerMonthSuffix } from '@/lib/pricingDisplay';
+import { useSubscriptionCurrency } from '@/hooks/useSubscriptionCurrency';
 import {
   DEFAULT_SUBSCRIPTION_TRIAL_DAYS,
   EXTENDED_SUBSCRIPTION_TRIAL_DAYS,
@@ -76,6 +77,7 @@ export default function TutorPlanCards({
 }: Props) {
   const { t, locale } = useTranslation();
   const { platform } = usePlatform();
+  const currency = useSubscriptionCurrency();
   const [internalIsYearly, setInternalIsYearly] = useState(false);
   const [planFamily, setPlanFamily] = useState<'standard' | 'no_commission'>('standard');
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
@@ -164,10 +166,10 @@ export default function TutorPlanCards({
             </h3>
             <div className="flex items-baseline gap-1.5 mb-3">
               <span className="text-4xl font-bold text-white">
-                {isYearly ? tutorPlanPriceLabels.yearlyPerMonth() : tutorPlanPriceLabels.monthly()}
+                {isYearly ? tutorPlanPriceLabels.yearlyPerMonth(currency) : tutorPlanPriceLabels.monthly(currency)}
               </span>
               <span className="text-indigo-200 text-sm inline-flex items-center gap-1.5">
-                {showPerMonthSuffix() ? t('common.perMonth') : null}
+                {showPerMonthSuffix(currency) ? t('common.perMonth') : null}
                 <span className="relative inline-flex items-center group">
                   <CircleHelp className="w-3.5 h-3.5 text-white/70 cursor-help" />
                   <span className="invisible group-hover:visible pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-64 -translate-x-1/2 rounded-lg border border-white/15 bg-white p-2.5 text-xs font-medium text-gray-700 opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
@@ -213,15 +215,15 @@ export default function TutorPlanCards({
             <div className="flex items-baseline gap-1.5 mb-3">
               <span className="text-4xl font-bold text-gray-900">
                 {isYearly
-                  ? tutorPlanPriceLabels.subscriptionOnlyYearlyPerMonth()
-                  : tutorPlanPriceLabels.subscriptionOnly()}
+                  ? tutorPlanPriceLabels.subscriptionOnlyYearlyPerMonth(currency)
+                  : tutorPlanPriceLabels.subscriptionOnly(currency)}
               </span>
-              {showPerMonthSuffix() ? <span className="text-gray-400 text-sm">{t('common.perMonth')}</span> : null}
+              {showPerMonthSuffix(currency) ? <span className="text-gray-400 text-sm">{t('common.perMonth')}</span> : null}
             </div>
             <p className="text-gray-500 text-[13px] leading-relaxed">
               {isYearly
                 ? t('pricing.subscriptionOnlyYearlyDesc', {
-                    total: tutorPlanPriceLabels.subscriptionOnlyYearlyTotal(),
+                    total: tutorPlanPriceLabels.subscriptionOnlyYearlyTotal(currency),
                   })
                 : t('pricing.subscriptionOnlyDesc')}
             </p>

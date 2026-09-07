@@ -12,7 +12,8 @@ import {
 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { useTotalChatUnread } from '@/hooks/useChat';
-import { useParentHasSchoolOrg } from '@/hooks/useParentHasSchoolOrg';
+import { useParentSchoolOrg } from '@/hooks/useParentHasSchoolOrg';
+import { useSchoolTerminology } from '@/hooks/useSchoolTerminology';
 import { preloadParentData } from '@/lib/preload';
 import BrandedLogo from '@/components/BrandedLogo';
 
@@ -24,7 +25,9 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
   const { t } = useTranslation();
   const location = useLocation();
   const chatUnreadTotal = useTotalChatUnread();
-  const hasSchoolOrg = useParentHasSchoolOrg();
+  const { hasSchoolOrg, terminology } = useParentSchoolOrg();
+  // School parents read "mokytojas" / "užsiėmimas" everywhere in the portal.
+  useSchoolTerminology(terminology);
 
   useEffect(() => {
     void preloadParentData();
@@ -81,7 +84,7 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
               <Link
                 key={item.href}
                 to={item.href}
-                className={`relative flex flex-col items-center gap-1 min-w-0 py-1 rounded-2xl transition-all ${
+                className={`relative flex flex-col items-center gap-1 min-w-0 overflow-hidden py-1 rounded-2xl transition-all touch-manipulation ${
                   active ? 'text-[var(--org-brand)]' : 'text-gray-400 hover:text-gray-700'
                 }`}
               >
@@ -98,7 +101,7 @@ export default function ParentLayout({ children }: ParentLayoutProps) {
                   )}
                 </div>
                 <span
-                  className={`block w-full text-[10px] sm:text-xs font-semibold leading-tight text-center px-0.5 ${
+                  className={`block w-full ${hasSchoolOrg ? 'text-[9px]' : 'text-[10px]'} sm:text-xs font-semibold leading-tight text-center px-0.5 break-words hyphens-auto line-clamp-2 ${
                     active ? 'text-[var(--org-brand)]' : ''
                   }`}
                 >

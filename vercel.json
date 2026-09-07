@@ -29,6 +29,9 @@
         "api/features-index-render.ts": {
             "maxDuration": 30
         },
+        "api/compare-render.ts": {
+            "maxDuration": 30
+        },
         "api/schools-render.ts": {
             "maxDuration": 30
         },

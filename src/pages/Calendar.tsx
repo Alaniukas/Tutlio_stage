@@ -134,12 +134,14 @@ import { calendarSessionTitlePrefix, getCalendarSessionEventStyle } from '@/lib/
 import { useOrgFeatures } from '@/hooks/useOrgFeatures';
 import {
   buildClassGroupMetaMap,
+  calendarSessionTopicSuffix,
   calendarTitleForSession,
   classGroupParticipantsForModal,
   isMergedClassGroupSession,
   mergeSchoolClassGroupSessions,
   type MergedClassGroupSession,
 } from '@/lib/schoolClassGroupSessions';
+import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
 import type { SchoolClassGroupRecord } from '@/lib/schoolClassGroups';
 import { isSameCalendarMonth, rescheduleAnchorDate } from '@/lib/monthlyPackages';
 import { formatContactForTutorView } from '@/lib/orgContactVisibility';
@@ -4072,7 +4074,7 @@ export default function CalendarPage() {
       isMakeup: showProKlaseCalendarFeatures && event.is_makeup === true,
       cancellationReasonCode: showProKlaseCalendarFeatures ? event.cancellation_reason_code : undefined,
       isMovedLesson,
-      isOrgTutor: orgPolicy.isOrgTutor,
+      isOrgTutor: orgPolicy.isOrgTutor || isSchoolBilledSession(event),
       defaultColor: subj?.color || '#6366f1',
     });
 
@@ -4454,13 +4456,14 @@ export default function CalendarPage() {
                 if (event.isBackground) return t('cal.freeSlot');
 
                 const name = calendarTitleForSession(event, t('cal.unknown'));
-                const topic = event.topic ? ` · ${event.topic}` : '';
+                const topic = calendarSessionTopicSuffix(name, event.topic);
+                const skipPaymentUi = orgPolicy.isOrgTutor || isSchoolBilledSession(event);
 
                 let statusText = '';
                 if (event.status === 'cancelled') {
                   statusText = t('cal.statusCancelled');
-                } else if (orgPolicy.isOrgTutor) {
-                  // no payment status text for org_tutor
+                } else if (skipPaymentUi) {
+                  // School / org tutor: no per-lesson payment status in calendar title
                 } else if (event.paid) {
                   statusText = t('cal.statusPaid');
                 } else if (event.payment_status === 'paid_by_student') {

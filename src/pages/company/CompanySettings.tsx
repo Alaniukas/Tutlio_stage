@@ -38,6 +38,8 @@ import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 import { isSchoolOrg } from '@/lib/orgIntakeMode';
 import { ORG_TUTOR_FILTER_SCROLL_CLASS } from '@/lib/orgUi';
 import { isProKlaseOrg } from '@/lib/marketMoney';
+import { Checkbox } from '@/components/ui/checkbox';
+import { parseEmailOptOutList, toggleEmailOptOut } from '@/lib/emailNotificationOptOut';
 
 type TrialCommentMode = 'student_and_parent' | 'internal_only';
 
@@ -150,6 +152,7 @@ export default function CompanySettings() {
   // Optional address shown to parents (e.g. contract emails) for questions; empty falls back to the org email.
   const [contactEmail, setContactEmail] = useState<string>(sc?.contactEmail ?? '');
   const [publicName, setPublicName] = useState<string>(sc?.publicName ?? '');
+  const [adminEmailOptOut, setAdminEmailOptOut] = useState<string[]>([]);
   const [orgLocale, setOrgLocale] = useState<string>(sc?.orgLocale ?? '');
 
   useEffect(() => { if (!getCached('company_settings')) fetchSettings(); }, []);
@@ -226,6 +229,7 @@ export default function CompanySettings() {
       if (typeof fce === 'string') nextContactEmail = fce.trim();
       const fpn = featObj['public_name'];
       if (typeof fpn === 'string') nextPublicName = fpn.trim();
+      setAdminEmailOptOut(parseEmailOptOutList(featObj['admin_email_opt_out']));
       setEnableManualStudentPayments(
         featObj['manual_payments'] === true || featObj['enable_manual_student_payments'] === true,
       );
@@ -747,6 +751,7 @@ export default function CompanySettings() {
       enable_manual_student_payments: enableManualStudentPayments,
       contact_email: contactEmail.trim(),
       public_name: publicName.trim(),
+      admin_email_opt_out: adminEmailOptOut,
     };
 
     const { error } = await supabase
@@ -945,6 +950,17 @@ export default function CompanySettings() {
               placeholder={t('compSet.parentContactEmailPlaceholder')}
               className="rounded-xl"
             />
+            <div className="pt-2 space-y-2 border-t border-gray-100">
+              <p className="text-sm font-medium text-gray-900">{t('compSet.emailNotificationsTitle')}</p>
+              <p className="text-xs text-gray-500">{t('compSet.emailNotificationsHint')}</p>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <Checkbox
+                  checked={adminEmailOptOut.includes('payment_deadline_warning')}
+                  onChange={() => setAdminEmailOptOut((prev) => toggleEmailOptOut(prev, 'payment_deadline_warning'))}
+                />
+                <span className="text-sm text-gray-700">{t('compSet.emailOptOutPaymentDeadline')}</span>
+              </label>
+            </div>
           </div>
 
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">

@@ -9,8 +9,17 @@ import {
   BOT_UA,
   LOCALES as MIDDLEWARE_LOCALES,
   FEATURES as MIDDLEWARE_FEATURES,
+  COMPARISONS as MIDDLEWARE_COMPARISONS,
   APP_ROUTES,
 } from '../../middleware.js';
+import {
+  COMPARISON_PAGE_IDS,
+  COMPARISON_PAGES,
+  COMPARE_SHARED_KEYS,
+  comparisonPageKeys,
+} from '../../src/lib/comparisonPages.js';
+import { SEO_LOCALES_BY_SURFACE } from '../../src/lib/i18n/localeRelease.js';
+import { pl } from '../../src/lib/i18n/pl.js';
 import { DISALLOW_PATHS } from '../../api/robots.js';
 import { FEATURE_PAGES, FEATURE_PAGE_IDS } from '../../src/lib/featurePages.js';
 import { en } from '../../src/lib/i18n/en.js';
@@ -58,8 +67,8 @@ describe('hreflang language codes', () => {
     expect(langs).toContain('da');
     expect(langs).not.toContain('ee');
     expect(langs).not.toContain('dk');
-    // 13 locales + x-default
-    expect(links).toHaveLength(14);
+    // every search-published marketing locale + x-default
+    expect(links).toHaveLength(SEO_LOCALES_BY_SURFACE.marketing.length + 1);
 
     const et = links.find((l) => l.lang === 'et');
     expect(et?.href).toBe('https://www.tutlio.com/ee/pricing');
@@ -130,6 +139,10 @@ describe('middleware stays in sync with shared SEO config', () => {
     expect([...MIDDLEWARE_FEATURES].sort()).toEqual([...FEATURE_PAGE_IDS].sort());
   });
 
+  it('middleware comparison slugs match the shared comparison-page config', () => {
+    expect([...MIDDLEWARE_COMPARISONS].sort()).toEqual([...COMPARISON_PAGE_IDS].sort());
+  });
+
   it('middleware APP_ROUTES match robots.txt disallow paths', () => {
     const disallowSegments = DISALLOW_PATHS
       .map((p) => p.replace(/^\//, '').replace(/\/$/, ''))
@@ -169,6 +182,30 @@ describe('feature page config integrity', () => {
     for (const id of FEATURE_PAGE_IDS) {
       expect(FEATURE_PAGES[id].path).toBe(`/features/${id}`);
     }
+  });
+});
+
+describe('comparison page config integrity', () => {
+  const dictionaries = { en, lt, pl } as const;
+
+  it('publishes comparisons only in the languages that carry native copy', () => {
+    expect([...SEO_LOCALES_BY_SURFACE.compare].sort()).toEqual(Object.keys(dictionaries).sort());
+  });
+
+  it.each(Object.entries(dictionaries))('%s has every shared and competitor-specific key', (_locale, dict) => {
+    for (const key of COMPARE_SHARED_KEYS) expect(dict[key], key).toBeTruthy();
+    for (const id of COMPARISON_PAGE_IDS) {
+      for (const key of comparisonPageKeys(id)) expect(dict[key], key).toBeTruthy();
+    }
+  });
+
+  it('comparison page paths match their ids and carry a trademark notice', () => {
+    for (const id of COMPARISON_PAGE_IDS) {
+      expect(COMPARISON_PAGES[id].path).toBe(`/compare/${id}`);
+      expect(COMPARISON_PAGES[id].website).toMatch(/^https:\/\//);
+    }
+    expect(en['compare.disclaimer']).toContain('trademark');
+    expect(en['compare.disclaimer']).toContain('{name}');
   });
 });
 

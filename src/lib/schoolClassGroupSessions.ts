@@ -1,4 +1,5 @@
 import type { SchoolClassGroupRecord } from './schoolClassGroups';
+import { classGroupCalendarLabel } from './schoolClassGroups.js';
 
 export type ClassGroupMemberDisplay = {
   student_id: string;
@@ -10,6 +11,7 @@ export type ClassGroupMemberDisplay = {
 export type ClassGroupMeta = {
   id: string;
   name: string;
+  calendarName: string;
   members: ClassGroupMemberDisplay[];
 };
 
@@ -43,6 +45,7 @@ export function buildClassGroupMetaMap(groups: SchoolClassGroupRecord[]): Map<st
     map.set(group.id, {
       id: group.id,
       name: group.name,
+      calendarName: classGroupCalendarLabel(group),
       members: (group.members || []).map((member) => ({
         student_id: member.student_id,
         full_name: member.student?.full_name || '—',
@@ -101,11 +104,13 @@ export function mergeSchoolClassGroupSessions<T extends ClassGroupSessionRow>(
     merged.push({
       ...first,
       id: `classgroup_${key}`,
-      topic: first.topic || meta.name,
-      student: { full_name: meta.name },
+      topic: first.topic && first.topic !== meta.calendarName && first.topic !== meta.name
+        ? first.topic
+        : null,
+      student: { full_name: meta.calendarName },
       _isClassGroup: true,
       _classGroupId: meta.id,
-      _classGroupName: meta.name,
+      _classGroupName: meta.calendarName,
       _classGroupSessions: enrichedRows,
       _classGroupMembers: meta.members,
     } as MergedClassGroupSession<T>);
@@ -125,7 +130,10 @@ export function calendarTitleForSession(
   fallbackUnknown: string,
 ): string {
   if (session._classGroupName) return session._classGroupName;
-  return session.student?.full_name || fallbackUnknown;
+  const name = session.student?.full_name?.trim();
+  const grade = session.student?.grade?.trim();
+  if (name && grade) return `${name} · ${grade}`;
+  return name || fallbackUnknown;
 }
 
 export function classGroupDisplayName(
@@ -133,7 +141,34 @@ export function classGroupDisplayName(
   groupMeta: Map<string, ClassGroupMeta>,
 ): string | null {
   if (!classGroupId) return null;
-  return groupMeta.get(classGroupId)?.name ?? null;
+  return groupMeta.get(classGroupId)?.calendarName ?? null;
+}
+
+/** Append topic to calendar title only when it adds information. */
+export function calendarSessionTopicSuffix(
+  displayName: string,
+  topic?: string | null,
+): string {
+  const t = String(topic || '').trim();
+  if (!t) return '';
+  const base = String(displayName || '').trim();
+  if (!base || t === base) return '';
+  return ` · ${t}`;
+}
+
+export function orgScheduleSessionTitle(
+  session: ClassGroupSessionRow & {
+    _classGroupName?: string;
+    tutor?: { full_name?: string | null } | null;
+  },
+  fallbackUnknown: string,
+  opts: { isSchoolOrg?: boolean; tutorFallback?: string } = {},
+): string {
+  const name = calendarTitleForSession(session, fallbackUnknown);
+  if (opts.isSchoolOrg && session._classGroupName) return name;
+  const tutor = String(session.tutor?.full_name || opts.tutorFallback || 'Tutorius').trim();
+  if (!tutor || name.toLowerCase().includes(tutor.toLowerCase())) return name;
+  return `${name} - ${tutor}`;
 }
 
 export function classGroupParticipantsForModal<T extends ClassGroupSessionRow>(

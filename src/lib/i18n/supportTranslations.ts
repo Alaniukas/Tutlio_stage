@@ -1,4 +1,4 @@
-import type { SupportWidgetCopyKey } from './supportCopyKeys';
+import type { SupportWidgetCopyKey } from './supportCopyKeys.js';
 
 type AdditionalSupportLocale = 'lv' | 'ee' | 'fr' | 'es' | 'de' | 'se' | 'dk' | 'fi' | 'no' | 'nl';
 

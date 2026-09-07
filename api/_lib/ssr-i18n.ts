@@ -1,6 +1,6 @@
 import { interpolateTranslation } from '../../src/lib/i18n/interpolate.js';
 import type { Locale } from './seo-routing.js';
-import { loadExtraLocaleDict } from './loadExtraLocaleDict.js';
+import { loadExtraLocaleDict, preloadExtraLocaleDict } from './loadExtraLocaleDict.js';
 import { lt } from '../../src/lib/i18n/lt.js';
 import { en } from '../../src/lib/i18n/en.js';
 import { pl } from '../../src/lib/i18n/pl.js';
@@ -23,9 +23,18 @@ function dictFor(locale: Locale): Record<string, string> | undefined {
   return translations[locale] ?? loadExtraLocaleDict(locale);
 }
 
-/** Extra locales load on first t() — kept async for call-site compatibility. */
+/**
+ * Every renderer awaits this before its first t(). Legacy dictionaries are
+ * static imports; the newer ones are loaded here with a real dynamic import so
+ * the same code path works on Vercel, under tsx and under vitest.
+ */
 export async function preloadSsrLocales(...locales: Locale[]): Promise<void> {
-  for (const locale of locales) dictFor(locale);
+  await Promise.all(
+    locales.map(async (locale) => {
+      if (translations[locale]) return;
+      await preloadExtraLocaleDict(locale);
+    }),
+  );
 }
 
 export function t(locale: Locale, key: string, params?: Record<string, string | number>): string {

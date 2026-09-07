@@ -45,7 +45,8 @@ import {
   resolveOrgSessionSubjectDefaults,
   type OrgSubjectForDefaults,
 } from '@/lib/orgSessionSubjectDefaults';
-import type { OrganizationDynamicPricingRule } from '@/lib/organizationDynamicPricing';
+import { isSchoolBilledSession } from '@/lib/schoolSessionBilling';
+import { useOrgEntityType } from '@/contexts/OrgEntityContext';
 
 interface Session {
   id: string;
@@ -57,6 +58,7 @@ interface Session {
   price: number | null;
   topic: string | null;
   paid: boolean;
+  class_group_id?: string | null;
   is_complimentary?: boolean;
   payment_status: string | null;
   cancellation_reason: string | null;
@@ -107,6 +109,7 @@ function mapOrgSessionRow(row: any, tutorList: { id: string; full_name: string }
     price: row.price,
     topic: row.topic,
     paid: row.paid,
+    class_group_id: row.class_group_id ?? null,
     is_complimentary: row.is_complimentary === true,
     payment_status: row.payment_status || null,
     cancellation_reason: row.cancellation_reason,
@@ -130,6 +133,8 @@ function mapOrgSessionRow(row: any, tutorList: { id: string; full_name: string }
 export default function CompanySessions() {
   const { t, locale, dateFnsLocale } = useTranslation();
   const { fmt } = useMarketMoney();
+  const entityType = useOrgEntityType();
+  const isSchoolOrgView = entityType === 'school';
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const orgBasePath = location.pathname.startsWith('/school') ? '/school' : '/company';
@@ -1264,7 +1269,7 @@ export default function CompanySessions() {
 
                   {!cancelMode && (selectedSession.status === 'active' || selectedSession.status === 'completed') && (
                     <div className="space-y-2 pt-1">
-                      {selectedSession.status === 'active' && (
+                      {selectedSession.status === 'active' && !isSchoolOrgView && !isSchoolBilledSession(selectedSession) && (
                         <Button
                           variant="outline"
                           className={cn('w-full rounded-xl', selectedSession.paid ? 'border-amber-200 text-amber-700 hover:bg-amber-50' : 'border-green-200 text-green-700 hover:bg-green-50')}

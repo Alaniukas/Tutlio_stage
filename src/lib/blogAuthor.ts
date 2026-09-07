@@ -1,4 +1,4 @@
-import { withEnglishLocaleFallback, type Locale } from './i18n/locales';
+import { withEnglishLocaleFallback, type Locale } from './i18n/locales.js';
 
 /** Stable editorial byline for auto + SSR schema (Person, not a fake LinkedIn). */
 export const BLOG_AUTHOR_NAME = 'Elena Norkūnė';

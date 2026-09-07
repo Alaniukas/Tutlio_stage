@@ -37,6 +37,7 @@ function mockRes() {
 }
 
 async function sendEmail(type: string, data: Record<string, unknown>) {
+  sendMock.mockClear();
   const { default: handler } = await import('../../api/send-email');
   const res = mockRes();
   await handler(
@@ -76,11 +77,29 @@ describe('school extra-lessons emails', () => {
       monthlyPrice: '144.00',
       schedule: 'Antradieniais 16:00–16:45',
     });
-    expect(sent.subject).toContain('PP-LEGAL-WITHIN14');
+    expect(sent.subject).toContain('Papildomų užsiėmimų sutartis');
     expect(sent.html).toContain('Peržiūrėti ir patvirtinti sutartį');
     expect(sent.html).toContain('school-extra-lessons-accept');
+    expect(sent.html).toContain('papildomų užsiėmimų sutartį');
     expect(sent.html).not.toContain('prievole sumokėti');
-  });
+  }, 15000);
+
+  it('shows school contact once when contactEmail is set', async () => {
+    const sent = await sendEmail('school_contract_extra_offer', {
+      schoolName: 'Demo Mokykla',
+      studentName: 'QA Legal Per 14 d.',
+      parentName: 'QA Extra Tėvas',
+      contractNumber: 'PP-LEGAL-WITHIN14',
+      acceptUrl: 'http://localhost:3000/school-extra-lessons-accept?token=abc',
+      serviceName: 'QA Matematika',
+      unitPrice: '18.00',
+      monthlyPrice: '144.00',
+      contactEmail: 'demo@tutlio.lt',
+    });
+    expect(sent.html).toContain('Jei turite klausimų, susisiekite su mokykla:');
+    const mailCount = (sent.html.match(/demo@tutlio\.lt/gi) || []).length;
+    expect(mailCount).toBe(1);
+  }, 15000);
 
   it('accepted mail includes SHA freeze', async () => {
     const sent = await sendEmail('school_contract_extra_accepted', {

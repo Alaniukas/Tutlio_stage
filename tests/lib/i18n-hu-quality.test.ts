@@ -145,8 +145,8 @@ describe('Hungarian tutor and business localization', () => {
     expect(isTranslatedLocale('hu')).toBe(false);
     const html = renderShell({ locale: 'hu', domain: 'com', path: '/', ...meta, body: '<h1>Magánórák</h1>' });
     expect(html).toContain('<html lang="hu" dir="ltr">');
-    expect(html).toContain('content="noindex, follow"');
+    expect(html).toContain('content="index, follow, max-image-preview:large"');
     expect(html).toContain('>Iskoláknak</a>');
-    expect(html).not.toContain('hreflang="hu"');
+    expect(html).toContain('hreflang="hu"');
   });
 });

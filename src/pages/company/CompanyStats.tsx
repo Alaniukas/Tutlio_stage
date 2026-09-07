@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { companyStatsCacheKey, getCached, setCache } from '@/lib/dataCache';
 import { TrendingUp, Award, AlertTriangle, Wallet, BookOpen } from 'lucide-react';
 import { DateRangeFilter } from '@/components/DateRangeFilter';
+import { useStaffLabels } from '@/hooks/useStaffLabels';
 import { useTranslation } from '@/lib/i18n';
 import { useOrgAdminAccess } from '@/contexts/OrgAdminAccessContext';
 import { getOrgVisibleTutors } from '@/lib/orgVisibleTutors';
@@ -48,6 +49,8 @@ interface TutorStat {
 
 export default function CompanyStats() {
   const { t } = useTranslation();
+  const { isSchool } = useStaffLabels();
+  const staffShareLabel = isSchool ? t('compStats.staffShare') : t('compStats.tutorShare');
   const cancellationBreakdown = (
     stat: Pick<TutorStat, 'totalCancelled' | 'cancelledByTutor' | 'cancelledByStudent' | 'cancelledByAdmin'>,
   ) =>
@@ -294,7 +297,7 @@ export default function CompanyStats() {
             </div>
             <div>
               <p className="text-2xl font-bold text-blue-900">{fmt(totalNetEarnings)}</p>
-              <p className="text-xs text-gray-500">{t('compStats.tutorShare')}</p>
+              <p className="text-xs text-gray-500">{staffShareLabel}</p>
             </div>
           </div>
             </>

@@ -70,13 +70,14 @@ export default function StudentProfileMockup() {
           />
         ))}
 
-        <span className="absolute left-[19%] top-[2%] rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700 sm:text-[11px]">
+        <span className="absolute left-[19%] top-[2%] inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2 py-1 text-[10px] font-semibold text-zinc-700 shadow-sm sm:text-[11px]">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
           {t('landing.v2.pillAttendance')}
         </span>
-        <span className="absolute right-[17%] top-[20%] whitespace-nowrap rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-[10px] font-semibold text-sky-700 sm:text-[11px]">
+        <span className="absolute right-[17%] top-[20%] whitespace-nowrap rounded-full border border-zinc-200 bg-white px-2 py-1 text-[10px] font-semibold text-zinc-700 shadow-sm sm:text-[11px]">
           {t('landing.v2.pillExam')}
         </span>
-        <span className="absolute left-[49%] top-[46%] whitespace-nowrap rounded-full border border-violet-200 bg-violet-50 px-2 py-1 text-[10px] font-semibold text-violet-700 sm:text-[11px]">
+        <span className="absolute left-[49%] top-[46%] whitespace-nowrap rounded-full border border-zinc-200 bg-white px-2 py-1 text-[10px] font-semibold text-zinc-700 shadow-sm sm:text-[11px]">
           {t('landing.v2.pillLevel')}
         </span>
       </div>

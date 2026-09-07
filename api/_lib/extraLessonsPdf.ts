@@ -12,8 +12,16 @@ import {
   schoolContractPdfStoragePath,
 } from './schoolContractPdfPath.js';
 import { buildSchoolContractTemplatePayload } from './schoolContractTemplatePayload.js';
-import { renderDocxTemplateBufferToPdfBuffer } from './renderSchoolContractDocxToPdf.js';
-import { usesBundledExtraLessonsDocx } from '../../src/lib/extraLessonsContract.js';
+import { fillDocxTemplateBuffer, renderDocxTemplateBufferToPdfBuffer } from './renderSchoolContractDocxToPdf.js';
+import { convertDocxBufferToPdfWithFallbacks } from './docxConverter.js';
+import {
+  extraLessonsBlankWithdrawalFormBody,
+  extraLessonsBlankWithdrawalFormPayload,
+  extraLessonsWithdrawalFormSubmitNote,
+  EXTRA_LESSONS_WITHDRAWAL_FORM_SCHOOL_EMAIL,
+  usesBundledExtraLessonsDocx,
+} from '../../src/lib/extraLessonsContract.js';
+import { stripDocxBufferToAnnex } from './extraLessonsAnnexDocx.js';
 
 export async function signSchoolContractPdf(
   supabase: SupabaseClient,
@@ -104,35 +112,37 @@ export async function renderAndStoreExtraLessonsPdf(
       const templateBytes = readFileSync(resolveExtraLessonsBundledDocxPath());
       pdfBytes = new Uint8Array(await withTimeout(
         renderDocxTemplateBufferToPdfBuffer({ templateBytes, payload }),
-        20000,
+        35000,
       ));
     } catch (e) {
-      console.error('[extra-lessons] bundled docx pdf fallback to text', (e as Error).message);
-      pdfBytes = null;
+      const detail = e instanceof Error ? e.message : 'nežinoma DOCX konvertavimo klaida';
+      throw new Error(`Nepavyko suformuoti papildomų užsiėmimų PDF pagal DOCX šabloną: ${detail}`, { cause: e });
     }
   } else if (params.contract.template_id) {
-    const { data: tpl } = await supabase
+    const { data: tpl, error: templateErr } = await supabase
       .from('school_contract_templates')
       .select('pdf_url, name')
       .eq('id', params.contract.template_id)
       .maybeSingle();
+    if (templateErr) {
+      throw new Error(`Nepavyko įkelti papildomų užsiėmimų sutarties šablono: ${templateErr.message}`);
+    }
     const templatePath = tpl?.pdf_url ? extractSchoolContractStoragePath(String(tpl.pdf_url)) : '';
-    const name = String(tpl?.name || '').toLowerCase();
-    const looksExtra = name.includes('papildom') || name.includes('extra');
-    if (looksExtra && templatePath.toLowerCase().endsWith('.docx')) {
+    if (templatePath.toLowerCase().endsWith('.docx')) {
       try {
         const { data: signedData, error: signErr } = await supabase.storage
           .from(BUCKET)
           .createSignedUrl(templatePath, 300);
-        if (!signErr && signedData?.signedUrl) {
-          pdfBytes = await withTimeout(
-            createDocxTemplatePdf({ fetchUrl: signedData.signedUrl, payload }),
-            12000,
-          );
+        if (signErr || !signedData?.signedUrl) {
+          throw new Error(`nepavyko pasiekti DOCX šablono${signErr?.message ? `: ${signErr.message}` : ''}`);
         }
+        pdfBytes = await withTimeout(
+          createDocxTemplatePdf({ fetchUrl: signedData.signedUrl, payload }),
+          35000,
+        );
       } catch (e) {
-        console.error('[extra-lessons] org docx pdf fallback to text', (e as Error).message);
-        pdfBytes = null;
+        const detail = e instanceof Error ? e.message : 'nežinoma DOCX konvertavimo klaida';
+        throw new Error(`Nepavyko suformuoti papildomų užsiėmimų PDF pagal DOCX šabloną: ${detail}`, { cause: e });
       }
     }
   }
@@ -165,8 +175,124 @@ export async function renderAndStoreExtraLessonsPdf(
     contentType: 'application/pdf',
   });
   if (uploadErr) {
-    console.error('[extra-lessons] pdf upload', uploadErr.message);
-    return { uploadedPath: null };
+    throw new Error(`Nepavyko išsaugoti papildomų užsiėmimų sutarties PDF: ${uploadErr.message}`);
   }
   return { uploadedPath: path, pdfBase64: Buffer.from(pdfBytes).toString('base64') };
+}
+
+async function annexPdfFromFilledDocx(params: {
+  templateBytes: Buffer;
+  payload: Record<string, string | boolean>;
+  schoolEmail: string;
+}): Promise<Uint8Array> {
+  const schoolEmail = params.schoolEmail || EXTRA_LESSONS_WITHDRAWAL_FORM_SCHOOL_EMAIL;
+  const filledDocx = fillDocxTemplateBuffer({
+    templateBytes: params.templateBytes,
+    payload: extraLessonsBlankWithdrawalFormPayload(params.payload),
+  });
+  const annexDocx = stripDocxBufferToAnnex(filledDocx, {
+    submitNote: extraLessonsWithdrawalFormSubmitNote(schoolEmail),
+  });
+  if (annexDocx) {
+    return new Uint8Array(await withTimeout(convertDocxBufferToPdfWithFallbacks(annexDocx), 20000));
+  }
+  return createSimpleContractPdf({
+    contractNumber: '',
+    studentName: '',
+    parentName: '',
+    parentEmail: '',
+    parentPhone: '',
+    parentPersonalCode: '',
+    childBirthDate: '',
+    address: '',
+    annualFee: 0,
+    body: extraLessonsBlankWithdrawalFormBody(schoolEmail),
+    title: 'Sutarties atsisakymo forma',
+    variant: 'annex',
+  });
+}
+
+/** 1 PRIEDAS only — filled from the same DOCX as the contract, then converted to PDF. */
+export async function renderExtraLessonsAnnexPdf(
+  supabase: SupabaseClient,
+  params: {
+    contract: { id: string; organization_id: string; contract_number?: string | null; template_id?: string | null };
+    student: {
+      full_name?: string | null;
+      payer_name?: string | null;
+      payer_email?: string | null;
+      payer_phone?: string | null;
+    };
+    filledBody: string;
+    indicativeMonthlyEur: number;
+    extraLessonsPayload?: Record<string, string>;
+  },
+): Promise<Uint8Array> {
+  const st = params.student || {};
+  const payload = extraLessonsDocxPayload({
+    student: st,
+    indicativeMonthlyEur: params.indicativeMonthlyEur,
+    extraLessonsPayload: params.extraLessonsPayload,
+    contractNumber: params.contract.contract_number,
+  });
+
+  if (usesBundledExtraLessonsDocx(params.contract.organization_id)) {
+    try {
+      const templateBytes = readFileSync(resolveExtraLessonsBundledDocxPath());
+      return await annexPdfFromFilledDocx({
+        templateBytes,
+        payload,
+        schoolEmail: EXTRA_LESSONS_WITHDRAWAL_FORM_SCHOOL_EMAIL,
+      });
+    } catch (e) {
+      console.error('[extra-lessons] annex bundled docx fallback to text', (e as Error).message);
+    }
+  } else if (params.contract.template_id) {
+    const { data: tpl } = await supabase
+      .from('school_contract_templates')
+      .select('pdf_url, name')
+      .eq('id', params.contract.template_id)
+      .maybeSingle();
+    const templatePath = tpl?.pdf_url ? extractSchoolContractStoragePath(String(tpl.pdf_url)) : '';
+    if (templatePath.toLowerCase().endsWith('.docx')) {
+      try {
+        const { data: signedData, error: signErr } = await supabase.storage
+          .from(BUCKET)
+          .createSignedUrl(templatePath, 300);
+        if (!signErr && signedData?.signedUrl) {
+          const response = await fetch(signedData.signedUrl);
+          if (response.ok) {
+            const templateBytes = Buffer.from(await response.arrayBuffer());
+            return await annexPdfFromFilledDocx({
+              templateBytes,
+              payload,
+              schoolEmail: String(params.extraLessonsPayload?.mokyklos_el_pastas || '').trim()
+                || EXTRA_LESSONS_WITHDRAWAL_FORM_SCHOOL_EMAIL,
+            });
+          }
+        }
+      } catch (e) {
+        console.error('[extra-lessons] annex org docx fallback to text', (e as Error).message);
+      }
+    }
+  }
+
+  return createSimpleContractPdf({
+    contractNumber: '',
+    studentName: '',
+    parentName: '',
+    parentEmail: '',
+    parentPhone: '',
+    parentPersonalCode: '',
+    childBirthDate: '',
+    address: '',
+    annualFee: 0,
+    body: extraLessonsBlankWithdrawalFormBody(
+      usesBundledExtraLessonsDocx(params.contract.organization_id)
+        ? EXTRA_LESSONS_WITHDRAWAL_FORM_SCHOOL_EMAIL
+        : (String(params.extraLessonsPayload?.mokyklos_el_pastas || '').trim() || EXTRA_LESSONS_WITHDRAWAL_FORM_SCHOOL_EMAIL),
+    ),
+    title: 'Sutarties atsisakymo forma',
+    variant: 'annex',
+  });
 }

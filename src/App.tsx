@@ -19,6 +19,8 @@ const AboutUs = lazy(() => import('@/pages/AboutUs'));
 const Contact = lazy(() => import('@/pages/Contact'));
 const FeaturePage = lazy(() => import('@/pages/FeaturePage'));
 const FeaturesIndexPage = lazy(() => import('@/pages/FeaturesIndexPage'));
+const ComparePage = lazy(() => import('@/pages/ComparePage'));
+const CompareIndexPage = lazy(() => import('@/pages/CompareIndexPage'));
 const Pricing = lazy(() => import('@/pages/Pricing'));
 const Blog = lazy(() => import('@/pages/Blog'));
 const BlogPost = lazy(() => import('@/pages/BlogPost'));
@@ -98,6 +100,7 @@ const ParentSettings = lazy(() => import('@/pages/ParentSettings'));
 const ParentRegister = lazy(() => import('@/pages/ParentRegister'));
 const SchoolContractComplete = lazy(() => import('@/pages/SchoolContractComplete'));
 const SchoolExtraLessonsAccept = lazy(() => import('@/pages/SchoolExtraLessonsAccept'));
+const SchoolHomework = lazy(() => import('@/pages/SchoolHomework'));
 const StripeSuccess = lazy(() => import('@/pages/StripeSuccess'));
 const EnterpriseSuccess = lazy(() => import('@/pages/EnterpriseSuccess'));
 const PerlasSuccess = lazy(() => import('@/pages/PerlasSuccess'));
@@ -270,6 +273,13 @@ export default function App({ basename }: { basename: string }) {
             /:locale above, so /new-landing is never read as a locale. */}
         <Route path="/new-landing" element={<Landing />} />
         <Route path="/:locale/new-landing" element={<Landing />} />
+        {/* Solo-tutor landing on its own URL; `/` is the agency/school landing. */}
+        <Route path="/for-tutors" element={<Landing audience="solo" />} />
+        <Route path="/:locale/for-tutors" element={<Landing audience="solo" />} />
+        <Route path="/compare" element={<CompareIndexPage />} />
+        <Route path="/:locale/compare" element={<CompareIndexPage />} />
+        <Route path="/compare/:competitor" element={<ComparePage />} />
+        <Route path="/:locale/compare/:competitor" element={<ComparePage />} />
         <Route path="/apie-mus" element={<AboutUs />} />
         <Route path="/:locale/apie-mus" element={<AboutUs />} />
         {/* English aliases — same canonical pages, kept in sync with bot SSR (middleware.ts). */}
@@ -325,6 +335,7 @@ export default function App({ basename }: { basename: string }) {
         <Route path="/:locale/parent-register" element={<ParentRegister />} />
         <Route path="/school-contract-complete" element={<SchoolContractComplete />} />
         <Route path="/school-extra-lessons-accept" element={<SchoolExtraLessonsAccept />} />
+        <Route path="/school-homework" element={<SchoolHomework />} />
         <Route path="/school-sign" element={<SchoolSign />} />
         <Route path="/school-sign/return" element={<SchoolSignReturn />} />
         <Route path="/unsubscribe" element={<UnsubscribeReminders />} />
@@ -452,6 +463,8 @@ export default function App({ basename }: { basename: string }) {
             <Route path="/school/team" element={<OrgPermissionRoute permission="team.view" editPermission="team.edit"><CompanyTeam /></OrgPermissionRoute>} />
           </Route>
         </Route>
+
+        <Route path="/contracts" element={<Navigate to="/school/contracts" replace />} />
 
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>

@@ -84,7 +84,7 @@ describe('Hebrew tutor and business localization', () => {
     expect(getSeoMeta('he', 'landing').title).toMatch(/[\u0590-\u05ff]/);
     expect(getSeoMeta('he', 'pricing').title).toMatch(/[\u0590-\u05ff]/);
     expect(isTranslatedLocale('he')).toBe(false);
-    expect(generateHreflangLinks('/').some((link) => link.lang === 'he')).toBe(false);
+    expect(generateHreflangLinks('/').some((link) => link.lang === 'he')).toBe(true);
   });
 
   it('localizes the entire booking interface while retaining other locale objects', () => {

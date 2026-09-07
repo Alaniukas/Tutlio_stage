@@ -12,6 +12,13 @@ export const FEATURES = new Set([
   'cancellation',
   'comments',
 ]);
+/** Mirrors COMPARISON_PAGE_IDS in src/lib/comparisonPages.ts (tested). */
+export const COMPARISONS = new Set([
+  'tutorbird',
+  'tutorcruncher',
+  'teachworks',
+  'oases-online',
+]);
 
 /** Recognized crawlers and AI fetchers. Unknown non-browser clients are also
  * handled below via Fetch Metadata rather than depending only on this list. */
@@ -241,6 +248,21 @@ export function ssrDestination(request: Request): string | null {
 
   if (rest === '/pricing') {
     return `/api/page-render?page=pricing&locale=${locale}`;
+  }
+
+  // The solo-tutor landing has its own URL so the B2C and B2B pitches never
+  // share a page; `/` is the agency/school landing.
+  if (rest === '/for-tutors') {
+    return `/api/page-render?page=for-tutors&locale=${locale}`;
+  }
+
+  if (rest === '/compare') {
+    return `/api/compare-render?locale=${locale}`;
+  }
+
+  const comparison = rest.match(/^\/compare\/([^/]+)$/);
+  if (comparison && COMPARISONS.has(comparison[1])) {
+    return `/api/compare-render?competitor=${encodeURIComponent(comparison[1])}&locale=${locale}`;
   }
 
   if (rest === '/apie-mus' || rest === '/about') {

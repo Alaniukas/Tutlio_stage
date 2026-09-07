@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/dialog';
 import { useTranslation, buildLocalizedPath } from '@/lib/i18n';
 import { tutorPlanPriceLabels } from '@/lib/pricingDisplay';
+import { useSubscriptionCurrency } from '@/hooks/useSubscriptionCurrency';
 import { isPlMarket } from '@/lib/market';
 import { SUBSCRIPTION_PLN } from '@/lib/subscriptionPricing';
 import { TUTOR_PLANS, eur } from '@/lib/pricing';
@@ -44,6 +45,7 @@ const TRIAL_CODES = ['TRIAL7D', 'TRIAL', 'BANDYMAS'] as const;
 
 export default function TutorSubscribe() {
   const { t, locale } = useTranslation();
+  const currency = useSubscriptionCurrency();
   const location = useLocation();
   const isRegistrationSubscription = location.pathname === '/registration/subscription';
   const [searchParams] = useSearchParams();
@@ -235,21 +237,18 @@ export default function TutorSubscribe() {
     }
   };
 
-  const monthlyPriceLabel = tutorPlanPriceLabels.monthly();
-  const yearlyPerMonthLabel = tutorPlanPriceLabels.yearlyPerMonth();
-  const subscriptionOnlyPriceLabel = tutorPlanPriceLabels.subscriptionOnly();
+  const monthlyPriceLabel = tutorPlanPriceLabels.monthly(currency);
+  const yearlyPerMonthLabel = tutorPlanPriceLabels.yearlyPerMonth(currency);
+  const subscriptionOnlyPriceLabel = tutorPlanPriceLabels.subscriptionOnly(currency);
+  const perMonthHint = currency === 'PLN' ? '/mies.' : '/mo';
   const selectedPlanPriceHint =
     selectedPlan === 'yearly'
-      ? isPlMarket()
+      ? currency === 'PLN'
         ? `${SUBSCRIPTION_PLN.yearlyTotal.toLocaleString('pl-PL')} zł/rok`
-        : `${eur(TUTOR_PLANS.yearly.pricePerYearEur)}/year`
+        : `${tutorPlanPriceLabels.yearlyTotal(currency)}/year`
       : selectedPlan === 'subscription_only'
-        ? isPlMarket()
-          ? `${subscriptionOnlyPriceLabel}/mies.`
-          : `${eur(TUTOR_PLANS.subscriptionOnly.pricePerMonthEur)}/mo`
-        : isPlMarket()
-          ? `${monthlyPriceLabel}/mies.`
-          : `${eur(TUTOR_PLANS.monthly.pricePerMonthEur)}/mo`;
+        ? `${subscriptionOnlyPriceLabel}${perMonthHint}`
+        : `${monthlyPriceLabel}${perMonthHint}`;
 
   const primaryButtonLabel = (() => {
     if (loading) return t('subscribe.preparing');

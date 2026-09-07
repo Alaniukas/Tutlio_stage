@@ -5,8 +5,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { supabase } from '@/lib/supabase';
 import {
-  EXTRA_LESSONS_TERMS_CHECKBOX_TEXT,
+  EXTRA_LESSONS_FULL_TERMS_CHECKBOX_TEXT,
+  EXTRA_LESSONS_GROUP_MONTHLY_BILLING_NOTE,
   START_WITHIN_14_CHECKBOX_TEXT,
+  extraLessonsStandaloneWithdrawalFormBody,
+  extraLessonsWithdrawalFormHref,
   formatScheduleLabel,
   parseExtraLessonsServiceType,
   resolveStartWithin14Status,
@@ -33,6 +36,7 @@ type Preview = {
   parentEditableFields?: string[];
   body: string;
   startWithin14Applies?: boolean;
+  startWithin14Default?: boolean;
   firstLessonDate?: string;
   termsCheckboxText?: string;
   startWithin14CheckboxText?: string;
@@ -76,7 +80,7 @@ export default function SchoolExtraLessonsAccept() {
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
-  const [startWithin14, setStartWithin14] = useState(false);
+  const [startWithin14, setStartWithin14] = useState(true);
   const [recordingConsent, setRecordingConsent] = useState<boolean | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState<{ sha256: string; acceptedAt?: string } | null>(null);
@@ -105,6 +109,7 @@ export default function SchoolExtraLessonsAccept() {
     setEndDate(o?.end_date || '');
     setBaseLessons(o?.base_lessons_per_month ? String(o.base_lessons_per_month) : '');
     setSlots(Array.isArray(o?.schedule_slots) ? o.schedule_slots : []);
+    if (!data.alreadyAccepted) setStartWithin14(data.startWithin14Default !== false);
     if (data.alreadyAccepted) setDone({ sha256: '', acceptedAt: data.acceptedAt || undefined });
     if (data.withdrawn) {
       setWithdrawn(true);
@@ -244,7 +249,7 @@ export default function SchoolExtraLessonsAccept() {
     e.preventDefault();
     if (!acceptedTerms) return;
     if (preview?.recordingsEnabled && recordingConsent === null) {
-      setError('Pasirinkite, ar sutinkate su pamokų įrašymu.');
+      setError('Pasirinkite, ar sutinkate su užsiėmimų įrašymu.');
       return;
     }
     setSubmitting(true);
@@ -301,6 +306,43 @@ export default function SchoolExtraLessonsAccept() {
   }
   if (!preview) return null;
 
+  const viewAnnex = params.get('view') === 'annex';
+  if (viewAnnex) {
+    const annex = extraLessonsStandaloneWithdrawalFormBody(preview.body);
+    return (
+      <PageShell>
+        <Card className="space-y-5">
+          <BrandMark />
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 mb-2">Sutarties atsisakymo forma</h1>
+            <p className="text-gray-600 text-sm">
+              Tai yra šios sutarties 1 priedas. Čia nėra viso sutarties teksto.
+            </p>
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700 space-y-1">
+            {preview.schoolName && <p><span className="font-semibold">Mokykla:</span> {preview.schoolName}</p>}
+            {preview.studentName && <p><span className="font-semibold">Mokinys:</span> {preview.studentName}</p>}
+            {preview.contractNumber && <p><span className="font-semibold">Sutarties Nr.:</span> {preview.contractNumber}</p>}
+          </div>
+          <div className="whitespace-pre-wrap rounded-xl border bg-white p-5 text-sm text-gray-800 leading-relaxed">
+            {annex || 'Priedas šioje sutartyje nerastas.'}
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Button type="button" variant="outline" className="rounded-xl" onClick={() => window.print()}>
+              Spausdinti / įrašyti PDF
+            </Button>
+            <a
+              className="inline-flex items-center text-sm font-semibold text-indigo-700 hover:underline"
+              href={`/school-extra-lessons-accept?token=${encodeURIComponent(token)}`}
+            >
+              Grįžti prie sutarties
+            </a>
+          </div>
+        </Card>
+      </PageShell>
+    );
+  }
+
   if (done) {
     return (
       <PageShell centered>
@@ -309,7 +351,7 @@ export default function SchoolExtraLessonsAccept() {
           <h1 className="text-2xl font-bold text-gray-900">Sutartis sudaryta</h1>
           <p className="text-sm text-gray-600">
             Sutartis Nr. {preview.contractNumber} su {preview.schoolName} dėl {preview.studentName} sudaryta.
-            Galutinė kopija išsiųsta el. paštu. 14 dienų atsisakymą ir nutraukimą rasite tėvų paskyroje.
+            Galutinė kopija išsiųsta el. paštu. Artimiausio užsiėmimo kvietimą ir priminimus gausite el. paštu — paskyros kurti nereikia.
           </p>
           {preview.pdfUrl && (
             <Button
@@ -334,9 +376,9 @@ export default function SchoolExtraLessonsAccept() {
   }
 
   const o = preview.order;
-  const termsText = preview.termsCheckboxText || EXTRA_LESSONS_TERMS_CHECKBOX_TEXT;
+  const termsText = preview.termsCheckboxText || EXTRA_LESSONS_FULL_TERMS_CHECKBOX_TEXT;
   const start14Text = preview.startWithin14CheckboxText || START_WITHIN_14_CHECKBOX_TEXT;
-  const withdrawalHref = preview.legalLinks?.withdrawalForm || '/legal/extra-lessons-withdrawal-form.html';
+  const withdrawalHref = extraLessonsWithdrawalFormHref(token);
   const pdfLooksHttp = Boolean(preview.pdfUrl && /^https?:\/\//i.test(preview.pdfUrl));
   const recordingReady = !preview.recordingsEnabled || recordingConsent !== null;
 
@@ -347,7 +389,7 @@ export default function SchoolExtraLessonsAccept() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Peržiūrėkite ir priimkite sutartį</h1>
           <p className="text-gray-600 text-sm">
-            Peržiūrėkite visą papildomų pamokų sutartį, jei reikia papildykite užsakymo duomenis ir pažymėkite sutikimus.
+            Peržiūrėkite visą papildomų užsiėmimų sutartį, jei reikia papildykite užsakymo duomenis ir pažymėkite sutikimus.
             Sutartis sudaroma elektroniniu būdu — el. parašas (GoSign) čia nenaudojamas.
           </p>
         </div>
@@ -431,7 +473,7 @@ export default function SchoolExtraLessonsAccept() {
             )}
             {(needsParentFields.duration || !duration) && (
               <div>
-                <Label>Pamokos trukmė (min)</Label>
+                <Label>Užsiėmimo trukmė (min)</Label>
                 <Input className="mt-1 rounded-xl" value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="45" />
               </div>
             )}
@@ -446,7 +488,7 @@ export default function SchoolExtraLessonsAccept() {
             )}
             {(needsParentFields.base || !baseLessons) && (
               <div>
-                <Label>Bazinis pamokų kiekis / mėn.</Label>
+                <Label>Bazinis užsiėmimų kiekis / mėn.</Label>
                 <Input className="mt-1 rounded-xl" value={baseLessons} onChange={(e) => setBaseLessons(e.target.value)} />
               </div>
             )}
@@ -461,25 +503,27 @@ export default function SchoolExtraLessonsAccept() {
           <div><span className="font-semibold">Trukmė:</span> {duration || o.duration_minutes || '—'} min.</div>
           <div><span className="font-semibold">Grafikas:</span> {formatScheduleLabel(slots) || o.schedule_label || '—'}</div>
           <div><span className="font-semibold">Laikotarpis:</span> {startDate || o.start_date || '—'} – {endDate || o.end_date || '—'}</div>
-          <div><span className="font-semibold">Kaina:</span> {Number(o.unit_price_eur).toFixed(2)} € / pamoka</div>
+          <div><span className="font-semibold">Kaina:</span> {Number(o.unit_price_eur).toFixed(2)} € / užsiėmimas</div>
           <div><span className="font-semibold">Orientacinė / mėn.:</span> {Number(o.indicative_monthly_eur).toFixed(2)} €</div>
         </div>
 
+        {(serviceType === 'group' || o.service_type === 'group') && (
+          <p className="text-sm text-gray-700 leading-relaxed rounded-xl border border-gray-200 bg-gray-50 p-4">
+            {EXTRA_LESSONS_GROUP_MONTHLY_BILLING_NOTE}
+          </p>
+        )}
+
         <div className="text-sm space-y-1">
-          <p className="font-semibold text-gray-900">Priedai ir kontaktai</p>
-          <ul className="list-disc pl-5 text-gray-700 space-y-1">
-            <li>
-              {preview.legalLinks?.privacyMailto
-                ? <a className="text-indigo-700 underline" href={preview.legalLinks.privacyMailto}>Privatumo pranešimas (mokyklos kontaktai)</a>
-                : <span>Privatumo pranešimas — kreipkitės {preview.schoolEmail || preview.schoolPhone || 'į mokyklą'}</span>}
-            </li>
-            <li>Elgesio taisyklės — kreipkitės {preview.schoolEmail || preview.schoolPhone || 'į mokyklą'}</li>
-            <li>
-              <a className="text-indigo-700 underline" href={withdrawalHref} target="_blank" rel="noreferrer">
-                Sutarties atsisakymo formos šablonas
-              </a>
-            </li>
-          </ul>
+          <p className="font-semibold text-gray-900">Sutarties priedas</p>
+          <a
+            className="text-indigo-700 underline"
+            href={withdrawalHref}
+            target="_blank"
+            rel="noreferrer"
+            download
+          >
+            Sutarties atsisakymo forma
+          </a>
         </div>
 
         <form onSubmit={submit} className="space-y-4 border-t pt-4">
@@ -520,9 +564,9 @@ export default function SchoolExtraLessonsAccept() {
           )}
           {preview.recordingsEnabled && (
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
-              <p className="font-bold text-gray-900">Pamokų įrašymas</p>
+              <p className="font-bold text-gray-900">Užsiėmimų įrašymas</p>
               <p className="text-sm text-gray-600 leading-relaxed">
-                Ar sutinkate, kad vaiko atvaizdas ir/ar balsas būtų įrašomi pamokos tikslais ir prieinami mokyklai bei paskirtiems mokytojams?
+                Ar sutinkate, kad vaiko atvaizdas ir/ar balsas būtų įrašomi užsiėmimo tikslais ir prieinami mokyklai bei paskirtiems mokytojams?
               </p>
               <div className="flex flex-col gap-2">
                 <label className="flex items-start gap-2 text-sm text-gray-800">

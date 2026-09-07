@@ -8,6 +8,8 @@ export type SchoolClassGroupSlot = {
 
 export type SchoolClassGroupDraft = {
   name: string;
+  /** Short label for calendars; contracts use `name`. */
+  calendar_name?: string | null;
   tutor_id: string;
   subject_id?: string | null;
   school_year_start: string;
@@ -20,13 +22,78 @@ export type SchoolClassGroupDraft = {
 
 export type SchoolClassGroupMember = {
   student_id: string;
-  student?: { full_name: string } | null;
+  student?: { full_name: string; grade?: string | null; email?: string | null } | null;
 };
 
 export type SchoolClassGroupRecord = SchoolClassGroupDraft & {
   id: string;
   members?: SchoolClassGroupMember[];
+  /** Embedded by /api/school-class-groups so the list can show the teacher without a second lookup. */
+  tutor?: { full_name?: string | null } | null;
 };
+
+export function classGroupTutorName(group: SchoolClassGroupRecord, fallback: string): string {
+  return String(group.tutor?.full_name || '').trim() || fallback;
+}
+
+/** Full legal / contract label. */
+export function classGroupContractLabel(group: Pick<SchoolClassGroupRecord, 'name'>): string {
+  return String(group.name || '').trim();
+}
+
+/** Calendar / schedule label (falls back to contract name). */
+export function classGroupCalendarLabel(
+  group: Pick<SchoolClassGroupRecord, 'name' | 'calendar_name'>,
+): string {
+  const short = String(group.calendar_name || '').trim();
+  if (short) return short;
+  return classGroupContractLabel(group);
+}
+
+/** Case-insensitive match on group name, teacher name, member names and the schedule label. */
+export function classGroupMatchesQuery(
+  group: SchoolClassGroupRecord,
+  query: string,
+  tutorName?: string | null,
+): boolean {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return true;
+  const hay = [
+    group.name,
+    group.calendar_name || '',
+    tutorName || classGroupTutorName(group, ''),
+    ...(group.members || []).map((member) => member.student?.full_name || ''),
+    scheduleLabelFromGroupSlots(group.slots || []),
+    group.platform || '',
+  ].join(' ').toLowerCase();
+  return q.split(/\s+/).every((term) => hay.includes(term));
+}
+
+export type ClassGroupTutorSection = {
+  tutorId: string;
+  tutorName: string;
+  groups: SchoolClassGroupRecord[];
+};
+
+/** Groups split per teacher (sections sorted by teacher name, groups by name) — one pile per teacher, not one big pile. */
+export function groupClassGroupsByTutor(
+  groups: SchoolClassGroupRecord[],
+  tutorName: (tutorId: string) => string,
+): ClassGroupTutorSection[] {
+  const byTutor = new Map<string, SchoolClassGroupRecord[]>();
+  for (const group of groups) {
+    const list = byTutor.get(group.tutor_id) || [];
+    list.push(group);
+    byTutor.set(group.tutor_id, list);
+  }
+  return [...byTutor.entries()]
+    .map(([tutorId, list]) => ({
+      tutorId,
+      tutorName: tutorName(tutorId),
+      groups: [...list].sort((a, b) => String(a.name).localeCompare(String(b.name), 'lt')),
+    }))
+    .sort((a, b) => a.tutorName.localeCompare(b.tutorName, 'lt'));
+}
 
 export type SchoolClassGroupWrite = SchoolClassGroupDraft & {
   student_ids: string[] | null;
@@ -136,8 +203,13 @@ export function parseClassGroupWriteBody(
 ): SchoolClassGroupWrite {
   const duration = Number(body.duration_minutes || 45);
   const rawSlots = Array.isArray(body.slots) ? body.slots as Array<{ weekday: number; start_time: string; end_time?: string | null }> : [];
+  const calendarRaw = body.calendar_name;
+  const calendarName = calendarRaw == null || String(calendarRaw).trim() === ''
+    ? null
+    : String(calendarRaw).trim();
   return {
     name: String(body.name || '').trim(),
+    calendar_name: calendarName,
     tutor_id: String(body.tutor_id || fallbackTutorId || '').trim(),
     subject_id: body.subject_id ? String(body.subject_id) : null,
     school_year_start: String(body.school_year_start || '').slice(0, 10),
@@ -157,6 +229,7 @@ export function classGroupRowFields(draft: SchoolClassGroupDraft): Record<string
     tutor_id: draft.tutor_id,
     subject_id: draft.subject_id ?? null,
     name: draft.name,
+    calendar_name: draft.calendar_name ?? null,
     school_year_start: draft.school_year_start,
     school_year_end: draft.school_year_end,
     platform: draft.platform || 'Google Meet',
@@ -169,6 +242,7 @@ export function groupToWriteDraft(group: SchoolClassGroupRecord): SchoolClassGro
   const duration = group.duration_minutes || 45;
   return {
     name: group.name,
+    calendar_name: group.calendar_name ?? null,
     tutor_id: group.tutor_id,
     subject_id: group.subject_id ?? null,
     school_year_start: String(group.school_year_start || '').slice(0, 10),

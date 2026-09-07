@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import LandingNavbar from '@/components/LandingNavbar';
 import LandingFooter from '@/components/LandingFooter';
+import FeatureIcon from '@/components/landing/FeatureIcon';
 import { Target, Heart, Shield, Sparkles } from 'lucide-react';
 import { useTranslation, buildLocalizedPath, localizedPagePath } from '@/lib/i18n';
 
@@ -62,9 +63,7 @@ export default function AboutUs() {
                 { icon: Sparkles, title: t('about.valueInnovation'), desc: t('about.valueInnovationDesc') },
               ].map((v, i) => (
                 <div key={i} className="bg-white p-6 rounded-2xl border border-gray-100 text-center">
-                  <div className="w-11 h-11 rounded-xl bg-indigo-50 flex items-center justify-center text-[#4f46e5] mx-auto mb-4">
-                    <v.icon className="w-5 h-5" />
-                  </div>
+                  <FeatureIcon icon={v.icon} size="lg" className="mx-auto mb-4" />
                   <h3 className="text-[15px] font-bold text-gray-900 mb-2">{v.title}</h3>
                   <p className="text-gray-500 text-[13px] leading-relaxed">{v.desc}</p>
                 </div>

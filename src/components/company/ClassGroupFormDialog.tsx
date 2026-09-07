@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { X } from 'lucide-react';
+import { Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,6 +14,7 @@ import {
 import { ScheduleSlotPicker } from '@/components/company/ScheduleSlotPicker';
 import { authHeaders } from '@/lib/apiHelpers';
 import { useStaffLabels } from '@/hooks/useStaffLabels';
+import { usesLaisviStyleExtraLessonsPrefill } from '@/lib/laisviVaikaiExtraLessonsDefaults';
 import { useTranslation } from '@/lib/i18n';
 import {
   addMinutesToTime,
@@ -38,6 +39,7 @@ export type ClassGroupStudentOption = {
 export type ClassGroupTutorOption = {
   id: string;
   full_name: string;
+  personal_meeting_link?: string | null;
 };
 
 const WEEKDAY_KEYS: { v: number; key: 'cal.monday' | 'cal.tuesday' | 'cal.wednesday' | 'cal.thursday' | 'cal.friday' | 'cal.saturday' | 'cal.sunday' }[] = [
@@ -75,12 +77,38 @@ export default function ClassGroupFormDialog(props: {
   students: ClassGroupStudentOption[];
   tutors: ClassGroupTutorOption[];
   canEditMembers: boolean;
+  /** Org admins may delete a group (its future lessons go with it). */
+  canDelete?: boolean;
   defaultTutorId: string;
-  onSaved: () => void;
+  organizationId?: string | null;
+  onSaved: (result?: { materializeError?: string | null }) => void;
+  /** Resolves true when the group is gone; the dialog closes itself. */
+  onDelete?: (group: SchoolClassGroupRecord) => Promise<boolean>;
 }) {
   const { t } = useTranslation();
   const { staff } = useStaffLabels();
+  const [deleting, setDeleting] = useState(false);
+
+  const remove = async () => {
+    if (!props.group || !props.onDelete) return;
+    if (!window.confirm(t('school.groups.deleteConfirm', { name: props.group.name }))) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      const ok = await props.onDelete(props.group);
+      if (!ok) {
+        setError(t('school.groups.deleteFailed'));
+        setDeleting(false);
+        return;
+      }
+      props.onOpenChange(false);
+    } catch {
+      setError(t('school.groups.deleteFailed'));
+    }
+    setDeleting(false);
+  };
   const [name, setName] = useState('');
+  const [calendarName, setCalendarName] = useState('');
   const [tutorId, setTutorId] = useState('');
   const [yearStart, setYearStart] = useState('');
   const [yearEnd, setYearEnd] = useState('');
@@ -102,6 +130,7 @@ export default function ClassGroupFormDialog(props: {
     if (props.mode === 'edit' && props.group) {
       const draft = groupToWriteDraft(props.group);
       setName(draft.name);
+      setCalendarName(draft.calendar_name || '');
       setTutorId(draft.tutor_id);
       setYearStart(draft.school_year_start);
       setYearEnd(draft.school_year_end);
@@ -114,6 +143,7 @@ export default function ClassGroupFormDialog(props: {
     }
     const blank = emptyDraft(props.defaultTutorId);
     setName(blank.name);
+    setCalendarName('');
     setTutorId(blank.tutor_id);
     setYearStart(blank.school_year_start);
     setYearEnd(blank.school_year_end);
@@ -153,6 +183,16 @@ export default function ClassGroupFormDialog(props: {
     [studentIds, props.students, props.group],
   );
 
+  const extraLessonsQaPrefill = usesLaisviStyleExtraLessonsPrefill(props.organizationId);
+
+  const pickTutor = (id: string) => {
+    setTutorId(id);
+    if (!extraLessonsQaPrefill || !id) return;
+    const tutor = props.tutors.find((row) => row.id === id);
+    const link = String(tutor?.personal_meeting_link || '').trim();
+    if (link && !meetingLink.trim()) setMeetingLink(link);
+  };
+
   const tutorOptions = useMemo(() => {
     if (tutorId && !props.tutors.some((tutor) => tutor.id === tutorId)) {
       return [{ id: tutorId, full_name: staff }, ...props.tutors];
@@ -163,6 +203,7 @@ export default function ClassGroupFormDialog(props: {
   const save = async () => {
     const draft = {
       name,
+      calendar_name: calendarName.trim() || null,
       tutor_id: tutorId,
       school_year_start: yearStart,
       school_year_end: yearEnd,
@@ -197,7 +238,7 @@ export default function ClassGroupFormDialog(props: {
         setBusy(false);
         return;
       }
-      props.onSaved();
+      props.onSaved(typeof data.materializeError === 'string' ? { materializeError: data.materializeError } : undefined);
       props.onOpenChange(false);
     } catch {
       setError(t('school.groups.saveError'));
@@ -217,20 +258,30 @@ export default function ClassGroupFormDialog(props: {
         <div className="grid grid-cols-1 min-[42rem]:grid-cols-[minmax(0,1.45fr)_minmax(18rem,1fr)] gap-5 min-[42rem]:gap-6 items-stretch">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-0 content-start">
             <div className="sm:col-span-2">
-              <Label>{t('school.groups.name')}</Label>
+              <Label>{t('school.groups.contractName')}</Label>
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="pvz. Matematika 5 kl."
+                placeholder={t('school.groups.contractNamePlaceholder')}
                 className="rounded-xl"
               />
+            </div>
+            <div className="sm:col-span-2">
+              <Label>{t('school.groups.calendarName')}</Label>
+              <Input
+                value={calendarName}
+                onChange={(e) => setCalendarName(e.target.value)}
+                placeholder={t('school.groups.calendarNamePlaceholder')}
+                className="rounded-xl"
+              />
+              <p className="text-xs text-muted-foreground mt-1">{t('school.groups.calendarNameHint')}</p>
             </div>
             <div>
               <Label>{staff}</Label>
               <select
                 className="w-full border rounded-xl h-9 px-2 text-sm bg-white"
                 value={tutorId}
-                onChange={(e) => setTutorId(e.target.value)}
+                onChange={(e) => pickTutor(e.target.value)}
               >
                 <option value="">{t('school.groups.pickTeacher')}</option>
                 {tutorOptions.map((tutor) => (
@@ -344,13 +395,27 @@ export default function ClassGroupFormDialog(props: {
             )}
           </div>
         </div>
-        <DialogFooter>
-          <Button variant="outline" className="rounded-xl" onClick={() => props.onOpenChange(false)}>
-            {t('common.cancel')}
-          </Button>
-          <Button className="bg-emerald-600 hover:bg-emerald-700 rounded-xl" disabled={busy} onClick={() => void save()}>
-            {busy ? '…' : props.mode === 'edit' ? t('common.save') : t('school.groups.create')}
-          </Button>
+        <DialogFooter className="sm:justify-between gap-2">
+          {props.mode === 'edit' && props.group && props.canDelete && props.onDelete ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-xl border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 sm:mr-auto"
+              disabled={busy || deleting}
+              onClick={() => void remove()}
+            >
+              <Trash2 className="w-4 h-4 mr-1" />
+              {deleting ? '…' : t('common.delete')}
+            </Button>
+          ) : <span className="hidden sm:block" />}
+          <div className="flex gap-2 justify-end">
+            <Button variant="outline" className="rounded-xl" onClick={() => props.onOpenChange(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button className="bg-emerald-600 hover:bg-emerald-700 rounded-xl" disabled={busy || deleting} onClick={() => void save()}>
+              {busy ? '…' : props.mode === 'edit' ? t('common.save') : t('school.groups.create')}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

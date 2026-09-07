@@ -8,6 +8,7 @@ import {
   webPageJsonLd,
   esc,
   hreflangCode,
+  t,
 } from './_lib/ssr-shell.js';
 import { isSsrMethod, rejectSsrMethod, sendSsrHtml } from './_lib/ssr-http.js';
 import {
@@ -40,7 +41,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const path = legalPath(doc);
   const rawTitle = legalTitle(locale, doc);
   const title = `${rawTitle} | Tutlio`;
-  const description = rawTitle;
+  // The title alone makes a poor search snippet; pair it with the localized subtitle.
+  const description = `${rawTitle}. ${t(locale, `${doc}.subtitle`).replace(/<[^>]+>/g, '')}`;
   const body = `<div class="hero"><h1>${esc(rawTitle)}</h1></div><div class="section">${renderLegalBody(locale, doc)}</div>`;
   const jsonLd = webPageJsonLd({
     locale,

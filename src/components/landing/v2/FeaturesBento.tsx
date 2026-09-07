@@ -1,13 +1,14 @@
-import { hasLocalizedAssets } from '@/lib/i18n/localeRelease';
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, Check, Star } from 'lucide-react';
 import { buildLocalizedPath, useTranslation } from '@/lib/i18n';
 import Reveal from '../Reveal';
 import type { LandingAudience } from './audience';
+import CalendarMockup from './CalendarMockup';
 import { MiniAvatar } from './demoAvatars';
 import FinanceMockup from './FinanceMockup';
 import PhoneFrame from './PhoneFrame';
 import StudentPaymentsScreen from './StudentPaymentsScreen';
+import { ltr } from './bidi';
 import StudentProfileMockup from './StudentProfileMockup';
 import { getLandingDemoPersonas } from './demoPersonas';
 
@@ -35,7 +36,7 @@ function PublicCardMock() {
     <div className="mx-auto w-full max-w-[380px] overflow-hidden rounded-2xl border border-white/10 bg-white shadow-2xl">
       <div className="flex items-center justify-between border-b border-zinc-100 bg-zinc-50 px-3 py-2 text-[10px] text-zinc-400">
         <span>{personas.publicProfileUrl}</span>
-        <span className="rounded-full bg-violet-50 px-1.5 py-0.5 text-[9px] font-semibold text-violet-700">{t('landing.v2.demo.online')}</span>
+        <span className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-1.5 py-0.5 text-[9px] font-semibold text-zinc-700"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />{t('landing.v2.demo.online')}</span>
       </div>
 
       <div className="space-y-3 p-4">
@@ -44,8 +45,8 @@ function PublicCardMock() {
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-1.5">
               <p className="text-[14px] font-semibold text-zinc-900">{personas.publicTutor}</p>
-              <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700">
-                <Check className="h-2.5 w-2.5" strokeWidth={3} />
+              <span className="inline-flex items-center gap-0.5 rounded-full border border-zinc-200 bg-white px-1.5 py-0.5 text-[9px] font-semibold text-zinc-700">
+                <Check className="h-2.5 w-2.5 text-emerald-600" strokeWidth={3} />
                 {t('landing.v2.demo.verified')}
               </span>
             </div>
@@ -63,7 +64,7 @@ function PublicCardMock() {
           </div>
         </div>
 
-        <p className="rounded-lg bg-violet-50/80 px-2.5 py-1.5 text-[11px] italic leading-snug text-violet-900/80">
+        <p className="rounded-lg bg-zinc-50 px-2.5 py-1.5 text-[11px] italic leading-snug text-zinc-700">
           {t('landing.v2.demo.mathQuote')}
         </p>
 
@@ -108,7 +109,7 @@ function PublicCardMock() {
                 <span
                   key={s}
                   className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold ${
-                    i === 1 ? 'border-violet-300 bg-violet-50 text-violet-800' : 'border-zinc-200 bg-white text-zinc-600'
+                    i === 1 ? 'border-zinc-900 bg-zinc-900 text-white' : 'border-zinc-200 bg-white text-zinc-600'
                   }`}
                 >
                   {s}
@@ -156,7 +157,7 @@ function AgencyOpsMock() {
   const { locale, t } = useTranslation();
   const personas = getLandingDemoPersonas(locale);
   const tutors = [
-    { seed: 'rasa-a', name: personas.tutors[0], subject: `${t('landing.v2.demo.subjectMath')} · 8–12`, hours: '18 h', pay: '€420', live: true },
+    { seed: 'rasa-a', name: personas.tutors[0], subject: `${t('landing.v2.demo.subjectMath')} · ${ltr('8–12')}`, hours: '18 h', pay: '€420', live: true },
     { seed: 'tomas-k', name: personas.tutors[1], subject: `${t('landing.v2.demo.subjectEnglish')} · B1–C1`, hours: '14 h', pay: '€350', live: true },
     { seed: 'inga-j', name: personas.tutors[2], subject: `${t('landing.v2.demo.subjectPhysics')} · ${t('landing.v2.demo.exams')}`, hours: '11 h', pay: '€275', live: false },
   ];
@@ -170,7 +171,7 @@ function AgencyOpsMock() {
     <div className="mx-auto w-full max-w-[420px] overflow-hidden rounded-2xl border border-white/10 bg-white shadow-2xl">
       <div className="flex items-center justify-between border-b border-zinc-100 bg-zinc-50 px-3 py-2">
         <span className="text-[11px] font-semibold text-zinc-700">{t('landing.v2.demo.agencySummary')}</span>
-        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] font-semibold text-emerald-700">9 {t('landing.v2.demo.online')}</span>
+        <span className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[9px] font-semibold text-zinc-700"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />9 {t('landing.v2.demo.online')}</span>
       </div>
 
       <div className="space-y-3 p-3 sm:p-4">
@@ -182,7 +183,7 @@ function AgencyOpsMock() {
           ].map((s) => (
             <div key={s.key} className="rounded-xl bg-zinc-50 px-2 py-2 text-center">
               <p className="text-[9px] text-zinc-400">{s.label}</p>
-              <p className="mt-0.5 text-[13px] font-bold text-zinc-900">{s.value}</p>
+              <p dir="ltr" className="mt-0.5 text-[13px] font-bold text-zinc-900">{s.value}</p>
             </div>
           ))}
         </div>
@@ -207,9 +208,9 @@ function AgencyOpsMock() {
                   <p className="truncate text-[12px] font-semibold text-zinc-900">{t.name}</p>
                   <p className="truncate text-[10px] text-zinc-500">{t.subject}</p>
                 </div>
-                <div className="text-right">
-                  <p className="text-[10px] font-semibold text-zinc-800">{t.hours}</p>
-                  <p className="text-[10px] text-emerald-700">{t.pay}</p>
+                <div className="text-end">
+                  <p dir="ltr" className="text-[10px] font-semibold text-zinc-800">{t.hours}</p>
+                  <p dir="ltr" className="text-[10px] text-emerald-700">{t.pay}</p>
                 </div>
               </div>
             ))}
@@ -229,14 +230,11 @@ function AgencyOpsMock() {
                   <p className="truncate text-[11px] font-semibold text-zinc-900">{p.family}</p>
                   <p className="truncate text-[10px] text-zinc-500">{p.child}</p>
                 </div>
-                <span
-                  className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${
-                    p.ok ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
-                  }`}
-                >
+                <span className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-1.5 py-0.5 text-[9px] font-semibold text-zinc-700">
+                  <span className={`h-1.5 w-1.5 rounded-full ${p.ok ? 'bg-emerald-500' : 'bg-amber-500'}`} />
                   {p.ok ? t('landing.v2.profileParentActive') : t('landing.v2.demo.waiting')}
                 </span>
-                <span className={`w-14 text-right text-[10px] font-semibold ${p.ok ? 'text-zinc-600' : 'text-amber-700'}`}>
+                <span dir="ltr" className={`w-14 text-end text-[10px] font-semibold ${p.ok ? 'text-zinc-600' : 'text-amber-700'}`}>
                   {p.pay}
                 </span>
               </div>
@@ -251,7 +249,6 @@ function AgencyOpsMock() {
 export default function FeaturesBento({ audience }: { audience: LandingAudience }) {
   const { locale, t } = useTranslation();
   const isSolo = audience === 'solo';
-  const calendarAudience = isSolo ? 'solo' : 'agency';
   const digitalBusinessCardPath = buildLocalizedPath('/features/digital-business-card', locale);
 
   return (
@@ -271,16 +268,15 @@ export default function FeaturesBento({ audience }: { audience: LandingAudience 
                 </div>
               </div>
               <div className="relative mt-6 flex justify-end sm:mt-8">
-                <img
-                  key={`${calendarAudience}-${locale}`}
-                  src={`/landing/calendar-${calendarAudience}-${hasLocalizedAssets(locale) ? locale : 'en'}.jpg`}
-                  alt={t('landing.calendarAlt')}
-                  loading="lazy"
-                  onError={(event) => {
-                    event.currentTarget.src = '/landing/calendar.png';
-                  }}
-                  className="h-[280px] w-[92%] rounded-tl-2xl object-cover object-left-top sm:h-[360px] sm:w-[88%] lg:h-[443px] lg:w-[84%]"
-                />
+                {/* Hand-built calendar surface in the landing's own style,
+                    not a screenshot of a customer account. */}
+                <div
+                  role="img"
+                  aria-label={t('landing.calendarAlt')}
+                  className="h-[280px] w-[92%] overflow-hidden rounded-tl-2xl border-l border-t border-white/10 bg-white shadow-[0_-12px_40px_-20px_rgba(0,0,0,0.6)] sm:h-[360px] sm:w-[88%] lg:h-[443px] lg:w-[84%]"
+                >
+                  <CalendarMockup audience={audience} />
+                </div>
                 <div
                   aria-hidden
                   className="pointer-events-none absolute inset-x-0 bottom-0 h-20 sm:h-32"
