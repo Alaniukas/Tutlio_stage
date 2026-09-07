@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Paperclip, Upload, Trash2, Download, Loader2 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n';
 import { homeworkSubmissionDisplayName, isHomeworkSubmissionFile } from '@/lib/sessionFileVisibility';
+import { orderSessionFileFolders, sessionFilesListOptions, studentFilesPollIntervalMs } from '@/lib/sessionStorageList';
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
@@ -33,6 +34,12 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [resolvedGroupIds, setResolvedGroupIds] = useState<string[]>([]);
   const [studentNameBySessionId, setStudentNameBySessionId] = useState<Record<string, string>>({});
+  const [lessonWindow, setLessonWindow] = useState<{ start: number; end: number } | null>(null);
+  const fetchGenRef = useRef(0);
+  const lessonWindowRef = useRef<{ start: number; end: number } | null>(null);
+  const lastStudentPollAtRef = useRef(0);
+  const studentPollBusyRef = useRef(false);
+  lessonWindowRef.current = lessonWindow;
 
   useEffect(() => {
     if (groupSessionIds && groupSessionIds.length > 0) {
@@ -48,6 +55,11 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
           .eq('id', sessionId)
           .single();
         if (cancelled) return;
+        if (sess?.start_time) {
+          const start = Date.parse(String(sess.start_time));
+          const end = Date.parse(String(sess.end_time || sess.start_time));
+          if (Number.isFinite(start) && Number.isFinite(end)) setLessonWindow({ start, end });
+        }
         if (!sess) { setResolvedGroupIds([sessionId]); return; }
         const classGroupId = (sess as { class_group_id?: string | null }).class_group_id;
         if (classGroupId) {
@@ -82,15 +94,18 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
   }, [sessionId, groupSessionIds]);
 
   async function fetchFiles(silent = false) {
+    const gen = ++fetchGenRef.current;
     if (!silent) setLoading(true);
     try {
       if (role === 'student') {
+        lastStudentPollAtRef.current = Date.now();
         const resp = await fetch('/api/student-session-files', {
           method: 'POST',
           headers: await authHeaders(),
           body: JSON.stringify({ action: 'list', sessionId }),
         });
         const json = await resp.json().catch(() => ({}));
+        if (gen !== fetchGenRef.current) return;
         if (!resp.ok) {
           setError(typeof json.error === 'string' ? json.error : t('files.downloadFailed'));
           setFiles([]);
@@ -115,18 +130,19 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
         return;
       }
 
-      const allIds = resolvedGroupIds.length > 0 ? resolvedGroupIds : [sessionId];
-      const results = await Promise.all(
-        allIds.map((id) =>
-          supabase.storage.from('session-files').list(id, { sortBy: { column: 'created_at', order: 'asc' } })
-        ),
+      const allIds = orderSessionFileFolders(
+        sessionId,
+        resolvedGroupIds.length > 0 ? resolvedGroupIds : [sessionId],
       );
       const seen = new Set<string>();
       const merged: StorageFile[] = [];
-      for (let i = 0; i < results.length; i++) {
-        const folderId = allIds[i];
-        const { data } = results[i];
+      for (const folderId of allIds) {
+        if (gen !== fetchGenRef.current) return;
+        const { data } = await supabase.storage
+          .from('session-files')
+          .list(folderId, sessionFilesListOptions());
         for (const f of data ?? []) {
+          if (!f.name || f.name.startsWith('.')) continue;
           if (seen.has(`${folderId}/${f.name}`)) continue;
           seen.add(`${folderId}/${f.name}`);
           merged.push({
@@ -136,18 +152,20 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
           });
         }
       }
+      if (gen !== fetchGenRef.current) return;
       setFiles(merged);
     } finally {
-      if (!silent) setLoading(false);
+      if (gen === fetchGenRef.current && !silent) setLoading(false);
     }
   }
 
   useEffect(() => {
     if (role === 'student') {
       void fetchFiles();
-      return;
+    } else if (resolvedGroupIds.length > 0) {
+      void fetchFiles();
     }
-    if (resolvedGroupIds.length > 0) fetchFiles();
+    return () => { fetchGenRef.current += 1; };
   }, [resolvedGroupIds, role, sessionId]);
 
   useEffect(() => {
@@ -179,8 +197,17 @@ export default function SessionFiles({ sessionId, role, groupSessionIds }: Sessi
   useEffect(() => {
     if (role !== 'student' || resolvedGroupIds.length === 0) return;
 
-    const poll = () => void fetchFiles(true);
-    const interval = window.setInterval(poll, 30_000);
+    const poll = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (studentPollBusyRef.current) return;
+      const now = Date.now();
+      const gap = studentFilesPollIntervalMs(now, lessonWindowRef.current);
+      if (now - lastStudentPollAtRef.current < gap) return;
+      lastStudentPollAtRef.current = now;
+      studentPollBusyRef.current = true;
+      void fetchFiles(true).finally(() => { studentPollBusyRef.current = false; });
+    };
+    const interval = window.setInterval(poll, 10_000);
     const onVisibility = () => {
       if (document.visibilityState === 'visible') poll();
     };

@@ -29,7 +29,8 @@ export const HOMEWORK_PREFIX = HOMEWORK_FILE_PREFIX;
 const PAST_DAYS = 60;
 const FUTURE_DAYS = 45;
 const FILE_SCAN_PAST_DAYS = 21;
-const MAX_FILE_FOLDERS = 80;
+const MAX_FILE_FOLDERS = 40;
+const FILE_LIST_CONCURRENCY = 2;
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
 
 type SessionRow = {
@@ -215,12 +216,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const folderSets = new Map<string, string[]>();
     for (const s of scanSessions) folderSets.set(s.id, siblingFolders(s, siblings));
     const allFolders = [...new Set([...folderSets.values()].flat())];
-    const listed = await Promise.all(
-      allFolders.map(async (folder) => {
-        const { data } = await supabase.storage.from(BUCKET).list(folder, { sortBy: { column: 'created_at', order: 'asc' } });
-        return [folder, (data || []).filter((f) => f.name && !f.name.startsWith('.'))] as const;
-      }),
-    );
+    const listed: Array<readonly [string, Array<{ name: string; metadata?: { size?: number } | null }>]> = [];
+    for (let i = 0; i < allFolders.length; i += FILE_LIST_CONCURRENCY) {
+      const chunk = allFolders.slice(i, i + FILE_LIST_CONCURRENCY);
+      const part = await Promise.all(
+        chunk.map(async (folder) => {
+          const { data } = await supabase.storage.from(BUCKET).list(folder, {
+            limit: 50,
+            sortBy: { column: 'created_at', order: 'asc' },
+          });
+          return [folder, (data || []).filter((f) => f.name && !f.name.startsWith('.'))] as const;
+        }),
+      );
+      listed.push(...part);
+    }
     const filesByFolder = new Map(listed);
     const paths: string[] = [];
     for (const [folder, files] of filesByFolder) for (const f of files) paths.push(`${folder}/${f.name}`);

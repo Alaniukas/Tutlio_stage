@@ -11,6 +11,7 @@ import { getCached, setCache, dedupeAsync } from '@/lib/dataCache';
 import { sendEmail } from '@/lib/email';
 import { authHeaders } from '@/lib/apiHelpers';
 import { format, isAfter, differenceInHours, addDays, getDay } from 'date-fns';
+import { sessionFilesListOptions, sessionsToScanForFilesTab } from '@/lib/sessionStorageList';
 import { useTranslation } from '@/lib/i18n';
 import { Clock, CheckCircle, XCircle, CalendarDays, RefreshCw, ShieldAlert, ListOrdered, Mail, Video, ChevronLeft, ChevronRight, CreditCard, Loader2, Package, Users, FileText, Landmark } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
@@ -123,7 +124,7 @@ export default function StudentSessions() {
     const [sessionsFetchError, setSessionsFetchError] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<'lessons' | 'files'>('lessons');
     const [sessionFiles, setSessionFiles] = useState<
-        { name: string; sessionId: string; sessionTopic: string; subjectName: string | null; sessionDate: string; url: string }[]
+        { name: string; sessionId: string; sessionTopic: string; subjectName: string | null; sessionDate: string }[]
     >([]);
     const [loadingFiles, setLoadingFiles] = useState(false);
     const [filesSessionFilter, setFilesSessionFilter] = useState<'all' | string>('all');
@@ -291,6 +292,7 @@ export default function StudentSessions() {
 
     useEffect(() => {
       if (activeTab !== 'files' || sessions.length === 0) return;
+      let cancelled = false;
       setLoadingFiles(true);
       (async () => {
         const files: {
@@ -299,29 +301,33 @@ export default function StudentSessions() {
           sessionTopic: string;
           subjectName: string | null;
           sessionDate: string;
-          url: string;
         }[] = [];
-        for (const session of sessions) {
-          const folder = `${session.id}/`;
-          const { data: fileList } = await supabase.storage.from('session-files').list(folder);
-          if (fileList) {
-            for (const f of fileList) {
-              const { data: urlData } = await supabase.storage.from('session-files').createSignedUrl(`${folder}${f.name}`, 3600);
-              files.push({
-                name: f.name,
-                sessionId: session.id,
-                sessionTopic: session.topic || '—',
-                subjectName: session.subjects?.name ?? null,
-                sessionDate: format(new Date(session.start_time), 'yyyy-MM-dd'),
-                url: urlData?.signedUrl || '',
-              });
-            }
+        const toScan = sessionsToScanForFilesTab(sessions, {
+          dateFrom: filesDateFrom || undefined,
+          dateTo: filesDateTo || undefined,
+        });
+        for (const session of toScan) {
+          if (cancelled) return;
+          const { data: fileList } = await supabase.storage
+            .from('session-files')
+            .list(session.id, sessionFilesListOptions());
+          for (const f of fileList ?? []) {
+            if (!f.name || f.name.startsWith('.')) continue;
+            files.push({
+              name: f.name,
+              sessionId: session.id,
+              sessionTopic: session.topic || '—',
+              subjectName: session.subjects?.name ?? null,
+              sessionDate: format(new Date(session.start_time), 'yyyy-MM-dd'),
+            });
           }
         }
+        if (cancelled) return;
         setSessionFiles(files);
         setLoadingFiles(false);
       })();
-    }, [activeTab, sessions]);
+      return () => { cancelled = true; };
+    }, [activeTab, sessions, filesDateFrom, filesDateTo]);
 
     useEffect(() => {
       if (filesSessionFilter === 'all') return;
@@ -345,6 +351,14 @@ export default function StudentSessions() {
         return true;
       });
     }, [sessionFiles, filesSessionFilter, filesDateFrom, filesDateTo]);
+
+    async function openListedSessionFile(file: { name: string; sessionId: string }) {
+        const { data, error } = await supabase.storage
+            .from('session-files')
+            .createSignedUrl(`${file.sessionId}/${file.name}`, 3600);
+        if (error || !data?.signedUrl) return;
+        window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+    }
 
     // After monthly invoice payment from Stripe success_url
     useEffect(() => {
@@ -1449,12 +1463,11 @@ export default function StudentSessions() {
                                     </div>
                                 ) : (
                                     filteredSessionFiles.map((f) => (
-                                        <a
+                                        <button
+                                            type="button"
                                             key={`${f.sessionId}-${f.name}`}
-                                            href={f.url}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="flex items-center gap-3 p-3 border border-gray-200 rounded-xl hover:border-indigo-200 transition-colors bg-white"
+                                            onClick={() => void openListedSessionFile(f)}
+                                            className="flex items-center gap-3 p-3 border border-gray-200 rounded-xl hover:border-indigo-200 transition-colors bg-white w-full text-left"
                                         >
                                             <FileText className="w-5 h-5 text-indigo-500 flex-shrink-0" />
                                             <div className="min-w-0 flex-1">
@@ -1463,7 +1476,7 @@ export default function StudentSessions() {
                                                     {f.sessionDate} &middot; {f.subjectName || f.sessionTopic}
                                                 </p>
                                             </div>
-                                        </a>
+                                        </button>
                                     ))
                                 )}
                             </>

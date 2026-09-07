@@ -161,6 +161,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     for (const folderId of folders) {
       const { data } = await supabase.storage.from(BUCKET).list(folderId, {
+        limit: 50,
         sortBy: { column: 'created_at', order: 'asc' },
       });
       for (const f of data ?? []) {
